@@ -79,9 +79,11 @@ struct ClassDocblockInfo {
     links: Vec<String>,
     /// `@see` references from the class-level docblock.
     see_refs: Vec<String>,
-    /// Raw class-level docblock text, preserved for deferred `@method` /
-    /// `@property` parsing by the `PHPDocProvider`.
+    /// Raw class-level docblock text, kept for the consumers that render
+    /// or re-scan the original text.
     raw_docblock: Option<String>,
+    /// `@method` / `@property` tags parsed out of `raw_docblock`.
+    doc_members: Option<Arc<DocblockMembers>>,
 }
 
 /// Extract all docblock-derived metadata from a class-like AST node.
@@ -153,6 +155,7 @@ fn extract_class_docblock<'a>(
         links: docblock::extract_link_urls_from_info(&info),
         see_refs: docblock::extract_see_references_from_info(&info),
         raw_docblock: Some(doc_text.to_string()),
+        doc_members: DocblockMembers::from_info(&info),
     }
 }
 
@@ -299,6 +302,7 @@ impl Backend {
                         trait_precedences,
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
+                        doc_members: doc_info.doc_members,
                         file_namespace: None,
                         backed_type: None,
                         attribute_targets: attr_targets,
@@ -415,6 +419,7 @@ impl Backend {
                         trait_precedences,
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
+                        doc_members: doc_info.doc_members,
                         file_namespace: None,
                         backed_type: None,
                         attribute_targets: 0,
@@ -509,6 +514,7 @@ impl Backend {
                         trait_precedences,
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
+                        doc_members: doc_info.doc_members,
                         file_namespace: None,
                         backed_type: None,
                         attribute_targets: 0,
@@ -656,6 +662,7 @@ impl Backend {
                         trait_precedences: vec![],
                         trait_aliases: vec![],
                         class_docblock: doc_info.raw_docblock,
+                        doc_members: doc_info.doc_members,
                         file_namespace: None,
                         backed_type: enum_def.backing_type_hint.as_ref().and_then(|h| {
                             let ty = crate::parser::extract_hint_type(&h.hint);

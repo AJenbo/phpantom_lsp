@@ -24,7 +24,6 @@
 use std::collections::HashSet;
 
 use crate::atom::atom;
-use crate::docblock;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
 
@@ -99,12 +98,10 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     // ── @property tags from the class docblock ──────────────────────
     // Virtual @property tags are not on `class.properties` yet (they
     // are added by PHPDocProvider during full resolution, which runs
-    // after this function).  Extract them directly from the raw
-    // docblock text.
-    if let Some(ref doc_text) = class.class_docblock {
-        for (name, _type_str) in docblock::extract_property_tags(doc_text) {
-            push(&name);
-        }
+    // after this function), so read them from the tags parsed when the
+    // class was extracted.
+    for (name, _type) in class.doc_properties() {
+        push(name);
     }
 
     columns

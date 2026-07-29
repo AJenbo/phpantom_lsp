@@ -15,7 +15,9 @@ use crate::atom::{Atom, atom, bytes_to_str};
 use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SymbolMap, extract_symbol_map};
-use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan, TypeAliasDef};
+use crate::types::{
+    ClassInfo, DefineInfo, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan, TypeAliasDef,
+};
 
 use mago_allocator::LocalArena;
 
@@ -1363,118 +1365,114 @@ impl Backend {
             }
 
             // Resolve type names inside `@property` / `@property-read` /
-            // `@property-write` and `@method` tags in the raw class
-            // docblock.  These tags are parsed lazily by the
-            // `PHPDocProvider`, but their type strings use short names
-            // relative to the declaring file's imports.  Without
-            // resolving them here, cross-file consumers whose own
-            // use-map does not import the same names would fail to
-            // resolve the types.
-            if let Some(ref docblock) = class.class_docblock {
-                let resolved_docblock = Self::resolve_docblock_tag_types(docblock, &resolver);
-                if resolved_docblock != *docblock {
-                    class.class_docblock = Some(resolved_docblock);
-                }
+            // `@property-write` and `@method` tags.  Their type strings use
+            // short names relative to the declaring file's imports, and a
+            // cross-file consumer has no access to this file's use-map.
+            if let Some(doc) = class.doc_members.as_ref()
+                && let Some(resolved) =
+                    Self::resolve_doc_member_types(doc, use_map, namespace, &skip_names, &resolver)
+            {
+                class.doc_members = Some(resolved);
             }
         }
     }
 
-    /// Resolve type names in `@property`, `@property-read`, `@property-write`,
-    /// and `@method` tags inside a raw class-level docblock.
+    /// Resolve short class names in the `@property` and `@method` tags that
+    /// were parsed out of a class-level docblock.
     ///
-    /// These tags are parsed lazily by the `PHPDocProvider`, but their type
-    /// strings use short names relative to the declaring file's imports.
-    /// This method rewrites those type portions to fully-qualified names
-    /// so that cross-file consumers can resolve them without access to the
-    /// declaring file's use-map.
-    fn resolve_docblock_tag_types(docblock: &str, resolver: &dyn Fn(&str) -> String) -> String {
-        let mut result = String::with_capacity(docblock.len());
+    /// The tag types are written against the declaring file's imports, so
+    /// they are qualified here while that use-map is still in scope.  A
+    /// consumer in another file only ever sees the resolved form.
+    ///
+    /// Returns `None` when nothing changed, so the common case keeps
+    /// sharing the existing `Arc` rather than rebuilding it.
+    fn resolve_doc_member_types(
+        doc: &Arc<DocblockMembers>,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+        skip_names: &[String],
+        resolver: &dyn Fn(&str) -> String,
+    ) -> Option<Arc<DocblockMembers>> {
+        let mut changed = false;
 
-        for line in docblock.split('\n') {
-            if !result.is_empty() {
-                result.push('\n');
-            }
+        let properties: Vec<(Atom, Option<PhpType>)> = doc
+            .properties
+            .iter()
+            .map(|(name, ty)| {
+                let resolved = ty.as_ref().map(|t| {
+                    let r = t.resolve_names(resolver);
+                    if r != *t {
+                        changed = true;
+                    }
+                    r
+                });
+                (*name, resolved)
+            })
+            .collect();
 
-            let trimmed = line.trim().trim_start_matches('*').trim();
+        let methods: Vec<Arc<MethodInfo>> = doc
+            .methods
+            .iter()
+            .map(|m| {
+                // `@method foo<T>(T $x): T` declares its own template
+                // params, which must not be namespace-qualified.
+                let method_skip: Vec<String>;
+                let owned_resolver;
+                let method_resolver: &dyn Fn(&str) -> String = if m.template_params.is_empty() {
+                    resolver
+                } else {
+                    method_skip = skip_names
+                        .iter()
+                        .cloned()
+                        .chain(m.template_params.iter().map(|a| a.to_string()))
+                        .collect();
+                    owned_resolver = Self::build_type_resolver(use_map, namespace, &method_skip);
+                    &owned_resolver
+                };
 
-            // ── @property[-read|-write] Type $name ──────────────────
-            let prop_rest = trimmed
-                .strip_prefix("@property-read")
-                .or_else(|| trimmed.strip_prefix("@property-write"))
-                .or_else(|| trimmed.strip_prefix("@property"));
+                let mut resolved = (**m).clone();
+                let mut method_changed = false;
 
-            if let Some(rest) = prop_rest {
-                let rest_trimmed = rest.trim_start();
-                // Must have content after the tag
-                if !rest_trimmed.is_empty() && !rest_trimmed.starts_with('$') {
-                    // Extract the type token (everything before `$name`).
-                    // The type may contain generics like `Collection<int, Model>`
-                    // so we use `split_type_token` for correct parsing.
-                    let (type_token, _remainder) =
-                        crate::docblock::type_strings::split_type_token(rest_trimmed);
-                    let resolved_type =
-                        Self::resolve_type_string_via_php_type(type_token, resolver);
-                    if resolved_type != type_token
-                        && let Some(type_start) = line.find(type_token)
-                    {
-                        let type_end = type_start + type_token.len();
-                        result.push_str(&line[..type_start]);
-                        result.push_str(&resolved_type);
-                        result.push_str(&line[type_end..]);
-                        continue;
+                if let Some(ref ret) = resolved.return_type {
+                    let r = ret.resolve_names(method_resolver);
+                    if r != *ret {
+                        resolved.return_type = Some(r);
+                        method_changed = true;
                     }
                 }
-            }
-
-            // ── @method [static] ReturnType methodName(…) ───────────
-            if let Some(rest) = trimmed.strip_prefix("@method") {
-                let rest_trimmed = rest.trim_start();
-                if !rest_trimmed.is_empty() {
-                    // Skip optional `static` keyword
-                    let after_static = if let Some(after) = rest_trimmed.strip_prefix("static") {
-                        if after.is_empty()
-                            || after.starts_with(char::is_whitespace)
-                            || after.starts_with('(')
-                        {
-                            after.trim_start()
-                        } else {
-                            rest_trimmed
-                        }
-                    } else {
-                        rest_trimmed
-                    };
-
-                    // Find the opening paren — the return type is between
-                    // the tag (after optional `static`) and the last
-                    // whitespace-delimited token before `(`.
-                    if let Some(paren_pos) = after_static.find('(') {
-                        let before_paren = after_static[..paren_pos].trim();
-                        // Split into optional return type + method name.
-                        if let Some(last_space) = before_paren.rfind(|c: char| c.is_whitespace()) {
-                            let ret_type = before_paren[..last_space].trim();
-                            if !ret_type.is_empty() {
-                                let resolved_ret =
-                                    Self::resolve_type_string_via_php_type(ret_type, resolver);
-                                if resolved_ret != ret_type
-                                    && let Some(type_start) = line.find(ret_type)
-                                {
-                                    let type_end = type_start + ret_type.len();
-                                    result.push_str(&line[..type_start]);
-                                    result.push_str(&resolved_ret);
-                                    result.push_str(&line[type_end..]);
-                                    continue;
-                                }
-                            }
+                for param in resolved.parameters.make_mut() {
+                    if let Some(ref hint) = param.type_hint {
+                        let r = hint.resolve_names(method_resolver);
+                        if r != *hint {
+                            param.native_type_hint = Some(r.clone());
+                            param.type_hint = Some(r);
+                            method_changed = true;
                         }
                     }
                 }
-            }
+                for bound in resolved.template_param_bounds.values_mut() {
+                    let r = bound.resolve_names(method_resolver);
+                    if r != *bound {
+                        *bound = r;
+                        method_changed = true;
+                    }
+                }
 
-            // No tag matched or no rewriting needed — keep line as-is.
-            result.push_str(line);
-        }
+                if method_changed {
+                    changed = true;
+                    Arc::new(resolved)
+                } else {
+                    Arc::clone(m)
+                }
+            })
+            .collect();
 
-        result
+        changed.then(|| {
+            Arc::new(DocblockMembers {
+                methods,
+                properties,
+            })
+        })
     }
 
     /// Resolve type arguments in a generics list (e.g. `@extends`, `@implements`,
@@ -1530,29 +1528,6 @@ impl Backend {
             }
             Self::resolve_name(name, use_map, namespace)
         }
-    }
-
-    /// Resolve class-like identifiers within a [`PhpType`] to their
-    /// fully-qualified forms, using `PhpType::resolve_names()`.
-    ///
-    /// This is for callers that already have a parsed `PhpType`, avoiding
-    /// a redundant parse→stringify→parse cycle.
-    fn resolve_type_via_php_type(ty: &PhpType, resolver: &dyn Fn(&str) -> String) -> PhpType {
-        ty.resolve_names(resolver)
-    }
-
-    /// Resolve class-like identifiers within a type string to their
-    /// fully-qualified forms, using `PhpType::resolve_names()`.
-    ///
-    /// Parses the string into a `PhpType`, resolves names via the given
-    /// resolver, and converts back to a string.  This is used for
-    /// string-typed fields (e.g. `native_return_type`,
-    /// type alias definitions) where the caller does not have a `PhpType`.
-    fn resolve_type_string_via_php_type(
-        type_str: &str,
-        resolver: &dyn Fn(&str) -> String,
-    ) -> String {
-        Self::resolve_type_via_php_type(&PhpType::parse(type_str), resolver).to_string()
     }
 
     /// Resolve a class name to its fully-qualified form given a use_map and

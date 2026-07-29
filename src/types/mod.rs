@@ -1559,6 +1559,51 @@ pub struct PivotRelation {
     pub columns: Vec<String>,
 }
 
+/// Virtual members declared by a class-level docblock's `@method` and
+/// `@property` tags.
+///
+/// Parsed once while the class is extracted from source and shared behind
+/// an `Arc`, so the inheritance merge and the PHPDoc virtual-member
+/// provider read the structured form instead of re-parsing
+/// [`ClassInfo::class_docblock`] every time the class is resolved.
+#[derive(Debug, Clone, Default)]
+pub struct DocblockMembers {
+    /// `@method` / `@psalm-method` signatures, in source order.
+    pub methods: Vec<Arc<MethodInfo>>,
+    /// `@property`, `@property-read`, and `@property-write` entries as
+    /// `(name, declared type)`.  The name carries no `$` prefix, and the
+    /// type is `None` for an untyped `@property $name`.
+    pub properties: Vec<(Atom, Option<PhpType>)>,
+}
+
+impl DocblockMembers {
+    /// Parse the `@method` / `@property` tags out of a raw docblock.
+    ///
+    /// Returns `None` when the docblock declares neither, which is the
+    /// overwhelmingly common case and keeps `ClassInfo` from carrying an
+    /// empty allocation per class.
+    pub fn from_docblock(docblock: &str) -> Option<Arc<Self>> {
+        if docblock.is_empty() {
+            return None;
+        }
+        let info = crate::docblock::parse_docblock_for_tags(docblock)?;
+        Self::from_info(&info)
+    }
+
+    /// [`Self::from_docblock`] against an already-parsed docblock.
+    pub fn from_info(info: &crate::docblock::DocblockInfo) -> Option<Arc<Self>> {
+        let methods = crate::docblock::extract_method_tags_from_info(info);
+        let properties = crate::docblock::extract_property_tags_from_info(info);
+        if methods.is_empty() && properties.is_empty() {
+            return None;
+        }
+        Some(Arc::new(Self {
+            methods: methods.into_iter().map(Arc::new).collect(),
+            properties,
+        }))
+    }
+}
+
 /// Stores extracted class information from a parsed PHP file.
 /// All data is owned so we don't depend on the parser's arena lifetime.
 #[derive(Debug, Clone, Default)]
@@ -1793,18 +1838,26 @@ pub struct ClassInfo {
     /// For example, `TraitB::method as traitBMethod` adds a new method
     /// `traitBMethod` that is a copy of TraitB's `method`.
     pub trait_aliases: Vec<TraitAlias>,
-    /// Raw class-level docblock text, preserved for deferred parsing.
+    /// Raw class-level docblock text.
     ///
-    /// `@method` and `@property` / `@property-read` / `@property-write`
-    /// tags are **not** parsed eagerly into `methods` / `properties`.
-    /// Instead, the raw docblock string is stored here and parsed lazily
-    /// by the `PHPDocProvider` virtual member provider when completion or
-    /// go-to-definition actually needs virtual members.
-    ///
-    /// Other docblock tags (`@template`, `@extends`, `@deprecated`, etc.)
-    /// are still parsed eagerly because they affect class metadata that is
-    /// needed during indexing and inheritance resolution.
+    /// Retained for the consumers that render or re-scan the original text
+    /// (hover, `@see` navigation, docblock code actions).  Tag data that
+    /// resolution depends on is parsed at extraction time into the typed
+    /// fields above and into [`Self::doc_members`].
     pub class_docblock: Option<String>,
+    /// `@method` and `@property` / `@property-read` / `@property-write`
+    /// tags parsed out of [`Self::class_docblock`].
+    ///
+    /// `None` when the docblock declares neither, so classes with an
+    /// ordinary description-only docblock cost nothing beyond the
+    /// `Option`.  The members are **not** merged into `methods` /
+    /// `properties`: they stay separate so the PHPDoc virtual-member
+    /// provider can apply generic substitutions per consumer and so that
+    /// real declared members keep precedence over the tags.
+    ///
+    /// Always assign through [`Self::set_class_docblock`] to keep the two
+    /// fields in sync.
+    pub doc_members: Option<Arc<DocblockMembers>>,
     /// The namespace this class was declared in.
     ///
     /// Populated during parsing from the enclosing `namespace { }` block.
@@ -1982,6 +2035,30 @@ impl ClassInfo {
             .iter()
             .find(|m| m.name.eq_ignore_ascii_case(name))
             .map(Arc::clone)
+    }
+
+    /// Set the raw class-level docblock and re-derive [`Self::doc_members`].
+    ///
+    /// The two fields describe the same source text, so they must never
+    /// drift apart.  Code that builds a `ClassInfo` outside the parser
+    /// (tests, synthesized classes) should go through this instead of
+    /// assigning `class_docblock` directly.
+    pub fn set_class_docblock(&mut self, docblock: Option<String>) {
+        self.doc_members = docblock.as_deref().and_then(DocblockMembers::from_docblock);
+        self.class_docblock = docblock;
+    }
+
+    /// `@method` tags declared on this class's own docblock.
+    #[inline]
+    pub fn doc_methods(&self) -> &[Arc<MethodInfo>] {
+        self.doc_members.as_deref().map_or(&[], |d| &d.methods)
+    }
+
+    /// `@property` / `@property-read` / `@property-write` tags declared on
+    /// this class's own docblock, as `(name, declared type)`.
+    #[inline]
+    pub fn doc_properties(&self) -> &[(Atom, Option<PhpType>)] {
+        self.doc_members.as_deref().map_or(&[], |d| &d.properties)
     }
 
     /// Look up a property by name (case-sensitive, per PHP semantics).

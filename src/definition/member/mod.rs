@@ -35,7 +35,6 @@ use tower_lsp::lsp_types::*;
 use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
-use crate::docblock;
 use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::ResolvedType;
@@ -806,23 +805,14 @@ impl Backend {
         None
     }
 
-    /// Check if a class's deferred docblock contains `@method` or `@property`
-    /// tags that declare the given member name.
+    /// Check if a class's docblock declares `@method` or `@property` tags
+    /// for the given member name.
     ///
-    /// Returns `(has_method, has_property)`.  This is a lazy parse of the
-    /// class-level docblock that only runs when the member was not found
-    /// among real declared members.
+    /// Returns `(has_method, has_property)`.
     fn has_docblock_virtual_member(class: &ClassInfo, member_name: &str) -> (bool, bool) {
-        let doc_text = match class.class_docblock.as_deref() {
-            Some(t) if !t.is_empty() => t,
-            _ => return (false, false),
-        };
-
-        let has_method = docblock::extract_method_tags(doc_text)
-            .iter()
-            .any(|m| m.name == member_name);
-
-        let has_property = docblock::extract_property_tags(doc_text)
+        let has_method = class.doc_methods().iter().any(|m| m.name == member_name);
+        let has_property = class
+            .doc_properties()
             .iter()
             .any(|(name, _)| name == member_name);
 

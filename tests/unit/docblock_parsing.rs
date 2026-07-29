@@ -186,7 +186,7 @@ fn property_tag_simple() {
     let props = extract_property_tags(doc);
     assert_eq!(
         props,
-        vec![("session".to_string(), Some(PhpType::parse("Session")))]
+        vec![(atom("session"), Some(PhpType::parse("Session")))]
     );
 }
 
@@ -194,10 +194,7 @@ fn property_tag_simple() {
 fn property_tag_nullable() {
     let doc = "/** @property ?int $count */";
     let props = extract_property_tags(doc);
-    assert_eq!(
-        props,
-        vec![("count".to_string(), Some(PhpType::parse("?int")))]
-    );
+    assert_eq!(props, vec![(atom("count"), Some(PhpType::parse("?int")))]);
 }
 
 #[test]
@@ -206,7 +203,7 @@ fn property_tag_union_with_null() {
     let props = extract_property_tags(doc);
     assert_eq!(
         props,
-        vec![("latest_id".to_string(), Some(PhpType::parse("null|int")))]
+        vec![(atom("latest_id"), Some(PhpType::parse("null|int")))]
     );
 }
 
@@ -216,10 +213,7 @@ fn property_tag_fqn() {
     let props = extract_property_tags(doc);
     assert_eq!(
         props,
-        vec![(
-            "user".to_string(),
-            Some(PhpType::parse("\\App\\Models\\User"))
-        )]
+        vec![(atom("user"), Some(PhpType::parse("\\App\\Models\\User")))]
     );
 }
 
@@ -237,14 +231,14 @@ fn property_tag_multiple() {
     assert_eq!(
         props[0],
         (
-            "latest_subscription_agreement_id".to_string(),
+            atom("latest_subscription_agreement_id"),
             Some(PhpType::parse("null|int"))
         )
     );
     assert_eq!(
         props[1],
         (
-            "mobile_verification_state".to_string(),
+            atom("mobile_verification_state"),
             Some(PhpType::parse("UserMobileVerificationState"))
         )
     );
@@ -260,18 +254,15 @@ fn property_tag_read_write_variants() {
     );
     let props = extract_property_tags(doc);
     assert_eq!(props.len(), 2);
-    assert_eq!(
-        props[0],
-        ("name".to_string(), Some(PhpType::parse("string")))
-    );
-    assert_eq!(props[1], ("age".to_string(), Some(PhpType::parse("int"))));
+    assert_eq!(props[0], (atom("name"), Some(PhpType::parse("string"))));
+    assert_eq!(props[1], (atom("age"), Some(PhpType::parse("int"))));
 }
 
 #[test]
 fn property_tag_no_type() {
     let doc = "/** @property $thing */";
     let props = extract_property_tags(doc);
-    assert_eq!(props, vec![("thing".to_string(), None)]);
+    assert_eq!(props, vec![(atom("thing"), None)]);
 }
 
 #[test]
@@ -281,7 +272,7 @@ fn property_tag_generic_preserved() {
     assert_eq!(
         props,
         vec![(
-            "items".to_string(),
+            atom("items"),
             Some(PhpType::parse("Collection<int, Model>"))
         )]
     );

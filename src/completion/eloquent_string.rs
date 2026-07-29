@@ -735,10 +735,8 @@ fn collect_model_columns(class: &ClassInfo) -> Vec<String> {
     }
 
     // @property tags from docblock.
-    if let Some(ref doc_text) = class.class_docblock {
-        for (name, _type_str) in crate::docblock::extract_property_tags(doc_text) {
-            push(&name);
-        }
+    for (name, _type) in class.doc_properties() {
+        push(name);
     }
 
     columns

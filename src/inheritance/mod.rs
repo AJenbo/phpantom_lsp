@@ -94,8 +94,7 @@ pub(crate) struct MergeDedup {
     pub constants: AtomSet,
 }
 
-/// Reserve the names of `@method` tags declared in `docblock` into the
-/// method dedup set.
+/// Reserve the names of `class`'s `@method` tags into the method dedup set.
 ///
 /// A `@method` tag declares a method on the class that carries it.  That
 /// declaration overrides any method of the same name inherited from a
@@ -103,14 +102,8 @@ pub(crate) struct MergeDedup {
 /// members themselves are synthesized later by the PHPDoc provider; this
 /// only stakes the claim so the inheritance walk stops merging the inherited
 /// real method over the `@method` declaration.
-fn reserve_method_tag_names(docblock: Option<&str>, dedup: &mut MergeDedup) {
-    let Some(doc) = docblock else {
-        return;
-    };
-    if !doc.contains("@method") {
-        return;
-    }
-    for m in crate::docblock::extract_method_tags(doc) {
+fn reserve_method_tag_names(class: &ClassInfo, dedup: &mut MergeDedup) {
+    for m in class.doc_methods() {
         dedup
             .methods
             .insert(crate::atom::ascii_lowercase_atom(&m.name));
@@ -167,7 +160,7 @@ pub(crate) fn resolve_class_with_inheritance(
     // overriding method would (the virtual members themselves are
     // synthesized later by the PHPDoc provider — here we only prevent the
     // inheritance walk from merging the inherited real method over them).
-    reserve_method_tag_names(class.class_docblock.as_deref(), &mut dedup);
+    reserve_method_tag_names(class, &mut dedup);
 
     // 1. Merge traits used by this class.
     //    PHP precedence: class methods > trait methods > inherited methods.
@@ -229,7 +222,7 @@ pub(crate) fn resolve_class_with_inheritance(
         // declaration.  Reserved before the ancestor's own members are
         // merged so a real method on this same ancestor still wins over its
         // own `@method` tag.
-        reserve_method_tag_names(parent.class_docblock.as_deref(), &mut dedup);
+        reserve_method_tag_names(&parent, &mut dedup);
 
         // Build the substitution map for this parent level.
         //

@@ -353,8 +353,9 @@ fn synthesizes_from_docblock_property_tags() {
     user.laravel_mut().timestamps = Some(false);
     // Simulate a model with @property tags in the class docblock but
     // nothing in the properties vec (as happens before full resolution).
-    user.class_docblock =
-        Some("/**\n * @property int $brand_id\n * @property string $email\n */".to_string());
+    user.set_class_docblock(Some(
+        "/**\n * @property int $brand_id\n * @property string $email\n */".to_string(),
+    ));
 
     let methods = build_where_property_methods_for_class(&user, &HashSet::new());
 

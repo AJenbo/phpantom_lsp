@@ -24,9 +24,9 @@ use crate::php_type::{
     TypeKind,
 };
 use crate::types::{
-    ClassInfo, ConstantInfo, FunctionInfo, LaravelMetadata, MethodInfo, ParameterInfo,
-    PropertyInfo, PropertySource, SharedVec, TraitAlias, TraitPrecedence, TypeAliasDef,
-    TypeAssertion,
+    ClassInfo, ConstantInfo, DocblockMembers, FunctionInfo, LaravelMetadata, MethodInfo,
+    ParameterInfo, PropertyInfo, PropertySource, SharedVec, TraitAlias, TraitPrecedence,
+    TypeAliasDef, TypeAssertion,
 };
 
 // ─── Counting global allocator ──────────────────────────────────────────────
@@ -793,6 +793,25 @@ impl Audit {
         self.cls_docs += s(&c.deprecated_replacement);
         self.cls_docs += vs(&c.links);
         self.cls_docs += vs(&c.see_refs);
+
+        // `@method` / `@property` tags parsed at extraction time.  The
+        // methods are `Arc`-shared with every class that mixes them in, so
+        // `self.method` de-duplicates them via the pointer set.
+        if let Some(doc) = c.doc_members.as_ref()
+            && self.mark(Arc::as_ptr(doc) as usize)
+        {
+            let mut z = Sz::default();
+            z.add(ARC + size_of::<DocblockMembers>());
+            z.add(VEC_HDR + doc.methods.capacity() * size_of::<Arc<MethodInfo>>());
+            z.add(VEC_HDR + doc.properties.capacity() * size_of::<(Atom, Option<PhpType>)>());
+            self.cls_docs += z;
+            for (_, t) in &doc.properties {
+                self.cls_docs += opt_ty(t);
+            }
+            for m in &doc.methods {
+                self.method(m);
+            }
+        }
 
         if let Some(l) = &c.laravel {
             self.cls_laravel += laravel_meta(l);

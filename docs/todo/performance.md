@@ -82,53 +82,6 @@ but not to this function.
 
 ---
 
-## P14. Eager docblock parsing into structured fields
-
-**Impact: Medium · Effort: Medium**
-
-> **Note.** This item needs refinement when we work on it. The
-> codebase and feature set may change significantly before then.
-
-Currently `ClassInfo::class_docblock` stores the raw docblock
-string. Consumers that need virtual members (`@method`,
-`@property`, `@property-read`, `@property-write`) re-parse the
-raw text via `PHPDocProvider`, and the inheritance merge re-parses
-it again (`reserve_method_tag_names`). Since the resolved-class
-cache landed, this fires only when a class is (re-)resolved after
-a cache miss or eviction rather than on every request, so the win
-is smaller than when this item was filed.
-
-Parse the class-level docblock once during extraction and store the
-structured results directly on ClassInfo:
-
-- A list of parsed `@method` signatures (name, parameters, return
-  type, static flag, description).
-- A list of parsed `@property` / `@property-read` /
-  `@property-write` entries (name, type, access mode, description).
-
-This has three benefits:
-
-1. **Drop the raw string.** For heavily-annotated classes (Eloquent
-   models, facades) the raw docblock can be hundreds of bytes.
-   The structured representation may be comparable in size but is
-   directly usable without re-parsing.
-
-2. **Eliminate repeated parsing.** Virtual member resolution
-   re-parses the same docblock text every time the class is
-   resolved into the resolved-class cache (and again in the
-   inheritance merge). Parsing once during extraction removes
-   this redundant work.
-
-3. **Simpler consumer code.** Consumers iterate structured fields
-   instead of calling into the docblock parser. This removes the
-   lazy-parse indirection and makes the data flow easier to follow.
-
-The same principle applies to other docblock data that is currently
-extracted from raw text at multiple read sites (descriptions, link
-URLs, see references), though those are smaller wins.
-
----
-
 ## P15. Two-phase stub index construction (eliminate `RwLock` on stub maps)
 
 **Impact: Low · Effort: Medium**
@@ -933,7 +886,9 @@ computing. What is left, re-profiled after the memo:
 - Type strings are still parsed during the diagnostic pass rather than
   at index time: `TypeTokenStream::fill_buffer_slow`, `PhpType::parse`,
   `LocalArena::alloc_slice_copy` and `parse_primary_type` together are
-  ~6.5% of Phase 2 samples. This is P14's territory.
+  ~6.5% of Phase 2 samples. Class-level `@method` / `@property` tags
+  are now parsed at extraction time; the remaining cost is method,
+  parameter and return type strings.
 - malloc/free/memmove remains diffuse. `is_scalar_name` and
   `is_keyword_type` (~2.3% between them) allocate a lowercase `String`
   per call and are reached from `base_name`, the subtype checks and the

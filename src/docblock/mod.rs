@@ -72,7 +72,10 @@ pub use templates::{
 };
 
 // Virtual member tags
-pub use virtual_members::{extract_method_tags, extract_property_tags};
+pub use virtual_members::{
+    extract_method_tags, extract_method_tags_from_info, extract_property_tags,
+    extract_property_tags_from_info,
+};
 
 // Conditional return types
 pub use conditional::{extract_conditional_return_type, extract_conditional_return_type_from_info};

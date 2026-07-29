@@ -21,8 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::atom::{Atom, atom};
-use crate::docblock;
+use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
 use crate::inheritance::ClassRef;
 use crate::php_type::{PhpType, TypeKind};
@@ -110,11 +109,11 @@ struct MixinCollector {
 /// accumulated vectors and base class members.
 struct MixinDedup {
     /// Method names from the base class + accumulated virtual methods.
-    methods: HashSet<String>,
+    methods: AtomSet,
     /// Property names from the base class + accumulated virtual properties.
-    properties: HashSet<String>,
+    properties: AtomSet,
     /// Constant names from the base class + accumulated virtual constants.
-    constants: HashSet<String>,
+    constants: AtomSet,
 }
 
 /// The substitution environment for a single [`collect_mixin_members`] level.
@@ -136,6 +135,53 @@ struct MixinSubs<'a> {
 }
 
 use super::{VirtualMemberProvider, VirtualMembers};
+
+/// Build a virtual [`PropertyInfo`] from a parsed `@property` tag,
+/// substituting template parameters in the declared type when `subs`
+/// carries bindings for the docblock's owner.
+fn doc_property(
+    name: Atom,
+    type_hint: Option<&PhpType>,
+    subs: &HashMap<String, PhpType>,
+) -> PropertyInfo {
+    PropertyInfo {
+        name,
+        name_offset: 0,
+        type_hint: type_hint.map(|t| {
+            if subs.is_empty() {
+                t.clone()
+            } else {
+                t.substitute(subs)
+            }
+        }),
+        native_type_hint: None,
+        description: None,
+        is_static: false,
+        visibility: Visibility::Public,
+        deprecation_message: None,
+        deprecated_replacement: None,
+        see_refs: Vec::new(),
+        is_virtual: true,
+        source: None,
+    }
+}
+
+/// Apply template substitutions to a parsed `@method` tag.
+///
+/// The tags are parsed once per class and shared behind an `Arc`, so the
+/// common case (no substitution for this consumer) is a refcount bump
+/// rather than a deep clone.
+fn substituted_doc_method(
+    method: &Arc<MethodInfo>,
+    subs: &HashMap<String, PhpType>,
+) -> Arc<MethodInfo> {
+    if subs.is_empty() {
+        return Arc::clone(method);
+    }
+    let mut cloned = (**method).clone();
+    inheritance::apply_substitution_to_method(&mut cloned, subs);
+    Arc::new(cloned)
+}
 
 /// Virtual member provider for `@method`, `@property`, and `@mixin` docblock tags.
 ///
@@ -159,30 +205,19 @@ use super::{VirtualMemberProvider, VirtualMembers};
 pub struct PHPDocProvider;
 
 impl VirtualMemberProvider for PHPDocProvider {
-    /// Returns `true` if the class has a non-empty class-level docblock
-    /// or declares `@mixin` tags (directly or via ancestors).
+    /// Returns `true` if the class carries `@method` / `@property` tags
+    /// or declares `@mixin` tags (directly or via traits and ancestors).
     ///
-    /// This is a cheap pre-check. No parsing is performed.
+    /// This is a cheap pre-check: the tags were parsed once when each
+    /// class was extracted, so this only inspects already-structured data.
     fn applies_to(
         &self,
         class: &ClassInfo,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
-        // Has a non-empty docblock with potential @method/@property tags.
-        if class.class_docblock.as_ref().is_some_and(|d| !d.is_empty()) {
+        // Declares @method/@property tags itself.
+        if class.doc_members.is_some() {
             return true;
-        }
-
-        // Has used traits that might have @method/@property tags.
-        for trait_name in &class.used_traits {
-            if let Some(trait_info) = class_loader(trait_name)
-                && trait_info
-                    .class_docblock
-                    .as_ref()
-                    .is_some_and(|d| !d.is_empty())
-            {
-                return true;
-            }
         }
 
         // Has direct @mixin declarations.
@@ -190,9 +225,18 @@ impl VirtualMemberProvider for PHPDocProvider {
             return true;
         }
 
-        // Walk the parent chain to check for ancestor mixins or docblocks
-        // with @method/@property tags.  Use a cheap Arc handle instead of
-        // cloning the entire ClassInfo at each level.
+        // Has used traits that carry @method/@property tags.
+        for trait_name in &class.used_traits {
+            if let Some(trait_info) = class_loader(trait_name)
+                && trait_info.doc_members.is_some()
+            {
+                return true;
+            }
+        }
+
+        // Walk the parent chain to check for ancestor mixins or tags.
+        // Use a cheap Arc handle instead of cloning the entire ClassInfo
+        // at each level.
         let mut current_parent = class.parent_class;
         let mut depth = 0u32;
         while let Some(ref parent_name) = current_parent {
@@ -205,27 +249,39 @@ impl VirtualMemberProvider for PHPDocProvider {
             } else {
                 break;
             };
-            if !parent.mixins.is_empty() {
-                return true;
-            }
-            if parent
-                .class_docblock
-                .as_ref()
-                .is_some_and(|d| !d.is_empty())
-            {
+            if !parent.mixins.is_empty() || parent.doc_members.is_some() {
                 return true;
             }
             current_parent = parent.parent_class;
         }
 
+        // Walk implemented interfaces (and the interfaces they extend),
+        // which `provide` also collects tags from.
+        let mut queue: Vec<Atom> = class.interfaces.to_vec();
+        let mut visited: AtomSet = AtomSet::default();
+        while let Some(iface_name) = queue.pop() {
+            if !visited.insert(iface_name) {
+                continue;
+            }
+            let Some(iface) = class_loader(&iface_name) else {
+                continue;
+            };
+            if iface.doc_members.is_some() {
+                return true;
+            }
+            queue.extend(iface.interfaces.iter().copied());
+        }
+
         false
     }
 
-    /// Parse `@method`, `@property`, and `@mixin` tags from the class.
+    /// Collect `@method`, `@property`, and `@mixin` members for the class.
     ///
-    /// Uses the existing [`docblock::extract_method_tags`] and
-    /// [`docblock::extract_property_tags`] functions for tag parsing.
-    /// Then collects public members from `@mixin` classes.  Within the
+    /// The `@method` / `@property` tags were parsed into
+    /// [`ClassInfo::doc_members`](crate::types::ClassInfo::doc_members)
+    /// when each class was extracted, so this only reads structured data
+    /// and applies the per-consumer generic substitutions.  It then
+    /// collects public members from `@mixin` classes.  Within the
     /// provider, `@method` / `@property` tags take precedence over
     /// `@mixin` members.
     fn provide(
@@ -250,38 +306,26 @@ impl VirtualMemberProvider for PHPDocProvider {
         // phase 1 emits, names are added to `seen_props` to prevent
         // lower-priority sources (trait tags, parent tags, `@mixin`
         // members) from overriding them.
-        let mut seen_methods: HashSet<String> =
-            class.methods.iter().map(|m| m.name.to_string()).collect();
-        let mut seen_props: HashSet<String> = HashSet::new();
-        let seen_consts: HashSet<String> =
-            class.constants.iter().map(|c| c.name.to_string()).collect();
+        let mut seen_methods: AtomSet = class.methods.iter().map(|m| m.name).collect();
+        let mut seen_props: AtomSet = AtomSet::default();
+        let seen_consts: AtomSet = class.constants.iter().map(|c| c.name).collect();
+
+        // No generic substitution applies to the class's own tags, nor to
+        // tags inherited from a trait: `@use Trait<T>` substitution is the
+        // inheritance merge's job, and it does not reach docblock tags.
+        let no_subs: HashMap<String, PhpType> = HashMap::new();
 
         // ── Phase 1: @method and @property tags (higher precedence) ─────
 
-        if let Some(doc_text) = class.class_docblock.as_deref()
-            && !doc_text.is_empty()
-        {
-            for m in docblock::extract_method_tags(doc_text) {
-                seen_methods.insert(m.name.to_string());
-                methods.push(Arc::new(m));
+        if let Some(doc) = class.doc_members.as_deref() {
+            for m in &doc.methods {
+                seen_methods.insert(m.name);
+                methods.push(Arc::clone(m));
             }
 
-            for (name, type_hint) in docblock::extract_property_tags(doc_text) {
-                seen_props.insert(name.clone());
-                properties.push(PropertyInfo {
-                    name: atom(&name),
-                    name_offset: 0,
-                    type_hint,
-                    native_type_hint: None,
-                    description: None,
-                    is_static: false,
-                    visibility: Visibility::Public,
-                    deprecation_message: None,
-                    deprecated_replacement: None,
-                    see_refs: Vec::new(),
-                    is_virtual: true,
-                    source: None,
-                });
+            for (name, type_hint) in &doc.properties {
+                seen_props.insert(*name);
+                properties.push(doc_property(*name, type_hint.as_ref(), &no_subs));
             }
         }
 
@@ -299,31 +343,16 @@ impl VirtualMemberProvider for PHPDocProvider {
                 continue;
             };
 
-            if let Some(doc_text) = trait_info.class_docblock.as_deref()
-                && !doc_text.is_empty()
-            {
-                for m in docblock::extract_method_tags(doc_text) {
-                    if seen_methods.insert(m.name.to_string()) {
-                        methods.push(Arc::new(m));
+            if let Some(doc) = trait_info.doc_members.as_deref() {
+                for m in &doc.methods {
+                    if seen_methods.insert(m.name) {
+                        methods.push(Arc::clone(m));
                     }
                 }
 
-                for (name, type_hint) in docblock::extract_property_tags(doc_text) {
-                    if seen_props.insert(name.clone()) {
-                        properties.push(PropertyInfo {
-                            name: atom(&name),
-                            name_offset: 0,
-                            type_hint,
-                            native_type_hint: None,
-                            description: None,
-                            is_static: false,
-                            visibility: Visibility::Public,
-                            deprecation_message: None,
-                            deprecated_replacement: None,
-                            see_refs: Vec::new(),
-                            is_virtual: true,
-                            source: None,
-                        });
+                for (name, type_hint) in &doc.properties {
+                    if seen_props.insert(*name) {
+                        properties.push(doc_property(*name, type_hint.as_ref(), &no_subs));
                     }
                 }
             }
@@ -367,39 +396,16 @@ impl VirtualMemberProvider for PHPDocProvider {
                     &class.template_param_bounds,
                 );
 
-                if let Some(doc_text) = parent.class_docblock.as_deref()
-                    && !doc_text.is_empty()
-                {
-                    for mut m in docblock::extract_method_tags(doc_text) {
-                        if seen_methods.insert(m.name.to_string()) {
-                            if !level_subs.is_empty() {
-                                inheritance::apply_substitution_to_method(&mut m, &level_subs);
-                            }
-                            methods.push(Arc::new(m));
+                if let Some(doc) = parent.doc_members.as_deref() {
+                    for m in &doc.methods {
+                        if seen_methods.insert(m.name) {
+                            methods.push(substituted_doc_method(m, &level_subs));
                         }
                     }
 
-                    for (name, type_hint) in docblock::extract_property_tags(doc_text) {
-                        if seen_props.insert(name.clone()) {
-                            let resolved_type = if !level_subs.is_empty() {
-                                type_hint.map(|t| t.substitute(&level_subs))
-                            } else {
-                                type_hint
-                            };
-                            properties.push(PropertyInfo {
-                                name: atom(&name),
-                                name_offset: 0,
-                                type_hint: resolved_type,
-                                native_type_hint: None,
-                                description: None,
-                                is_static: false,
-                                visibility: Visibility::Public,
-                                deprecation_message: None,
-                                deprecated_replacement: None,
-                                see_refs: Vec::new(),
-                                is_virtual: true,
-                                source: None,
-                            });
+                    for (name, type_hint) in &doc.properties {
+                        if seen_props.insert(*name) {
+                            properties.push(doc_property(*name, type_hint.as_ref(), &level_subs));
                         }
                     }
                 }
@@ -443,39 +449,16 @@ impl VirtualMemberProvider for PHPDocProvider {
                     continue;
                 };
 
-                if let Some(doc_text) = iface.class_docblock.as_deref()
-                    && !doc_text.is_empty()
-                {
-                    for mut m in docblock::extract_method_tags(doc_text) {
-                        if seen_methods.insert(m.name.to_string()) {
-                            if !subs.is_empty() {
-                                inheritance::apply_substitution_to_method(&mut m, &subs);
-                            }
-                            methods.push(Arc::new(m));
+                if let Some(doc) = iface.doc_members.as_deref() {
+                    for m in &doc.methods {
+                        if seen_methods.insert(m.name) {
+                            methods.push(substituted_doc_method(m, &subs));
                         }
                     }
 
-                    for (name, type_hint) in docblock::extract_property_tags(doc_text) {
-                        if seen_props.insert(name.clone()) {
-                            let resolved_type = if !subs.is_empty() {
-                                type_hint.map(|t| t.substitute(&subs))
-                            } else {
-                                type_hint
-                            };
-                            properties.push(PropertyInfo {
-                                name: atom(&name),
-                                name_offset: 0,
-                                type_hint: resolved_type,
-                                native_type_hint: None,
-                                description: None,
-                                is_static: false,
-                                visibility: Visibility::Public,
-                                deprecation_message: None,
-                                deprecated_replacement: None,
-                                see_refs: Vec::new(),
-                                is_virtual: true,
-                                source: None,
-                            });
+                    for (name, type_hint) in &doc.properties {
+                        if seen_props.insert(*name) {
+                            properties.push(doc_property(*name, type_hint.as_ref(), &subs));
                         }
                     }
                 }
@@ -789,7 +772,7 @@ fn collect_mixin_members(
             }
             // Skip if the base-resolved class already has this method,
             // or if a previous @method tag or mixin already contributed it.
-            if !collector.dedup.methods.insert(method.name.to_string()) {
+            if !collector.dedup.methods.insert(method.name) {
                 continue;
             }
             let transformed = super::cache::intern_transformed_method(method, fp, || {
@@ -839,7 +822,7 @@ fn collect_mixin_members(
             if property.visibility != Visibility::Public {
                 continue;
             }
-            if !collector.dedup.properties.insert(property.name.to_string()) {
+            if !collector.dedup.properties.insert(property.name) {
                 continue;
             }
             let mut property = (**property).clone();
@@ -854,7 +837,7 @@ fn collect_mixin_members(
             if constant.visibility != Visibility::Public {
                 continue;
             }
-            if !collector.dedup.constants.insert(constant.name.to_string()) {
+            if !collector.dedup.constants.insert(constant.name) {
                 continue;
             }
             collector.constants.push((**constant).clone());
@@ -865,13 +848,12 @@ fn collect_mixin_members(
         // from @method/@property tags (to avoid circular provider calls).
         // Extract them manually so that e.g. `@mixin A` where A declares
         // `@method $this active()` propagates `active()` to the consumer.
-        if let Some(doc_text) = mixin_class.class_docblock.as_deref()
-            && !doc_text.is_empty()
-        {
-            for mut m in docblock::extract_method_tags(doc_text) {
-                if !collector.dedup.methods.insert(m.name.to_string()) {
+        if let Some(doc) = mixin_class.doc_members.as_deref() {
+            for m in &doc.methods {
+                if !collector.dedup.methods.insert(m.name) {
                     continue;
                 }
+                let mut m = (**m).clone();
                 if !subs.is_empty() {
                     inheritance::apply_substitution_to_method(&mut m, &subs);
                 }
@@ -882,29 +864,13 @@ fn collect_mixin_members(
                 collector.methods.push(Arc::new(m));
             }
 
-            for (name, type_hint) in docblock::extract_property_tags(doc_text) {
-                if !collector.dedup.properties.insert(name.clone()) {
+            for (name, type_hint) in &doc.properties {
+                if !collector.dedup.properties.insert(*name) {
                     continue;
                 }
-                let resolved_type = if !subs.is_empty() {
-                    type_hint.map(|t| t.substitute(&subs))
-                } else {
-                    type_hint
-                };
-                collector.properties.push(PropertyInfo {
-                    name: atom(&name),
-                    name_offset: 0,
-                    type_hint: resolved_type,
-                    native_type_hint: None,
-                    description: None,
-                    is_static: false,
-                    visibility: Visibility::Public,
-                    deprecation_message: None,
-                    deprecated_replacement: None,
-                    see_refs: Vec::new(),
-                    is_virtual: true,
-                    source: None,
-                });
+                collector
+                    .properties
+                    .push(doc_property(*name, type_hint.as_ref(), &subs));
             }
         }
 
@@ -1109,9 +1075,9 @@ pub fn resolve_template_param_mixins(
     }
 
     let dedup = MixinDedup {
-        methods: HashSet::new(),
-        properties: HashSet::new(),
-        constants: HashSet::new(),
+        methods: AtomSet::default(),
+        properties: AtomSet::default(),
+        constants: AtomSet::default(),
     };
 
     let mut collector = MixinCollector {

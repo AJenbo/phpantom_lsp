@@ -114,6 +114,7 @@ impl Backend {
             links: Vec::new(),
             see_refs: Vec::new(),
             class_docblock: None,
+            doc_members: None,
             file_namespace: None,
             backed_type: None,
             attribute_targets: 0,

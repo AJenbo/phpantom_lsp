@@ -64,6 +64,7 @@ pub fn make_class(name: &str) -> ClassInfo {
         trait_precedences: Vec::new(),
         trait_aliases: Vec::new(),
         class_docblock: None,
+        doc_members: None,
         file_namespace: None,
         backed_type: None,
         attribute_targets: 0,

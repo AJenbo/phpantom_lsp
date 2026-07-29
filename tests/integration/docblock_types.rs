@@ -1345,10 +1345,9 @@ async fn test_docblock_return_generic_type_stripped() {
 
 // ─── @property Docblock Tags ────────────────────────────────────────────────
 
-/// Test: `@property` tags are NOT parsed eagerly into `ClassInfo.properties`.
-/// Instead, the raw docblock is preserved on `ClassInfo.class_docblock` and
-/// properties are provided lazily by the `PHPDocProvider` via
-/// `resolve_class_fully`.
+/// Test: `@property` tags are not merged into `ClassInfo.properties` during
+/// extraction.  They are parsed into `ClassInfo.doc_members` and only become
+/// members when the `PHPDocProvider` runs via `resolve_class_fully`.
 #[tokio::test]
 async fn test_parse_php_class_property_tags() {
     let backend = create_test_backend();
@@ -1742,10 +1741,9 @@ async fn test_goto_definition_property_read_tag() {
 
 // ─── @method Docblock Tags ──────────────────────────────────────────────────
 
-/// Test: `@method` tags are NOT parsed eagerly into `ClassInfo.methods`.
-/// Instead, the raw docblock is preserved on `ClassInfo.class_docblock` and
-/// methods are provided lazily by the `PHPDocProvider` via
-/// `resolve_class_fully`.
+/// Test: `@method` tags are not merged into `ClassInfo.methods` during
+/// extraction.  They are parsed into `ClassInfo.doc_members` and only become
+/// members when the `PHPDocProvider` runs via `resolve_class_fully`.
 #[tokio::test]
 async fn test_parse_php_class_method_tags() {
     let backend = create_test_backend();

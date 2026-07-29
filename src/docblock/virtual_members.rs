@@ -7,11 +7,11 @@
 //!   - `@method ReturnType methodName(ParamType $param, ...)`
 //!   - `@method static ReturnType methodName(...)`
 
-use crate::atom::AtomMap;
+use crate::atom::{Atom, AtomMap, atom};
 
 use mago_docblock::document::TagKind;
 
-use super::parser::parse_docblock_for_tags;
+use super::parser::{DocblockInfo, parse_docblock_for_tags};
 use super::tags::sanitise_and_parse_docblock_type;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
@@ -32,11 +32,18 @@ use crate::types::{MethodInfo, ParameterInfo, Visibility};
 ///
 /// Returns a list of `(property_name, cleaned_type)` pairs.  The property
 /// name does **not** include the `$` prefix.
-pub fn extract_property_tags(docblock: &str) -> Vec<(String, Option<PhpType>)> {
+pub fn extract_property_tags(docblock: &str) -> Vec<(Atom, Option<PhpType>)> {
     let Some(info) = parse_docblock_for_tags(docblock) else {
         return Vec::new();
     };
+    extract_property_tags_from_info(&info)
+}
 
+/// [`extract_property_tags`] against an already-parsed docblock.
+///
+/// Class-level docblocks are parsed once during extraction, so the class
+/// parser reuses that [`DocblockInfo`] instead of re-parsing the text.
+pub fn extract_property_tags_from_info(info: &DocblockInfo) -> Vec<(Atom, Option<PhpType>)> {
     const PROPERTY_KINDS: &[TagKind] = &[
         TagKind::Property,
         TagKind::PropertyRead,
@@ -62,7 +69,7 @@ pub fn extract_property_tags(docblock: &str) -> Vec<(String, Option<PhpType>)> {
             if name.is_empty() {
                 continue;
             }
-            results.push((name.to_string(), None));
+            results.push((atom(name), None));
             continue;
         }
 
@@ -90,7 +97,7 @@ pub fn extract_property_tags(docblock: &str) -> Vec<(String, Option<PhpType>)> {
         } else {
             sanitise_and_parse_docblock_type(type_str)
         };
-        results.push((name.to_string(), parsed));
+        results.push((atom(name), parsed));
     }
 
     results
@@ -113,7 +120,14 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
     let Some(info) = parse_docblock_for_tags(docblock) else {
         return Vec::new();
     };
+    extract_method_tags_from_info(&info)
+}
 
+/// [`extract_method_tags`] against an already-parsed docblock.
+///
+/// Class-level docblocks are parsed once during extraction, so the class
+/// parser reuses that [`DocblockInfo`] instead of re-parsing the text.
+pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
     const METHOD_KINDS: &[TagKind] = &[TagKind::Method, TagKind::PsalmMethod];
 
     let mut results: Vec<MethodInfo> = Vec::new();

@@ -2,6 +2,7 @@ use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_constant, make_method, make_property, no_loader};
+use crate::types::ClassLikeKind;
 use std::sync::Arc;
 
 // ── applies_to ──────────────────────────────────────────────────────
@@ -10,7 +11,7 @@ use std::sync::Arc;
 fn applies_when_docblock_present() {
     let provider = PHPDocProvider;
     let mut class = make_class("Foo");
-    class.class_docblock = Some("/** @method void bar() */".to_string());
+    class.set_class_docblock(Some("/** @method void bar() */".to_string()));
     assert!(provider.applies_to(&class, &no_loader));
 }
 
@@ -25,8 +26,80 @@ fn does_not_apply_when_no_docblock_and_no_mixins() {
 fn does_not_apply_when_docblock_empty_and_no_mixins() {
     let provider = PHPDocProvider;
     let mut class = make_class("Foo");
-    class.class_docblock = Some(String::new());
+    class.set_class_docblock(Some(String::new()));
     assert!(!provider.applies_to(&class, &no_loader));
+}
+
+#[test]
+fn applies_when_implemented_interface_has_tags() {
+    // `provide` collects `@method` / `@property` tags from implemented
+    // interfaces, so the pre-check has to see them too — even when the
+    // implementing class carries no docblock of its own.
+    let provider = PHPDocProvider;
+    let mut class = make_class("Foo");
+    class.interfaces = vec![atom("HasMagic")];
+
+    let mut iface = make_class("HasMagic");
+    iface.kind = ClassLikeKind::Interface;
+    iface.set_class_docblock(Some("/** @method void bar() */".to_string()));
+    let iface = Arc::new(iface);
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        (name == "HasMagic").then(|| Arc::clone(&iface))
+    };
+    assert!(provider.applies_to(&class, &class_loader));
+}
+
+#[test]
+fn applies_when_extended_interface_has_tags() {
+    let provider = PHPDocProvider;
+    let mut class = make_class("Foo");
+    class.interfaces = vec![atom("Middle")];
+
+    let mut base = make_class("Base");
+    base.kind = ClassLikeKind::Interface;
+    base.set_class_docblock(Some("/** @property int $id */".to_string()));
+    let base = Arc::new(base);
+
+    let mut middle = make_class("Middle");
+    middle.kind = ClassLikeKind::Interface;
+    middle.interfaces = vec![atom("Base")];
+    let middle = Arc::new(middle);
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Middle" => Some(Arc::clone(&middle)),
+            "Base" => Some(Arc::clone(&base)),
+            _ => None,
+        }
+    };
+    assert!(provider.applies_to(&class, &class_loader));
+}
+
+#[test]
+fn cyclic_interfaces_do_not_hang_applies_to() {
+    let provider = PHPDocProvider;
+    let mut class = make_class("Foo");
+    class.interfaces = vec![atom("A")];
+
+    let mut a = make_class("A");
+    a.kind = ClassLikeKind::Interface;
+    a.interfaces = vec![atom("B")];
+    let a = Arc::new(a);
+
+    let mut b = make_class("B");
+    b.kind = ClassLikeKind::Interface;
+    b.interfaces = vec![atom("A")];
+    let b = Arc::new(b);
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "A" => Some(Arc::clone(&a)),
+            "B" => Some(Arc::clone(&b)),
+            _ => None,
+        }
+    };
+    assert!(!provider.applies_to(&class, &class_loader));
 }
 
 #[test]
@@ -64,7 +137,7 @@ fn applies_when_ancestor_has_mixins() {
 fn provides_method_tags() {
     let provider = PHPDocProvider;
     let mut class = make_class("Cart");
-    class.class_docblock = Some(
+    class.set_class_docblock(Some(
         concat!(
             "/**\n",
             " * @method string getName()\n",
@@ -72,7 +145,7 @@ fn provides_method_tags() {
             " */",
         )
         .to_string(),
-    );
+    ));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.methods.len(), 2);
@@ -84,8 +157,9 @@ fn provides_method_tags() {
 fn provides_static_method_tags() {
     let provider = PHPDocProvider;
     let mut class = make_class("Facade");
-    class.class_docblock =
-        Some(concat!("/**\n", " * @method static int count()\n", " */",).to_string());
+    class.set_class_docblock(Some(
+        concat!("/**\n", " * @method static int count()\n", " */",).to_string(),
+    ));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.methods.len(), 1);
@@ -98,14 +172,14 @@ fn provides_static_method_tags() {
 fn method_tag_preserves_return_type() {
     let provider = PHPDocProvider;
     let mut class = make_class("TestCase");
-    class.class_docblock = Some(
+    class.set_class_docblock(Some(
         concat!(
             "/**\n",
             " * @method \\Mockery\\MockInterface mock(string $abstract)\n",
             " */",
         )
         .to_string(),
-    );
+    ));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.methods.len(), 1);
@@ -119,11 +193,11 @@ fn method_tag_preserves_return_type() {
 fn method_tag_parses_parameters() {
     let provider = PHPDocProvider;
     let mut class = make_class("DB");
-    class.class_docblock = Some(concat!(
+    class.set_class_docblock(Some(concat!(
         "/**\n",
         " * @method void assertDatabaseHas(string $table, array $data, string $connection = null)\n",
         " */",
-    ).to_string());
+    ).to_string()));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.methods.len(), 1);
@@ -140,7 +214,7 @@ fn method_tag_parses_parameters() {
 fn provides_property_tags() {
     let provider = PHPDocProvider;
     let mut class = make_class("Customer");
-    class.class_docblock = Some(
+    class.set_class_docblock(Some(
         concat!(
             "/**\n",
             " * @property int $id\n",
@@ -148,7 +222,7 @@ fn provides_property_tags() {
             " */",
         )
         .to_string(),
-    );
+    ));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.properties.len(), 2);
@@ -160,7 +234,7 @@ fn provides_property_tags() {
 fn provides_property_read_and_write_tags() {
     let provider = PHPDocProvider;
     let mut class = make_class("Controller");
-    class.class_docblock = Some(
+    class.set_class_docblock(Some(
         concat!(
             "/**\n",
             " * @property-read Session $session\n",
@@ -168,7 +242,7 @@ fn provides_property_read_and_write_tags() {
             " */",
         )
         .to_string(),
-    );
+    ));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.properties.len(), 2);
@@ -190,7 +264,7 @@ fn provides_property_read_and_write_tags() {
 fn property_tags_are_public_and_non_static() {
     let provider = PHPDocProvider;
     let mut class = make_class("Model");
-    class.class_docblock = Some("/** @property int $id */".to_string());
+    class.set_class_docblock(Some("/** @property int $id */".to_string()));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.properties.len(), 1);
@@ -202,7 +276,7 @@ fn property_tags_are_public_and_non_static() {
 fn nullable_type_preserved() {
     let provider = PHPDocProvider;
     let mut class = make_class("Customer");
-    class.class_docblock = Some("/** @property null|int $agreement_id */".to_string());
+    class.set_class_docblock(Some("/** @property null|int $agreement_id */".to_string()));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.properties.len(), 1);
@@ -219,7 +293,7 @@ fn nullable_type_preserved() {
 fn tags_never_produce_constants() {
     let provider = PHPDocProvider;
     let mut class = make_class("Foo");
-    class.class_docblock = Some(
+    class.set_class_docblock(Some(
         concat!(
             "/**\n",
             " * @method void bar()\n",
@@ -227,7 +301,7 @@ fn tags_never_produce_constants() {
             " */",
         )
         .to_string(),
-    );
+    ));
 
     let result = provider.provide(&class, &no_loader, None);
     assert!(result.constants.is_empty());
@@ -239,7 +313,7 @@ fn tags_never_produce_constants() {
 fn empty_docblock_returns_empty() {
     let provider = PHPDocProvider;
     let mut class = make_class("Foo");
-    class.class_docblock = Some("/** */".to_string());
+    class.set_class_docblock(Some("/** */".to_string()));
 
     let result = provider.provide(&class, &no_loader, None);
     assert!(result.methods.is_empty());
@@ -262,7 +336,7 @@ fn no_docblock_returns_empty() {
 fn provides_both_methods_and_properties() {
     let provider = PHPDocProvider;
     let mut class = make_class("Model");
-    class.class_docblock = Some(
+    class.set_class_docblock(Some(
         concat!(
             "/**\n",
             " * @property string $name\n",
@@ -272,7 +346,7 @@ fn provides_both_methods_and_properties() {
             " */",
         )
         .to_string(),
-    );
+    ));
 
     let result = provider.provide(&class, &no_loader, None);
     assert_eq!(result.methods.len(), 2);
@@ -611,7 +685,7 @@ fn first_mixin_wins_on_name_collision() {
 fn method_tag_beats_mixin_method() {
     let provider = PHPDocProvider;
     let mut class = make_class("Foo");
-    class.class_docblock = Some("/** @method string doStuff() */".to_string());
+    class.set_class_docblock(Some("/** @method string doStuff() */".to_string()));
     class.mixins = vec![atom("Bar")];
 
     let mut bar = make_class("Bar");
@@ -646,7 +720,7 @@ fn method_tag_beats_mixin_method() {
 fn property_tag_beats_mixin_property() {
     let provider = PHPDocProvider;
     let mut class = make_class("Foo");
-    class.class_docblock = Some("/** @property string $name */".to_string());
+    class.set_class_docblock(Some("/** @property string $name */".to_string()));
     class.mixins = vec![atom("Bar")];
 
     let mut bar = make_class("Bar");

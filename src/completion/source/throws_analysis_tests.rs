@@ -861,6 +861,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         trait_precedences: Vec::new(),
         trait_aliases: Vec::new(),
         class_docblock: None,
+        doc_members: None,
         file_namespace: None,
         backed_type: None,
         attribute_targets: 0,

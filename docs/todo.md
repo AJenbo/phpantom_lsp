@@ -201,7 +201,6 @@ unlikely to move the needle for most users.
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
 | P25 | [`type_mismatch_argument` / `argument_count_mismatch` slow on large single files](todo/performance.md#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files) | Medium      | Medium      |
 | P22 | [Signature change re-queues slow diagnostics for every open file](todo/performance.md#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file)                  | Medium-High | Medium      |
-| P14 | [Eager docblock parsing into structured fields](todo/performance.md#p14-eager-docblock-parsing-into-structured-fields)                                                      | Medium      | Medium      |
 | P27 | [`object`/`?object` call-return check re-resolves the subject a second time](todo/performance.md#p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time)  | Medium      | Low         |
 | P11 | [Uncached base-resolution in `build_scope_methods_for_builder`](todo/performance.md#p11-uncached-base-resolution-in-build_scope_methods_for_builder)                        | Low-Medium  | Low         |
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium      |
