@@ -120,7 +120,8 @@ src/
 ├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
 ├── self_update.rs          # Binary self-update
 │
-│   # Blade & shared utilities
+│   # Framework resources & shared utilities
+├── framework.rs            # Symfony/Doctrine PHP, YAML, XML, XLIFF, and Twig reference index
 ├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
 └── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
 
@@ -143,6 +144,16 @@ diagnostics, hover, go-to-definition, and signature help, not just completion
 (see [Forward Walker](#forward-walker) and [Name Resolution](#name-resolution)
 below). Do not build a second type-resolution path: extend the engine here so
 every consumer benefits.
+
+### Framework Resource Index
+
+**Symfony and Doctrine resources use a lightweight parallel reference index.**
+`framework.rs` scans PHP configurators and attributes alongside YAML, XML,
+XLIFF, and Twig resources. It records classes, members, paths, named framework
+symbols, form and validation properties, Messenger relationships, and local
+`TreeBuilder` keys. Definition, references, rename, highlights, completion,
+diagnostics, and code lenses consume that shared index without parsing
+non-PHP resources as PHP.
 
 ### Framework Runtime Metadata
 
