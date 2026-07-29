@@ -109,15 +109,23 @@ impl Backend {
                 name,
                 declaration: false,
             } => self.framework_symfony_symbol_locations(kind, &name, true, false),
+            FrameworkReferenceKind::RouteParameter {
+                route_name,
+                name,
+                declaration: false,
+            } => self.framework_route_parameter_locations(&route_name, &name, true, false),
             FrameworkReferenceKind::Namespace { .. }
             | FrameworkReferenceKind::Path { .. }
             | FrameworkReferenceKind::SymfonySymbol {
+                declaration: true, ..
+            }
+            | FrameworkReferenceKind::RouteParameter {
                 declaration: true, ..
             } => Vec::new(),
         }
     }
 
-    fn resolve_framework_member_definition(
+    pub(crate) fn resolve_framework_member_definition(
         &self,
         uri: &str,
         content: &str,

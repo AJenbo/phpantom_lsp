@@ -357,6 +357,9 @@ impl Backend {
             FrameworkReferenceKind::SymfonySymbol { name, .. } => {
                 (reference.start, reference.end, name)
             }
+            FrameworkReferenceKind::RouteParameter { name, .. } => {
+                (reference.start, reference.end, name)
+            }
             FrameworkReferenceKind::Path { .. } => return None,
         };
 
@@ -403,6 +406,11 @@ impl Backend {
                 let locations =
                     self.find_framework_references_for_rename(uri, content, position, true)?;
                 build_simple_rename_edit(self, uri, content, &locations, new_name, true)
+            }
+            FrameworkReferenceKind::RouteParameter { .. } => {
+                let locations =
+                    self.find_framework_references_for_rename(uri, content, position, true)?;
+                build_simple_rename_edit(self, uri, content, &locations, new_name, false)
             }
             FrameworkReferenceKind::Path { .. } => None,
         }

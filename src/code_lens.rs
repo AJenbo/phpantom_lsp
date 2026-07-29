@@ -607,7 +607,9 @@ impl Backend {
             };
             if !matches!(
                 kind,
-                SymfonySymbolKind::Service | SymfonySymbolKind::Parameter
+                SymfonySymbolKind::Service
+                    | SymfonySymbolKind::Parameter
+                    | SymfonySymbolKind::Route
             ) {
                 continue;
             }
@@ -624,7 +626,7 @@ impl Backend {
                 self.push_locations_lens(uri, pos, title, usages, lenses, seen);
             }
 
-            if *kind != SymfonySymbolKind::Service {
+            if *kind == SymfonySymbolKind::Parameter {
                 continue;
             }
             let block_end = references
@@ -632,16 +634,48 @@ impl Backend {
                 .skip(idx + 1)
                 .find_map(|candidate| {
                     matches!(
-                        candidate.kind,
+                        &candidate.kind,
                         FrameworkReferenceKind::SymfonySymbol {
-                            kind: SymfonySymbolKind::Service,
+                            kind: candidate_kind,
                             declaration: true,
                             ..
-                        }
+                        } if candidate_kind == kind
                     )
                     .then_some(candidate.start)
                 })
                 .unwrap_or(content.len() as u32);
+
+            if *kind == SymfonySymbolKind::Route {
+                if let Some((class_fqn, member_name)) = references.iter().find_map(|candidate| {
+                    if candidate.start <= declaration.start || candidate.start >= block_end {
+                        return None;
+                    }
+                    let FrameworkReferenceKind::Method {
+                        class_fqn,
+                        member_name,
+                    } = &candidate.kind
+                    else {
+                        return None;
+                    };
+                    Some((class_fqn.as_str(), member_name.as_str()))
+                }) && let Some(location) =
+                    self.resolve_framework_member_definition(uri, content, class_fqn, member_name)
+                {
+                    self.push_locations_lens(
+                        uri,
+                        pos,
+                        format!(
+                            "Symfony controller: {}::{}",
+                            short_name(class_fqn),
+                            member_name
+                        ),
+                        vec![location],
+                        lenses,
+                        seen,
+                    );
+                }
+                continue;
+            }
 
             if let Some(class_fqn) = references.iter().find_map(|candidate| {
                 if candidate.start <= declaration.start || candidate.start >= block_end {

@@ -174,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Symfony and Doctrine
 
+- **Symfony route intelligence.** Route names and path parameters declared with attributes or in YAML, XML, and PHP now complete, navigate, find references, rename, highlight, and show declaration-side code lenses across controllers and Twig templates. Project-local missing route names produce diagnostics. Contributed by @sidux.
 - **Symfony service container intelligence.** Service IDs and parameters declared in YAML, XML, and PHP configuration now complete, navigate, find references, rename, highlight, and show declaration-side code lenses across configuration and PHP usage sites. Project-local missing IDs and parameters produce diagnostics. Contributed by @sidux.
 - **Symfony and Doctrine configuration navigation.** Service declarations, route controllers, and Doctrine mappings in YAML, XML, and Symfony PHP configurators now participate in go-to-definition, find references, rename, document highlights, and PHP code lenses. Namespace and resource-path refactors also update matching framework configuration. Contributed by @sidux.
 

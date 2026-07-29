@@ -211,6 +211,14 @@ impl Backend {
             FrameworkReferenceKind::SymfonySymbol { kind, name, .. } => {
                 self.framework_symfony_symbol_locations(kind, &name, include_declaration, true)
             }
+            FrameworkReferenceKind::RouteParameter {
+                route_name, name, ..
+            } => self.framework_route_parameter_locations(
+                &route_name,
+                &name,
+                include_declaration,
+                true,
+            ),
             FrameworkReferenceKind::Namespace { .. } | FrameworkReferenceKind::Path { .. } => {
                 Vec::new()
             }

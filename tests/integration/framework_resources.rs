@@ -868,3 +868,329 @@ return static function (ContainerConfigurator $container): void {
         "expected PHP service declaration class lens, got {titles:?}"
     );
 }
+
+#[tokio::test]
+async fn symfony_route_names_work_across_yaml_php_and_twig() {
+    let controller_php = "<?php\nnamespace App\\Controller;\nclass HomeController {\n    public function index(): void {}\n}\n";
+    let routes_yaml = r#"app_home:
+  path: /users/{userId}
+  controller: App\Controller\HomeController::index
+"#;
+    let consumer_php = r#"<?php
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class Consumer extends AbstractController
+{
+    public function run(): void
+    {
+        $this->redirectToRoute('app_home', ['userId' => 1]);
+        $this->generateUrl('app_home');
+        $this->redirectToRoute('app_missing');
+    }
+}
+"#;
+    let template = "<a href=\"{{ path('app_home', {'userId': 1}) }}\">Home</a>\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Controller/HomeController.php", controller_php),
+            ("src/Consumer.php", consumer_php),
+            ("config/routes.yaml", routes_yaml),
+            ("templates/home.html.twig", template),
+        ],
+    );
+    let controller_uri = uri_for(&dir, "src/Controller/HomeController.php");
+    let consumer_uri = uri_for(&dir, "src/Consumer.php");
+    let routes_uri = uri_for(&dir, "config/routes.yaml");
+    let template_uri = uri_for(&dir, "templates/home.html.twig");
+    open_doc(&backend, controller_uri, "php", controller_php).await;
+    open_doc(&backend, routes_uri.clone(), "yaml", routes_yaml).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+    open_doc(&backend, template_uri.clone(), "twig", template).await;
+
+    for (uri, content) in [(&consumer_uri, consumer_php), (&template_uri, template)] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, "app_home", 4),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .expect("route usage should resolve to YAML declaration");
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(location.uri, routes_uri);
+        assert_eq!(location.range.start.line, 0);
+    }
+
+    for (uri, content) in [(&consumer_uri, consumer_php), (&template_uri, template)] {
+        let response = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, "app_home", 5),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .expect("route completion should return candidates");
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        assert!(
+            items.iter().any(|item| item.label == "app_home"),
+            "expected app_home completion"
+        );
+    }
+
+    let lenses = backend
+        .handle_code_lens(routes_uri.as_str(), routes_yaml)
+        .unwrap_or_default();
+    let titles = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref().map(|command| command.title.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        titles.contains(&"Symfony route: 3 refs"),
+        "expected route reference lens, got {titles:?}"
+    );
+    assert!(
+        titles.contains(&"Symfony controller: HomeController::index"),
+        "expected route-to-controller lens, got {titles:?}"
+    );
+
+    for (uri, content) in [(&consumer_uri, consumer_php), (&template_uri, template)] {
+        let response = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, "userId", 4),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .expect("route parameter completion should return candidates");
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        assert!(
+            items.iter().any(|item| item.label == "userId"),
+            "expected userId route parameter completion"
+        );
+    }
+
+    let parameter_definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: consumer_uri.clone(),
+                },
+                position: position_in(consumer_php, "userId", 3),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("route parameter should resolve to its path placeholder");
+    let parameter_location = match parameter_definition {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+        GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+    };
+    assert_eq!(parameter_location.uri, routes_uri);
+    assert_eq!(parameter_location.range.start.line, 1);
+
+    let parameter_edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: routes_uri.clone(),
+                },
+                position: position_in(routes_yaml, "userId", 3),
+            },
+            new_name: "accountId".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("route parameter rename should update call sites");
+    assert!(
+        edit_texts_for_uri(&parameter_edit, &consumer_uri)
+            .iter()
+            .any(|text| text == "accountId")
+    );
+    assert!(
+        edit_texts_for_uri(&parameter_edit, &template_uri)
+            .iter()
+            .any(|text| text == "accountId")
+    );
+
+    let edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: routes_uri.clone(),
+                },
+                position: position_in(routes_yaml, "app_home", 4),
+            },
+            new_name: "app_dashboard".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("route rename should update PHP and Twig usages");
+    assert_eq!(
+        edit_texts_for_uri(&edit, &consumer_uri)
+            .iter()
+            .filter(|text| text.as_str() == "app_dashboard")
+            .count(),
+        2
+    );
+    assert!(
+        edit_texts_for_uri(&edit, &template_uri)
+            .iter()
+            .any(|text| text == "app_dashboard")
+    );
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(consumer_uri.as_str(), consumer_php, &mut diagnostics);
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code == "unknown_symfony_route"
+            ) && diagnostic.message.contains("app_missing")
+        }),
+        "expected unknown project-local route diagnostic"
+    );
+}
+
+#[tokio::test]
+async fn symfony_routes_are_declared_by_xml_php_and_attributes() {
+    let routes_xml = r#"<?xml version="1.0"?>
+<routes>
+  <route id="app_xml" path="/xml/{xmlId}"/>
+</routes>
+"#;
+    let routes_php = r#"<?php
+namespace Symfony\Component\Routing\Loader\Configurator;
+
+return static function (RoutingConfigurator $routes): void {
+    $routes->add('app_php', '/php/{phpId}');
+};
+"#;
+    let controller_php = r#"<?php
+namespace App\Controller;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+final class AttributeController
+{
+    #[Route('/attribute/{attributeId}', name: 'app_attribute')]
+    public function index(): void {}
+}
+"#;
+    let consumer_php = r#"<?php
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class Consumer extends AbstractController
+{
+    public function run(): void
+    {
+        $this->generateUrl('app_xml', ['xmlId' => 1]);
+        $this->generateUrl('app_php', ['phpId' => 1]);
+        $this->generateUrl('app_attribute', ['attributeId' => 1]);
+    }
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("config/routes.xml", routes_xml),
+            ("config/routes.php", routes_php),
+            ("src/Controller/AttributeController.php", controller_php),
+            ("src/Consumer.php", consumer_php),
+        ],
+    );
+    let xml_uri = uri_for(&dir, "config/routes.xml");
+    let php_routes_uri = uri_for(&dir, "config/routes.php");
+    let controller_uri = uri_for(&dir, "src/Controller/AttributeController.php");
+    let consumer_uri = uri_for(&dir, "src/Consumer.php");
+    open_doc(&backend, xml_uri.clone(), "xml", routes_xml).await;
+    open_doc(&backend, php_routes_uri.clone(), "php", routes_php).await;
+    open_doc(&backend, controller_uri.clone(), "php", controller_php).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+
+    for (name, expected_uri) in [
+        ("app_xml", &xml_uri),
+        ("app_php", &php_routes_uri),
+        ("app_attribute", &controller_uri),
+    ] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: consumer_uri.clone(),
+                    },
+                    position: position_in(consumer_php, name, 4),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .expect("route reference should resolve");
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(&location.uri, expected_uri, "wrong definition for {name}");
+    }
+
+    for (name, expected_uri) in [
+        ("xmlId", &xml_uri),
+        ("phpId", &php_routes_uri),
+        ("attributeId", &controller_uri),
+    ] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: consumer_uri.clone(),
+                    },
+                    position: position_in(consumer_php, name, 3),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .expect("route parameter reference should resolve");
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(
+            &location.uri, expected_uri,
+            "wrong parameter definition for {name}"
+        );
+    }
+}

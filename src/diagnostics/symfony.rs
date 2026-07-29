@@ -26,6 +26,10 @@ impl Backend {
             .framework_symfony_symbol_names(SymfonySymbolKind::Parameter)
             .into_iter()
             .collect::<HashSet<_>>();
+        let known_routes = self
+            .framework_symfony_symbol_names(SymfonySymbolKind::Route)
+            .into_iter()
+            .collect::<HashSet<_>>();
 
         for reference in references.iter() {
             let FrameworkReferenceKind::SymfonySymbol {
@@ -43,6 +47,8 @@ impl Backend {
                         || (name.starts_with("App\\") && self.find_or_load_class(name).is_some())
                 }
                 SymfonySymbolKind::Parameter => known_parameters.contains(name),
+                SymfonySymbolKind::Route => known_routes.contains(name),
+                SymfonySymbolKind::RouteParameter => true,
             };
             if known || !is_project_local_name(*kind, name) {
                 continue;
@@ -66,5 +72,7 @@ impl Backend {
 
 fn is_project_local_name(kind: SymfonySymbolKind, name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.starts_with("app.") || (kind == SymfonySymbolKind::Service && name.starts_with("App\\"))
+    lower.starts_with("app.")
+        || (kind == SymfonySymbolKind::Service && name.starts_with("App\\"))
+        || (kind == SymfonySymbolKind::Route && lower.starts_with("app_"))
 }

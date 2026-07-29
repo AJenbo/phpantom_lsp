@@ -19,6 +19,7 @@ struct SymfonyCompletionContext {
     prefix: String,
     content_start: usize,
     escape_backslashes: bool,
+    route_name: Option<String>,
 }
 
 impl Backend {
@@ -33,7 +34,11 @@ impl Backend {
         } else {
             detect_php_context(content, position)?
         };
-        let candidates = self.framework_symfony_symbol_names(context.kind);
+        let candidates = if context.kind == SymfonySymbolKind::RouteParameter {
+            self.framework_route_parameter_names(context.route_name.as_deref()?)
+        } else {
+            self.framework_symfony_symbol_names(context.kind)
+        };
         if candidates.is_empty() {
             return None;
         }
@@ -58,6 +63,8 @@ impl Backend {
                     kind: Some(match context.kind {
                         SymfonySymbolKind::Parameter => CompletionItemKind::PROPERTY,
                         SymfonySymbolKind::Service => CompletionItemKind::REFERENCE,
+                        SymfonySymbolKind::Route => CompletionItemKind::VALUE,
+                        SymfonySymbolKind::RouteParameter => CompletionItemKind::FIELD,
                     }),
                     detail: Some(format!("Symfony {}", context.kind.label())),
                     sort_text: Some(format!("{index:05}")),
@@ -87,6 +94,7 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
             prefix: raw_prefix[percent + 1..].to_string(),
             content_start: quote_start + percent + 2,
             escape_backslashes: false,
+            route_name: None,
         });
     }
 
@@ -97,6 +105,19 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
     let (call_name, argument_index, args_start) = php_call_context(content, quote_start)?;
     let call_name = call_name.to_ascii_lowercase();
     let named_argument = named_argument_before(content, args_start, quote_start);
+    if argument_index > 0
+        && is_route_reference_call(&call_name, content, quote_start)
+        && content[args_start..quote_start].contains('[')
+        && let Some(route_name) = first_string_argument(content, args_start, quote_start)
+    {
+        return Some(SymfonyCompletionContext {
+            kind: SymfonySymbolKind::RouteParameter,
+            prefix: raw_prefix.to_string(),
+            content_start: quote_start + 1,
+            escape_backslashes: false,
+            route_name: Some(route_name),
+        });
+    }
     let service_context = (matches!(call_name.as_str(), "service" | "decorate" | "target")
         && argument_index == 0)
         || (call_name == "alias" && argument_index == 1)
@@ -112,10 +133,17 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
     ) && argument_index == 0)
         || (call_name == "autowire"
             && named_argument.is_some_and(|name| name.eq_ignore_ascii_case("param")));
+    let route_context = (matches!(call_name.as_str(), "generateurl" | "redirecttoroute")
+        && argument_index == 0)
+        || (call_name == "generate"
+            && argument_index == 0
+            && looks_like_route_generator_call(content, quote_start));
     let kind = if service_context {
         SymfonySymbolKind::Service
     } else if parameter_context {
         SymfonySymbolKind::Parameter
+    } else if route_context {
+        SymfonySymbolKind::Route
     } else {
         return None;
     };
@@ -125,6 +153,7 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
         prefix: raw_prefix[service_prefix..].replace("\\\\", "\\"),
         content_start: quote_start + 1 + service_prefix,
         escape_backslashes: quote == b'\'' || quote == b'"',
+        route_name: None,
     })
 }
 
@@ -132,6 +161,33 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
     let cursor = position_to_offset(content, position) as usize;
     let line_start = content[..cursor].rfind('\n').map_or(0, |idx| idx + 1);
     let prefix = &content[line_start..cursor];
+
+    if let Some((quote_start, _)) = opening_quote(content, cursor)
+        && let Some((call_name, argument_index, args_start)) =
+            php_call_context(content, quote_start)
+        && matches!(call_name, "path" | "url")
+    {
+        if argument_index == 0 {
+            return Some(SymfonyCompletionContext {
+                kind: SymfonySymbolKind::Route,
+                prefix: content[quote_start + 1..cursor].to_string(),
+                content_start: quote_start + 1,
+                escape_backslashes: false,
+                route_name: None,
+            });
+        }
+        if content[args_start..quote_start].contains('{')
+            && let Some(route_name) = first_string_argument(content, args_start, quote_start)
+        {
+            return Some(SymfonyCompletionContext {
+                kind: SymfonySymbolKind::RouteParameter,
+                prefix: content[quote_start + 1..cursor].to_string(),
+                content_start: quote_start + 1,
+                escape_backslashes: false,
+                route_name: Some(route_name),
+            });
+        }
+    }
 
     if let Some(percent) = prefix.rfind('%')
         && !prefix[percent + 1..].contains('%')
@@ -141,6 +197,7 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
             prefix: prefix[percent + 1..].to_string(),
             content_start: line_start + percent + 1,
             escape_backslashes: false,
+            route_name: None,
         });
     }
 
@@ -153,6 +210,7 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
                 prefix: typed.to_string(),
                 content_start: line_start + at + 1 + adjust,
                 escape_backslashes: false,
+                route_name: None,
             });
         }
     }
@@ -170,6 +228,7 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
                 prefix: typed.to_string(),
                 content_start: line_start + typed_start,
                 escape_backslashes: false,
+                route_name: None,
             });
         }
     }
@@ -269,6 +328,44 @@ fn looks_like_container_call(content: &str, quote_start: usize) -> bool {
         ]
         .iter()
         .any(|typed| content.contains(typed))
+}
+
+fn looks_like_route_generator_call(content: &str, quote_start: usize) -> bool {
+    let start = quote_start.saturating_sub(192);
+    let prefix = &content[start..quote_start];
+    prefix.contains("$router->generate(")
+        || prefix.contains("$urlGenerator->generate(")
+        || content.contains("UrlGeneratorInterface")
+        || content.contains("RouterInterface")
+}
+
+fn is_route_reference_call(call_name: &str, content: &str, quote_start: usize) -> bool {
+    matches!(call_name, "generateurl" | "redirecttoroute")
+        || (call_name == "generate" && looks_like_route_generator_call(content, quote_start))
+}
+
+fn first_string_argument(content: &str, args_start: usize, before: usize) -> Option<String> {
+    let bytes = content.as_bytes();
+    let mut cursor = args_start;
+    while cursor < before && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    let quote @ (b'\'' | b'"') = bytes.get(cursor).copied()? else {
+        return None;
+    };
+    cursor += 1;
+    let start = cursor;
+    while cursor < before {
+        if bytes[cursor] == b'\\' {
+            cursor = (cursor + 2).min(before);
+            continue;
+        }
+        if bytes[cursor] == quote {
+            return Some(content[start..cursor].replace("\\\\", "\\"));
+        }
+        cursor += 1;
+    }
+    None
 }
 
 fn is_identifier_char(byte: u8) -> bool {

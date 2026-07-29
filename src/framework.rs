@@ -24,6 +24,8 @@ use crate::util::strip_fqn_prefix;
 pub(crate) enum SymfonySymbolKind {
     Service,
     Parameter,
+    Route,
+    RouteParameter,
 }
 
 impl SymfonySymbolKind {
@@ -31,6 +33,8 @@ impl SymfonySymbolKind {
         match self {
             Self::Service => "service",
             Self::Parameter => "parameter",
+            Self::Route => "route",
+            Self::RouteParameter => "route parameter",
         }
     }
 }
@@ -52,6 +56,12 @@ pub(crate) enum FrameworkReferenceKind {
     /// A named Symfony resource such as a service ID or parameter name.
     SymfonySymbol {
         kind: SymfonySymbolKind,
+        name: String,
+        declaration: bool,
+    },
+    /// A named placeholder scoped to one Symfony route.
+    RouteParameter {
+        route_name: String,
         name: String,
         declaration: bool,
     },
@@ -144,13 +154,16 @@ pub(crate) fn is_framework_resource_uri(uri: &str) -> bool {
         .next()
         .unwrap_or(uri);
     let path_lower = path.to_ascii_lowercase();
-    path_lower.ends_with(".yaml") || path_lower.ends_with(".yml") || path_lower.ends_with(".xml")
+    path_lower.ends_with(".yaml")
+        || path_lower.ends_with(".yml")
+        || path_lower.ends_with(".xml")
+        || path_lower.ends_with(".twig")
 }
 
 fn is_framework_resource_path(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()),
-        Some(ext) if matches!(ext.as_str(), "yaml" | "yml" | "xml")
+        Some(ext) if matches!(ext.as_str(), "yaml" | "yml" | "xml" | "twig")
     )
 }
 
@@ -196,7 +209,16 @@ pub(crate) fn should_index_framework_php_content(uri: &str, content: &str) -> bo
             || content.contains("hasParameter(")
             || content.contains("service(")
             || content.contains("param(")
-            || content.contains("$container->get("))
+            || content.contains("$container->get(")
+            || content.contains("generateUrl(")
+            || content.contains("redirectToRoute(")
+            || content.contains("UrlGeneratorInterface")
+            || content.contains("RouterInterface")
+            || content.contains("RoutingConfigurator")
+            || content.contains("Routing\\Attribute\\Route")
+            || content.contains("Routing\\Annotation\\Route")
+            || content.contains("#[Route(")
+            || content.contains("#[\\Route("))
 }
 
 fn is_skipped_resource_path(path: &Path) -> bool {
@@ -253,9 +275,7 @@ impl Backend {
                     );
                     keys.methods.insert(member_name.clone());
                 }
-                FrameworkReferenceKind::Namespace { .. }
-                | FrameworkReferenceKind::Path { .. }
-                | FrameworkReferenceKind::SymfonySymbol { .. } => {}
+                _ => {}
             }
         }
 
@@ -444,16 +464,18 @@ impl Backend {
             })?;
 
         refs.iter()
-            .find(|reference| {
+            .filter(|reference| {
                 offset >= reference.start
                     && (offset < reference.end
                         || (offset == reference.end && offset > reference.start))
             })
+            .min_by_key(|reference| reference.end.saturating_sub(reference.start))
             .cloned()
             .or_else(|| {
                 offset.checked_sub(1).and_then(|prev| {
                     refs.iter()
-                        .find(|reference| prev >= reference.start && prev < reference.end)
+                        .filter(|reference| prev >= reference.start && prev < reference.end)
+                        .min_by_key(|reference| reference.end.saturating_sub(reference.start))
                         .cloned()
                 })
             })
@@ -546,6 +568,70 @@ impl Backend {
                 };
                 if *kind != target_kind
                     || name != target_name
+                    || (*declaration && !include_declarations)
+                    || (!*declaration && !include_references)
+                {
+                    continue;
+                }
+                push_unique_location(
+                    &mut locations,
+                    &parsed_uri,
+                    offset_to_position(&content, reference.start as usize),
+                    offset_to_position(&content, reference.end as usize),
+                );
+            }
+        }
+        sort_locations(&mut locations);
+        locations
+    }
+
+    pub(crate) fn framework_route_parameter_names(&self, route_name: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        for refs in self.framework_references.read().values() {
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::RouteParameter {
+                    route_name: candidate_route,
+                    name,
+                    declaration: true,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                if candidate_route == route_name {
+                    push_unique_string(&mut names, name.clone());
+                }
+            }
+        }
+        names.sort_unstable();
+        names
+    }
+
+    pub(crate) fn framework_route_parameter_locations(
+        &self,
+        route_name: &str,
+        parameter_name: &str,
+        include_declarations: bool,
+        include_references: bool,
+    ) -> Vec<Location> {
+        let mut locations = Vec::new();
+        for (uri, refs) in self.framework_references.read().iter() {
+            let Ok(parsed_uri) = Url::parse(uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(uri) else {
+                continue;
+            };
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::RouteParameter {
+                    route_name: candidate_route,
+                    name,
+                    declaration,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                if candidate_route != route_name
+                    || name != parameter_name
                     || (*declaration && !include_declarations)
                     || (!*declaration && !include_references)
                 {
@@ -656,6 +742,18 @@ impl Backend {
                             ..
                         },
                     ) => lhs_kind == rhs_kind && lhs_name == rhs_name,
+                    (
+                        FrameworkReferenceKind::RouteParameter {
+                            route_name: lhs_route,
+                            name: lhs_name,
+                            ..
+                        },
+                        FrameworkReferenceKind::RouteParameter {
+                            route_name: rhs_route,
+                            name: rhs_name,
+                            ..
+                        },
+                    ) => lhs_route == rhs_route && lhs_name == rhs_name,
                     _ => false,
                 };
             if matched {
@@ -875,6 +973,7 @@ impl Backend {
                 });
             }
         }
+        scan_php_route_parameters(uri, content, &literals, &mut refs);
 
         if include_config_resources {
             let class_service_declarations: Vec<(u32, u32, String)> = refs
@@ -914,7 +1013,8 @@ fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Opti
         FrameworkReferenceKind::Namespace { prefix } => Some(prefix),
         FrameworkReferenceKind::Method { .. }
         | FrameworkReferenceKind::Path { .. }
-        | FrameworkReferenceKind::SymfonySymbol { .. } => None,
+        | FrameworkReferenceKind::SymfonySymbol { .. }
+        | FrameworkReferenceKind::RouteParameter { .. } => None,
     }
 }
 
@@ -1134,7 +1234,20 @@ fn scan_php_symfony_literal(
     ) && call.argument_index == 0)
         || (call_name == "autowire"
             && named_argument.is_some_and(|name| name.eq_ignore_ascii_case("param")));
-    let (kind, declaration) = if in_configurator
+    let route_reference = (matches!(call_name.as_str(), "generateurl" | "redirecttoroute")
+        && call.argument_index == 0)
+        || (call_name == "generate"
+            && call.argument_index == 0
+            && looks_like_route_generator_call(content, call));
+    let route_declaration = (in_configurator && call.argument_index == 0 && call_name == "add")
+        || ((call_name == "route"
+            || (call_name.ends_with("route")
+                && (content.contains("Routing\\Attribute\\Route")
+                    || content.contains("Routing\\Annotation\\Route"))))
+            && named_argument.is_some_and(|name| name.eq_ignore_ascii_case("name")));
+    let (kind, declaration) = if route_declaration {
+        (SymfonySymbolKind::Route, true)
+    } else if in_configurator
         && call.argument_index == 0
         && call_name == "set"
         && looks_like_parameter_set(content, call)
@@ -1151,6 +1264,8 @@ fn scan_php_symfony_literal(
         (SymfonySymbolKind::Service, false)
     } else if parameter_reference {
         (SymfonySymbolKind::Parameter, false)
+    } else if route_reference {
+        (SymfonySymbolKind::Route, false)
     } else {
         return;
     };
@@ -1277,12 +1392,101 @@ fn looks_like_parameter_set(content: &str, call: PhpCallContext<'_>) -> bool {
         || prefix.trim_end().ends_with("$params->")
 }
 
+fn looks_like_route_generator_call(content: &str, call: PhpCallContext<'_>) -> bool {
+    let name_offset = call.name.as_ptr() as usize - content.as_ptr() as usize;
+    let start = name_offset.saturating_sub(128);
+    let prefix = &content[start..name_offset];
+    prefix.trim_end().ends_with("$router->")
+        || prefix.trim_end().ends_with("$urlGenerator->")
+        || content.contains("UrlGeneratorInterface")
+        || content.contains("RouterInterface")
+}
+
 fn php_semantic_string(raw: &str) -> String {
     if raw.contains('\\') {
         raw.replace("\\\\", "\\")
     } else {
         raw.to_string()
     }
+}
+
+fn scan_php_route_parameters(
+    uri: &str,
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    refs: &mut Vec<FrameworkReference>,
+) {
+    for literal in literals {
+        let Some(call) = php_call_context(content, literal.quote_start) else {
+            continue;
+        };
+        let call_name = call.name.to_ascii_lowercase();
+        let named_argument =
+            php_named_argument_before(content, call.args_start, literal.quote_start);
+        let route_attribute = call_name == "route"
+            || (call_name.ends_with("route")
+                && (content.contains("Routing\\Attribute\\Route")
+                    || content.contains("Routing\\Annotation\\Route")));
+        let is_path = (call_name == "add" && call.argument_index == 1)
+            || (route_attribute
+                && (call.argument_index == 0
+                    || named_argument.is_some_and(|name| name.eq_ignore_ascii_case("path"))));
+
+        if is_path && literal.value.contains('{') {
+            let route_name = refs.iter().find_map(|reference| {
+                let FrameworkReferenceKind::SymfonySymbol {
+                    kind: SymfonySymbolKind::Route,
+                    name,
+                    declaration: true,
+                } = &reference.kind
+                else {
+                    return None;
+                };
+                let declaration_call = php_call_context(content, reference.start as usize)?;
+                (declaration_call.args_start == call.args_start).then(|| name.clone())
+            });
+            if let Some(route_name) = route_name {
+                scan_route_path_parameters(uri, &route_name, literal.value, literal.start, refs);
+            }
+        }
+
+        if call.argument_index == 0 || !php_literal_is_array_key(content, literal) {
+            continue;
+        }
+        let route_name = refs.iter().find_map(|reference| {
+            let FrameworkReferenceKind::SymfonySymbol {
+                kind: SymfonySymbolKind::Route,
+                name,
+                declaration: false,
+            } = &reference.kind
+            else {
+                return None;
+            };
+            let route_call = php_call_context(content, reference.start as usize)?;
+            (route_call.args_start == call.args_start).then(|| name.clone())
+        });
+        let parameter_name = php_semantic_string(literal.value.trim());
+        if let Some(route_name) = route_name
+            && valid_symfony_symbol_name(&parameter_name)
+        {
+            refs.push(FrameworkReference {
+                uri: uri.to_string(),
+                start: literal.start as u32,
+                end: literal.end as u32,
+                kind: FrameworkReferenceKind::RouteParameter {
+                    route_name: route_name.to_string(),
+                    name: parameter_name,
+                    declaration: false,
+                },
+            });
+        }
+    }
+}
+
+fn php_literal_is_array_key(content: &str, literal: &PhpStringLiteral<'_>) -> bool {
+    content
+        .get(literal.quote_end + 1..)
+        .is_some_and(|suffix| suffix.trim_start().starts_with("=>"))
 }
 
 fn scan_php_config_literal(
@@ -1485,6 +1689,17 @@ fn skip_ascii_whitespace_backwards(bytes: &[u8], cursor: &mut usize) {
 
 fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference> {
     let mut refs = Vec::new();
+    if uri
+        .split('?')
+        .next()
+        .is_some_and(|path| path.ends_with(".twig"))
+    {
+        scan_twig_route_references(uri, content, &mut refs);
+        refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
+        refs.dedup();
+        return refs;
+    }
+
     scan_class_like_tokens(uri, content, &mut refs);
     scan_path_scalars(uri, content, &mut refs);
     if uri
@@ -1493,16 +1708,323 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
         .is_some_and(|path| path.ends_with(".yaml") || path.ends_with(".yml"))
     {
         scan_symfony_yaml_container_symbols(uri, content, &mut refs);
+        scan_symfony_yaml_routes(uri, content, &mut refs);
     } else if uri
         .split('?')
         .next()
         .is_some_and(|path| path.ends_with(".xml"))
     {
         scan_symfony_xml_container_symbols(uri, content, &mut refs);
+        scan_symfony_xml_routes(uri, content, &mut refs);
     }
     refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
     refs.dedup();
     refs
+}
+
+fn scan_twig_route_references(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    scan_string_call_symbols(
+        uri,
+        content,
+        &["path", "url"],
+        SymfonySymbolKind::Route,
+        false,
+        refs,
+    );
+    scan_twig_route_parameters(uri, content, refs);
+}
+
+fn scan_twig_route_parameters(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    let route_refs = refs
+        .iter()
+        .filter_map(|reference| {
+            let FrameworkReferenceKind::SymfonySymbol {
+                kind: SymfonySymbolKind::Route,
+                name,
+                declaration: false,
+            } = &reference.kind
+            else {
+                return None;
+            };
+            Some((name.clone(), reference.end as usize))
+        })
+        .collect::<Vec<_>>();
+    let bytes = content.as_bytes();
+    for (route_name, route_end) in route_refs {
+        let Some(call_end_rel) = content[route_end..].find(')') else {
+            continue;
+        };
+        let call_end = route_end + call_end_rel;
+        let Some(object_start_rel) = content[route_end..call_end].find('{') else {
+            continue;
+        };
+        let mut cursor = route_end + object_start_rel + 1;
+        while cursor < call_end {
+            while bytes
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == b',')
+            {
+                cursor += 1;
+            }
+            if cursor >= call_end || bytes[cursor] == b'}' {
+                break;
+            }
+
+            let (start, end) = if matches!(bytes[cursor], b'\'' | b'"') {
+                let quote = bytes[cursor];
+                let start = cursor + 1;
+                let mut end = start;
+                while end < call_end && bytes[end] != quote {
+                    end += 1;
+                }
+                cursor = end.saturating_add(1);
+                (start, end)
+            } else {
+                let start = cursor;
+                while cursor < call_end && is_php_identifier_char(bytes[cursor]) {
+                    cursor += 1;
+                }
+                (start, cursor)
+            };
+            while bytes
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_whitespace())
+            {
+                cursor += 1;
+            }
+            if bytes.get(cursor) != Some(&b':') {
+                cursor += 1;
+                continue;
+            }
+            let name = &content[start..end];
+            if !name.is_empty() {
+                refs.push(FrameworkReference {
+                    uri: uri.to_string(),
+                    start: start as u32,
+                    end: end as u32,
+                    kind: FrameworkReferenceKind::RouteParameter {
+                        route_name: route_name.clone(),
+                        name: name.to_string(),
+                        declaration: false,
+                    },
+                });
+            }
+            cursor += 1;
+            while cursor < call_end && !matches!(bytes[cursor], b',' | b'}') {
+                cursor += 1;
+            }
+        }
+    }
+}
+
+fn scan_string_call_symbols(
+    uri: &str,
+    content: &str,
+    call_names: &[&str],
+    kind: SymfonySymbolKind,
+    declaration: bool,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let bytes = content.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let Some(name) = call_names.iter().find(|name| {
+            let name = name.as_bytes();
+            bytes.get(cursor..cursor + name.len()) == Some(name)
+                && (cursor == 0 || !is_php_identifier_char(bytes[cursor - 1]))
+                && bytes
+                    .get(cursor + name.len())
+                    .is_none_or(|byte| !is_php_identifier_char(*byte))
+        }) else {
+            cursor += 1;
+            continue;
+        };
+        let mut open = cursor + name.len();
+        skip_ascii_whitespace(bytes, &mut open);
+        if bytes.get(open) != Some(&b'(') {
+            cursor += name.len();
+            continue;
+        }
+        open += 1;
+        skip_ascii_whitespace(bytes, &mut open);
+        let Some(quote @ (b'\'' | b'"')) = bytes.get(open).copied() else {
+            cursor += name.len();
+            continue;
+        };
+        let start = open + 1;
+        let mut end = start;
+        while end < bytes.len() {
+            if bytes[end] == b'\\' {
+                end = (end + 2).min(bytes.len());
+                continue;
+            }
+            if bytes[end] == quote {
+                break;
+            }
+            end += 1;
+        }
+        let value = &content[start..end];
+        if valid_symfony_symbol_name(value) {
+            push_symfony_symbol(refs, uri, kind, value.to_string(), start, end, declaration);
+        }
+        cursor = end.saturating_add(1);
+    }
+}
+
+fn scan_symfony_yaml_routes(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    if !uri.to_ascii_lowercase().contains("route") && !content.contains("controller:") {
+        return;
+    }
+    let lines = line_offsets(content);
+    for (idx, (line_start, line)) in lines.iter().enumerate() {
+        let semantic = yaml_content_before_comment(line);
+        let Some((raw_key, key_start, key_end, value_start)) =
+            yaml_mapping_entry(semantic, *line_start)
+        else {
+            continue;
+        };
+        let indent = leading_spaces(semantic);
+        let (key, quote_adjust) = strip_yaml_quotes(raw_key);
+        if key.starts_with('_')
+            || matches!(
+                key,
+                "path"
+                    | "controller"
+                    | "methods"
+                    | "defaults"
+                    | "requirements"
+                    | "options"
+                    | "host"
+                    | "schemes"
+                    | "condition"
+                    | "resource"
+                    | "type"
+                    | "prefix"
+                    | "name_prefix"
+            )
+            || !valid_symfony_symbol_name(key)
+        {
+            continue;
+        }
+
+        let inline = semantic
+            .get(value_start..)
+            .is_some_and(|value| value.contains("path:") || value.contains("\"path\""));
+        let mut has_path = inline;
+        let mut route_path = None;
+        if !has_path {
+            for (child_start, child_line) in lines.iter().skip(idx + 1) {
+                let child_semantic = yaml_content_before_comment(child_line);
+                let child_trimmed = child_semantic.trim();
+                if child_trimmed.is_empty() {
+                    continue;
+                }
+                if leading_spaces(child_semantic) <= indent {
+                    break;
+                }
+                let child_key = child_trimmed
+                    .split_once(':')
+                    .map(|(candidate, _)| candidate.trim().trim_matches(['\'', '"']));
+                if child_key == Some("path") {
+                    has_path = true;
+                    if let Some(colon) = child_semantic.find(':') {
+                        let raw = child_semantic[colon + 1..].trim_start();
+                        let adjustment = child_semantic[colon + 1..].len() - raw.len();
+                        route_path = scalar_value(raw, child_start + colon + 1 + adjustment)
+                            .map(|(value, start, _)| (value.to_string(), start));
+                    }
+                    break;
+                }
+            }
+        }
+        if has_path {
+            push_symfony_symbol(
+                refs,
+                uri,
+                SymfonySymbolKind::Route,
+                key.to_string(),
+                key_start + quote_adjust.0,
+                key_end.saturating_sub(quote_adjust.1),
+                true,
+            );
+            if let Some((path, path_start)) = route_path {
+                scan_route_path_parameters(uri, key, &path, path_start, refs);
+            }
+        }
+    }
+}
+
+fn scan_symfony_xml_routes(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    if !content.contains("<route") {
+        return;
+    }
+    let lower = content.to_ascii_lowercase();
+    let mut search = 0usize;
+    while let Some(rel_start) = lower[search..].find("<route") {
+        let tag_start = search + rel_start;
+        let Some(rel_end) = content[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + rel_end + 1;
+        let tag = &content[tag_start..tag_end];
+        if let Some((route_name, start, end)) = xml_attr_value(tag, tag_start, &["id", "name"])
+            && valid_symfony_symbol_name(&route_name)
+        {
+            push_symfony_symbol(
+                refs,
+                uri,
+                SymfonySymbolKind::Route,
+                route_name.clone(),
+                start,
+                end,
+                true,
+            );
+            if let Some((path, path_start, _)) = xml_attr_value(tag, tag_start, &["path"]) {
+                scan_route_path_parameters(uri, &route_name, &path, path_start, refs);
+            }
+        }
+        search = tag_end;
+    }
+}
+
+fn scan_route_path_parameters(
+    uri: &str,
+    route_name: &str,
+    path: &str,
+    path_start: usize,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let bytes = path.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let Some(open_rel) = path[cursor..].find('{') else {
+            break;
+        };
+        let open = cursor + open_rel;
+        let Some(close_rel) = path[open + 1..].find('}') else {
+            break;
+        };
+        let close = open + 1 + close_rel;
+        let inner = &path[open + 1..close];
+        let name_len = inner
+            .bytes()
+            .take_while(|byte| *byte == b'_' || byte.is_ascii_alphanumeric())
+            .count();
+        let name = &inner[..name_len];
+        if !name.is_empty() && !name.starts_with(|character: char| character.is_ascii_digit()) {
+            refs.push(FrameworkReference {
+                uri: uri.to_string(),
+                start: (path_start + open + 1) as u32,
+                end: (path_start + open + 1 + name_len) as u32,
+                kind: FrameworkReferenceKind::RouteParameter {
+                    route_name: route_name.to_string(),
+                    name: name.to_string(),
+                    declaration: true,
+                },
+            });
+        }
+        cursor = close + 1;
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
