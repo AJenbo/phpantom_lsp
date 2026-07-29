@@ -74,6 +74,18 @@ impl PhpType {
     pub fn kind(&self) -> &TypeKind {
         &self.0
     }
+
+    /// Address of the interned node, distinct for every distinct type as
+    /// long as a handle to it is alive.
+    ///
+    /// Only meaningful as a hash of the identity `PartialEq` already
+    /// compares; a cache keyed on it must hold the handle too, since
+    /// dropping the last one frees the node and lets a later type reuse
+    /// the address.
+    #[inline]
+    pub(crate) fn identity(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
 }
 
 impl Deref for PhpType {

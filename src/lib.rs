@@ -222,6 +222,7 @@ mod backend;
 pub mod blade;
 pub(crate) mod call_args;
 pub mod ci_map;
+pub(crate) mod class_loader_memo;
 pub(crate) mod class_lookup;
 pub mod classmap_scanner;
 mod code_actions;
@@ -1450,6 +1451,8 @@ impl Backend {
                 fci.remove(fqn);
             }
         }
+        // These FQNs no longer resolve; retire the memoised lookups.
+        self.symbols.note_class_lookup_change();
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
 

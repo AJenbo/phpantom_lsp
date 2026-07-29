@@ -142,11 +142,13 @@ impl Backend {
         }
 
         // Clear all cached class info since vendor classes may have
-        // changed versions.
+        // changed versions.  The negative-cache clear comes last of the
+        // three: it also retires the memoised class lookups, which must
+        // happen after the index it memoises has been emptied.
         self.symbols.fqn_class_index.write().clear();
         self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
-        self.symbols.class_not_found_cache.write().clear();
+        self.clear_class_not_found_cache();
         self.resolved_class_cache.write().clear();
         self.member_completion_cache.lock().clear();
     }
@@ -358,7 +360,7 @@ impl Backend {
         // looked up (and cached as "not found") before the phar was
         // scanned can now be resolved.
         if class_count > 0 {
-            self.symbols.class_not_found_cache.write().clear();
+            self.clear_class_not_found_cache();
         }
 
         tracing::info!(

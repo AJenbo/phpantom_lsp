@@ -513,7 +513,7 @@ impl LanguageServer for Backend {
         // clear, those stale entries cause false-positive "Class not found"
         // diagnostics even though hover and go-to-definition (which run
         // later) resolve the same symbols correctly.
-        self.symbols.class_not_found_cache.write().clear();
+        self.clear_class_not_found_cache();
 
         // Clear the resolved-class cache for the same reason.  A request
         // that arrives while indexing is still in progress (the editor

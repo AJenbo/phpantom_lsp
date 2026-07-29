@@ -39,6 +39,7 @@ use std::path::Path;
 use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
+use crate::class_loader_memo;
 use crate::composer;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
 use crate::types::{ClassInfo, FileContext, FunctionInfo, PhpVersion};
@@ -191,8 +192,26 @@ impl Backend {
     /// avoiding the redundant `PhpType::parse()` call that the string
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
-        let base = ty.base_name()?;
-        let mut loaded = self.find_or_load_class_inner(base)?;
+        // The name search is memoised per thread on the interned type
+        // handle: the diagnostic pass asks for the same types millions of
+        // times, and every miss costs two case-insensitive hash lookups
+        // behind locks the whole worker pool shares.  Read the generation
+        // first so that a change landing mid-search retires the answer.
+        let generation = self.symbols.class_lookup_generation();
+        let mut loaded = match class_loader_memo::probe(self.symbols.id(), generation, ty) {
+            Some(memoised) => memoised?,
+            None => {
+                let found = ty
+                    .base_name()
+                    .and_then(|base| self.find_or_load_class_inner(base));
+                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
+                found?
+            }
+        };
+        // The refinements below stay outside the memo: each depends on an
+        // index of its own (the configured auth model, registered macros,
+        // many-to-many targets) that keeps changing as files are indexed.
+        //
         // Refine the auth entry points' `user()` return type to the configured
         // model.  Gated on the cheap stored short name so the hot loader path
         // is untouched for every other class.
@@ -437,6 +456,19 @@ impl Backend {
             .write()
             .insert(class_name);
         None
+    }
+
+    /// Forget which class names failed to resolve, so names looked up
+    /// before an index was populated are searched again.
+    ///
+    /// Callers reach for this after growing `fqn_uri_index` (a classmap
+    /// scan, a phar scan) or when files changed on disk. It also retires
+    /// the memoised lookups in
+    /// [`class_loader_memo`](crate::class_loader_memo), which would
+    /// otherwise keep answering from the negatives just cleared.
+    pub(crate) fn clear_class_not_found_cache(&self) {
+        self.symbols.class_not_found_cache.write().clear();
+        self.symbols.note_class_lookup_change();
     }
 
     /// Try to load a class from the embedded stub index only.
@@ -752,7 +784,6 @@ impl Backend {
                 fqn_idx.insert(fqn, cls);
             }
         }
-
         // On re-parse, evict the method_store and gti_index entries for
         // the classes this file previously defined before re-populating.
         // Evicting the *old* FQN set (rather than the new one) removes
@@ -781,6 +812,13 @@ impl Backend {
                 }
             }
         }
+
+        // Retire memoised lookups now that the index has these classes, has
+        // dropped any the file no longer declares, and has un-cached their
+        // negatives.  It has to come after all three, or a lookup that read
+        // the new generation could still see a negative about to be cleared
+        // and memoise it as fresh.
+        self.symbols.note_class_lookup_change();
 
         // Selectively invalidate the resolved-class cache for the
         // classes defined in this file.

@@ -895,7 +895,7 @@ current single populate thread.
 
 Measured on a 32-core machine against large Laravel projects (release
 build): the `analyze` Phase 2 diagnostic pass spawns one worker per
-core with atomic work-stealing but does not keep them busy. Two
+core with atomic work-stealing but does not keep them busy. Three
 offenders are fixed. The original one was every worker deep-cloning
 the embedded stub class/function/constant indexes twice per file via
 `clone_for_diagnostic_worker`; the indexes are Arc-shared now. The
@@ -909,45 +909,126 @@ gitignore-aware walk. They are guarded by
 Laravel project from 11.6 to 22.6 of 32 cores (1.91 s → 1.31 s) and
 whole-run wall clock down ~15%.
 
+The third was the name → class loader itself. `find_or_load_class_typed`
+was called 3.68 M times in a 1.2 s Phase 2 over a few thousand distinct
+types, and every call hashed the name case-insensitively for a read
+lock on `class_not_found_cache` and another on `fqn_class_index`. That
+cluster (`find_or_load_class_typed`, `find_class_in_uri_classes_index`,
+`CiMap::get`, `sip::Hasher::write`, `RawRwLock::lock_shared_slow`,
+kernel `osq_lock`) was ~22% of Phase 2 samples, and both lock symbols
+have since dropped out of the profile entirely. `class_loader_memo`
+memoises the loader per worker on the interned `PhpType` handle, keyed
+by `SymbolIndex::id` and stamped with `class_lookup_generation` so an
+answer is never staler than the two caches it derives from. Phase 2 fell
+~25-32% (1.23 s → 0.93 s and 0.72 s → 0.49 s on the two largest Laravel
+projects benchmarked) at ~26.8 → ~28.6 of 32 cores, with whole-run wall
+clock down 8-12% and user CPU down 17-34% across three large Laravel
+projects. Every smaller project benchmarked improved as well, RSS did
+not move, and diagnostic output was byte-identical on all ten.
+
 Sampling `/proc/<pid>/task/*/stat` is the fastest way to see the
 remaining ceiling: workers in `S` rather than `R` are blocked, not
-computing. After the stampede fix the remaining gap is:
+computing. What is left, re-profiled after the memo:
 
-- ~18% of worker on-CPU time is malloc/free/memmove, diffuse:
-  `PhpType`, `MethodInfo`, and `ParameterInfo` clones throughout the
-  type engine, plus allocator arena contention when 32 workers
-  allocate heavily.
-- The `PhpType` interner (`php_type::intern`) is hit ~13 M times in a
-  1.3 s Phase 2, roughly a quarter of which fall through the shard
-  read lock to the write path. Its 64 shards are the largest single
-  source of measured lock-wait time left (~5 s of thread-time across
-  all workers), and `sched_yield` volume shows the workers spinning
-  before parking.
+- Type strings are still parsed during the diagnostic pass rather than
+  at index time: `TypeTokenStream::fill_buffer_slow`, `PhpType::parse`,
+  `LocalArena::alloc_slice_copy` and `parse_primary_type` together are
+  ~6.5% of Phase 2 samples. This is P14's territory.
+- malloc/free/memmove remains diffuse. `is_scalar_name` and
+  `is_keyword_type` (~2.3% between them) allocate a lowercase `String`
+  per call and are reached from `base_name`, the subtype checks and the
+  narrowing paths; the ~150 other `to_ascii_lowercase()` calls in
+  `php_type/` do the same. A stack buffer plus a length pre-filter
+  would make them allocation-free, but see the reverted attempt below
+  before assuming that wins.
+- The `PhpType` interner (`php_type::intern` + `intern::lookup`) is
+  ~4.6% of Phase 2 samples and its 64 shards are now the largest
+  remaining lock, though the memo removed enough traffic that
+  `lock_shared_slow` no longer registers at all. An earlier count put
+  the interner at ~13 M hits per pass with roughly a quarter falling
+  through the shard read lock to the write path; that has not been
+  re-counted since. A per-thread direct-mapped memo in front of the
+  shard read (the same shape as `class_loader_memo`) is the obvious
+  next attempt.
 - `ensure_workspace_indexed_with_progress` still re-walks the whole
   workspace on every call, so the four surviving string-key
   enumerations do four full walks per diagnostic pass (down from ~44).
   The walk is deliberate — it is how PHP files created outside the
   editor get discovered — so removing it needs a change to that
   contract, not just another cache.
-- Projects that keep substantial code in `vendor/` (e.g. models shipped
-  in a shared vendor package) pay extra: eager population only walks
-  classes from the indexed user files, so every vendor class is parsed
-  lazily on first touch during the diagnostic pass, serialising workers
-  on the load path early in the run. Measured on a large Laravel
-  project (release build, 32 threads): eager population covers only
-  ~1,300 user classes, and the diagnostic pass then resolves ~2,100
-  further classes lazily, with cycle-break re-merges that eager
-  dependency-first ordering would have avoided (eager population
-  itself hit only 3).
+- `class_loader_memo`'s own hit rate is bounded by how often
+  `note_class_lookup_change` fires: 1,169 times in Phase 2, once per
+  lazily parsed vendor file, each retiring every worker's table. A
+  build with invalidation removed (unsound, for sizing only) reached
+  0.80 s against the 0.93 s shipped, so ~14% of the memo's prize is
+  still on the table. Recovering it means either loading fewer vendor
+  classes lazily (the reverted experiment below, whose calculus this
+  changes) or splitting the generation so an additive insert only
+  retires negative answers. The latter is not sound as stated: a
+  positive answer reached through PSR-4 or a stub is matched by short
+  name, so it is not always backed by an `fqn_class_index` entry under
+  the name that was looked up, and a later first-time insert of that
+  exact name can change it.
 
-Likely next steps, in rough value order: reduce clone traffic in the
-hot type-engine paths (share via `Arc`/`Cow` instead of cloning
-`PhpType`/member vectors), cut interner traffic or widen its sharding,
-include depended-upon vendor classes in eager population, and only
-then consider allocator-level fixes. The LSP workspace diagnostics
-pass uses the same collectors and has the same ceiling. Re-measure
-with `perf` (frame-pointer build) or the CPU-sampling loop in the
-Appendix after any change.
+The LSP workspace diagnostics pass uses the same collectors and has the
+same ceiling. Re-measure with `perf` (frame-pointer build) or the
+CPU-sampling loop in the Appendix after any change.
+
+**Tried and reverted (vendor classes in eager population):** an
+earlier revision of this item claimed that projects keeping
+substantial code in `vendor/` pay extra because eager population only
+walks the indexed user files, leaving every vendor class to be parsed
+and resolved lazily mid-diagnostic — serialising workers on the load
+path, with cycle-break re-merges that dependency-first ordering would
+have avoided. Seeding eager population with vendor classes was
+implemented in two escalating variants and benchmarked (10-run,
+order-swapped wall/user-CPU averages against the two largest Laravel
+projects benchmarked): (1) expanding the toposort input with the
+transitive inheritance closure of the user classes (parents, traits,
+interfaces, mixins, generic arguments, loaded via
+`find_or_load_class`), and (2) additionally seeding every `use`-import
+target found in `fqn_uri_index`, with parallel frontier loading and
+Kahn-levelled parallel resolution to keep Phase 1.5 off the critical
+path. Neither moved wall clock on any project. Variant 1 cut lazy
+Phase 2 resolutions only ~2% (950 → 931) because vendor ancestors
+were already being resolved as nested resolutions during eager
+population; variant 2 cut them to a third (931 → 276) but cost ~3%
+more user CPU (duplicated nested provider resolutions across level
+workers) and ~10 MB RSS for classes the pass never needed resolved.
+The predicted cycle-break re-merges also failed to reproduce: Phase 2
+hits 0 on one of them and 18 on the other, and all
+18 are genuine dependency cycles (`Schedule` ↔
+`PendingEventAttributes`, Spatie `Role` ↔ `Permission`) that
+dependency-first ordering cannot avoid — the toposort has to break
+them somewhere too. Conclusion: after the stampede fix, lazy vendor
+class loading no longer serialises the diagnostic pass measurably;
+the remaining ceiling is the clone/interner traffic above. Diagnostic
+output was byte-identical in every configuration.
+
+**Tried and reverted:** a single `perf` snapshot attributed ~4% of
+Phase 2 time to `core::hash::sip::Hasher::write`, called from
+`CiMap`/`CiSet` (`fqn_class_index`, `class_not_found_cache`) inside
+`find_or_load_class` — the single hottest function in the profile.
+Two independent fixes were tried: swapping `CiMap`/`CiSet`'s `HashMap`
+from `std`'s default SipHash to a hand-rolled FxHash-style hasher, and
+avoiding `fold()`'s per-lookup heap allocation with a stack buffer.
+Both looked sound in isolation and passed all tests, but 10-run
+wall-clock/user-CPU averages against a large Laravel project (order-swapped
+to rule out warm-cache bias) showed a small, consistent *regression*
+(~2% more user CPU) for the hasher swap alone, the allocation-avoidance
+alone, and the two combined. Likely cause: `mimalloc` already makes
+these transient allocations cheap, and the hand-rolled hasher's
+sequential dependency chain (`rotate_left` → `xor` → `wrapping_mul` per
+word) didn't beat `std`'s SipHash13 for these short keys on this
+hardware. Lesson for next attempt: a single `perf --stdio` percentage
+is not sufficient evidence — confirm with repeated, order-controlled
+wall-clock measurement before committing a "hot function" fix; sampling
+noise and inlining attribution can point at the wrong function. The
+re-measurement did surface a more promising lead: `RawRwLock::lock_shared_slow`
+rose from 3.78% to 4.36% of samples once the hashing/allocation cost
+was removed, suggesting the read lock on `fqn_class_index` (contended
+by 32 workers doing `find_or_load_class` concurrently) is closer to the
+real ceiling than the hashing was.
 
 ---
 

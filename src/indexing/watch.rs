@@ -115,7 +115,7 @@ impl Backend {
             // A class that was previously "not found" may now exist, and
             // resolved class info / member completions may be stale for a
             // class whose file changed.
-            self.symbols.class_not_found_cache.write().clear();
+            self.clear_class_not_found_cache();
             self.resolved_class_cache.write().clear();
             self.auth_user_type_cache.write().clear();
             *self.laravel_aliases.write() = None;

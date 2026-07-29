@@ -758,7 +758,6 @@ impl Backend {
                 }
             }
         }
-
         {
             let nf_cache = self.symbols.class_not_found_cache.read();
             if !nf_cache.is_empty() {
@@ -769,6 +768,13 @@ impl Backend {
                 }
             }
         }
+
+        // Retire memoised lookups: this parse repointed every FQN the file
+        // declares, dropped the ones it no longer does, and un-cached their
+        // negatives.  It has to come after all three, or a lookup that read
+        // the new generation could still see a negative about to be cleared
+        // and memoise it as fresh.
+        self.symbols.note_class_lookup_change();
 
         // Only touch a file's function entries when this parse contributes
         // functions or the previous parse did (so removals can be evicted).
