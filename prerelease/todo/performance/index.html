@@ -1505,10 +1505,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p44-consume-the-phpdoc-cst-directly-instead-of-re-parsing-tag-text" class="md-nav__link">
+  <a href="#p45-emit-docblock-symbol-spans-from-the-phpdoc-cst" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P44. Consume the PHPDoc CST directly instead of re-parsing tag text
+        P45. Emit docblock symbol spans from the PHPDoc CST
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code>
       </span>
     </span>
   </a>
@@ -2240,10 +2251,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p44-consume-the-phpdoc-cst-directly-instead-of-re-parsing-tag-text" class="md-nav__link">
+  <a href="#p45-emit-docblock-symbol-spans-from-the-phpdoc-cst" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P44. Consume the PHPDoc CST directly instead of re-parsing tag text
+        P45. Emit docblock symbol spans from the PHPDoc CST
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code>
       </span>
     </span>
   </a>
@@ -2953,34 +2975,51 @@ PclZip return-type-inference hang, but was reverted at the time
 because it did not address that hang's dominant cost (uncached
 body-return inference, since fixed by memoization).</p>
 <hr />
-<h2 id="p44-consume-the-phpdoc-cst-directly-instead-of-re-parsing-tag-text">P44. Consume the PHPDoc CST directly instead of re-parsing tag text<a class="headerlink" href="#p44-consume-the-phpdoc-cst-directly-instead-of-re-parsing-tag-text" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: High</strong></p>
-<p><code>src/docblock/parser.rs</code> adapts <code>mago-phpdoc-syntax</code> by reducing each tag
-to its <code>TagKind</code>, its vendor prefix, and the <em>raw source text</em> of its
-value. Everything downstream then re-parses that text: <code>tags.rs</code> splits
-the type token off the front with <code>split_type_token</code>, <code>templates.rs</code>
-pulls the name and <code>of</code> bound out of a <code>@template</code> value by whitespace,
-<code>virtual_members.rs</code> hand-parses <code>@method</code> signatures (parameter list,
-defaults, inline <code>&lt;T of Bound&gt;</code> templates) and <code>@property</code> declarations,
-and <code>symbol_map/docblock.rs</code> re-scans the same text a third time to emit
-navigable spans.</p>
-<p>The parser already produced all of that structurally on the way in:
-<code>ParamTagValue</code> carries a <code>&amp;Type</code> plus the <code>Variable</code>, <code>TemplateTagValue</code>
-carries the name, variance, bound and default, <code>MethodTagValue</code> carries
-the return type, visibility, name, template list and a full
-<code>MethodParameterList</code> with per-parameter types, defaults and variadic
-flags, and <code>AssertTagValue</code> carries the negation/exactness flags, the
-pattern and the subject. Reading those fields instead of re-deriving them
-from a string would delete a large amount of hand-rolled scanning, remove
-one full parse per tag from the hot path, and fix the class of bug where
-our splitter and the real grammar disagree.</p>
-<p>The reason it was not done as part of the migration is the shape of the
-boundary, not the parsing: <code>DocblockInfo</code> is owned (it must outlive the
-per-call arena), so exposing the CST means either interning the pieces we
-need into owned structures per tag kind, or keeping the arena alive for as
-long as the extracted data. The first is mechanical but touches every
-extractor in <code>docblock/</code>; the second changes the ownership model of every
-caller. Sized for several sprint items.</p>
+<h2 id="p45-emit-docblock-symbol-spans-from-the-phpdoc-cst">P45. Emit docblock symbol spans from the PHPDoc CST<a class="headerlink" href="#p45-emit-docblock-symbol-spans-from-the-phpdoc-cst" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Effort: Medium-High</strong></p>
+<p><code>src/symbol_map/docblock.rs</code> is the last consumer that re-derives tag
+structure from raw text. The extractors in <code>docblock/</code> now read the
+parsed grammar (see the <code>TagValueInfo</code> snapshot on <code>TagInfo</code>), but the
+symbol map needs a <em>byte offset in the file</em> for every identifier inside
+a type, not just the type's text, so it still finds the type itself by
+hand: <code>emit_type_first_tag</code> strips <code>@assert</code> modifiers and calls
+<code>split_type_token</code>, <code>extract_method_tag_symbols</code> re-implements the
+<code>[static] Return name(params)</code> split with its own paren-depth scan and a
+heuristic for telling a return type from a method name,
+<code>extract_template_tag_symbols</code> re-finds the <code>of</code> bound, and
+<code>extract_property_tag_symbols</code> re-splits type from variable.</p>
+<p>The CST has a span on every type, identifier and variable, which would
+replace all of that guessing. The obstacle is multi-line types:
+<code>join_multiline_type</code> builds an offset map so that a position inside the
+joined type string can be mapped back to the file, and the folded text
+kept in <code>TagValueInfo</code> cannot be mapped that way. Recording each type's
+span alongside its text is enough to anchor the <em>start</em> of a type
+precisely; the per-identifier offsets inside a folded multi-line type
+still need the offset map, or a walk over the CST type tree in place of
+<code>emit_type_spans</code>.</p>
+<p>Walking the CST directly is the endgame: it deletes <code>join_multiline_type</code>,
+<code>emit_type_spans_from_ast</code> and the offset-map machinery outright, since
+every identifier already carries its own span. That is the larger of the
+two options and is what makes this Medium-High rather than Medium.</p>
+<hr />
+<h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
+<p>The PHPDoc grammar reads <code>static</code> followed by <code>(</code> as a method literally
+named <code>static</code> whose parameter list follows, because
+<code>@method static(int $x)</code> is how such a method would be written and the
+two are indistinguishable once whitespace is discarded. A parenthesised
+return type after the <code>static</code> modifier therefore fails to parse and the
+whole tag is dropped:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/**</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x"> * @method static (string|int)[] getArray()</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x"> * @method static (callable(): string) getCallable()</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x"> */</span>
+</code></pre></div>
+<p>Both forms appear in Psalm's own magic-method test suite.
+<code>recover_static_method_tag</code> in <code>src/docblock/virtual_members.rs</code> works
+around it by re-parsing the value without the modifier and reapplying
+<code>static</code> afterwards. Report it upstream; remove the workaround once the
+grammar disambiguates on the whitespace before the <code>(</code>.</p>
 <hr />
 <h2 id="p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code><a class="headerlink" href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: High</strong></p>
