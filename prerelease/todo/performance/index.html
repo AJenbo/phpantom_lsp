@@ -2981,20 +2981,6 @@ need into owned structures per tag kind, or keeping the arena alive for as
 long as the extracted data. The first is mechanical but touches every
 extractor in <code>docblock/</code>; the second changes the ownership model of every
 caller. Sized for several sprint items.</p>
-<p>Two smaller pieces of the same cleanup can land independently:</p>
-<ul>
-<li><strong>The <code>*</code> wildcard pre-pass is obsolete.</strong> <code>PhpType::parse</code> and
-  <code>symbol_map/docblock.rs::emit_type_spans</code> both still rewrite PHPStan's
-  <code>*</code> generic wildcard to <code>mixed</code> in the type string before parsing, and
-  the latter maintains a byte offset map to undo the 1→5 character
-  expansion afterwards. The grammar now models <code>*</code> natively as
-  <code>Type::Wildcard</code>, so both passes (and the offset map) can go, replaced
-  by mapping <code>Type::Wildcard</code> to <code>mixed</code> in <code>convert</code>.</li>
-<li><strong><code>get_docblock_text_for_node</code> re-reads raw comment text.</strong> Tags are
-  parsed from a <code>&amp;str</code> recovered from trivia rather than from the trivia
-  the main <code>mago-syntax</code> parse already produced. Feeding the parser the
-  trivia bytes directly would drop a copy per docblock.</li>
-</ul>
 <hr />
 <h2 id="p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code><a class="headerlink" href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: High</strong></p>
