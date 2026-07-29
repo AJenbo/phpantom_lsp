@@ -47,9 +47,9 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, class)
     {
-        let tpl_params = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         let scope_end = class.right_brace.end.offset;
-        for (name, name_offset, bound, variance) in tpl_params {
+        for (name, name_offset, bound, variance) in found.templates {
             ctx.template_defs.push(TemplateParamDef {
                 name_offset,
                 name,
@@ -141,9 +141,9 @@ pub(super) fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut Ext
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, iface)
     {
-        let tpl_params = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         let scope_end = iface.right_brace.end.offset;
-        for (name, name_offset, bound, variance) in tpl_params {
+        for (name, name_offset, bound, variance) in found.templates {
             ctx.template_defs.push(TemplateParamDef {
                 name_offset,
                 name,
@@ -175,9 +175,9 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, trait_def)
     {
-        let tpl_params = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         let scope_end = trait_def.right_brace.end.offset;
-        for (name, name_offset, bound, variance) in tpl_params {
+        for (name, name_offset, bound, variance) in found.templates {
             ctx.template_defs.push(TemplateParamDef {
                 name_offset,
                 name,
@@ -221,9 +221,9 @@ pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut Extraction
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, enum_def)
     {
-        let tpl_params = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         let scope_end = enum_def.right_brace.end.offset;
-        for (name, name_offset, bound, variance) in tpl_params {
+        for (name, name_offset, bound, variance) in found.templates {
             ctx.template_defs.push(TemplateParamDef {
                 name_offset,
                 name,
@@ -326,7 +326,7 @@ pub(super) fn extract_from_class_member<'a>(
             if let Some((doc_text, doc_offset)) =
                 get_docblock_text_with_offset(ctx.trivias, ctx.content, trait_use)
             {
-                let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+                let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
             }
 
             for ident in trait_use.trait_names.iter() {
@@ -549,8 +549,10 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
     // now, but defer `@param $var` variable spans until after we know
     // `method_scope_start` (the body's opening-brace offset).
     let method_docblock = get_docblock_text_with_offset(ctx.trivias, ctx.content, method);
+    let mut docblock_params: Vec<(String, u32)> = Vec::new();
     if let Some((doc_text, doc_offset)) = method_docblock {
-        let tpl_params = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        docblock_params = found.param_vars;
         // Method-level template params: scope extends from the docblock to
         // the end of the method body (or the end of the docblock for
         // abstract methods without a body).
@@ -561,7 +563,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
             // Use the method span end as a reasonable bound.
             method.span().end.offset
         };
-        for (name, name_offset, bound, variance) in tpl_params {
+        for (name, name_offset, bound, variance) in found.templates {
             ctx.template_defs.push(TemplateParamDef {
                 name_offset,
                 name,
@@ -593,8 +595,8 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
     // them.  The VarDefSite with `DocblockParam` kind lets
     // `find_variable_scope` map the pre-body offset to the correct
     // function body scope.
-    if let Some((doc_text, doc_offset)) = method_docblock {
-        for (name, file_offset) in extract_param_var_spans(doc_text, doc_offset) {
+    {
+        for (name, file_offset) in docblock_params {
             let end = file_offset + 1 + name.len() as u32;
             ctx.spans.push(SymbolSpan {
                 start: file_offset,
@@ -627,7 +629,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         if let Some((doc_text, doc_offset)) =
             get_docblock_text_with_offset(ctx.trivias, ctx.content, param)
         {
-            let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+            let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         }
         let name = {
             let s = bytes_to_str(param.variable.name);
@@ -684,10 +686,10 @@ pub(super) fn extract_inline_docblock(
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, node)
     {
-        let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
 
         // Emit VarDefSite entries for `@var Type $varName` in inline docblocks.
-        for (name, file_offset) in extract_var_docblock_var_spans(doc_text, doc_offset) {
+        for (name, file_offset) in found.var_vars {
             let name_len = name.len() as u32 + 1; // +1 for the `$` prefix
             ctx.spans.push(SymbolSpan {
                 start: file_offset,
@@ -722,7 +724,7 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
     {
         // Property docblocks don't define template params, but we still
         // need to consume the return value.
-        let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
     }
 
     // Property type hint.
@@ -818,7 +820,7 @@ pub(super) fn extract_from_class_constant<'a>(
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, constant)
     {
-        let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
     }
 
     // Type hint on constant (PHP 8.3+).
@@ -853,10 +855,12 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
     // defer `@param $var` variable spans until after we know
     // `func_scope_start` (the body's opening-brace offset).
     let func_docblock = get_docblock_text_with_offset(ctx.trivias, ctx.content, func);
+    let mut docblock_params: Vec<(String, u32)> = Vec::new();
     if let Some((doc_text, doc_offset)) = func_docblock {
-        let tpl_params = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        docblock_params = found.param_vars;
         let scope_end = func.body.right_brace.end.offset;
-        for (name, name_offset, bound, variance) in tpl_params {
+        for (name, name_offset, bound, variance) in found.templates {
             ctx.template_defs.push(TemplateParamDef {
                 name_offset,
                 name,
@@ -878,8 +882,8 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
     // them.  The VarDefSite with `DocblockParam` kind lets
     // `find_variable_scope` map the pre-body offset to the correct
     // function body scope.
-    if let Some((doc_text, doc_offset)) = func_docblock {
-        for (name, file_offset) in extract_param_var_spans(doc_text, doc_offset) {
+    {
+        for (name, file_offset) in docblock_params {
             let end = file_offset + 1 + name.len() as u32;
             ctx.spans.push(SymbolSpan {
                 start: file_offset,
@@ -911,7 +915,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
         if let Some((doc_text, doc_offset)) =
             get_docblock_text_with_offset(ctx.trivias, ctx.content, param)
         {
-            let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+            let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         }
         // Emit VarDefSite for each parameter.
         let pname = {

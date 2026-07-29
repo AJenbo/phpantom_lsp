@@ -678,36 +678,25 @@ body-return inference, since fixed by memoization).
 
 ---
 
-## P45. Emit docblock symbol spans from the PHPDoc CST
+## P47. Inline `{@see}` references are still found by scanning raw text
 
-**Impact: Low-Medium · Effort: Medium-High**
+**Impact: Low · Effort: Low-Medium**
 
-`src/symbol_map/docblock.rs` is the last consumer that re-derives tag
-structure from raw text. The extractors in `docblock/` now read the
-parsed grammar (see the `TagValueInfo` snapshot on `TagInfo`), but the
-symbol map needs a *byte offset in the file* for every identifier inside
-a type, not just the type's text, so it still finds the type itself by
-hand: `emit_type_first_tag` strips `@assert` modifiers and calls
-`split_type_token`, `extract_method_tag_symbols` re-implements the
-`[static] Return name(params)` split with its own paren-depth scan and a
-heuristic for telling a return type from a method name,
-`extract_template_tag_symbols` re-finds the `of` bound, and
-`extract_property_tag_symbols` re-splits type from variable.
+`extract_inline_see_symbols` in `src/symbol_map/docblock.rs` is the last
+place the symbol map reads a docblock as a string: it searches for the
+literal `{@see ` and takes everything up to the next `}`. The rest of
+the module now walks the PHPDoc CST, where an inline tag is a
+`TextSegment::InlineTag` carrying a full `Tag` with its own spans.
 
-The CST has a span on every type, identifier and variable, which would
-replace all of that guessing. The obstacle is multi-line types:
-`join_multiline_type` builds an offset map so that a position inside the
-joined type string can be mapped back to the file, and the folded text
-kept in `TagValueInfo` cannot be mapped that way. Recording each type's
-span alongside its text is enough to anchor the *start* of a type
-precisely; the per-identifier offsets inside a folded multi-line type
-still need the offset map, or a walk over the CST type tree in place of
-`emit_type_spans`.
+The reason the scan survived is reach rather than capability. Inline
+tags turn up in any prose, so a CST-based version has to visit the free
+text before the first tag *and* the description of every tag shape that
+has one, which means a `Text` visitor threaded through the tag match in
+`emit_tag_symbols`. The string scan reaches all of them in one pass.
 
-Walking the CST directly is the endgame: it deletes `join_multiline_type`,
-`emit_type_spans_from_ast` and the offset-map machinery outright, since
-every identifier already carries its own span. That is the larger of the
-two options and is what makes this Medium-High rather than Medium.
+Doing it properly would pick up `{@link}` and the other inline tags for
+free, and stop the scan tripping over a `}` that belongs to a nested
+type rather than the inline tag.
 
 ---
 
@@ -729,11 +718,15 @@ whole tag is dropped:
  */
 ```
 
-Both forms appear in Psalm's own magic-method test suite.
-`recover_static_method_tag` in `src/docblock/virtual_members.rs` works
-around it by re-parsing the value without the modifier and reapplying
-`static` afterwards. Report it upstream; remove the workaround once the
-grammar disambiguates on the whitespace before the `(`.
+Both forms appear in Psalm's own magic-method test suite. Two places
+work around it: `recover_static_method_tag` in
+`src/docblock/virtual_members.rs` re-parses the value without the
+modifier and reapplies `static` afterwards, and
+`recover_static_method_tags` in `src/symbol_map/docblock.rs` blanks the
+keyword out with spaces and re-parses the whole docblock, because it
+needs the tag's original byte offsets as well as its signature. Report
+it upstream; remove both workarounds once the grammar disambiguates on
+the whitespace before the `(`.
 
 ---
 

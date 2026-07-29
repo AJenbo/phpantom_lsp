@@ -1,28 +1,30 @@
 //! Docblock symbol extraction helpers for the symbol map.
 //!
-//! This module contains functions that scan PHPDoc comment blocks for
-//! type references in supported tags (`@param`, `@return`, `@var`,
-//! `@template`, `@method`, etc.) and emit [`SymbolSpan`] entries with
-//! correct file-level byte offsets.
+//! This module scans PHPDoc comment blocks for the symbols the symbol map
+//! cares about — type references in `@param`, `@return`, `@var`, `@extends`
+//! and friends, the members `@method` and `@property` declare, `@template`
+//! parameters, `@see` references, and the `$variables` a docblock names — and
+//! emits [`SymbolSpan`] entries with file-level byte offsets.
 //!
-//! Tag detection and iteration uses the structured [`DocblockInfo`] /
-//! [`TagInfo`] infrastructure from [`crate::docblock::parser`], which
-//! delegates to `mago-phpdoc-syntax` for parsing.  Type *string*
-//! decomposition (unions, intersections, generics, callables,
-//! conditionals) remains structured via [`emit_type_spans`], which parses
-//! types with the same crate and walks the AST with accurate span
-//! information.
+//! It works from the PHPDoc CST produced by `mago-phpdoc-syntax`, via
+//! [`with_docblock_cst`].  The parser is anchored at the docblock's own
+//! position in the file, so every type, identifier and variable node already
+//! carries the offset we need, including nodes buried inside a type written
+//! across continuation lines.  Nothing here re-derives tag structure from the
+//! raw text: the grammar has already split type from variable from prose.
 
-use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_phpdoc_syntax::cst::r#type as type_ast;
+use mago_phpdoc_syntax::cst::{
+    AssertPattern, Element, MethodTagValue, PropertyTagValue, Tag, TagValue,
+    TemplateTagValue as CstTemplateTagValue, TemplateTagValueVariance, Text, Variable,
+};
 use mago_span::{HasSpan, Position, Span};
 use mago_syntax::cst::*;
 
-use crate::docblock::TagKind;
+use crate::docblock::{TagKind, tag_kind};
 
-use crate::docblock::parser::parse_docblock;
-use crate::docblock::type_strings::split_type_token;
+use crate::docblock::parser::{type_text, value_span, with_docblock_cst};
 use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 
@@ -137,537 +139,412 @@ pub fn get_docblock_text_with_offset<'a>(
     None
 }
 
-// ─── Tag classification ─────────────────────────────────────────────────────
-
-/// `TagKind` values whose value starts with a type expression.
-///
-/// Vendor prefixes are already folded away by the parser, so `@param`,
-/// `@psalm-param` and `@phpstan-param` all match `TagKind::Param` here.
-const TYPE_FIRST_KINDS: &[TagKind] = &[
-    TagKind::Param,
-    TagKind::Return,
-    TagKind::Throws,
-    TagKind::Var,
-    TagKind::Property,
-    TagKind::PropertyRead,
-    TagKind::PropertyWrite,
-    TagKind::Mixin,
-    TagKind::Extends,
-    TagKind::Implements,
-    TagKind::Use,
-    TagKind::RequireExtends,
-    TagKind::RequireImplements,
-    TagKind::Sealed,
-    TagKind::Assert,
-    TagKind::AssertIfTrue,
-    TagKind::AssertIfFalse,
-];
-
-use crate::docblock::templates::{TEMPLATE_KINDS, variance_for};
-
-/// Determine the template variance for a tag, if it is a template tag.
-fn template_variance_for_tag(tag: &TagKind) -> Option<TemplateVariance> {
-    if TEMPLATE_KINDS.contains(tag) {
-        Some(variance_for(*tag))
-    } else {
-        None
-    }
-}
-
-/// Returns `true` when the tag's value starts with a type expression.
-fn is_type_first_tag(kind: &TagKind) -> bool {
-    TYPE_FIRST_KINDS.contains(kind)
-}
-
 // ─── Docblock tag scanning ──────────────────────────────────────────────────
 
-/// Scan a docblock for type references in supported tags and emit
+/// What a docblock declares beyond the [`SymbolSpan`] entries that
+/// [`extract_docblock_symbols`] pushes directly.
+#[derive(Debug, Default)]
+pub(super) struct DocblockSymbols {
+    /// `@template` parameter definitions, as
+    /// `(name, offset of the name token, bound, variance)`.
+    pub templates: Vec<(String, u32, Option<PhpType>, TemplateVariance)>,
+    /// The parameters this docblock names: the variable of a `@param` tag, and
+    /// the subject of any conditional type (`$strict` in
+    /// `($strict is true ? A : B)`).
+    ///
+    /// Each entry is `(name_without_dollar, offset_of_the_dollar)`.  Callers
+    /// turn them into [`SymbolKind::Variable`] spans and `DocblockParam`
+    /// definition sites, so rename and find-references cover parameter names
+    /// mentioned in docblocks.
+    pub param_vars: Vec<(String, u32)>,
+    /// The variables an inline `@var Type $name` declares, in the same shape
+    /// as [`Self::param_vars`].
+    pub var_vars: Vec<(String, u32)>,
+}
+
+/// Where a docblock walk writes what it finds.
+struct DocblockSink<'a> {
+    spans: &'a mut Vec<SymbolSpan>,
+    found: &'a mut DocblockSymbols,
+}
+
+/// Scan a docblock for the symbols the symbol map needs and emit
 /// `SymbolSpan` entries with file-level byte offsets.
-///
-/// Returns a list of `@template` parameter definitions found in the
-/// docblock, each as `(name, byte_offset, optional_bound, variance)`.
 pub(super) fn extract_docblock_symbols(
     docblock: &str,
     base_offset: u32,
     spans: &mut Vec<SymbolSpan>,
-) -> Vec<(String, u32, Option<PhpType>, TemplateVariance)> {
-    // ── Inline `{@see ...}` references ──────────────────────────────
-    // These appear in free-text, not as top-level tags, so we scan the
-    // raw docblock text for them.
+) -> DocblockSymbols {
+    // Inline `{@see ...}` references sit in free text rather than in a tag
+    // value of their own, so they are found by scanning the raw docblock.
     extract_inline_see_symbols(docblock, base_offset, spans);
 
-    // ── Parse structured tags ───────────────────────────────────────
-    let base_span = Span::new(
+    let mut found = DocblockSymbols::default();
+    let mut sink = DocblockSink {
+        spans,
+        found: &mut found,
+    };
+
+    // Tags whose `static` modifier has to be blanked out before the grammar
+    // will read them, as `(element index, offset of the keyword)`.
+    let mut recoveries: Vec<(usize, usize)> = Vec::new();
+
+    with_docblock_cst(docblock, docblock_span(docblock, base_offset), |document| {
+        for (index, element) in document.elements.iter().enumerate() {
+            let Element::Tag(tag) = element else { continue };
+            if let Some(keyword) = emit_tag_symbols(tag, docblock, base_offset, &mut sink) {
+                recoveries.push((index, keyword));
+            }
+        }
+    });
+
+    if !recoveries.is_empty() {
+        recover_static_method_tags(docblock, base_offset, &recoveries, &mut sink);
+    }
+
+    found
+}
+
+/// The span a docblock occupies in the file, which anchors the PHPDoc parser
+/// so that every node it produces reports a file offset.
+fn docblock_span(docblock: &str, base_offset: u32) -> Span {
+    Span::new(
         FileId::zero(),
         Position::new(base_offset),
         Position::new(base_offset + docblock.len() as u32),
-    );
-    let Some(info) = parse_docblock(docblock, base_span) else {
-        return Vec::new();
-    };
+    )
+}
 
-    let mut template_params: Vec<(String, u32, Option<PhpType>, TemplateVariance)> = Vec::new();
-
-    for tag in &info.tags {
-        let desc_file_offset = tag.description_span.start.offset;
-        let desc_start_in_docblock = (desc_file_offset - base_offset) as usize;
-
-        // ── @see ────────────────────────────────────────────────────
-        if tag.kind == TagKind::See {
-            extract_see_tag_symbol(tag, spans);
-            continue;
-        }
-
-        // ── @method ─────────────────────────────────────────────────
-        if tag.kind == TagKind::Method {
-            extract_method_tag_symbols(docblock, desc_start_in_docblock, base_offset, spans);
-            continue;
-        }
-
-        // ── @property variants ───────────────────────────────────────
-        if matches!(
-            tag.kind,
-            TagKind::Property | TagKind::PropertyRead | TagKind::PropertyWrite
-        ) {
-            extract_property_tag_symbols(docblock, desc_start_in_docblock, base_offset, spans);
-            continue;
-        }
-
-        // ── @template variants ──────────────────────────────────────
-        if let Some(variance) = template_variance_for_tag(&tag.kind) {
-            if let Some((name, offset, bound)) =
-                extract_template_tag_symbols(docblock, desc_start_in_docblock, base_offset, spans)
-            {
-                template_params.push((name, offset, bound, variance));
+/// Emit the symbols one tag declares.
+///
+/// Returns the docblock-relative offset of a `static` modifier that has to be
+/// blanked out before the tag can be read; see [`recover_static_method_tags`].
+/// Tags the grammar could not parse at all yield nothing: their type text is
+/// not a type, so guessing at a class name from it would only produce a
+/// reference that resolves to nothing.
+fn emit_tag_symbols(
+    tag: &Tag<'_>,
+    docblock: &str,
+    base_offset: u32,
+    sink: &mut DocblockSink<'_>,
+) -> Option<usize> {
+    match &tag.value {
+        // ── Tags that lead with a type ──────────────────────────────
+        TagValue::Param(value) => {
+            emit_type_symbols(value.r#type, sink);
+            if let Some(parameter) = value.parameter {
+                push_variable_reference(&parameter, &mut sink.found.param_vars);
             }
-            continue;
+        }
+        TagValue::TypelessParam(value) => {
+            push_variable_reference(&value.parameter, &mut sink.found.param_vars);
+        }
+        TagValue::Return(value) | TagValue::RealReturn(value) => {
+            emit_type_symbols(value.r#type, sink);
+        }
+        TagValue::Var(value) => {
+            emit_type_symbols(value.r#type, sink);
+            if let Some(variable) = value.variable {
+                push_variable_reference(&variable, &mut sink.found.var_vars);
+            }
+        }
+        TagValue::Throws(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::Mixin(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::Extends(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::Implements(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::Use(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::RequireExtends(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::RequireImplements(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::Sealed(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::Assert(value)
+        | TagValue::AssertIfTrue(value)
+        | TagValue::AssertIfFalse(value) => {
+            if let AssertPattern::Type(asserted) = value.pattern {
+                emit_type_symbols(asserted, sink);
+            }
         }
 
-        // ── Type-first tags ─────────────────────────────────────────
-        if is_type_first_tag(&tag.kind) {
-            emit_type_first_tag(docblock, desc_start_in_docblock, base_offset, spans);
+        // ── Tags that declare a member or a template parameter ──────
+        TagValue::Method(value) => emit_method_tag_symbols(value, value.is_static(), sink),
+        TagValue::Property(value)
+        | TagValue::PropertyRead(value)
+        | TagValue::PropertyWrite(value) => emit_property_tag_symbols(value, sink),
+        TagValue::Template(value) => emit_template_tag_symbols(value, docblock, base_offset, sink),
+
+        // ── Tags the grammar keeps as free text ─────────────────────
+        TagValue::Generic(text) if tag_kind(tag) == TagKind::See => {
+            emit_see_tag_symbol(&text.value, docblock, base_offset, sink.spans);
+        }
+        TagValue::Invalid(_) if tag_kind(tag) == TagKind::Method => {
+            return static_modifier_offset(tag, docblock, base_offset);
+        }
+        _ => {}
+    }
+
+    None
+}
+
+/// The `static` modifier of a `@method` tag, and a blank of the same width.
+///
+/// Overwriting the keyword rather than removing it keeps every following byte
+/// at its original offset; see [`recover_static_method_tags`].
+const STATIC_MODIFIER: &str = "static";
+const BLANKED_MODIFIER: &str = "      ";
+const _: () = assert!(STATIC_MODIFIER.len() == BLANKED_MODIFIER.len());
+
+/// The docblock-relative offset of a `static` modifier leading a tag value.
+fn static_modifier_offset(tag: &Tag<'_>, docblock: &str, base_offset: u32) -> Option<usize> {
+    let value_start = value_span(tag, docblock, base_offset)
+        .start
+        .offset
+        .saturating_sub(base_offset) as usize;
+    let rest = docblock.get(value_start..)?.strip_prefix(STATIC_MODIFIER)?;
+
+    rest.starts_with(char::is_whitespace).then_some(value_start)
+}
+
+/// Re-emit the `@method` tags the PHPDoc grammar rejected over their `static`
+/// modifier.
+///
+/// `mago-phpdoc-syntax` cannot tell `@method static (…) name()` from a method
+/// literally called `static` whose parameter list follows, so a parenthesised
+/// return type after the modifier makes the whole tag unparseable.
+/// `docblock::virtual_members` recovers the signature by re-parsing the tag
+/// without the modifier; the symbol map needs the signature *and* its
+/// original offsets, so the keyword is blanked out instead of removed and the
+/// recovered CST still reports file-accurate spans.  Blanking cannot merge or
+/// split tags, so the element indices recorded during the first walk still
+/// identify the same tags.
+fn recover_static_method_tags(
+    docblock: &str,
+    base_offset: u32,
+    recoveries: &[(usize, usize)],
+    sink: &mut DocblockSink<'_>,
+) {
+    let mut patched = String::from(docblock);
+    for &(_, keyword) in recoveries {
+        patched.replace_range(keyword..keyword + STATIC_MODIFIER.len(), BLANKED_MODIFIER);
+    }
+
+    with_docblock_cst(&patched, docblock_span(&patched, base_offset), |document| {
+        for (index, element) in document.elements.iter().enumerate() {
+            if !recoveries.iter().any(|&(recovered, _)| recovered == index) {
+                continue;
+            }
+            let Element::Tag(tag) = element else { continue };
+            if let TagValue::Method(value) = &tag.value {
+                emit_method_tag_symbols(value, true, sink);
+            }
+        }
+    });
+}
+
+/// Emit the return type, name and parameter types of a `@method` tag.
+///
+/// `is_static` is passed in rather than read off `value` so a tag recovered by
+/// [`recover_static_method_tags`], whose modifier has been blanked out, still
+/// declares a static member.
+fn emit_method_tag_symbols(
+    value: &MethodTagValue<'_>,
+    is_static: bool,
+    sink: &mut DocblockSink<'_>,
+) {
+    if let Some(return_type) = value.return_type {
+        emit_type_symbols(return_type, sink);
+    }
+
+    sink.spans.push(SymbolSpan {
+        start: value.name.span.start.offset,
+        end: value.name.span.end.offset,
+        kind: SymbolKind::MemberDeclaration {
+            name: crate::atom::atom_bytes(value.name.value),
+            is_static,
+        },
+    });
+
+    if let Some(templates) = value.templates {
+        for entry in templates.entries.iter() {
+            if let Some(bound) = entry.template.bound {
+                emit_type_symbols(bound.r#type, sink);
+            }
         }
     }
 
-    template_params
+    for parameter in value.parameters.entries.iter() {
+        if let Some(declared) = parameter.r#type {
+            emit_type_symbols(declared, sink);
+        }
+    }
 }
 
-/// Emit type spans for a tag whose description starts with a type
-/// expression (e.g. `@param string $name`, `@return Collection<int>`).
-///
-/// Uses [`join_multiline_type`] to handle types that span continuation
-/// lines and [`emit_type_spans`] to produce navigable symbol spans.
-fn emit_type_first_tag(
+/// Emit the type and the member name of a `@property` tag (or one of its
+/// `-read` / `-write` variants).
+fn emit_property_tag_symbols(value: &PropertyTagValue<'_>, sink: &mut DocblockSink<'_>) {
+    if let Some(declared) = value.r#type {
+        emit_type_symbols(declared, sink);
+    }
+
+    let Some((name, dollar_offset)) = variable_name_and_offset(&value.variable) else {
+        return;
+    };
+    sink.spans.push(SymbolSpan {
+        start: dollar_offset + 1,
+        end: dollar_offset + 1 + name.len() as u32,
+        kind: SymbolKind::MemberDeclaration {
+            name: crate::atom::atom(name),
+            is_static: false,
+        },
+    });
+}
+
+/// Record a `@template` declaration and emit the spans of its bound.
+fn emit_template_tag_symbols(
+    value: &CstTemplateTagValue<'_>,
     docblock: &str,
-    desc_start_in_docblock: usize,
+    base_offset: u32,
+    sink: &mut DocblockSink<'_>,
+) {
+    let bound = value.bound.map(|bound| {
+        emit_type_symbols(bound.r#type, sink);
+        PhpType::parse(&type_text(docblock, base_offset, bound.r#type.span()))
+    });
+
+    let variance = match value.variance {
+        TemplateTagValueVariance::Invariant => TemplateVariance::Invariant,
+        TemplateTagValueVariance::Covariant => TemplateVariance::Covariant,
+        TemplateTagValueVariance::Contravariant => TemplateVariance::Contravariant,
+    };
+
+    sink.found.templates.push((
+        crate::atom::bytes_to_str(value.name.value).to_owned(),
+        value.name.span.start.offset,
+        bound,
+        variance,
+    ));
+}
+
+/// Emit the symbol an `@see` tag references.
+///
+/// The PHPDoc grammar keeps `@see` as free text, so the reference is the first
+/// whitespace-delimited token of it; the text node supplies the file offset.
+fn emit_see_tag_symbol(
+    text: &Text<'_>,
+    docblock: &str,
     base_offset: u32,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    if desc_start_in_docblock >= docblock.len() {
+    let start = text.span.start.offset.saturating_sub(base_offset) as usize;
+    let end = (text.span.end.offset.saturating_sub(base_offset) as usize).min(docblock.len());
+    let Some(raw) = docblock.get(start..end) else {
         return;
-    }
-    // The description may start with whitespace (e.g. double-space after
-    // the tag name: `@param  Type`).  Trim it and adjust the offset so
-    // that `join_multiline_type` begins at the first non-whitespace byte
-    // on the same line.
-    let raw = &docblock[desc_start_in_docblock..];
-    let first_nl = raw.find('\n').unwrap_or(raw.len());
-    let first_line = &raw[..first_nl];
-    // Skip leading `@phpstan-assert` / `@psalm-assert` type modifiers
-    // (`!` negation, `=` exact-type) so they aren't emitted as bogus
-    // class-name references (e.g. `Class '=T' not found`).
-    let trimmed = first_line.trim_start().trim_start_matches(['!', '=']);
-    if trimmed.is_empty() {
+    };
+    let trimmed = raw.trim_start();
+    let Some(reference) = trimmed.split_whitespace().next() else {
         return;
-    }
-    let leading_ws = first_line.len() - trimmed.len();
-    let adjusted_start = desc_start_in_docblock + leading_ws;
-
-    let (joined, offset_map) = join_multiline_type(docblock, adjusted_start);
-    let (type_token, _remainder) = split_type_token(&joined);
-    if !type_token.is_empty() {
-        let mut local_spans: Vec<SymbolSpan> = Vec::new();
-        emit_type_spans(type_token, 0, &mut local_spans);
-        for mut sp in local_spans {
-            sp.start = base_offset
-                + offset_map
-                    .get(sp.start as usize)
-                    .copied()
-                    .unwrap_or(sp.start as usize) as u32;
-            sp.end = base_offset
-                + offset_map
-                    .get(sp.end as usize)
-                    .copied()
-                    .unwrap_or(sp.end as usize) as u32;
-            spans.push(sp);
-        }
-    }
-}
-
-/// Scan a docblock for `@param $varName` tokens and return
-/// `(name_without_dollar, file_byte_offset_of_dollar)` pairs.
-///
-/// These are used by the symbol-map extraction to emit
-/// [`SymbolKind::Variable`] spans so that rename and find-references
-/// cover parameter names mentioned in docblocks.
-pub(super) fn extract_param_var_spans(docblock: &str, base_offset: u32) -> Vec<(String, u32)> {
-    let base_span = Span::new(
-        FileId::zero(),
-        Position::new(base_offset),
-        Position::new(base_offset + docblock.len() as u32),
-    );
-    let Some(info) = parse_docblock(docblock, base_span) else {
-        return Vec::new();
     };
 
-    let mut results = Vec::new();
-
-    for tag in &info.tags {
-        if tag.kind != TagKind::Param {
-            continue;
-        }
-
-        // The description is `TypeHint $varName desc` or just `$varName`.
-        // Find the `$` in the raw source covered by description_span so
-        // the file offset is accurate.
-        let desc_file_start = tag.description_span.start.offset;
-        let desc_in_doc_start = (desc_file_start - base_offset) as usize;
-        let desc_in_doc_end =
-            ((tag.description_span.end.offset - base_offset) as usize).min(docblock.len());
-        let raw_desc = &docblock[desc_in_doc_start..desc_in_doc_end];
-
-        if let Some(dollar_pos) = raw_desc.find('$') {
-            let rest = &raw_desc[dollar_pos..];
-            let name_end = rest[1..]
-                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                .map(|i| i + 1)
-                .unwrap_or(rest.len());
-            if name_end > 1 {
-                let name = rest[1..name_end].to_string();
-                let file_offset = desc_file_start + dollar_pos as u32;
-                results.push((name, file_offset));
-            }
-        }
-    }
-
-    // Also scan @return / @phpstan-return / @psalm-return tags for
-    // parameter references in conditional return types, e.g.
-    //   @return ($strict is true ? Result : ($fallback is true ? Result : ?Result))
-    // The `$strict` and `$fallback` tokens must be renamed together with
-    // the function parameters.
-    for tag in &info.tags {
-        if tag.kind != TagKind::Return {
-            continue;
-        }
-
-        let desc_file_start = tag.description_span.start.offset;
-        let desc_in_doc_start = (desc_file_start - base_offset) as usize;
-        let desc_in_doc_end =
-            ((tag.description_span.end.offset - base_offset) as usize).min(docblock.len());
-        let raw_desc = &docblock[desc_in_doc_start..desc_in_doc_end];
-
-        // Find all `($varName` patterns — these are conditional type
-        // subjects.  Conditionals can be nested, so scan the entire
-        // description.
-        let bytes = raw_desc.as_bytes();
-        for i in 0..raw_desc.len().saturating_sub(1) {
-            if bytes[i] == b'(' && bytes[i + 1] == b'$' {
-                let dollar_pos = i + 1;
-                let rest = &raw_desc[dollar_pos..];
-                let name_end = rest[1..]
-                    .find(|c: char| !c.is_alphanumeric() && c != '_')
-                    .map(|j| j + 1)
-                    .unwrap_or(rest.len());
-                if name_end > 1 {
-                    let name = rest[1..name_end].to_string();
-                    let file_offset = desc_file_start + dollar_pos as u32;
-                    results.push((name, file_offset));
-                }
-            }
-        }
-    }
-
-    results
+    let offset = text.span.start.offset + (raw.len() - trimmed.len()) as u32;
+    emit_see_reference(reference, offset, spans);
 }
 
-/// Scan a docblock for `@var Type $varName` tokens and return
-/// `(name_without_dollar, file_byte_offset_of_dollar)` pairs.
-///
-/// These are used by the symbol-map extraction to emit
-/// [`VarDefSite`](super::VarDefSite) entries for inline `@var`
-/// docblocks so the forward walker treats them as variable definitions.
-pub(super) fn extract_var_docblock_var_spans(
-    docblock: &str,
-    base_offset: u32,
-) -> Vec<(String, u32)> {
-    let base_span = Span::new(
-        FileId::zero(),
-        Position::new(base_offset),
-        Position::new(base_offset + docblock.len() as u32),
-    );
-    let Some(info) = parse_docblock(docblock, base_span) else {
-        return Vec::new();
-    };
+/// The name and `$` offset of a variable token, with the `$` stripped from the
+/// name.
+fn variable_name_and_offset<'a>(variable: &Variable<'a>) -> Option<(&'a str, u32)> {
+    let name = crate::atom::bytes_to_str(variable.value).strip_prefix('$')?;
 
-    let mut results = Vec::new();
+    (!name.is_empty()).then_some((name, variable.span.start.offset))
+}
 
-    for tag in &info.tags {
-        if tag.kind != TagKind::Var {
-            continue;
-        }
-
-        // The description is `TypeHint $varName desc` or just `$varName`.
-        // Find the `$` in the raw source covered by description_span so
-        // the file offset is accurate.
-        let desc_file_start = tag.description_span.start.offset;
-        let desc_in_doc_start = (desc_file_start - base_offset) as usize;
-        let desc_in_doc_end =
-            ((tag.description_span.end.offset - base_offset) as usize).min(docblock.len());
-        let raw_desc = &docblock[desc_in_doc_start..desc_in_doc_end];
-
-        if let Some(dollar_pos) = raw_desc.find('$') {
-            let rest = &raw_desc[dollar_pos..];
-            let name_end = rest[1..]
-                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                .map(|i| i + 1)
-                .unwrap_or(rest.len());
-            if name_end > 1 {
-                let name = rest[1..name_end].to_string();
-                let file_offset = desc_file_start + dollar_pos as u32;
-                results.push((name, file_offset));
-            }
-        }
+/// Record a reference to a `$variable` named in a docblock.
+fn push_variable_reference(variable: &Variable<'_>, into: &mut Vec<(String, u32)>) {
+    if let Some((name, dollar_offset)) = variable_name_and_offset(variable) {
+        into.push((name.to_owned(), dollar_offset));
     }
-
-    results
 }
 
 // ─── Type span emission ─────────────────────────────────────────────────────
 
-/// Emit `SymbolSpan` entries for a type token, splitting unions and
-/// intersections and skipping scalars.
-/// Build a contiguous type string from a potentially multiline docblock
-/// region, starting at `start_in_docblock` (byte offset within the
-/// docblock text).
+/// Walk a PHPDoc type node and emit [`SymbolSpan`] entries for every navigable
+/// type reference (class names, `self`, `static`, `parent`, `$this`), plus a
+/// reference for the `$parameter` a conditional type is keyed on.
 ///
-/// Returns `(joined_text, offset_map)` where `offset_map[i]` is the byte
-/// offset in the original `docblock` that corresponds to byte `i` in
-/// `joined_text`.  Continuation-line prefixes (`* `) are stripped so that
-/// `split_type_token` / `emit_type_spans` see a clean type string.
-fn join_multiline_type(docblock: &str, start_in_docblock: usize) -> (String, Vec<usize>) {
-    let mut joined = String::new();
-    // offset_map[i] = byte offset in `docblock` for byte `i` in `joined`.
-    // We only add the one-past-end sentinel at the very end so that
-    // continuation chunks don't shift indices.
-    let mut offset_map: Vec<usize> = Vec::new();
-
-    let first_line_rest = &docblock[start_in_docblock..];
-    // Take text up to (but not including) the newline on the first line.
-    let first_nl = first_line_rest.find('\n').unwrap_or(first_line_rest.len());
-    let first_chunk = &first_line_rest[..first_nl];
-    for (i, _) in first_chunk.char_indices() {
-        offset_map.push(start_in_docblock + i);
-    }
-    joined.push_str(first_chunk);
-
-    // Check whether the first chunk has unclosed `<`, `(`, or `{`.
-    if !crate::docblock::type_strings::has_unclosed_delimiters(&joined) {
-        // Push one-past-end sentinel.
-        offset_map.push(start_in_docblock + first_chunk.len());
-        return (joined, offset_map);
-    }
-
-    // Consume continuation lines.
-    let mut pos = start_in_docblock + first_nl;
-    while pos < docblock.len() {
-        // Skip the `\n`.
-        if docblock.as_bytes().get(pos) == Some(&b'\n') {
-            pos += 1;
-        }
-        if pos >= docblock.len() {
-            break;
-        }
-
-        let line_end = docblock[pos..]
-            .find('\n')
-            .map_or(docblock.len(), |p| pos + p);
-        let raw_line = &docblock[pos..line_end];
-
-        // Strip the leading `* ` (with optional whitespace before `*`).
-        let stripped = raw_line.trim_start();
-        if stripped.starts_with("*/") {
-            // End of docblock.
-            break;
-        }
-        let content_after_star = if let Some(rest) = stripped.strip_prefix('*') {
-            // Skip one optional space after `*`.
-            rest.strip_prefix(' ').unwrap_or(rest)
-        } else {
-            stripped
-        };
-
-        // If the continuation line starts with `@`, it's a new tag — stop.
-        if content_after_star.trim_start().starts_with('@') {
-            break;
-        }
-
-        let content_start_in_docblock = pos + (raw_line.len() - content_after_star.len());
-
-        // Append a space to represent the line break in the joined string,
-        // mapped to the newline position.
-        offset_map.push(pos.saturating_sub(1));
-        joined.push(' ');
-
-        for (i, _) in content_after_star.char_indices() {
-            offset_map.push(content_start_in_docblock + i);
-        }
-        joined.push_str(content_after_star);
-
-        pos = line_end;
-
-        if !crate::docblock::type_strings::has_unclosed_delimiters(&joined) {
-            break;
-        }
-    }
-
-    // One-past-end sentinel so that `sp.end` lookups work.
-    let last_mapped = offset_map.last().copied().unwrap_or(start_in_docblock);
-    offset_map.push(last_mapped + 1);
-
-    (joined, offset_map)
-}
-
-pub(super) fn emit_type_spans(
-    type_token: &str,
-    token_file_offset: u32,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    if type_token.is_empty() {
-        return;
-    }
-
-    // Parse the type string.  The span we provide starts at 0 so that
-    // all AST node offsets are relative to `type_token`.
-    let parse_span = Span::new(
-        FileId::zero(),
-        Position::new(0),
-        Position::new(type_token.len() as u32),
-    );
-
-    let arena = LocalArena::new();
-    match mago_phpdoc_syntax::parse_type(&arena, type_token.as_bytes(), parse_span) {
-        Ok(ty) => emit_type_spans_from_ast(&ty, token_file_offset, spans),
-        Err(_) => {
-            // Parse failed — fall back to emitting a single span for
-            // the whole token if it looks like a navigable class name.
-            let trimmed = type_token.trim();
-            let base = strip_fqn_prefix(trimmed)
-                .split('<')
-                .next()
-                .unwrap_or(trimmed);
-            if is_navigable_type(base) {
-                let is_fqn = trimmed.starts_with('\\');
-                let name = crate::atom::atom(strip_fqn_prefix(trimmed));
-                spans.push(SymbolSpan {
-                    start: token_file_offset,
-                    end: token_file_offset + trimmed.len() as u32,
-                    kind: SymbolKind::ClassReference {
-                        name,
-                        is_fqn,
-                        context: ClassRefContext::Other,
-                    },
-                });
-            }
-        }
-    }
-}
-
-/// Walk a parsed PHPDoc type AST node and emit [`SymbolSpan`] entries
-/// for every navigable type reference (class names, `self`, `static`,
-/// `parent`, `$this`).
-///
-/// `base_offset` is added to every AST-local offset to produce
-/// file-level byte positions.
-fn emit_type_spans_from_ast(
-    ty: &type_ast::Type<'_>,
-    base_offset: u32,
-    spans: &mut Vec<SymbolSpan>,
-) {
+/// Node spans are already file offsets, so nothing has to be adjusted here.
+fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
     use crate::atom::bytes_to_str;
     match ty {
         // ── Composite types ─────────────────────────────────────────
         type_ast::Type::Union(u) => {
-            emit_type_spans_from_ast(u.left, base_offset, spans);
-            emit_type_spans_from_ast(u.right, base_offset, spans);
+            emit_type_symbols(u.left, sink);
+            emit_type_symbols(u.right, sink);
         }
         type_ast::Type::Intersection(i) => {
-            emit_type_spans_from_ast(i.left, base_offset, spans);
-            emit_type_spans_from_ast(i.right, base_offset, spans);
+            emit_type_symbols(i.left, sink);
+            emit_type_symbols(i.right, sink);
         }
         type_ast::Type::Nullable(n) => {
-            emit_type_spans_from_ast(n.inner, base_offset, spans);
+            emit_type_symbols(n.inner, sink);
         }
         type_ast::Type::Parenthesized(p) => {
-            emit_type_spans_from_ast(p.inner, base_offset, spans);
+            emit_type_symbols(p.inner, sink);
         }
 
         // ── Named / Reference types ─────────────────────────────────
         type_ast::Type::Reference(r) => {
             let name = crate::php_type::reference_kind_name(&r.kind);
             let id_span = r.kind.span();
-            let id_start = base_offset + id_span.start.offset;
-            let id_end = base_offset + id_span.end.offset;
+            let id_start = id_span.start.offset;
+            let id_end = id_span.end.offset;
 
             // Emit a span for the identifier itself.
-            emit_identifier_span(name, id_start, id_end, spans);
+            emit_identifier_span(name, id_start, id_end, sink.spans);
 
             // Recurse into generic parameters if present.
             if let Some(params) = &r.parameters {
-                emit_generic_params(params, base_offset, spans);
+                emit_generic_params(params, sink);
             }
         }
 
         // ── Array-like types with optional generic parameters ───────
         type_ast::Type::Array(a) => {
             if let Some(params) = &a.parameters {
-                emit_generic_params(params, base_offset, spans);
+                emit_generic_params(params, sink);
             }
         }
         type_ast::Type::NonEmptyArray(a) => {
             if let Some(params) = &a.parameters {
-                emit_generic_params(params, base_offset, spans);
+                emit_generic_params(params, sink);
             }
         }
         type_ast::Type::AssociativeArray(a) => {
             if let Some(params) = &a.parameters {
-                emit_generic_params(params, base_offset, spans);
+                emit_generic_params(params, sink);
             }
         }
         type_ast::Type::List(l) => {
             if let Some(params) = &l.parameters {
-                emit_generic_params(params, base_offset, spans);
+                emit_generic_params(params, sink);
             }
         }
         type_ast::Type::NonEmptyList(l) => {
             if let Some(params) = &l.parameters {
-                emit_generic_params(params, base_offset, spans);
+                emit_generic_params(params, sink);
             }
         }
         type_ast::Type::Iterable(i) => {
             if let Some(params) = &i.parameters {
-                emit_generic_params(params, base_offset, spans);
+                emit_generic_params(params, sink);
             }
         }
 
         // ── Slice: T[] ──────────────────────────────────────────────
         type_ast::Type::Slice(s) => {
-            emit_type_spans_from_ast(s.inner, base_offset, spans);
+            emit_type_symbols(s.inner, sink);
         }
 
         // ── Shape types ─────────────────────────────────────────────
         type_ast::Type::Shape(s) => {
             for field in &s.fields {
-                emit_type_spans_from_ast(field.value, base_offset, spans);
+                emit_type_symbols(field.value, sink);
             }
         }
 
@@ -675,7 +552,7 @@ fn emit_type_spans_from_ast(
         type_ast::Type::Object(o) => {
             if let Some(props) = &o.properties {
                 for field in &props.fields {
-                    emit_type_spans_from_ast(field.value, base_offset, spans);
+                    emit_type_symbols(field.value, sink);
                 }
             }
         }
@@ -685,81 +562,84 @@ fn emit_type_spans_from_ast(
             // Emit span for the callable keyword if it's navigable
             // (e.g. `Closure` is a class, `callable` is not).
             let kw_name = bytes_to_str(c.keyword.value);
-            let kw_start = base_offset + c.keyword.span.start.offset;
-            let kw_end = base_offset + c.keyword.span.end.offset;
-            emit_identifier_span(kw_name, kw_start, kw_end, spans);
+            let kw_start = c.keyword.span.start.offset;
+            let kw_end = c.keyword.span.end.offset;
+            emit_identifier_span(kw_name, kw_start, kw_end, sink.spans);
 
             // Recurse into parameter types and return type.
             if let Some(spec) = &c.specification {
                 for param in &spec.parameters.entries {
                     if let Some(param_type) = &param.parameter_type {
-                        emit_type_spans_from_ast(param_type, base_offset, spans);
+                        emit_type_symbols(param_type, sink);
                     }
                 }
                 if let Some(ret) = &spec.return_type {
-                    emit_type_spans_from_ast(ret.return_type, base_offset, spans);
+                    emit_type_symbols(ret.return_type, sink);
                 }
             }
         }
 
         // ── Conditional types ───────────────────────────────────────
         type_ast::Type::Conditional(c) => {
-            // The subject is a variable ($param) — skip it.
-            // Recurse into the condition, then, and otherwise types.
-            emit_type_spans_from_ast(c.target, base_offset, spans);
-            emit_type_spans_from_ast(c.then, base_offset, spans);
-            emit_type_spans_from_ast(c.r#else, base_offset, spans);
+            // `($strict is true ? A : B)` keys the type on a parameter, so the
+            // subject is a reference that has to be renamed with it.
+            if let type_ast::Type::Variable(subject) = c.subject {
+                push_variable_reference(subject, &mut sink.found.param_vars);
+            }
+            emit_type_symbols(c.target, sink);
+            emit_type_symbols(c.then, sink);
+            emit_type_symbols(c.r#else, sink);
         }
 
         // ── class-string / interface-string / enum-string / trait-string ─
         type_ast::Type::ClassString(c) => {
             if let Some(param) = &c.parameter {
-                emit_type_spans_from_ast(&param.entry.inner, base_offset, spans);
+                emit_type_symbols(&param.entry.inner, sink);
             }
         }
         type_ast::Type::InterfaceString(i) => {
             if let Some(param) = &i.parameter {
-                emit_type_spans_from_ast(&param.entry.inner, base_offset, spans);
+                emit_type_symbols(&param.entry.inner, sink);
             }
         }
         type_ast::Type::EnumString(e) => {
             if let Some(param) = &e.parameter {
-                emit_type_spans_from_ast(&param.entry.inner, base_offset, spans);
+                emit_type_symbols(&param.entry.inner, sink);
             }
         }
         type_ast::Type::TraitString(t) => {
             if let Some(param) = &t.parameter {
-                emit_type_spans_from_ast(&param.entry.inner, base_offset, spans);
+                emit_type_symbols(&param.entry.inner, sink);
             }
         }
 
         // ── key-of / value-of ───────────────────────────────────────
         type_ast::Type::KeyOf(k) => {
-            emit_type_spans_from_ast(&k.parameter.entry.inner, base_offset, spans);
+            emit_type_symbols(&k.parameter.entry.inner, sink);
         }
         type_ast::Type::ValueOf(v) => {
-            emit_type_spans_from_ast(&v.parameter.entry.inner, base_offset, spans);
+            emit_type_symbols(&v.parameter.entry.inner, sink);
         }
 
         // ── Index access: T[K] ─────────────────────────────────────
         type_ast::Type::IndexAccess(i) => {
-            emit_type_spans_from_ast(i.target, base_offset, spans);
-            emit_type_spans_from_ast(i.index, base_offset, spans);
+            emit_type_symbols(i.target, sink);
+            emit_type_symbols(i.index, sink);
         }
 
         // ── int-mask / int-mask-of ──────────────────────────────────
         type_ast::Type::IntMask(m) => {
             for entry in &m.parameters.entries {
-                emit_type_spans_from_ast(&entry.inner, base_offset, spans);
+                emit_type_symbols(&entry.inner, sink);
             }
         }
         type_ast::Type::IntMaskOf(m) => {
-            emit_type_spans_from_ast(&m.parameter.entry.inner, base_offset, spans);
+            emit_type_symbols(&m.parameter.entry.inner, sink);
         }
 
         // ── properties-of ───────────────────────────────────────────
         type_ast::Type::PropertiesOf(p) => {
-            emit_type_spans_from_ast(&p.parameter.entry.inner, base_offset, spans);
+            emit_type_symbols(&p.parameter.entry.inner, sink);
         }
 
         // ── Negated / Posited literals ──────────────────────────────
@@ -769,18 +649,18 @@ fn emit_type_spans_from_ast(
 
         // ── Variable ($this) ────────────────────────────────────────
         type_ast::Type::ThisVariable(v) => {
-            let start = base_offset + v.span.start.offset;
-            let end = base_offset + v.span.end.offset;
-            spans.push(SymbolSpan {
+            let start = v.span.start.offset;
+            let end = v.span.end.offset;
+            sink.spans.push(SymbolSpan {
                 start,
                 end,
                 kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
             });
         }
         type_ast::Type::Variable(v) if v.value == b"$this" => {
-            let start = base_offset + v.span.start.offset;
-            let end = base_offset + v.span.end.offset;
-            spans.push(SymbolSpan {
+            let start = v.span.start.offset;
+            let end = v.span.end.offset;
+            sink.spans.push(SymbolSpan {
                 start,
                 end,
                 kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
@@ -835,9 +715,9 @@ fn emit_type_spans_from_ast(
             // mago but should still produce SelfStaticParent spans.
             let name = bytes_to_str(k.value);
             if let Some(ssp_kind) = self_static_parent_kind(name) {
-                let start = base_offset + k.span.start.offset;
-                let end = base_offset + k.span.end.offset;
-                spans.push(SymbolSpan {
+                let start = k.span.start.offset;
+                let end = k.span.end.offset;
+                sink.spans.push(SymbolSpan {
                     start,
                     end,
                     kind: SymbolKind::SelfStaticParent(ssp_kind),
@@ -897,335 +777,20 @@ fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<Symbol
 }
 
 /// Recurse into generic type parameters (`<T, U, V>`).
-fn emit_generic_params(
-    params: &type_ast::GenericParameters<'_>,
-    base_offset: u32,
-    spans: &mut Vec<SymbolSpan>,
-) {
+fn emit_generic_params(params: &type_ast::GenericParameters<'_>, sink: &mut DocblockSink<'_>) {
     for entry in &params.entries {
-        emit_type_spans_from_ast(&entry.inner, base_offset, spans);
+        emit_type_symbols(&entry.inner, sink);
     }
-}
-
-// ─── @template tag extraction ───────────────────────────────────────────────
-
-/// Handle `@template` (and variants) tags whose description has the form:
-/// `T of BoundType`
-///
-/// `desc_start_in_docblock` is the byte offset within `docblock` where
-/// the tag's description begins.  This is derived from the structured
-/// `description_span` so that file-level offsets are accurate.
-///
-/// Returns `(name, byte_offset, optional_bound)` so the caller can
-/// record a [`super::TemplateParamDef`].
-fn extract_template_tag_symbols(
-    docblock: &str,
-    desc_start_in_docblock: usize,
-    base_offset: u32,
-    spans: &mut Vec<SymbolSpan>,
-) -> Option<(String, u32, Option<PhpType>)> {
-    let desc = docblock.get(desc_start_in_docblock..)?;
-    // Take only the first line of the description (template tags are
-    // always single-line).
-    let first_line = desc.split('\n').next().unwrap_or(desc);
-    let trimmed = first_line.trim_start();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let leading_ws = first_line.len() - trimmed.len();
-
-    // The first non-whitespace token is the parameter name (e.g. `T`, `TNode`).
-    let param_end = trimmed
-        .find(|c: char| c.is_whitespace())
-        .unwrap_or(trimmed.len());
-
-    let param_name = &trimmed[..param_end];
-    let param_file_offset = base_offset + (desc_start_in_docblock + leading_ws) as u32;
-
-    let after_param = &trimmed[param_end..];
-    let after_param_trimmed = after_param.trim_start();
-
-    // Check for `of` keyword.
-    if !after_param_trimmed.starts_with("of ") && !after_param_trimmed.starts_with("of\t") {
-        return Some((param_name.to_string(), param_file_offset, None));
-    }
-
-    // Skip `of` and whitespace to get to the bound type.
-    let after_of = &after_param_trimmed[2..]; // skip "of"
-    let after_of_trimmed = after_of.trim_start();
-    if after_of_trimmed.is_empty() {
-        return Some((param_name.to_string(), param_file_offset, None));
-    }
-
-    // Compute the offset of the bound type within the docblock.
-    let bound_offset_in_desc = trimmed.len() - after_of_trimmed.len();
-    let bound_start_in_docblock = desc_start_in_docblock + leading_ws + bound_offset_in_desc;
-
-    let (type_token, _remainder) = split_type_token(after_of_trimmed);
-    let bound = if !type_token.is_empty() {
-        emit_type_spans(
-            type_token,
-            base_offset + bound_start_in_docblock as u32,
-            spans,
-        );
-        Some(PhpType::parse(type_token))
-    } else {
-        None
-    };
-
-    Some((param_name.to_string(), param_file_offset, bound))
-}
-
-// ─── @method tag extraction ─────────────────────────────────────────────────
-
-/// Handle `@method` tags whose description has the form:
-/// `[static] ReturnType methodName(ParamType $p, ...)`
-///
-/// `desc_start_in_docblock` is the byte offset within `docblock` where
-/// the tag's description begins.
-fn extract_method_tag_symbols(
-    docblock: &str,
-    desc_start_in_docblock: usize,
-    base_offset: u32,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    let desc = match docblock.get(desc_start_in_docblock..) {
-        Some(d) => d,
-        None => return,
-    };
-    // Take only the first line (method tags are single-line).
-    let first_line = desc.split('\n').next().unwrap_or(desc);
-    let trimmed = first_line.trim_start();
-    if trimmed.is_empty() {
-        return;
-    }
-    let leading_ws = first_line.len() - trimmed.len();
-
-    let mut rest = trimmed;
-    let mut rest_offset_in_docblock = desc_start_in_docblock + leading_ws;
-
-    // Skip optional `static` keyword.
-    let mut is_static = false;
-    if rest.starts_with("static ") || rest.starts_with("static\t") {
-        is_static = true;
-        let skip = "static".len();
-        let after_static = rest[skip..].trim_start();
-        let whitespace_len = rest.len() - skip - after_static.len();
-        rest_offset_in_docblock += skip + whitespace_len;
-        rest = after_static;
-    }
-
-    if rest.is_empty() {
-        return;
-    }
-
-    // Extract return type.
-    let (return_type, remainder) = split_type_token(rest);
-
-    // When the method has no explicit return type (e.g. `@method foo()`),
-    // `split_type_token` consumes `foo()` as the "type" because the
-    // parentheses are treated as a grouped type unit.  Detect this by
-    // checking if `return_type` contains `(` and `remainder` is empty.
-    // In that case, re-split at the method-name `(`.
-    let (return_type, remainder): (&str, &str) =
-        if remainder.is_empty() && return_type.contains('(') {
-            // The "type" is actually `name(params)`.  Split at the first
-            // `(` that follows a valid identifier to separate the method
-            // name from its parameters.
-            if let Some(paren) = return_type.find('(') {
-                let before = &return_type[..paren];
-                // Only re-split if the text before `(` looks like a plain
-                // identifier (no type operators).
-                let is_plain_ident = !before.contains('|')
-                    && !before.contains('&')
-                    && !before.contains('<')
-                    && !before.contains('{')
-                    && !before.contains(' ');
-                if is_plain_ident {
-                    ("", return_type)
-                } else {
-                    (return_type, remainder)
-                }
-            } else {
-                (return_type, remainder)
-            }
-        } else {
-            (return_type, remainder)
-        };
-
-    if !return_type.is_empty() {
-        emit_type_spans(
-            return_type,
-            base_offset + rest_offset_in_docblock as u32,
-            spans,
-        );
-    }
-
-    // After the return type, find the `(` for parameter list.
-    if let Some(paren_pos) = remainder.find('(') {
-        // Emit MemberDeclaration span for the method name.
-        let method_name = remainder[..paren_pos].trim();
-        if !method_name.is_empty() {
-            // Calculate the absolute offset of the method name within the
-            // docblock.  `remainder` is a substring of `rest` that starts
-            // after `return_type`.  Its first byte is at:
-            //   rest_offset_in_docblock + return_type.len()
-            let remainder_start_in_docblock = rest_offset_in_docblock + return_type.len();
-            let trimmed_before_paren = remainder[..paren_pos].trim_start();
-            let ws_before_name = remainder[..paren_pos].len() - trimmed_before_paren.len();
-            let name_start_in_docblock = remainder_start_in_docblock + ws_before_name;
-            let name_file_start = base_offset + name_start_in_docblock as u32;
-            let name_file_end = name_file_start + method_name.len() as u32;
-            spans.push(SymbolSpan {
-                start: name_file_start,
-                end: name_file_end,
-                kind: SymbolKind::MemberDeclaration {
-                    name: crate::atom::atom(method_name),
-                    is_static,
-                },
-            });
-        }
-        let close = remainder[paren_pos..].find(')');
-        if let Some(close_pos) = close {
-            let inner = &remainder[paren_pos + 1..paren_pos + close_pos];
-            let inner_offset_in_docblock = rest_offset_in_docblock
-                + return_type.len()
-                + (remainder.len() - rest[return_type.len()..].len())
-                + paren_pos
-                + 1;
-
-            // Simple comma-split at depth 0 for parameters.
-            let mut depth = 0i32;
-            let mut param_start = 0usize;
-
-            for (i, ch) in inner.char_indices() {
-                match ch {
-                    '<' | '(' | '{' => depth += 1,
-                    '>' | ')' | '}' => depth -= 1,
-                    ',' if depth == 0 => {
-                        let param = inner[param_start..i].trim();
-                        emit_method_param_type(
-                            param,
-                            inner_offset_in_docblock,
-                            param_start,
-                            base_offset,
-                            spans,
-                        );
-                        param_start = i + 1;
-                    }
-                    _ => {}
-                }
-            }
-            // Last parameter.
-            let param = inner[param_start..].trim();
-            emit_method_param_type(
-                param,
-                inner_offset_in_docblock,
-                param_start,
-                base_offset,
-                spans,
-            );
-        }
-    }
-}
-
-// ─── @property tag symbol extraction ───────────────────────────────────────
-
-/// Extract a `MemberDeclaration` span from `@property`, `@property-read`,
-/// `@property-write`, and their `@psalm-` equivalents.
-///
-/// Format: `@property Type $name` or `@property $name` (no type).
-/// The emitted `MemberDeclaration` name does **not** include the `$` prefix.
-fn extract_property_tag_symbols(
-    docblock: &str,
-    desc_start_in_docblock: usize,
-    base_offset: u32,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    if desc_start_in_docblock >= docblock.len() {
-        return;
-    }
-    let raw = &docblock[desc_start_in_docblock..];
-    let first_nl = raw.find('\n').unwrap_or(raw.len());
-    let first_line = &raw[..first_nl];
-    let trimmed = first_line.trim_start();
-    if trimmed.is_empty() {
-        return;
-    }
-    let leading_ws = first_line.len() - trimmed.len();
-    let adjusted_start = desc_start_in_docblock + leading_ws;
-
-    // Split off the type (if any).  The property name `$name` is in the
-    // remainder after the type.
-    let (type_token, remainder) = split_type_token(trimmed);
-
-    // Emit type spans for the property type (if present).
-    if !type_token.is_empty() {
-        emit_type_spans(type_token, base_offset + adjusted_start as u32, spans);
-    }
-
-    // Find `$name` in the remainder.
-    let remainder_trimmed = remainder.trim_start();
-    if remainder_trimmed.is_empty() {
-        return;
-    }
-    let Some(dollar_pos) = remainder_trimmed.find('$') else {
-        return;
-    };
-    let after_dollar = &remainder_trimmed[dollar_pos + '$'.len_utf8()..];
-    // The name ends at the next whitespace or end of string.
-    let name_end = after_dollar
-        .find(|c: char| c.is_whitespace())
-        .unwrap_or(after_dollar.len());
-    let prop_name = &after_dollar[..name_end];
-    if prop_name.is_empty() {
-        return;
-    }
-
-    // Calculate absolute offset of the property name (excluding `$`).
-    let ws_before_remainder = remainder.len() - remainder_trimmed.len();
-    let name_start_in_docblock =
-        adjusted_start + type_token.len() + ws_before_remainder + dollar_pos + '$'.len_utf8();
-    let name_file_start = base_offset + name_start_in_docblock as u32;
-    let name_file_end = name_file_start + prop_name.len() as u32;
-
-    spans.push(SymbolSpan {
-        start: name_file_start,
-        end: name_file_end,
-        kind: SymbolKind::MemberDeclaration {
-            name: crate::atom::atom(prop_name),
-            is_static: false,
-        },
-    });
 }
 
 // ─── @see tag symbol extraction ─────────────────────────────────────────────
 
-/// Extract a symbol reference from a structured `@see` tag.
-///
-/// The tag's `description_span` gives the file-level offset of the
-/// reference token.
-fn extract_see_tag_symbol(tag: &crate::docblock::parser::TagInfo, spans: &mut Vec<SymbolSpan>) {
-    let desc = tag.description.trim();
-    if desc.is_empty() {
-        return;
-    }
-    let reference = desc.split_whitespace().next().unwrap_or("");
-    if reference.is_empty() {
-        return;
-    }
-    // Compute the file offset: description_span.start + any leading whitespace.
-    let raw_desc = &tag.description;
-    let leading_ws = raw_desc.len() - raw_desc.trim_start().len();
-    let file_offset = tag.description_span.start.offset + leading_ws as u32;
-    emit_see_reference(reference, file_offset, spans);
-}
-
 /// Scan raw docblock text for inline `{@see ...}` references.
 ///
-/// These appear in free-text (descriptions, not top-level tags) and must
-/// be found by scanning the raw string since the PHPDoc parser does not
-/// expose inline tag positions with sufficient granularity.
+/// The CST does model these (as a `TextSegment::InlineTag`), but they can turn
+/// up in any prose: the free text before the first tag, and the description of
+/// every tag that has one.  Scanning the raw string reaches all of them in one
+/// pass, without a `Text` visitor threaded through each tag shape.
 fn extract_inline_see_symbols(docblock: &str, base_offset: u32, spans: &mut Vec<SymbolSpan>) {
     let mut search_from = 0;
     while let Some(open) = docblock[search_from..].find("{@see ") {
@@ -1411,37 +976,6 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                     is_definition: false,
                 },
             });
-        }
-    }
-}
-
-/// Emit a type span for a single parameter in a `@method` tag's parameter list.
-///
-/// `inner_offset_in_docblock` is the byte offset of the opening `(` + 1
-/// within the raw docblock string.  `param_start_in_inner` is the byte
-/// offset of this parameter's text within the parenthesized list.
-fn emit_method_param_type(
-    param: &str,
-    inner_offset_in_docblock: usize,
-    param_start_in_inner: usize,
-    base_offset: u32,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    if param.is_empty() {
-        return;
-    }
-    // A parameter looks like `TypeHint $varName` or just `$varName`.
-    if let Some(dollar_pos) = param.find('$') {
-        let type_part = param[..dollar_pos].trim();
-        if !type_part.is_empty() {
-            let type_start_in_param = param.find(type_part).unwrap_or(0);
-            let (type_token, _) = split_type_token(type_part);
-            if !type_token.is_empty() {
-                let file_offset = base_offset
-                    + (inner_offset_in_docblock + param_start_in_inner + type_start_in_param)
-                        as u32;
-                emit_type_spans(type_token, file_offset, spans);
-            }
         }
     }
 }

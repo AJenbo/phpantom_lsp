@@ -368,6 +368,27 @@ fn vendor_rank(tag: &TagInfo) -> u8 {
 ///   When the caller does not have span information (e.g. unit tests that
 ///   work with standalone strings), pass a zero-offset span.
 pub fn parse_docblock(docblock: &str, base_span: Span) -> Option<DocblockInfo> {
+    with_docblock_cst(docblock, base_span, |document| {
+        collect_tags(document, docblock, base_span.start.offset)
+    })
+}
+
+/// Parse a docblock and hand the CST to `f`.
+///
+/// Every span in the CST is a *file* offset, because the parser is anchored
+/// at `base_span`: the lexer treats the `*` continuation prefixes as trivia,
+/// so an identifier nested inside a type written across several lines still
+/// reports where it really sits in the file.  That makes this the entry point
+/// for anything that needs source positions rather than text, and it is why
+/// the symbol map walks the CST instead of re-scanning tag values.
+///
+/// The CST borrows from an arena that dies with this call, so it cannot
+/// escape the closure.  Returns `None` if the string is not a docblock.
+pub fn with_docblock_cst<R>(
+    docblock: &str,
+    base_span: Span,
+    f: impl FnOnce(&Document<'_>) -> R,
+) -> Option<R> {
     if !docblock.trim_start().starts_with("/**") {
         return None;
     }
@@ -378,7 +399,7 @@ pub fn parse_docblock(docblock: &str, base_span: Span) -> Option<DocblockInfo> {
     let arena = LocalArena::new();
     let document = PHPDocParser::parse_with_span(&arena, docblock.as_bytes(), base_span);
 
-    Some(collect_tags(&document, docblock, base_span.start.offset))
+    Some(f(&document))
 }
 
 /// Walk a parsed `Document` and collect all tags into owned [`TagInfo`]
@@ -678,7 +699,7 @@ fn variable_text(value: &[u8]) -> String {
 /// A type written across several lines carries the `*` continuation prefix
 /// and the source indentation; both have to go before the string can be
 /// handed to the type parser.
-fn type_text(docblock: &str, base_offset: u32, span: Span) -> String {
+pub(crate) fn type_text(docblock: &str, base_offset: u32, span: Span) -> String {
     let raw = source_text(docblock, base_offset, span);
     if raw.contains('\n') {
         collapse_newlines(&raw)
@@ -696,7 +717,11 @@ fn type_text(docblock: &str, base_offset: u32, span: Span) -> String {
 /// declined to model at all would drop out of the text.  Taking the region
 /// from the tag name instead yields the value exactly as written, which is
 /// what the extractors re-parse.
-fn value_span(tag: &mago_phpdoc_syntax::cst::Tag<'_>, docblock: &str, base_offset: u32) -> Span {
+pub(crate) fn value_span(
+    tag: &mago_phpdoc_syntax::cst::Tag<'_>,
+    docblock: &str,
+    base_offset: u32,
+) -> Span {
     let name_end = tag.name.span.end;
     let end = tag.value.span().end;
     let start = if end.offset > name_end.offset {

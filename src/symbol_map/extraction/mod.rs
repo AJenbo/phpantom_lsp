@@ -8,8 +8,8 @@
 use mago_syntax::cst::*;
 
 use super::docblock::{
-    class_ref_span, class_ref_span_ctx, extract_docblock_symbols, extract_param_var_spans,
-    extract_var_docblock_var_spans, get_docblock_text_with_offset, is_navigable_type,
+    class_ref_span, class_ref_span_ctx, extract_docblock_symbols, get_docblock_text_with_offset,
+    is_navigable_type,
 };
 use super::{
     CallSite, ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap,
@@ -163,7 +163,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     // step below removes any duplicates from already-processed docblocks.
     for t in program.trivia.iter() {
         if t.kind == TriviaKind::DocBlockComment {
-            let _tpl = extract_docblock_symbols(
+            let _found = extract_docblock_symbols(
                 bytes_to_str(t.value),
                 t.span.start.offset,
                 &mut ctx.spans,

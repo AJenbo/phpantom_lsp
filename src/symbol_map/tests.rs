@@ -1076,6 +1076,119 @@ fn fqn_lookup_at_middle_of_name() {
     }
 }
 
+// ── Multi-line docblock tag tests ───────────────────────────────────
+
+/// The name of the class a `ClassReference` span at `offset` points at.
+fn class_ref_at(map: &SymbolMap, php: &str, needle: &str) -> String {
+    let offset = php.find(needle).unwrap() as u32;
+    match map.lookup(offset) {
+        Some(SymbolSpan {
+            kind: SymbolKind::ClassReference { name, .. },
+            ..
+        }) => name.to_string(),
+        other => panic!("expected a ClassReference at {needle:?}, got {other:?}"),
+    }
+}
+
+/// The name of a `MemberDeclaration` span at the first occurrence of `needle`.
+fn member_decl_at(map: &SymbolMap, php: &str, needle: &str) -> String {
+    let offset = php.find(needle).unwrap() as u32;
+    match map.lookup(offset) {
+        Some(SymbolSpan {
+            kind: SymbolKind::MemberDeclaration { name, .. },
+            ..
+        }) => name.to_string(),
+        other => panic!("expected a MemberDeclaration at {needle:?}, got {other:?}"),
+    }
+}
+
+#[test]
+fn multiline_method_tag_produces_spans_for_every_part() {
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method Collection<\n",
+        " *     int,\n",
+        " *     Item\n",
+        " * > fetchAll(Filter $filter)\n",
+        " */\n",
+        "class Foo {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    assert_eq!(class_ref_at(&map, php, "Collection"), "Collection");
+    assert_eq!(class_ref_at(&map, php, "Item"), "Item");
+    assert_eq!(member_decl_at(&map, php, "fetchAll"), "fetchAll");
+    assert_eq!(class_ref_at(&map, php, "Filter"), "Filter");
+}
+
+#[test]
+fn multiline_property_tag_produces_spans_for_every_part() {
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property Wrapper<\n",
+        " *     Payload\n",
+        " * > $payload\n",
+        " */\n",
+        "class Foo {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    assert_eq!(class_ref_at(&map, php, "Wrapper"), "Wrapper");
+    assert_eq!(class_ref_at(&map, php, "Payload"), "Payload");
+    assert_eq!(member_decl_at(&map, php, "payload\n"), "payload");
+}
+
+#[test]
+fn multiline_array_shape_return_resolves_nested_classes() {
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @return array{\n",
+        " *     first: Alpha,\n",
+        " *     second: \\App\\Beta,\n",
+        " * }\n",
+        " */\n",
+        "function f() {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    assert_eq!(class_ref_at(&map, php, "Alpha"), "Alpha");
+    assert_eq!(class_ref_at(&map, php, "\\App\\Beta"), "App\\Beta");
+}
+
+#[test]
+fn static_method_tag_with_parenthesised_return_type_is_recovered() {
+    // The PHPDoc grammar cannot tell `@method static (…) foo()` from a method
+    // literally called `static`, so the tag only survives via recovery.
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method static (string|int)[] getArray()\n",
+        " * @method static Wrapped getWrapped()\n",
+        " */\n",
+        "class Foo {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let offset = php.find("getArray").unwrap() as u32;
+    match map.lookup(offset) {
+        Some(SymbolSpan {
+            kind: SymbolKind::MemberDeclaration { name, is_static },
+            ..
+        }) => {
+            assert_eq!(name, "getArray");
+            assert!(is_static, "the `static` modifier must survive recovery");
+        }
+        other => panic!("expected a static MemberDeclaration, got {other:?}"),
+    }
+
+    // The tag the grammar *can* parse still works alongside a recovered one.
+    assert_eq!(member_decl_at(&map, php, "getWrapped"), "getWrapped");
+    assert_eq!(class_ref_at(&map, php, "Wrapped"), "Wrapped");
+}
+
 // ── @template tag tests ─────────────────────────────────────────────
 
 #[test]

@@ -4212,6 +4212,25 @@ class MethodTagTemplateDemo
     }
 }
 
+
+// ── Multi-Line @method / @property Tags ─────────────────────────────────────
+
+class MultiLineDocblockTagDemo
+{
+    public function demo(): void
+    {
+        // A @method or @property tag whose type wraps onto continuation lines
+        // resolves like its single-line form, and every name written inside the
+        // tag stays navigable: try go-to-definition on `FluentCollection`,
+        // `Pen`, `fetchAll` or `$penHolder` in the docblock of
+        // ScaffoldingMultiLineTags.
+        $shed = new ScaffoldingMultiLineTags();
+
+        $shed->fetchAll('black')->first()->write();  // TValue resolves to Pen
+        $shed->penHolder->first()->write();          // same through @property
+    }
+}
+
 /**
  * Convert to arrow function — place cursor on a single-expression closure
  * and trigger code actions to see "Convert to arrow function".
@@ -4367,6 +4386,31 @@ class ScaffoldingMethodTagTemplate
 {
     /** @return mixed */
     public function __call(string $name, array $args): mixed { return $args[0] ?? null; }
+}
+
+// ── Multi-line @method / @property scaffolding ─────────────────────────────────
+
+/**
+ * @method FluentCollection<
+ *     int,
+ *     Pen
+ * > fetchAll(string $ink)
+ * @property FluentCollection<
+ *     int,
+ *     Pen
+ * > $penHolder
+ */
+class ScaffoldingMultiLineTags
+{
+    public function __call(string $name, array $args): mixed
+    {
+        return collect([new Pen(is_string($args[0] ?? null) ? $args[0] : 'black')]);
+    }
+
+    public function __get(string $name): mixed
+    {
+        return collect([new Pen()]);
+    }
 }
 
 // ── Template-param @mixin scaffolding ─────────────────────────────────────────
@@ -7272,6 +7316,17 @@ function runDemoAssertions(): void
     assert($collected instanceof FluentCollection, 'collect() must return FluentCollection');
     $firstPen = $collected->first();
     assert($firstPen instanceof Pen, 'collect(Pen[])->first() must return Pen');
+
+    // ── Multi-line @method / @property tags ──────────────────────────────
+    $multiLine = new ScaffoldingMultiLineTags();
+    assert(
+        $multiLine->fetchAll('black')->first() instanceof Pen,
+        'multi-line @method tag must yield FluentCollection<int, Pen>',
+    );
+    assert(
+        $multiLine->penHolder->first() instanceof Pen,
+        'multi-line @property tag must yield FluentCollection<int, Pen>',
+    );
 
     // ── Generic @phpstan-assert narrowing ────────────────────────────────
     $assertObj = new Pen();

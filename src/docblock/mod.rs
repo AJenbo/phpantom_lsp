@@ -38,6 +38,7 @@ pub(crate) mod type_strings;
 
 // Parsed docblock representation
 pub use parser::{DocblockInfo, TagInfo, parse_docblock_for_tags};
+pub(crate) use tag_kind::tag_kind;
 pub use tag_kind::{TagKind, TagVendor};
 
 // Core tags

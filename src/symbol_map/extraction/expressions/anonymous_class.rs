@@ -47,7 +47,7 @@ pub(super) fn extract_anonymous_class_expr<'a>(
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, anon)
     {
-        let _tpl = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
     }
 
     // Members.
