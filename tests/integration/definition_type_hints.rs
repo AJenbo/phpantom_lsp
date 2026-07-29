@@ -888,6 +888,37 @@ async fn test_goto_definition_docblock_generic_inner_type() {
     assert_location(result2.unwrap(), &uri, 1);
 }
 
+/// Clicking on a class name that follows both a non-ASCII class name and a
+/// PHPStan `*` wildcard in the same generic argument list.
+#[tokio::test]
+async fn test_goto_definition_docblock_generic_wildcard_after_multibyte() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                             // 0
+        "class Café {}\n",                     // 1
+        "class User {}\n",                     // 2
+        "class Map {}\n",                      // 3
+        "class Repository {\n",                // 4
+        "    /**\n",                           // 5
+        "     * @return Map<Café, *, User>\n", // 6
+        "     */\n",                           // 7
+        "    public function all() {\n",       // 8
+        "    }\n",                             // 9
+        "}\n",                                 // 10
+    );
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on "User", which sits after both the multibyte `é` and the
+    // `*` wildcard on line 6.
+    let result = goto_definition(&backend, &uri, 6, 29).await;
+    assert!(
+        result.is_some(),
+        "Should resolve a generic argument that follows a multibyte name and a `*` wildcard"
+    );
+    assert_location(result.unwrap(), &uri, 2);
+}
+
 /// Clicking on a class name in a `@throws` docblock tag.
 #[tokio::test]
 async fn test_goto_definition_docblock_throws_type() {

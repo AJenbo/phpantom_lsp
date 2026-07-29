@@ -17,12 +17,10 @@ impl PhpType {
             return PhpType::untyped();
         }
 
-        // Replace PHPStan `*` wildcards in generic positions with `mixed`.
-        let cleaned = replace_star_wildcards(input);
         // Replace known hyphenated pseudo-types (e.g. `model-property`)
         // with underscore placeholders so Mago can parse the surrounding
         // type structure.  The placeholders are restored in the result.
-        let cleaned = replace_hyphenated_keywords(&cleaned);
+        let cleaned = replace_hyphenated_keywords(input);
         let effective: &str = &cleaned;
 
         let span = Span::new(
@@ -32,8 +30,7 @@ impl PhpType {
         );
 
         let arena = LocalArena::new();
-        let effective = arena.alloc_slice_copy(effective.as_bytes());
-        match mago_phpdoc_syntax::parse_type(&arena, effective, span) {
+        match mago_phpdoc_syntax::parse_type(&arena, effective.as_bytes(), span) {
             Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
             Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
         }
@@ -107,22 +104,6 @@ pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {
     clean.parse::<f64>().ok()
 }
 
-/// Replace PHPStan `*` wildcards in generic type argument positions with
-/// `mixed`.
-///
-/// PHPStan's phpdoc-parser supports `*` as a bivariant wildcard inside
-/// generic angle brackets, e.g. `Relation<TRelatedModel, *, *>`.  The
-/// `*` simply means "any type" and is equivalent to `mixed`.
-/// `mago-phpdoc-syntax` does not model it as a type, so we pre-process it.
-///
-/// Only replaces `*` tokens that appear inside angle brackets at generic
-/// argument boundaries: preceded (ignoring whitespace) by `<` or `,` and
-/// followed (ignoring whitespace) by `,` or `>`.  This avoids mangling:
-/// - `Foo::*` — member references (preceded by `::`)
-/// - `int-mask-of<self::FOO_*>` — constant wildcard patterns (preceded
-///   by `_` or identifier chars)
-///
-/// Returns the input unchanged (no allocation) when no wildcards are found.
 /// Hyphenated PHPDoc pseudo-type names that `mago_phpdoc_syntax` cannot
 /// parse because hyphens are not valid PHP identifier characters.
 /// Each pair is `(hyphenated, placeholder)`.
@@ -178,77 +159,6 @@ fn try_parse_hyphenated_generic(input: &str) -> Option<PhpType> {
     }
     let args: Vec<PhpType> = inner.split(',').map(|s| PhpType::parse(s.trim())).collect();
     Some(PhpType::generic(base, args))
-}
-
-pub(crate) fn replace_star_wildcards(s: &str) -> std::borrow::Cow<'_, str> {
-    if !s.contains('*') {
-        return std::borrow::Cow::Borrowed(s);
-    }
-
-    let bytes = s.as_bytes();
-
-    // First pass: check if any `*` is actually a generic wildcard.
-    let has_generic_wildcard =
-        (0..bytes.len()).any(|i| bytes[i] == b'*' && is_generic_wildcard(bytes, i));
-
-    if !has_generic_wildcard {
-        return std::borrow::Cow::Borrowed(s);
-    }
-
-    let mut result = String::with_capacity(s.len() + 16);
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        if bytes[i] == b'*' && is_generic_wildcard(bytes, i) {
-            result.push_str("mixed");
-            i += 1;
-        } else {
-            // Copy the whole UTF-8 character, not a single byte, so
-            // multibyte characters in the type string are not mangled.
-            let ch = s[i..].chars().next().unwrap();
-            result.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-
-    std::borrow::Cow::Owned(result)
-}
-
-/// Check whether the `*` at position `pos` in `bytes` is a PHPStan
-/// generic wildcard (as opposed to a member reference like `Foo::*`
-/// or a constant pattern like `self::FOO_*`).
-///
-/// A generic wildcard `*` is preceded (ignoring whitespace) by `<` or
-/// `,` and followed (ignoring whitespace) by `,` or `>`.
-pub(crate) fn is_generic_wildcard(bytes: &[u8], pos: usize) -> bool {
-    // Check preceding non-whitespace character.
-    let prev_ok = {
-        let mut j = pos;
-        loop {
-            if j == 0 {
-                break false;
-            }
-            j -= 1;
-            if !bytes[j].is_ascii_whitespace() {
-                break bytes[j] == b'<' || bytes[j] == b',';
-            }
-        }
-    };
-
-    if !prev_ok {
-        return false;
-    }
-
-    // Check following non-whitespace character.
-    let mut k = pos + 1;
-    while k < bytes.len() {
-        if !bytes[k].is_ascii_whitespace() {
-            return bytes[k] == b',' || bytes[k] == b'>';
-        }
-        k += 1;
-    }
-
-    false
 }
 
 /// The written name of a class-like reference.
@@ -431,6 +341,11 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw)),
         cst::Type::LiteralFloat(l) => PhpType::literal_float(bytes_to_str(l.raw)),
         cst::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw)),
+
+        // -- Wildcard: PHPStan's bivariant `*` / `_` --------------------------
+        // `Relation<TRelatedModel, *, *>` means "any type" in that generic
+        // position, which is exactly `mixed` for our purposes.
+        cst::Type::Wildcard(_) => PhpType::mixed(),
 
         // -- Negated / Posited literals (e.g. -42, +42) -----------------------
         cst::Type::Negated(n) => literal_number_type(format!("-{}", n.operand)),

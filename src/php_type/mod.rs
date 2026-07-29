@@ -20,7 +20,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use mago_allocator::{Arena, LocalArena};
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_phpdoc_syntax::cst::r#type as cst;
 use mago_span::{Position, Span};

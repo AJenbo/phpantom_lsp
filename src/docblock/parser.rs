@@ -19,7 +19,7 @@
 //! so the extractors in [`super::tags`] and friends see the type and
 //! description exactly as the author wrote them.
 
-use mago_allocator::{Arena, LocalArena};
+use mago_allocator::LocalArena;
 use mago_phpdoc_syntax::PHPDocParser;
 use mago_phpdoc_syntax::cst::{Document, Element};
 use mago_span::{HasSpan, Position, Span};
@@ -139,13 +139,11 @@ pub fn parse_docblock(docblock: &str, base_span: Span) -> Option<DocblockInfo> {
         return None;
     }
 
+    // `PHPDocParser::parse_with_span` ties the arena borrow and the content
+    // borrow to one lifetime, and the caller's bytes already outlive this
+    // scope, so they can be handed over directly — no copy into the arena.
     let arena = LocalArena::new();
-
-    // `PHPDocParser::parse_with_span` requires `content: &'arena [u8]`, so
-    // the bytes are allocated into the arena to make the borrow live long
-    // enough.
-    let content: &[u8] = arena.alloc_slice_copy(docblock.as_bytes());
-    let document = PHPDocParser::parse_with_span(&arena, content, base_span);
+    let document = PHPDocParser::parse_with_span(&arena, docblock.as_bytes(), base_span);
 
     Some(collect_tags(&document, docblock, base_span.start.offset))
 }

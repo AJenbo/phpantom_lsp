@@ -711,20 +711,6 @@ long as the extracted data. The first is mechanical but touches every
 extractor in `docblock/`; the second changes the ownership model of every
 caller. Sized for several sprint items.
 
-Two smaller pieces of the same cleanup can land independently:
-
-- **The `*` wildcard pre-pass is obsolete.** `PhpType::parse` and
-  `symbol_map/docblock.rs::emit_type_spans` both still rewrite PHPStan's
-  `*` generic wildcard to `mixed` in the type string before parsing, and
-  the latter maintains a byte offset map to undo the 1→5 character
-  expansion afterwards. The grammar now models `*` natively as
-  `Type::Wildcard`, so both passes (and the offset map) can go, replaced
-  by mapping `Type::Wildcard` to `mixed` in `convert`.
-- **`get_docblock_text_for_node` re-reads raw comment text.** Tags are
-  parsed from a `&str` recovered from trivia rather than from the trivia
-  the main `mago-syntax` parse already produced. Feeding the parser the
-  trivia bytes directly would drop a copy per docblock.
-
 ---
 
 ## P30. Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`

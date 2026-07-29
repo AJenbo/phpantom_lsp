@@ -14,8 +14,7 @@ fn assert_round_trip(input: &str) {
         Position::new(input.len() as u32),
     );
     let arena = LocalArena::new();
-    let input_arena = arena.alloc_slice_copy(input.as_bytes());
-    let mago_canonical = match mago_phpdoc_syntax::parse_type(&arena, input_arena, span) {
+    let mago_canonical = match mago_phpdoc_syntax::parse_type(&arena, input.as_bytes(), span) {
         Ok(ty) => ty.to_string(),
         Err(_) => {
             // If mago can't parse it, PhpType should produce Raw.
@@ -400,15 +399,10 @@ fn parse_generic_star_does_not_mangle_member_reference() {
 }
 
 #[test]
-fn replace_star_wildcards_does_not_mangle_constant_pattern() {
+fn parse_generic_star_does_not_mangle_constant_pattern() {
     // `int-mask-of<self::FOO_*>` — the `*` is part of a constant
-    // pattern, not a generic wildcard (preceded by `_`, not `<`/`,`).
-    // Our pre-processing must leave it untouched.  (mago itself may
-    // or may not parse the result, but that's a separate issue.)
-    use super::replace_star_wildcards;
-    let result = replace_star_wildcards("int-mask-of<self::FOO_*>");
-    assert_eq!(result.as_ref(), "int-mask-of<self::FOO_*>");
-    assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    // pattern, not a bivariant wildcard, so it must survive parsing.
+    assert_round_trip("int-mask-of<self::FOO_*>");
 }
 
 #[test]
@@ -428,12 +422,10 @@ fn parse_generic_star_with_spaces() {
 }
 
 #[test]
-fn replace_star_wildcards_preserves_multibyte() {
-    // A multibyte character alongside a generic wildcard must survive
-    // the rewrite intact (not be mangled byte-by-byte).
-    use super::replace_star_wildcards;
-    let result = replace_star_wildcards("Map<Café, *>");
-    assert_eq!(result.as_ref(), "Map<Café, mixed>");
+fn parse_generic_star_preserves_multibyte() {
+    // A multibyte character alongside a bivariant wildcard must survive
+    // intact (not be mangled byte-by-byte).
+    assert_round_trip_expected("Map<Café, *>", "Map<Café, mixed>");
 }
 
 #[test]
@@ -454,45 +446,17 @@ fn variance_annotations_are_parsed_and_discarded() {
 }
 
 #[test]
-fn replace_star_wildcards_no_star() {
-    use super::replace_star_wildcards;
-    let result = replace_star_wildcards("Collection<int, User>");
-    assert_eq!(result.as_ref(), "Collection<int, User>");
-    // Should borrow, not allocate
-    assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+fn parse_generic_wildcard_becomes_mixed() {
+    assert_round_trip_expected(
+        "Relation<TRelatedModel, *, *>",
+        "Relation<TRelatedModel, mixed, mixed>",
+    );
 }
 
 #[test]
-fn replace_star_wildcards_member_ref() {
-    use super::replace_star_wildcards;
-    let result = replace_star_wildcards("Foo::*");
-    assert_eq!(result.as_ref(), "Foo::*");
-    // Should borrow, not allocate
-    assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
-}
-
-#[test]
-fn replace_star_wildcards_constant_pattern() {
-    use super::replace_star_wildcards;
-    let result = replace_star_wildcards("int-mask-of<self::FOO_*>");
-    assert_eq!(result.as_ref(), "int-mask-of<self::FOO_*>");
-    assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
-}
-
-#[test]
-fn replace_star_wildcards_generic() {
-    use super::replace_star_wildcards;
-    let result = replace_star_wildcards("Relation<TRelatedModel, *, *>");
-    assert_eq!(result.as_ref(), "Relation<TRelatedModel, mixed, mixed>");
-}
-
-#[test]
-fn replace_star_wildcards_single_star() {
-    use super::replace_star_wildcards;
-    let result = replace_star_wildcards("Voter<self::*>");
-    // `self::*` — the `*` is preceded by `::`, not `<` or `,`
-    assert_eq!(result.as_ref(), "Voter<self::*>");
-    assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+fn parse_generic_star_keeps_member_wildcard() {
+    // `self::*` is a member reference wildcard, not a bivariant `*`.
+    assert_round_trip("Voter<self::*>");
 }
 
 #[test]

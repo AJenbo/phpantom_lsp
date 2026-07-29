@@ -13,7 +13,7 @@
 //! types with the same crate and walks the AST with accurate span
 //! information.
 
-use mago_allocator::{Arena, LocalArena};
+use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_phpdoc_syntax::cst::r#type as type_ast;
 use mago_span::{HasSpan, Position, Span};
@@ -546,45 +546,17 @@ pub(super) fn emit_type_spans(
         return;
     }
 
-    // ── Replace PHPStan `*` wildcards in generic positions ──────────
-    // PHPStan supports `*` as a bivariant wildcard in generic args,
-    // e.g. `Relation<TRelatedModel, *, *>`.  Replace with `mixed` and
-    // build an offset map that accounts for the 1→5 character
-    // expansion, so spans emitted from the cleaned string translate
-    // back to the original.
-    let (effective_cleaned, wildcard_offset_map) =
-        replace_star_wildcards_with_offset_map(type_token);
-    let effective_token: &str = &effective_cleaned;
-
     // Parse the type string.  The span we provide starts at 0 so that
-    // all AST node offsets are relative to `effective_token`.
+    // all AST node offsets are relative to `type_token`.
     let parse_span = Span::new(
         FileId::zero(),
         Position::new(0),
-        Position::new(effective_token.len() as u32),
+        Position::new(type_token.len() as u32),
     );
 
     let arena = LocalArena::new();
-    let effective_token = arena.alloc_slice_copy(effective_token.as_bytes());
-    match mago_phpdoc_syntax::parse_type(&arena, effective_token, parse_span) {
-        Ok(ty) => {
-            let mut local_spans: Vec<SymbolSpan> = Vec::new();
-            emit_type_spans_from_ast(&ty, 0, &mut local_spans);
-            // Map cleaned-string offsets back to original-string
-            // offsets, then shift by token_file_offset.
-            for mut sp in local_spans {
-                if let Some(ref map) = wildcard_offset_map {
-                    sp.start = map
-                        .get(sp.start as usize)
-                        .copied()
-                        .unwrap_or(sp.start as usize) as u32;
-                    sp.end = map.get(sp.end as usize).copied().unwrap_or(sp.end as usize) as u32;
-                }
-                sp.start += token_file_offset;
-                sp.end += token_file_offset;
-                spans.push(sp);
-            }
-        }
+    match mago_phpdoc_syntax::parse_type(&arena, type_token.as_bytes(), parse_span) {
+        Ok(ty) => emit_type_spans_from_ast(&ty, token_file_offset, spans),
         Err(_) => {
             // Parse failed — fall back to emitting a single span for
             // the whole token if it looks like a navigable class name.
@@ -608,57 +580,6 @@ pub(super) fn emit_type_spans(
             }
         }
     }
-}
-
-/// Replace PHPStan `*` wildcards in generic type argument positions with
-/// `mixed`, returning the cleaned string and an offset map.
-///
-/// The offset map translates positions in the cleaned string back to
-/// positions in the input string.  When `*` (1 byte) is replaced with
-/// `mixed` (5 bytes), all 5 positions in the output map back to the
-/// single `*` position in the input.
-///
-/// Returns `(cleaned, None)` when no wildcards are found (no allocation
-/// for the offset map).
-fn replace_star_wildcards_with_offset_map(s: &str) -> (String, Option<Vec<usize>>) {
-    use crate::php_type::is_generic_wildcard;
-
-    if !s.contains('*') {
-        return (s.to_owned(), None);
-    }
-
-    let bytes = s.as_bytes();
-    let has_generic_wildcard =
-        (0..bytes.len()).any(|i| bytes[i] == b'*' && is_generic_wildcard(bytes, i));
-
-    if !has_generic_wildcard {
-        return (s.to_owned(), None);
-    }
-
-    let mut cleaned = String::with_capacity(s.len() + 16);
-    let mut offset_map: Vec<usize> = Vec::with_capacity(s.len() + 32);
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        if bytes[i] == b'*' && is_generic_wildcard(bytes, i) {
-            // Replace `*` with `mixed` — all 5 output positions map
-            // back to the original `*` position.
-            for _ in 0.."mixed".len() {
-                offset_map.push(i);
-            }
-            cleaned.push_str("mixed");
-            i += 1;
-        } else {
-            offset_map.push(i);
-            cleaned.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-
-    // One-past-end sentinel.
-    offset_map.push(i);
-
-    (cleaned, Some(offset_map))
 }
 
 /// Walk a parsed PHPDoc type AST node and emit [`SymbolSpan`] entries
