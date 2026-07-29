@@ -12,7 +12,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::framework::{
-    FrameworkReferenceKind, namespace_segment_range_at_offset, short_segment_range,
+    FrameworkReferenceKind, SymfonySymbolKind, namespace_segment_range_at_offset,
+    short_segment_range,
 };
 use crate::symbol_map::SymbolKind;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
@@ -354,6 +355,10 @@ impl Backend {
                     .to_string();
                 (start, end, placeholder)
             }
+            FrameworkReferenceKind::SymfonySymbol {
+                kind: SymfonySymbolKind::Template,
+                ..
+            } => return None,
             FrameworkReferenceKind::SymfonySymbol { name, .. } => {
                 (reference.start, reference.end, name)
             }
@@ -402,6 +407,10 @@ impl Backend {
                     namespace_segment_range_at_offset(source, reference.start, cursor)?;
                 self.build_namespace_rename_edit(&prefix, segment_idx, new_name)
             }
+            FrameworkReferenceKind::SymfonySymbol {
+                kind: SymfonySymbolKind::Template,
+                ..
+            } => None,
             FrameworkReferenceKind::SymfonySymbol { .. } => {
                 let locations =
                     self.find_framework_references_for_rename(uri, content, position, true)?;

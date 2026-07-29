@@ -26,6 +26,7 @@ pub(crate) enum SymfonySymbolKind {
     Parameter,
     Route,
     RouteParameter,
+    Template,
 }
 
 impl SymfonySymbolKind {
@@ -35,6 +36,7 @@ impl SymfonySymbolKind {
             Self::Parameter => "parameter",
             Self::Route => "route",
             Self::RouteParameter => "route parameter",
+            Self::Template => "template",
         }
     }
 }
@@ -218,7 +220,14 @@ pub(crate) fn should_index_framework_php_content(uri: &str, content: &str) -> bo
             || content.contains("Routing\\Attribute\\Route")
             || content.contains("Routing\\Annotation\\Route")
             || content.contains("#[Route(")
-            || content.contains("#[\\Route("))
+            || content.contains("#[\\Route(")
+            || content.contains("render(")
+            || content.contains("renderView(")
+            || content.contains("renderBlock(")
+            || content.contains("htmlTemplate(")
+            || content.contains("textTemplate(")
+            || content.contains("#[Template(")
+            || content.contains("#[\\Template("))
 }
 
 fn is_skipped_resource_path(path: &Path) -> bool {
@@ -905,7 +914,13 @@ impl Backend {
         content: &str,
     ) -> Option<Vec<FrameworkReference>> {
         if is_framework_resource_uri(uri) {
-            return Some(scan_framework_references(uri, content));
+            let mut refs = scan_framework_references(uri, content);
+            if is_twig_uri(uri) {
+                self.scan_twig_template_declarations(uri, &mut refs);
+                refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
+                refs.dedup();
+            }
+            return Some(refs);
         }
         if should_index_framework_php_content(uri, content) {
             return Some(self.scan_symfony_php_references(uri, content));
@@ -1004,6 +1019,26 @@ impl Backend {
         refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
         refs.dedup();
         refs
+    }
+
+    fn scan_twig_template_declarations(&self, uri: &str, refs: &mut Vec<FrameworkReference>) {
+        let Some(root) = self.workspace.workspace_root.read().clone() else {
+            return;
+        };
+        let Some(path) = Url::parse(uri).ok().and_then(|url| url.to_file_path().ok()) else {
+            return;
+        };
+        for name in twig_template_names(&root, &path) {
+            push_symfony_symbol(refs, uri, SymfonySymbolKind::Template, name, 0, 0, true);
+        }
+    }
+
+    pub(crate) fn symfony_template_uri(&self, name: &str) -> Option<Url> {
+        if !is_safe_project_template_name(name) {
+            return None;
+        }
+        let root = self.workspace.workspace_root.read().clone()?;
+        Url::from_file_path(root.join("templates").join(name)).ok()
     }
 }
 
@@ -1216,7 +1251,15 @@ fn scan_php_symfony_literal(
     let call_name = call.name.to_ascii_lowercase();
     let named_argument = php_named_argument_before(content, call.args_start, literal.quote_start);
     let semantic_value = php_semantic_string(raw);
-    if !valid_symfony_symbol_name(&semantic_value) {
+    let template_reference = call.argument_index == 0
+        && (matches!(
+            call_name.as_str(),
+            "render" | "renderview" | "renderblock" | "htmltemplate" | "texttemplate"
+        ) || (call_name == "template"
+            && named_argument.is_none_or(|name| name.eq_ignore_ascii_case("template"))));
+    if !valid_symfony_symbol_name(&semantic_value)
+        && !(template_reference && valid_template_name(&semantic_value))
+    {
         return;
     }
 
@@ -1266,6 +1309,8 @@ fn scan_php_symfony_literal(
         (SymfonySymbolKind::Parameter, false)
     } else if route_reference {
         (SymfonySymbolKind::Route, false)
+    } else if template_reference {
+        (SymfonySymbolKind::Template, false)
     } else {
         return;
     };
@@ -1695,6 +1740,7 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
         .is_some_and(|path| path.ends_with(".twig"))
     {
         scan_twig_route_references(uri, content, &mut refs);
+        scan_twig_template_references(uri, content, &mut refs);
         refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
         refs.dedup();
         return refs;
@@ -1720,6 +1766,178 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
     refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
     refs.dedup();
     refs
+}
+
+fn is_twig_uri(uri: &str) -> bool {
+    uri.split('?')
+        .next()
+        .is_some_and(|path| path.to_ascii_lowercase().ends_with(".twig"))
+}
+
+fn scan_twig_template_references(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    scan_twig_template_calls(uri, content, refs);
+
+    let bytes = content.as_bytes();
+    let lower = content.to_ascii_lowercase();
+    let mut cursor = 0usize;
+    while let Some(tag_rel) = lower[cursor..].find("{%") {
+        let tag_start = cursor + tag_rel + 2;
+        let Some(tag_end_rel) = lower[tag_start..].find("%}") else {
+            break;
+        };
+        let tag_end = tag_start + tag_end_rel;
+        let mut keyword_start = tag_start;
+        skip_ascii_whitespace(bytes, &mut keyword_start);
+        let mut keyword_end = keyword_start;
+        while bytes
+            .get(keyword_end)
+            .is_some_and(|byte| byte.is_ascii_alphabetic())
+        {
+            keyword_end += 1;
+        }
+        let keyword = &lower[keyword_start..keyword_end];
+        if matches!(
+            keyword,
+            "extends" | "include" | "embed" | "use" | "import" | "from"
+        ) && let Some((name, start, end)) = first_quoted_value(content, keyword_end, tag_end)
+            && valid_template_name(name)
+        {
+            push_symfony_symbol(
+                refs,
+                uri,
+                SymfonySymbolKind::Template,
+                name.to_string(),
+                start,
+                end,
+                false,
+            );
+        }
+        cursor = tag_end + 2;
+    }
+}
+
+fn scan_twig_template_calls(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    let bytes = content.as_bytes();
+    let lower = content.to_ascii_lowercase();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let Some(name) = ["include", "source"].iter().find(|name| {
+            let name = name.as_bytes();
+            lower.as_bytes().get(cursor..cursor + name.len()) == Some(name)
+                && (cursor == 0 || !is_php_identifier_char(bytes[cursor - 1]))
+                && bytes
+                    .get(cursor + name.len())
+                    .is_none_or(|byte| !is_php_identifier_char(*byte))
+        }) else {
+            cursor += 1;
+            continue;
+        };
+        let mut open = cursor + name.len();
+        skip_ascii_whitespace(bytes, &mut open);
+        if bytes.get(open) != Some(&b'(') {
+            cursor += name.len();
+            continue;
+        }
+        if let Some((template, start, end)) = first_quoted_value(content, open + 1, content.len())
+            && valid_template_name(template)
+        {
+            push_symfony_symbol(
+                refs,
+                uri,
+                SymfonySymbolKind::Template,
+                template.to_string(),
+                start,
+                end,
+                false,
+            );
+            cursor = end.saturating_add(1);
+        } else {
+            cursor += name.len();
+        }
+    }
+}
+
+fn first_quoted_value(content: &str, start: usize, end: usize) -> Option<(&str, usize, usize)> {
+    let bytes = content.as_bytes();
+    let mut quote_start = start;
+    while quote_start < end && !matches!(bytes[quote_start], b'\'' | b'"') {
+        quote_start += 1;
+    }
+    let quote = *bytes.get(quote_start)?;
+    let value_start = quote_start + 1;
+    let mut value_end = value_start;
+    while value_end < end {
+        if bytes[value_end] == b'\\' {
+            value_end = (value_end + 2).min(end);
+            continue;
+        }
+        if bytes[value_end] == quote {
+            return Some((&content[value_start..value_end], value_start, value_end));
+        }
+        value_end += 1;
+    }
+    None
+}
+
+fn twig_template_names(root: &Path, path: &Path) -> Vec<String> {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+
+    if let Ok(template_path) = relative.strip_prefix("templates") {
+        if let Some(name) = normalized_template_path(template_path) {
+            names.push(name);
+        }
+        if let Ok(bundle_path) = template_path.strip_prefix("bundles") {
+            let mut components = bundle_path.components();
+            if let (Some(Component::Normal(bundle)), Some(rest)) = (
+                components.next(),
+                normalized_template_path(components.as_path()),
+            ) {
+                let bundle = bundle.to_string_lossy();
+                let namespace = bundle.strip_suffix("Bundle").unwrap_or(&bundle);
+                names.push(format!("@{namespace}/{rest}"));
+            }
+        }
+    }
+
+    let components = relative.components().collect::<Vec<_>>();
+    if let Some(template_idx) = components
+        .iter()
+        .position(|component| matches!(component, Component::Normal(name) if *name == "templates"))
+        && template_idx > 0
+        && let Component::Normal(bundle) = components[template_idx - 1]
+        && let Some(bundle) = bundle.to_string_lossy().strip_suffix("Bundle")
+    {
+        let rest = components[template_idx + 1..].iter().collect::<PathBuf>();
+        if let Some(rest) = normalized_template_path(&rest) {
+            names.push(format!("@{bundle}/{rest}"));
+        }
+    }
+
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+fn normalized_template_path(path: &Path) -> Option<String> {
+    let value = path.to_string_lossy().replace('\\', "/");
+    (!value.is_empty() && value.to_ascii_lowercase().ends_with(".twig")).then_some(value)
+}
+
+fn valid_template_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.to_ascii_lowercase().ends_with(".twig")
+        && !name.bytes().any(|byte| byte.is_ascii_whitespace())
+}
+
+pub(crate) fn is_safe_project_template_name(name: &str) -> bool {
+    valid_template_name(name)
+        && !name.starts_with(['@', '/', '\\'])
+        && !Path::new(name)
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
 }
 
 fn scan_twig_route_references(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {

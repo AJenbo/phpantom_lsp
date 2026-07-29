@@ -610,6 +610,7 @@ impl Backend {
                 SymfonySymbolKind::Service
                     | SymfonySymbolKind::Parameter
                     | SymfonySymbolKind::Route
+                    | SymfonySymbolKind::Template
             ) {
                 continue;
             }
@@ -626,7 +627,10 @@ impl Backend {
                 self.push_locations_lens(uri, pos, title, usages, lenses, seen);
             }
 
-            if *kind == SymfonySymbolKind::Parameter {
+            if matches!(
+                kind,
+                SymfonySymbolKind::Parameter | SymfonySymbolKind::Template
+            ) {
                 continue;
             }
             let block_end = references

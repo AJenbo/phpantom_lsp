@@ -30,7 +30,7 @@ impl Backend {
         position: Position,
     ) -> Option<CompletionResponse> {
         let context = if is_framework_resource_uri(uri) {
-            detect_resource_context(content, position)?
+            detect_resource_context(uri, content, position)?
         } else {
             detect_php_context(content, position)?
         };
@@ -65,6 +65,7 @@ impl Backend {
                         SymfonySymbolKind::Service => CompletionItemKind::REFERENCE,
                         SymfonySymbolKind::Route => CompletionItemKind::VALUE,
                         SymfonySymbolKind::RouteParameter => CompletionItemKind::FIELD,
+                        SymfonySymbolKind::Template => CompletionItemKind::FILE,
                     }),
                     detail: Some(format!("Symfony {}", context.kind.label())),
                     sort_text: Some(format!("{index:05}")),
@@ -138,12 +139,20 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
         || (call_name == "generate"
             && argument_index == 0
             && looks_like_route_generator_call(content, quote_start));
+    let template_context = argument_index == 0
+        && (matches!(
+            call_name.as_str(),
+            "render" | "renderview" | "renderblock" | "htmltemplate" | "texttemplate"
+        ) || (call_name == "template"
+            && named_argument.is_none_or(|name| name.eq_ignore_ascii_case("template"))));
     let kind = if service_context {
         SymfonySymbolKind::Service
     } else if parameter_context {
         SymfonySymbolKind::Parameter
     } else if route_context {
         SymfonySymbolKind::Route
+    } else if template_context {
+        SymfonySymbolKind::Template
     } else {
         return None;
     };
@@ -157,7 +166,11 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
     })
 }
 
-fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyCompletionContext> {
+fn detect_resource_context(
+    uri: &str,
+    content: &str,
+    position: Position,
+) -> Option<SymfonyCompletionContext> {
     let cursor = position_to_offset(content, position) as usize;
     let line_start = content[..cursor].rfind('\n').map_or(0, |idx| idx + 1);
     let prefix = &content[line_start..cursor];
@@ -165,9 +178,8 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
     if let Some((quote_start, _)) = opening_quote(content, cursor)
         && let Some((call_name, argument_index, args_start)) =
             php_call_context(content, quote_start)
-        && matches!(call_name, "path" | "url")
     {
-        if argument_index == 0 {
+        if matches!(call_name, "path" | "url") && argument_index == 0 {
             return Some(SymfonyCompletionContext {
                 kind: SymfonySymbolKind::Route,
                 prefix: content[quote_start + 1..cursor].to_string(),
@@ -176,7 +188,8 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
                 route_name: None,
             });
         }
-        if content[args_start..quote_start].contains('{')
+        if matches!(call_name, "path" | "url")
+            && content[args_start..quote_start].contains('{')
             && let Some(route_name) = first_string_argument(content, args_start, quote_start)
         {
             return Some(SymfonyCompletionContext {
@@ -186,6 +199,33 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
                 escape_backslashes: false,
                 route_name: Some(route_name),
             });
+        }
+        if is_twig_uri(uri)
+            && matches!(
+                call_name.to_ascii_lowercase().as_str(),
+                "include" | "source"
+            )
+            && argument_index == 0
+        {
+            return template_context(content, quote_start, cursor);
+        }
+    }
+
+    if is_twig_uri(uri)
+        && let Some((quote_start, _)) = opening_quote(content, cursor)
+    {
+        let statement = content[line_start..quote_start].trim_end();
+        let keyword = statement
+            .rsplit_once("{%")
+            .map(|(_, tail)| tail.trim_start())
+            .and_then(|tail| tail.split_whitespace().next())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if matches!(
+            keyword.as_str(),
+            "extends" | "include" | "embed" | "use" | "import" | "from"
+        ) {
+            return template_context(content, quote_start, cursor);
         }
     }
 
@@ -234,6 +274,26 @@ fn detect_resource_context(content: &str, position: Position) -> Option<SymfonyC
     }
 
     None
+}
+
+fn template_context(
+    content: &str,
+    quote_start: usize,
+    cursor: usize,
+) -> Option<SymfonyCompletionContext> {
+    Some(SymfonyCompletionContext {
+        kind: SymfonySymbolKind::Template,
+        prefix: content.get(quote_start + 1..cursor)?.to_string(),
+        content_start: quote_start + 1,
+        escape_backslashes: false,
+        route_name: None,
+    })
+}
+
+fn is_twig_uri(uri: &str) -> bool {
+    uri.split('?')
+        .next()
+        .is_some_and(|path| path.to_ascii_lowercase().ends_with(".twig"))
 }
 
 fn opening_quote(content: &str, cursor: usize) -> Option<(usize, u8)> {
@@ -405,7 +465,8 @@ mod tests {
         let yaml = "services:\n  app.foo:\n    arguments: ['@app.ba']\n";
         let offset = yaml.find("app.ba").unwrap() + 6;
         let position = offset_to_position(yaml, offset);
-        let context = detect_resource_context(yaml, position).unwrap();
+        let context =
+            detect_resource_context("file:///config/services.yaml", yaml, position).unwrap();
         assert_eq!(context.kind, SymfonySymbolKind::Service);
         assert_eq!(context.prefix, "app.ba");
     }

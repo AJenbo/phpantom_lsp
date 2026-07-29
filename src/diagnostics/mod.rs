@@ -308,6 +308,9 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        if crate::framework::is_framework_resource_uri(uri_str) {
+            return;
+        }
         self.collect_syntax_error_diagnostics(uri_str, content, out);
         self.collect_unused_import_diagnostics(uri_str, content, out);
         self.collect_unused_variable_diagnostics(uri_str, content, out);
@@ -409,6 +412,10 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
         mut observe: Option<SlowDiagnosticObserver<'_>>,
     ) {
+        if crate::framework::is_framework_resource_uri(uri_str) {
+            self.collect_unknown_symfony_resource_diagnostics(uri_str, content, out);
+            return;
+        }
         // Activate the chain resolution cache so that all slow
         // diagnostic collectors share cached intermediate chain
         // prefix results (e.g. `$model->where(...)` resolved once
@@ -584,7 +591,7 @@ impl Backend {
                 self.collect_blade_section_diagnostics(uri_str, out)
             );
         }
-        self.collect_unknown_symfony_container_diagnostics(uri_str, content, out);
+        self.collect_unknown_symfony_resource_diagnostics(uri_str, content, out);
     }
 
     /// Emit a warning for each `$this->argument('x')` / `$this->option('x')`

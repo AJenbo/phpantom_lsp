@@ -1118,6 +1118,7 @@ final class Consumer extends AbstractController
         $this->generateUrl('app_attribute', ['attributeId' => 1]);
     }
 }
+
 "#;
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
@@ -1193,4 +1194,258 @@ final class Consumer extends AbstractController
             "wrong parameter definition for {name}"
         );
     }
+}
+#[tokio::test]
+async fn symfony_twig_templates_complete_navigate_reference_and_show_lenses() {
+    let base_template = "<main>{% block body %}{% endblock %}</main>\n";
+    let card_template = "<article>Card</article>\n";
+    let page_template = r#"{% extends 'base.html.twig' %}
+{% block body %}
+  {% include 'partials/card.html.twig' %}
+{% endblock %}
+"#;
+    let controller_php = r#"<?php
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Bridge\Twig\Mime\TemplatedEmail;
+
+final class PageController extends AbstractController
+{
+    public function show(): void
+    {
+        $this->render('page.html.twig');
+        (new TemplatedEmail())->htmlTemplate('partials/card.html.twig');
+    }
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("templates/base.html.twig", base_template),
+            ("templates/partials/card.html.twig", card_template),
+            ("templates/page.html.twig", page_template),
+            ("src/PageController.php", controller_php),
+        ],
+    );
+    let base_uri = uri_for(&dir, "templates/base.html.twig");
+    let card_uri = uri_for(&dir, "templates/partials/card.html.twig");
+    let page_uri = uri_for(&dir, "templates/page.html.twig");
+    let controller_uri = uri_for(&dir, "src/PageController.php");
+    open_doc(&backend, base_uri.clone(), "twig", base_template).await;
+    open_doc(&backend, card_uri.clone(), "twig", card_template).await;
+    open_doc(&backend, page_uri.clone(), "twig", page_template).await;
+    open_doc(&backend, controller_uri.clone(), "php", controller_php).await;
+
+    for (uri, content, name, expected_uri) in [
+        (&page_uri, page_template, "base.html.twig", &base_uri),
+        (
+            &page_uri,
+            page_template,
+            "partials/card.html.twig",
+            &card_uri,
+        ),
+        (&controller_uri, controller_php, "page.html.twig", &page_uri),
+    ] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, name, 3),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .expect("template reference should resolve");
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(&location.uri, expected_uri, "wrong definition for {name}");
+        assert_eq!(location.range.start, Position::new(0, 0));
+    }
+
+    for (uri, content, name) in [
+        (&page_uri, page_template, "base.html.twig"),
+        (&controller_uri, controller_php, "page.html.twig"),
+    ] {
+        let response = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, name, 5),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .expect("template completion should return candidates");
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        assert!(
+            items.iter().any(|item| item.label == name),
+            "expected {name} completion, got {:?}",
+            items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let references = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: controller_uri.clone(),
+                },
+                position: position_in(controller_php, "page.html.twig", 4),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap()
+        .expect("template references should be returned");
+    assert!(references.iter().any(|location| location.uri == page_uri));
+
+    let lenses = backend
+        .handle_code_lens(base_uri.as_str(), base_template)
+        .unwrap_or_default();
+    assert!(
+        lenses.iter().any(|lens| {
+            lens.command
+                .as_ref()
+                .is_some_and(|command| command.title == "Symfony template: 1 ref")
+        }),
+        "expected a declaration-side Twig reference lens, got {lenses:?}"
+    );
+}
+
+#[tokio::test]
+async fn symfony_missing_template_diagnostic_offers_create_template_action() {
+    let controller_php = r#"<?php
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class PageController extends AbstractController
+{
+    public function show(): void
+    {
+        $this->render('missing/page.html.twig');
+        $this->render('@Vendor/external.html.twig');
+    }
+}
+"#;
+    let (backend, dir) =
+        create_psr4_workspace(COMPOSER, &[("src/PageController.php", controller_php)]);
+    let controller_uri = uri_for(&dir, "src/PageController.php");
+    open_doc(&backend, controller_uri.clone(), "php", controller_php).await;
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(controller_uri.as_str(), controller_php, &mut diagnostics);
+    let template_diagnostics = diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code == "unknown_symfony_template"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        template_diagnostics.len(),
+        1,
+        "namespaced vendor templates should not be diagnosed"
+    );
+    assert!(
+        template_diagnostics[0]
+            .message
+            .contains("missing/page.html.twig")
+    );
+
+    let actions = backend.handle_code_action(
+        controller_uri.as_str(),
+        controller_php,
+        &CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: controller_uri.clone(),
+            },
+            range: template_diagnostics[0].range,
+            context: CodeActionContext {
+                diagnostics: template_diagnostics,
+                only: Some(vec![CodeActionKind::QUICKFIX]),
+                trigger_kind: Some(CodeActionTriggerKind::INVOKED),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        },
+    );
+    let action = actions
+        .iter()
+        .find_map(|action| match action {
+            CodeActionOrCommand::CodeAction(action)
+                if action.title == "Create Twig template 'missing/page.html.twig'" =>
+            {
+                Some(action)
+            }
+            _ => None,
+        })
+        .expect("missing template should offer a create-file quick fix");
+    let Some(DocumentChanges::Operations(operations)) = action
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.document_changes.as_ref())
+    else {
+        panic!("expected resource operations");
+    };
+    assert!(operations.iter().any(|operation| {
+        matches!(
+            operation,
+            DocumentChangeOperation::Op(ResourceOp::Create(create))
+                if create.uri.path().ends_with("/templates/missing/page.html.twig")
+        )
+    }));
+}
+
+#[tokio::test]
+async fn symfony_bundle_override_templates_use_twig_namespaces() {
+    let template = "<div>Widget</div>\n";
+    let consumer = "{% include '@Acme/widget.html.twig' %}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("templates/bundles/AcmeBundle/widget.html.twig", template),
+            ("templates/consumer.html.twig", consumer),
+        ],
+    );
+    let template_uri = uri_for(&dir, "templates/bundles/AcmeBundle/widget.html.twig");
+    let consumer_uri = uri_for(&dir, "templates/consumer.html.twig");
+    open_doc(&backend, template_uri.clone(), "twig", template).await;
+    open_doc(&backend, consumer_uri.clone(), "twig", consumer).await;
+
+    let definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: consumer_uri },
+                position: position_in(consumer, "@Acme/widget.html.twig", 8),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("Twig bundle namespace should resolve");
+    let location = match definition {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+        GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+    };
+    assert_eq!(location.uri, template_uri);
 }

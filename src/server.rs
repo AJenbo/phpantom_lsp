@@ -781,6 +781,7 @@ impl LanguageServer for Backend {
             }
             if is_framework_resource {
                 self.index_framework_uri_content(&uri, &text);
+                self.schedule_diagnostics(uri.clone());
             }
             self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
                 .await;
@@ -874,6 +875,7 @@ impl LanguageServer for Backend {
             }
             if is_framework_resource {
                 self.index_framework_uri_content(&uri, &text);
+                self.schedule_diagnostics(uri.clone());
             }
             if self.supports_code_lens_refresh.load(Ordering::Acquire)
                 && let Some(ref client) = self.client

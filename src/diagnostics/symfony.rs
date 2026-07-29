@@ -1,4 +1,4 @@
-//! Conservative diagnostics for project-local Symfony container symbols.
+//! Conservative diagnostics for project-local Symfony named resources.
 
 use std::collections::HashSet;
 
@@ -9,7 +9,7 @@ use crate::framework::{FrameworkReferenceKind, SymfonySymbolKind};
 use crate::text_position::offset_to_position;
 
 impl Backend {
-    pub(crate) fn collect_unknown_symfony_container_diagnostics(
+    pub(crate) fn collect_unknown_symfony_resource_diagnostics(
         &self,
         uri: &str,
         content: &str,
@@ -28,6 +28,10 @@ impl Backend {
             .collect::<HashSet<_>>();
         let known_routes = self
             .framework_symfony_symbol_names(SymfonySymbolKind::Route)
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let known_templates = self
+            .framework_symfony_symbol_names(SymfonySymbolKind::Template)
             .into_iter()
             .collect::<HashSet<_>>();
 
@@ -49,6 +53,7 @@ impl Backend {
                 SymfonySymbolKind::Parameter => known_parameters.contains(name),
                 SymfonySymbolKind::Route => known_routes.contains(name),
                 SymfonySymbolKind::RouteParameter => true,
+                SymfonySymbolKind::Template => known_templates.contains(name),
             };
             if known || !is_project_local_name(*kind, name) {
                 continue;
@@ -75,4 +80,9 @@ fn is_project_local_name(kind: SymfonySymbolKind, name: &str) -> bool {
     lower.starts_with("app.")
         || (kind == SymfonySymbolKind::Service && name.starts_with("App\\"))
         || (kind == SymfonySymbolKind::Route && lower.starts_with("app_"))
+        || (kind == SymfonySymbolKind::Template
+            && name.to_ascii_lowercase().ends_with(".twig")
+            && !name.starts_with(['@', '/', '\\'])
+            && !name.starts_with("./")
+            && !name.starts_with("../"))
 }
