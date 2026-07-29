@@ -88,6 +88,7 @@ impl Backend {
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
         let _body_infer_guard = self.activate_body_return_inferrer();
         let _auth_user_guard = self.activate_auth_user_resolver();
+        let _validation_rules_guard = self.activate_validation_rules_resolver();
         let offset = crate::text_position::position_to_offset(content, position);
 
         // Try the exact cursor offset first.

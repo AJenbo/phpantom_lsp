@@ -1,7 +1,7 @@
 use super::*;
 
-fn keys(rules: &[ValidationRule]) -> Vec<&str> {
-    rules.iter().map(|r| r.key.as_str()).collect()
+fn keys(rules: &RulesArray) -> Vec<&str> {
+    rules.rules.iter().map(|r| r.key.as_str()).collect()
 }
 
 #[test]
@@ -19,8 +19,8 @@ class StoreUserRequest extends FormRequest {
 ";
     let rules = rules_from_class_source(content, "StoreUserRequest");
     assert_eq!(keys(&rules), vec!["name", "age"]);
-    assert_eq!(rules[0].rules, "required|string|max:255");
-    assert_eq!(rules[1].rules, "nullable|integer");
+    assert_eq!(rules.rules[0].rules, "required|string|max:255");
+    assert_eq!(rules.rules[1].rules, "nullable|integer");
 }
 
 #[test]
@@ -69,7 +69,7 @@ class StoreUserRequest extends FormRequest {
 }
 ";
     let rules = rules_from_class_source(content, "StoreUserRequest");
-    assert_eq!(rules[0].rules, "required|new Enum(Role::class)");
+    assert_eq!(rules.rules[0].rules, "required|new Enum(Role::class)");
 }
 
 #[test]
@@ -80,7 +80,10 @@ class StoreUserRequest extends FormRequest {
 }
 ";
     let rules = rules_from_class_source(content, "StoreUserRequest");
-    assert_eq!(&content[rules[0].key_start..rules[0].key_start + 4], "name");
+    assert_eq!(
+        &content[rules.rules[0].key_start..rules.rules[0].key_start + 4],
+        "name"
+    );
 }
 
 #[test]

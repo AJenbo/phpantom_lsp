@@ -51,6 +51,35 @@ pub(crate) struct ValidationRule {
     pub key_start: usize,
 }
 
+/// The entries of one validation rules array, plus whether its key set is
+/// known to be complete.
+#[derive(Debug, Clone)]
+pub(crate) struct RulesArray {
+    /// The field entries, in declaration order.
+    pub rules: Vec<ValidationRule>,
+    /// `false` when a key was not a string literal (`$field => 'required'`),
+    /// which means entries are missing from [`Self::rules`].
+    ///
+    /// Callers that turn the rules into an array shape must bail on this: a
+    /// shape that omits keys the request really accepts would report valid
+    /// input as unknown.
+    pub keys_complete: bool,
+}
+
+impl RulesArray {
+    fn new() -> Self {
+        Self {
+            rules: Vec::new(),
+            keys_complete: true,
+        }
+    }
+
+    /// Whether no entries were recovered at all.
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+}
+
 /// Which file a resolved rules array was parsed from.
 #[derive(Debug)]
 pub(crate) enum RulesSource {
@@ -71,8 +100,8 @@ pub(crate) enum RulesSource {
 pub(crate) struct ResolvedRules {
     /// Where the rules were parsed from.
     pub source: RulesSource,
-    /// The field entries, in declaration order.
-    pub rules: Vec<ValidationRule>,
+    /// The recovered entries.
+    pub rules: RulesArray,
 }
 
 // ─── Array parsing ──────────────────────────────────────────────────────────
@@ -82,7 +111,7 @@ pub(crate) struct ResolvedRules {
 /// Unlike config files, rules arrays are flat: nesting is expressed in the
 /// key itself (`items.*.id`), so only the outermost level is walked.
 /// `array_merge(parent::rules(), [...])` is followed into each argument.
-fn collect_rules_from_expr(expr: &Expression<'_>, content: &str, out: &mut Vec<ValidationRule>) {
+fn collect_rules_from_expr(expr: &Expression<'_>, content: &str, out: &mut RulesArray) {
     match expr {
         Expression::Array(arr) => collect_rules_from_elements(arr.elements.iter(), content, out),
         Expression::LegacyArray(arr) => {
@@ -96,28 +125,39 @@ fn collect_rules_from_expr(expr: &Expression<'_>, content: &str, out: &mut Vec<V
                 for arg in fc.argument_list.arguments.iter() {
                     collect_rules_from_expr(arg.value(), content, out);
                 }
+            } else {
+                // `rules()` returning some other call's result — the keys it
+                // produces are invisible here.
+                out.keys_complete = false;
             }
         }
-        _ => {}
+        // A spread, a variable, a match — whatever keys it contributes are
+        // not recoverable, so the set is no longer known to be complete.
+        _ => out.keys_complete = false,
     }
 }
 
 fn collect_rules_from_elements<'a>(
     elements: impl Iterator<Item = &'a ArrayElement<'a>>,
     content: &str,
-    out: &mut Vec<ValidationRule>,
+    out: &mut RulesArray,
 ) {
     for element in elements {
         let ArrayElement::KeyValue(kv) = element else {
+            // A spread (`...$base`) or a positional entry adds keys we
+            // cannot name.
+            out.keys_complete = false;
             continue;
         };
         let Some((key, key_start, _)) = extract_string_literal(kv.key, content) else {
+            out.keys_complete = false;
             continue;
         };
         if key.is_empty() {
+            out.keys_complete = false;
             continue;
         }
-        out.push(ValidationRule {
+        out.rules.push(ValidationRule {
             key: key.to_string(),
             rules: render_rule_value(kv.value, content),
             key_start,
@@ -264,9 +304,9 @@ fn beats_best<T>(best: &Option<(u32, T)>, end: u32, cursor: u32) -> bool {
 /// method names are case-insensitive, so an unconventional `VALIDATE(` is
 /// missed here; that costs suggestions rather than producing wrong ones.
 fn mentions_validation(content: &str) -> bool {
-    let bytes = content.as_bytes();
-    memchr::memmem::find(bytes, b"validat").is_some()
-        || memchr::memmem::find(bytes, b"Validat").is_some()
+    // Matching on the case-invariant tail covers `validate`, `Validator` and
+    // `validateWithBag` in one pass.
+    memchr::memmem::find(content.as_bytes(), b"alidat").is_some()
 }
 
 /// Rules from the last `validate()` / `Validator::make()` call that completes
@@ -274,7 +314,7 @@ fn mentions_validation(content: &str) -> bool {
 ///
 /// Returns `None` when the cursor is not inside a function body, or when no
 /// such call precedes it.
-pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Vec<ValidationRule>> {
+pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<RulesArray> {
     if !mentions_validation(content) {
         return None;
     }
@@ -286,7 +326,7 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Vec<
     let body = enclosing_body(Node::Program(program), offset as u32)?;
     let cursor = offset as u32;
 
-    let mut best: Option<(u32, Vec<ValidationRule>)> = None;
+    let mut best: Option<(u32, RulesArray)> = None;
     walk_before_cursor(body, cursor, &mut |node| {
         let rules_arg = match node {
             Node::MethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
@@ -301,13 +341,30 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Vec<
         if !beats_best(&best, end, cursor) {
             return;
         }
-        let mut rules = Vec::new();
+        let mut rules = RulesArray::new();
         collect_rules_from_expr(arg, content, &mut rules);
         if !rules.is_empty() {
             best = Some((end, rules));
         }
     });
     best.map(|(_, rules)| rules)
+}
+
+/// Parse a rules array written directly at a call site, e.g. the argument
+/// text of `$request->validate([…])`.
+///
+/// The text is parsed standalone, so [`ValidationRule::key_start`] offsets
+/// index `array_text` rather than any file; callers that need navigable
+/// offsets must use [`inline_validate_rules`] instead.
+pub(crate) fn rules_from_array_text(array_text: &str) -> Option<RulesArray> {
+    let source = format!("<?php return {};", array_text.trim());
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, source.as_bytes());
+
+    let mut out = RulesArray::new();
+    collect_returned_rules(Node::Program(program), &source, &mut out);
+    (!out.is_empty()).then_some(out)
 }
 
 /// The rules argument of `->validate([...])`, `->validate($request, [...])`,
@@ -406,7 +463,7 @@ pub(crate) fn safe_source_variable(content: &str, offset: usize, variable: &str)
         if !beats_best(&best, end, cursor) {
             return;
         }
-        if let Some(source) = safe_call_receiver(assignment.rhs) {
+        if let Some(source) = safe_call_receiver_variable(assignment.rhs) {
             best = Some((end, source));
         }
     });
@@ -415,7 +472,7 @@ pub(crate) fn safe_source_variable(content: &str, offset: usize, variable: &str)
 
 /// The receiver of a no-argument `->safe()` call, when it is a plain
 /// variable.
-fn safe_call_receiver(expr: &Expression<'_>) -> Option<String> {
+pub(crate) fn safe_call_receiver_variable(expr: &Expression<'_>) -> Option<String> {
     let (object, method) = match expr {
         Expression::Call(Call::Method(mc)) => (mc.object, &mc.method),
         Expression::Call(Call::NullSafeMethod(mc)) => (mc.object, &mc.method),
@@ -513,23 +570,46 @@ pub(crate) fn form_request_rules(
     }
 }
 
+/// The rules that describe `class` at `offset`.
+///
+/// A `FormRequest` carries its own `rules()`; every other request-like
+/// receiver — a plain `Request`, a `Validator`, a `ValidatedInput` — is
+/// described by the nearest `validate()` / `Validator::make()` call preceding
+/// the cursor in the same function body.
+///
+/// This is the single definition of that precedence; both request-input
+/// completion and `validated()` shape inference go through it.
+pub(crate) fn rules_in_scope(
+    backend: &Backend,
+    class: &ClassInfo,
+    current_uri: &str,
+    content: &str,
+    offset: usize,
+) -> Option<ResolvedRules> {
+    let loader = |name: &str| backend.find_or_load_class(name);
+    if is_form_request(class, &loader)
+        && let Some(resolved) = form_request_rules(backend, class, current_uri, content)
+    {
+        return Some(resolved);
+    }
+    inline_validate_rules(content, offset).map(|rules| ResolvedRules {
+        source: RulesSource::CurrentFile,
+        rules,
+    })
+}
+
 /// Parse the array returned by `class_name`'s `rules()` method.
-pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> Vec<ValidationRule> {
+pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> RulesArray {
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
 
-    let mut out = Vec::new();
+    let mut out = RulesArray::new();
     collect_rules_method(Node::Program(program), class_name, content, &mut out);
     out
 }
 
-fn collect_rules_method(
-    node: Node<'_, '_>,
-    class_name: &str,
-    content: &str,
-    out: &mut Vec<ValidationRule>,
-) {
+fn collect_rules_method(node: Node<'_, '_>, class_name: &str, content: &str, out: &mut RulesArray) {
     if let Node::Class(class) = node {
         if !bytes_to_str(class.name.value).eq_ignore_ascii_case(class_name) {
             return;
@@ -547,7 +627,7 @@ fn collect_rules_method(
     node.visit_children(|child| collect_rules_method(child, class_name, content, out));
 }
 
-fn collect_returned_rules(node: Node<'_, '_>, content: &str, out: &mut Vec<ValidationRule>) {
+fn collect_returned_rules(node: Node<'_, '_>, content: &str, out: &mut RulesArray) {
     if let Node::Return(ret) = node {
         if let Some(value) = ret.value {
             collect_rules_from_expr(value, content, out);

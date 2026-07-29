@@ -24,8 +24,8 @@ use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
 
 use super::validation_rules::{
-    ResolvedRules, RuleField, RulesSource, form_request_rules, inline_validate_rules,
-    is_form_request, is_request_like, is_validated_input, rule_fields, safe_source_variable,
+    ResolvedRules, RuleField, RulesSource, is_request_like, is_validated_input, rule_fields,
+    rules_in_scope, safe_source_variable,
 };
 
 /// Request accessors whose *first* argument names a single input field.
@@ -249,19 +249,15 @@ pub(crate) fn request_fields_at_position(
         return None;
     }
 
-    let rules = if is_form_request(receiver_class, &class_loader) {
-        form_request_rules(backend, receiver_class, uri, content)
-    } else {
-        None
-    }
-    .or_else(|| {
-        inline_validate_rules(content, cursor_offset as usize).map(|rules| ResolvedRules {
-            source: RulesSource::CurrentFile,
-            rules,
-        })
-    })?;
+    let rules = rules_in_scope(
+        backend,
+        receiver_class,
+        uri,
+        content,
+        cursor_offset as usize,
+    )?;
 
-    let fields = rule_fields(&rules.rules);
+    let fields = rule_fields(&rules.rules.rules);
     if fields.is_empty() {
         return None;
     }
@@ -310,6 +306,7 @@ pub(crate) fn resolve_request_field_definition(
     // An exact rule key wins over the root segment it also contributes, so
     // `input('address.city')` lands on that key rather than on `address`.
     let key_start = rules
+        .rules
         .rules
         .iter()
         .find(|rule| rule.key == value)

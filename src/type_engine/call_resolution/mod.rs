@@ -53,4 +53,6 @@ mod target_cache;
 mod template_subs;
 
 pub(crate) use return_types::MethodReturnCtx;
-pub(crate) use target_cache::{try_infer_body_return_type, with_callable_target_cache};
+pub(crate) use target_cache::{
+    VALIDATION_RULES_RESOLVER, try_infer_body_return_type, with_callable_target_cache,
+};

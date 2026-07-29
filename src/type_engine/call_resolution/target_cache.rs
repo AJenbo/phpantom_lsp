@@ -27,6 +27,15 @@ type BodyReturnInferrerFn = Box<dyn Fn(&str, &MethodInfo) -> Option<PhpType>>;
 /// down.
 type AuthUserResolverFn = Box<dyn Fn(Option<&str>) -> Option<PhpType>>;
 
+/// Closure type for looking up the validation rules that describe a
+/// request-like receiver.
+///
+/// Takes `(receiver_fqn, file_content, call_offset)` and returns the rules
+/// array in scope: a `FormRequest`'s own `rules()`, or the nearest preceding
+/// `validate()` / `Validator::make()` call in the same function body.
+type ValidationRulesResolverFn =
+    Box<dyn Fn(&str, &str, u32) -> Option<crate::virtual_members::laravel::RulesArray>>;
+
 /// Memoized body-return-inference results, keyed by `(FQN, method)`.
 type BodyInferMemo = HashMap<(Atom, Atom), Option<PhpType>>;
 
@@ -86,6 +95,16 @@ thread_local! {
     /// that have access to `Backend` (which holds the config and class
     /// index the traversal needs).
     pub(super) static AUTH_USER_RESOLVER: RefCell<Option<AuthUserResolverFn>> =
+        const { RefCell::new(None) };
+
+    /// When `Some`, `validated()` / `validate()` calls on a request-like
+    /// receiver resolve to the array shape the validation rules in scope
+    /// describe, instead of plain `array`.
+    ///
+    /// Set up by [`Backend::activate_validation_rules_resolver`] at request
+    /// entry points, which is where the class index needed to read a
+    /// `FormRequest`'s `rules()` from another file is available.
+    pub(crate) static VALIDATION_RULES_RESOLVER: RefCell<Option<ValidationRulesResolverFn>> =
         const { RefCell::new(None) };
 
 }
@@ -277,6 +296,39 @@ pub(crate) fn with_auth_user_resolver(resolver: AuthUserResolverFn) -> AuthUserR
     AuthUserResolverGuard { owns: true }
 }
 
+// ── Validation rules resolution ─────────────────────────────────────────────
+
+/// RAII guard that clears [`VALIDATION_RULES_RESOLVER`] on drop.
+pub(crate) struct ValidationRulesResolverGuard {
+    owns: bool,
+}
+
+impl Drop for ValidationRulesResolverGuard {
+    fn drop(&mut self) {
+        if self.owns {
+            VALIDATION_RULES_RESOLVER.with(|cell| {
+                *cell.borrow_mut() = None;
+            });
+        }
+    }
+}
+
+/// Activate validation-rule lookup for the current thread.
+///
+/// Returns an RAII guard that clears the resolver on drop.
+fn with_validation_rules_resolver(
+    resolver: ValidationRulesResolverFn,
+) -> ValidationRulesResolverGuard {
+    let already_active = VALIDATION_RULES_RESOLVER.with(|cell| cell.borrow().is_some());
+    if already_active {
+        return ValidationRulesResolverGuard { owns: false };
+    }
+    VALIDATION_RULES_RESOLVER.with(|cell| {
+        *cell.borrow_mut() = Some(resolver);
+    });
+    ValidationRulesResolverGuard { owns: true }
+}
+
 impl Backend {
     /// Build and activate the thread-local guard-aware auth user model
     /// resolver.
@@ -294,6 +346,22 @@ impl Backend {
             crate::virtual_members::laravel::resolve_auth_user_type(&backend, guard, &loader)
         };
         with_auth_user_resolver(Box::new(resolver))
+    }
+
+    /// Build and activate the thread-local validation rules resolver, which
+    /// lets `$request->validated()` resolve to the array shape its rules
+    /// describe.
+    ///
+    /// Returns an RAII guard that deactivates the resolver on drop.  Call it
+    /// alongside [`activate_auth_user_resolver`] at request entry points.
+    ///
+    /// [`activate_auth_user_resolver`]: Backend::activate_auth_user_resolver
+    pub(crate) fn activate_validation_rules_resolver(&self) -> ValidationRulesResolverGuard {
+        let backend = self.clone_for_diagnostic_worker();
+        let resolver = move |fqn: &str, content: &str, offset: u32| {
+            crate::virtual_members::laravel::rules_for_receiver(&backend, fqn, content, offset)
+        };
+        with_validation_rules_resolver(Box::new(resolver))
     }
 
     /// Build and activate the thread-local body return type inferrer.

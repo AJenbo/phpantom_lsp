@@ -12,6 +12,7 @@ use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
+use crate::virtual_members::laravel::validated_shape;
 
 use crate::type_engine::call_resolution::MethodReturnCtx;
 use crate::type_engine::conditional_resolution::resolve_conditional_with_args;
@@ -1206,11 +1207,24 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
     let (owner_classes, receiver_resolved) =
         expand_union_generic_owners(owner_classes, receiver_resolved, ctx);
 
+    // Laravel validated input: the rules that guard this request describe the
+    // array it hands back, so `$data = $request->validated()` gets a shape
+    // rather than plain `array`.  Classifying the call and tracing a `safe()`
+    // hop do not depend on the receiver, so both happen once rather than once
+    // per owner.
+    let shape_call = validated_shape::shape_bearing_method(&method_name)
+        .filter(|_| validated_shape::rules_resolver_active());
+
     for owner in &owner_classes {
         if let Some(result) =
             try_resolve_config_method_type(&owner.fqn(), &method_name, argument_list, ctx)
         {
             return result;
+        }
+        if let Some(call) = shape_call
+            && let Some(shape) = try_resolve_validated_shape(owner, call, object, &arg_refs, ctx)
+        {
+            return vec![ResolvedType::from_type_string(shape)];
         }
     }
 
@@ -2073,6 +2087,66 @@ fn facade_accessor_concrete_owner(
             class_has_method(&class, method_name, class_loader, cache)
                 .then(|| Arc::unwrap_or_clone(class))
         })
+}
+
+/// The array shape a Laravel `validated()` / `validate()` /
+/// `safe()->only()` call assigns, given the validation rules in scope.
+///
+/// `object` is the expression the method was called on, which is what tells
+/// a `ValidatedInput` receiver apart from the request it came from.
+fn try_resolve_validated_shape(
+    owner: &ClassInfo,
+    call: validated_shape::ShapeCall,
+    object: &Expression<'_>,
+    arg_refs: &[&str],
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    // Tracing a `safe()` hop parses the file, and `only`/`except` are common
+    // names on Collection and Arr too, so it waits until the receiver is
+    // actually the wrapper `safe()` returns.
+    let safe_source = crate::virtual_members::laravel::is_validated_input(owner)
+        .then(|| safe_source_owner(object, ctx))
+        .flatten();
+
+    validated_shape::resolve_shape_at_call(
+        owner,
+        call,
+        arg_refs,
+        safe_source.as_deref(),
+        ctx.content,
+        object.span().end.offset,
+        ctx.as_resolution_ctx().class_loader,
+    )
+}
+
+/// The request class behind a `ValidatedInput` receiver.
+///
+/// Covers both the direct chain (`$request->safe()->only(…)`) and the
+/// two-step form (`$safe = $request->safe(); $safe->only(…)`), which L37's
+/// assignment tracing already resolves back to the request variable.
+fn safe_source_owner(
+    object: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Arc<ClassInfo>> {
+    let variable = match object {
+        // `$request->safe()->only(…)` — the receiver is the `safe()` call.
+        Expression::Call(_) => {
+            crate::virtual_members::laravel::safe_call_receiver_variable(object)?
+        }
+        // `$safe->only(…)` — trace the assignment that produced `$safe`.
+        Expression::Variable(Variable::Direct(dv)) => {
+            crate::virtual_members::laravel::safe_source_variable(
+                ctx.content,
+                object.span().end.offset as usize,
+                bytes_to_str(dv.name),
+            )?
+        }
+        _ => return None,
+    };
+    let resolved = resolve_var_types(&variable, ctx, object.span().end.offset);
+    ResolvedType::into_arced_classes(resolved)
+        .into_iter()
+        .next()
 }
 
 fn try_resolve_config_method_type(
