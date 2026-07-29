@@ -1084,7 +1084,7 @@ fn scan_php_symfony_literal(
 
     let leading = literal.value.len() - literal.value.trim_start().len();
     let trailing = literal.value.len() - literal.value.trim_end().len();
-    let raw = &literal.value[leading..literal.value.len().saturating_sub(trailing)];
+    let raw = literal.value.trim();
     if raw.is_empty() {
         return;
     }
@@ -1169,7 +1169,10 @@ fn scan_php_symfony_literal(
 fn php_call_context(content: &str, offset: usize) -> Option<PhpCallContext<'_>> {
     let prefix = content.get(..offset)?;
     let search_start = offset.saturating_sub(2048);
-    let open = prefix[search_start..].rfind('(')? + search_start;
+    let open = prefix.as_bytes()[search_start..]
+        .iter()
+        .rposition(|byte| *byte == b'(')?
+        + search_start;
     let bytes = content.as_bytes();
     let mut name_end = open;
     skip_ascii_whitespace_backwards(bytes, &mut name_end);
@@ -2589,5 +2592,33 @@ mod tests {
                 .framework_member_reference_locations("dashboard", None)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn php_call_context_handles_multibyte_search_boundary() {
+        let content = format!("─{} service('app.mailer')", "x".repeat(2037));
+        let quote_start = content.find("'app.mailer").unwrap();
+        let call = php_call_context(&content, quote_start).unwrap();
+
+        assert_eq!(call.name, "service");
+        assert_eq!(call.argument_index, 0);
+    }
+
+    #[test]
+    fn php_symfony_scanner_ignores_whitespace_only_literal() {
+        let content = "<?php service(' ');";
+        let mut refs = Vec::new();
+        let literals = scan_php_string_literals_and_class_constants(
+            "file:///test.php",
+            content,
+            &HashMap::new(),
+            &None,
+            false,
+            &mut refs,
+        );
+
+        scan_php_symfony_literal("file:///test.php", content, &literals, 0, false, &mut refs);
+
+        assert!(refs.is_empty());
     }
 }
