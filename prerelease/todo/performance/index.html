@@ -1138,17 +1138,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p14-eager-docblock-parsing-into-structured-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P14. Eager docblock parsing into structured fields
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1884,17 +1873,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p14-eager-docblock-parsing-into-structured-fields" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P14. Eager docblock parsing into structured fields
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2440,53 +2418,6 @@ have it from the resolved-class cache). The caller
 (<code>inject_scopes_and_model_methods</code>) already has the resolved-class
 cache in scope — it passes it to <code>inject_model_virtual_methods</code>
 but not to this function.</p>
-<hr />
-<h2 id="p14-eager-docblock-parsing-into-structured-fields">P14. Eager docblock parsing into structured fields<a class="headerlink" href="#p14-eager-docblock-parsing-into-structured-fields" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<blockquote>
-<p><strong>Note.</strong> This item needs refinement when we work on it. The
-codebase and feature set may change significantly before then.</p>
-</blockquote>
-<p>Currently <code>ClassInfo::class_docblock</code> stores the raw docblock
-string. Consumers that need virtual members (<code>@method</code>,
-<code>@property</code>, <code>@property-read</code>, <code>@property-write</code>) re-parse the
-raw text via <code>PHPDocProvider</code>, and the inheritance merge re-parses
-it again (<code>reserve_method_tag_names</code>). Since the resolved-class
-cache landed, this fires only when a class is (re-)resolved after
-a cache miss or eviction rather than on every request, so the win
-is smaller than when this item was filed.</p>
-<p>Parse the class-level docblock once during extraction and store the
-structured results directly on ClassInfo:</p>
-<ul>
-<li>A list of parsed <code>@method</code> signatures (name, parameters, return
-  type, static flag, description).</li>
-<li>A list of parsed <code>@property</code> / <code>@property-read</code> /
-  <code>@property-write</code> entries (name, type, access mode, description).</li>
-</ul>
-<p>This has three benefits:</p>
-<ol>
-<li>
-<p><strong>Drop the raw string.</strong> For heavily-annotated classes (Eloquent
-   models, facades) the raw docblock can be hundreds of bytes.
-   The structured representation may be comparable in size but is
-   directly usable without re-parsing.</p>
-</li>
-<li>
-<p><strong>Eliminate repeated parsing.</strong> Virtual member resolution
-   re-parses the same docblock text every time the class is
-   resolved into the resolved-class cache (and again in the
-   inheritance merge). Parsing once during extraction removes
-   this redundant work.</p>
-</li>
-<li>
-<p><strong>Simpler consumer code.</strong> Consumers iterate structured fields
-   instead of calling into the docblock parser. This removes the
-   lazy-parse indirection and makes the data flow easier to follow.</p>
-</li>
-</ol>
-<p>The same principle applies to other docblock data that is currently
-extracted from raw text at multiple read sites (descriptions, link
-URLs, see references), though those are smaller wins.</p>
 <hr />
 <h2 id="p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps">P15. Two-phase stub index construction (eliminate <code>RwLock</code> on stub maps)<a class="headerlink" href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
@@ -3204,7 +3135,9 @@ computing. What is left, re-profiled after the memo:</p>
 <li>Type strings are still parsed during the diagnostic pass rather than
   at index time: <code>TypeTokenStream::fill_buffer_slow</code>, <code>PhpType::parse</code>,
   <code>LocalArena::alloc_slice_copy</code> and <code>parse_primary_type</code> together are
-  ~6.5% of Phase 2 samples. This is P14's territory.</li>
+  ~6.5% of Phase 2 samples. Class-level <code>@method</code> / <code>@property</code> tags
+  are now parsed at extraction time; the remaining cost is method,
+  parameter and return type strings.</li>
 <li>malloc/free/memmove remains diffuse. <code>is_scalar_name</code> and
   <code>is_keyword_type</code> (~2.3% between them) allocate a lowercase <code>String</code>
   per call and are reached from <code>base_name</code>, the subtype checks and the
