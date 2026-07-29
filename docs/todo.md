@@ -163,7 +163,6 @@ unlikely to move the needle for most users.
 | L15 | [Completion for Laravel string keys](todo/laravel.md)                                                                                | High        | Medium      |
 | L5  | [`abort_if`/`abort_unless` type narrowing](todo/laravel.md#l5-abort_ifabort_unless-type-narrowing)                                                                          | High        | Medium      |
 | L24 | [Translation depth: JSON lang files, locales, placeholders](todo/laravel.md#l24-translation-depth-json-lang-files-locales-placeholders)                                     | Medium-High | Medium      |
-| L38 | [Typed `validated()` array shapes from rules](todo/laravel.md#l38-typed-validated-array-shapes-from-rules)                                                                  | Medium-High | Medium-High |
 | L26 | [Gate ability and policy strings](todo/laravel.md#l26-gate-ability-and-policy-strings)                                                                                      | Medium-High | Medium-High |
 | L16 | [Hover for Laravel string keys](todo/laravel.md)                                                                                          | Medium      | Low-Medium  |
 | L23 | [Route parameter name completion](todo/laravel.md#l23-route-parameter-name-completion)                                                                                      | Medium      | Low-Medium  |

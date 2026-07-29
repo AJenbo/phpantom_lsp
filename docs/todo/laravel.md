@@ -847,38 +847,6 @@ binding `bind(Gateway::class, StripeGateway::class)` does **not**
 retype `app(Gateway::class)` to the concrete — the contract is the
 interface.
 
-#### L38. Typed `validated()` array shapes from rules
-
-**Impact: Medium-High · Effort: Medium-High**
-
-No mainstream tool types `$request->validated()` beyond `array` — this
-is a leapfrog opportunity, not catch-up. The rules array is a static
-type contract; translate it into an array shape:
-
-- `'name' => 'required|string|max:255'` → `name: string`
-- `'age' => 'nullable|integer'` → `age: int|null`
-- `'active' => 'boolean'` → `active: bool`
-- `'role' => [new Enum(Role::class)]` / enum-cast columns → `role: string`
-  (the raw validated value; the enum object only exists after `enum()`)
-- `'items' => 'array'`, `'items.*.id' => 'integer'` →
-  `items: list<array{id: int}>`
-- fields without `required` (and without `nullable`) are optional keys
-  (`name?:`), since absent input never reaches the validated array
-
-Apply the shape to `$request->validated()` (no-argument form),
-`$request->validate([...])` return values, and `$validator->validated()`
-where the rules are visible. `validated('key')` returns the shape's
-member type. `safe()` returns a `ValidatedInput` whose `only()`/
-`except()` results narrow the same shape. Fall back to plain `array`
-the moment any rule key or rule string is non-literal — a partial
-shape that claims completeness would produce false unknown-key
-diagnostics. Array-shape machinery (shapes, optional keys, `list<>`)
-already exists in the type engine, and
-`virtual_members/laravel/validation_rules.rs` already recovers the
-literal `(key, rule)` pairs and locates the rules array in scope for a
-cursor; the work is the rules-to-shape translation and wiring it as a
-conditional return.
-
 #### L39. Unused view and translation key detection
 
 **Impact: Low · Effort: Medium**
