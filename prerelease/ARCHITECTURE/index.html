@@ -3319,7 +3319,7 @@ diagnostics, hover, go-to-definition, and signature help, not just completion
 below). Do not build a second type-resolution path: extend the engine here so
 every consumer benefits.</p>
 <h2 id="external-crates">External Crates<a class="headerlink" href="#external-crates" title="Permanent link">&para;</a></h2>
-<p>PHPantom uses three crates from the <a href="https://github.com/carthage-software/mago">Mago</a>
+<p>PHPantom uses several crates from the <a href="https://github.com/carthage-software/mago">Mago</a>
 project for PHP parsing and type representation:</p>
 <table>
 <thead>
@@ -3330,22 +3330,28 @@ project for PHP parsing and type representation:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>mago-docblock</code></td>
-<td>Structured PHPDoc parsing (replaces manual scanning)</td>
-</tr>
-<tr>
 <td><code>mago-names</code></td>
 <td>Use-statement and namespace resolution</td>
 </tr>
 <tr>
-<td><code>mago-type-syntax</code></td>
-<td>PHPStan/Psalm type expression parsing into <code>PhpType</code></td>
+<td><code>mago-phpdoc-syntax</code></td>
+<td>PHPDoc parsing, including the PHPStan/Psalm type mini-language</td>
+</tr>
+<tr>
+<td><code>mago-syntax</code></td>
+<td>PHP source to CST</td>
 </tr>
 </tbody>
 </table>
+<p><code>mago-phpdoc-syntax</code> parses a docblock comment and the type expressions
+embedded in its tags in one pass. <code>src/docblock/parser.rs</code> adapts its CST
+to the owned <code>DocblockInfo</code> / <code>TagInfo</code> pair the rest of the codebase
+works with, reducing each tag to a vendor-agnostic <code>TagKind</code>
+(<code>src/docblock/tag_kind.rs</code>), the vendor prefix it was written with, and
+the raw source text of its value.</p>
 <p><code>PhpType</code> (<code>src/php_type/</code>) is a pointer-sized handle to an interned
 <code>TypeKind</code> node, itself built from the borrowed
-<code>mago_type_syntax::cst::Type</code> AST. Every type-carrying field in the
+<code>mago_phpdoc_syntax::cst::type::Type</code> AST. Every type-carrying field in the
 data model (<code>type_hint</code>, <code>return_type</code>, <code>native_type_hint</code>,
 <code>native_return_type</code>, <code>asserted_type</code>, <code>template_param_bounds</code> values,
 generics type arguments, <code>ResolvedType::type_string</code>) uses <code>PhpType</code>.
