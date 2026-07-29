@@ -34,8 +34,52 @@ impl Backend {
             .framework_symfony_symbol_names(SymfonySymbolKind::Template)
             .into_iter()
             .collect::<HashSet<_>>();
+        let mut translation_domains = HashSet::new();
+        let mut known_translations = HashSet::new();
+        for refs in self.framework_references.read().values() {
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::Translation {
+                    domain,
+                    name,
+                    declaration: true,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                translation_domains.insert(domain.clone());
+                known_translations.insert((domain.clone(), name.clone()));
+            }
+        }
 
         for reference in references.iter() {
+            if let FrameworkReferenceKind::Translation {
+                domain,
+                name,
+                declaration: false,
+            } = &reference.kind
+            {
+                if translation_domains.contains(domain)
+                    && !known_translations.contains(&(domain.clone(), name.clone()))
+                {
+                    out.push(Diagnostic {
+                        range: Range {
+                            start: offset_to_position(content, reference.start as usize),
+                            end: offset_to_position(content, reference.end as usize),
+                        },
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String(
+                            "unknown_symfony_translation".to_string(),
+                        )),
+                        source: Some("PHPantom".to_string()),
+                        message: format!(
+                            "Symfony translation '{}' is not declared in the '{}' domain",
+                            name, domain
+                        ),
+                        ..Default::default()
+                    });
+                }
+                continue;
+            }
             let FrameworkReferenceKind::SymfonySymbol {
                 kind,
                 name,
@@ -54,6 +98,7 @@ impl Backend {
                 SymfonySymbolKind::Route => known_routes.contains(name),
                 SymfonySymbolKind::RouteParameter => true,
                 SymfonySymbolKind::Template => known_templates.contains(name),
+                SymfonySymbolKind::Translation => true,
             };
             if known || !is_project_local_name(*kind, name) {
                 continue;

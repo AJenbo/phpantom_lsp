@@ -27,6 +27,7 @@ pub(crate) enum SymfonySymbolKind {
     Route,
     RouteParameter,
     Template,
+    Translation,
 }
 
 impl SymfonySymbolKind {
@@ -37,6 +38,7 @@ impl SymfonySymbolKind {
             Self::Route => "route",
             Self::RouteParameter => "route parameter",
             Self::Template => "template",
+            Self::Translation => "translation",
         }
     }
 }
@@ -64,6 +66,12 @@ pub(crate) enum FrameworkReferenceKind {
     /// A named placeholder scoped to one Symfony route.
     RouteParameter {
         route_name: String,
+        name: String,
+        declaration: bool,
+    },
+    /// A translation key scoped to one Symfony catalogue domain.
+    Translation {
+        domain: String,
         name: String,
         declaration: bool,
     },
@@ -159,13 +167,15 @@ pub(crate) fn is_framework_resource_uri(uri: &str) -> bool {
     path_lower.ends_with(".yaml")
         || path_lower.ends_with(".yml")
         || path_lower.ends_with(".xml")
+        || path_lower.ends_with(".xlf")
+        || path_lower.ends_with(".xliff")
         || path_lower.ends_with(".twig")
 }
 
 fn is_framework_resource_path(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()),
-        Some(ext) if matches!(ext.as_str(), "yaml" | "yml" | "xml" | "twig")
+        Some(ext) if matches!(ext.as_str(), "yaml" | "yml" | "xml" | "xlf" | "xliff" | "twig")
     )
 }
 
@@ -189,6 +199,25 @@ pub(crate) fn is_framework_php_config_path(path: &Path) -> bool {
             .any(|component| matches!(component, Component::Normal(name) if name == "config"))
 }
 
+fn is_symfony_translation_php_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
+        && path
+            .components()
+            .any(|component| matches!(component, Component::Normal(name) if name == "translations"))
+}
+
+fn is_symfony_translation_php_uri(uri: &str) -> bool {
+    is_php_uri(uri)
+        && uri
+            .split('?')
+            .next()
+            .unwrap_or(uri)
+            .split('/')
+            .any(|component| component == "translations")
+}
+
 pub(crate) fn is_framework_php_config_uri(uri: &str) -> bool {
     if !is_php_uri(uri) {
         return false;
@@ -203,6 +232,7 @@ pub(crate) fn is_framework_php_config_uri(uri: &str) -> bool {
 pub(crate) fn should_index_framework_php_content(uri: &str, content: &str) -> bool {
     is_php_uri(uri)
         && (is_framework_php_config_uri(uri)
+            || is_symfony_translation_php_uri(uri)
             || content.contains("Autowire")
             || content.contains("ContainerInterface")
             || content.contains("ContainerBagInterface")
@@ -227,7 +257,10 @@ pub(crate) fn should_index_framework_php_content(uri: &str, content: &str) -> bo
             || content.contains("htmlTemplate(")
             || content.contains("textTemplate(")
             || content.contains("#[Template(")
-            || content.contains("#[\\Template("))
+            || content.contains("#[\\Template(")
+            || content.contains("TranslatorInterface")
+            || content.contains("TranslatableMessage")
+            || content.contains("->trans("))
 }
 
 fn is_skipped_resource_path(path: &Path) -> bool {
@@ -336,7 +369,9 @@ impl Backend {
             if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                 continue;
             }
-            if (!is_framework_resource_path(path) && !is_framework_php_config_path(path))
+            if (!is_framework_resource_path(path)
+                && !is_framework_php_config_path(path)
+                && !is_symfony_translation_php_path(path))
                 || is_skipped_resource_path(path)
             {
                 continue;
@@ -401,6 +436,7 @@ impl Backend {
     pub(crate) fn reindex_framework_uri_from_disk(&self, uri: &str) {
         if !is_framework_resource_uri(uri)
             && !is_framework_php_config_uri(uri)
+            && !is_symfony_translation_php_uri(uri)
             && !self.framework_references.read().contains_key(uri)
         {
             return;
@@ -658,6 +694,70 @@ impl Backend {
         locations
     }
 
+    pub(crate) fn framework_translation_names(&self, domain: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        for refs in self.framework_references.read().values() {
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::Translation {
+                    domain: candidate_domain,
+                    name,
+                    declaration: true,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                if candidate_domain == domain {
+                    push_unique_string(&mut names, name.clone());
+                }
+            }
+        }
+        names.sort_unstable();
+        names
+    }
+
+    pub(crate) fn framework_translation_locations(
+        &self,
+        domain: &str,
+        name: &str,
+        include_declarations: bool,
+        include_references: bool,
+    ) -> Vec<Location> {
+        let mut locations = Vec::new();
+        for (uri, refs) in self.framework_references.read().iter() {
+            let Ok(parsed_uri) = Url::parse(uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(uri) else {
+                continue;
+            };
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::Translation {
+                    domain: candidate_domain,
+                    name: candidate_name,
+                    declaration,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                if candidate_domain != domain
+                    || candidate_name != name
+                    || (*declaration && !include_declarations)
+                    || (!*declaration && !include_references)
+                {
+                    continue;
+                }
+                push_unique_location(
+                    &mut locations,
+                    &parsed_uri,
+                    offset_to_position(&content, reference.start as usize),
+                    offset_to_position(&content, reference.end as usize),
+                );
+            }
+        }
+        sort_locations(&mut locations);
+        locations
+    }
+
     pub(crate) fn framework_doctrine_repository_fqns_for_entity(
         &self,
         entity_fqn: &str,
@@ -763,6 +863,18 @@ impl Backend {
                             ..
                         },
                     ) => lhs_route == rhs_route && lhs_name == rhs_name,
+                    (
+                        FrameworkReferenceKind::Translation {
+                            domain: lhs_domain,
+                            name: lhs_name,
+                            ..
+                        },
+                        FrameworkReferenceKind::Translation {
+                            domain: rhs_domain,
+                            name: rhs_name,
+                            ..
+                        },
+                    ) => lhs_domain == rhs_domain && lhs_name == rhs_name,
                     _ => false,
                 };
             if matched {
@@ -922,6 +1034,9 @@ impl Backend {
             }
             return Some(refs);
         }
+        if is_symfony_translation_php_uri(uri) {
+            return Some(scan_symfony_php_translation_catalog(uri, content));
+        }
         if should_index_framework_php_content(uri, content) {
             return Some(self.scan_symfony_php_references(uri, content));
         }
@@ -1049,7 +1164,8 @@ fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Opti
         FrameworkReferenceKind::Method { .. }
         | FrameworkReferenceKind::Path { .. }
         | FrameworkReferenceKind::SymfonySymbol { .. }
-        | FrameworkReferenceKind::RouteParameter { .. } => None,
+        | FrameworkReferenceKind::RouteParameter { .. }
+        | FrameworkReferenceKind::Translation { .. } => None,
     }
 }
 
@@ -1251,6 +1367,8 @@ fn scan_php_symfony_literal(
     let call_name = call.name.to_ascii_lowercase();
     let named_argument = php_named_argument_before(content, call.args_start, literal.quote_start);
     let semantic_value = php_semantic_string(raw);
+    let translation_reference =
+        call.argument_index == 0 && matches!(call_name.as_str(), "trans" | "translatablemessage");
     let template_reference = call.argument_index == 0
         && (matches!(
             call_name.as_str(),
@@ -1259,7 +1377,20 @@ fn scan_php_symfony_literal(
             && named_argument.is_none_or(|name| name.eq_ignore_ascii_case("template"))));
     if !valid_symfony_symbol_name(&semantic_value)
         && !(template_reference && valid_template_name(&semantic_value))
+        && !(translation_reference && valid_translation_key(&semantic_value))
     {
+        return;
+    }
+    if translation_reference {
+        push_translation(
+            refs,
+            uri,
+            php_translation_domain(content, literals, call),
+            semantic_value,
+            literal.start + leading,
+            literal.end - trailing,
+            false,
+        );
         return;
     }
 
@@ -1453,6 +1584,146 @@ fn php_semantic_string(raw: &str) -> String {
     } else {
         raw.to_string()
     }
+}
+
+fn php_translation_domain(
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    target_call: PhpCallContext<'_>,
+) -> String {
+    literals
+        .iter()
+        .find_map(|literal| {
+            let call = php_call_context(content, literal.quote_start)?;
+            if call.args_start != target_call.args_start {
+                return None;
+            }
+            let named = php_named_argument_before(content, call.args_start, literal.quote_start);
+            if call.argument_index == 2
+                || named.is_some_and(|name| name.eq_ignore_ascii_case("domain"))
+            {
+                let domain = php_semantic_string(literal.value.trim());
+                valid_translation_domain(&domain).then_some(domain)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "messages".to_string())
+}
+
+fn scan_symfony_php_translation_catalog(uri: &str, content: &str) -> Vec<FrameworkReference> {
+    let Some(domain) = translation_catalog_domain(uri) else {
+        return Vec::new();
+    };
+    let mut refs = Vec::new();
+    let mut ignored = Vec::new();
+    let literals = scan_php_string_literals_and_class_constants(
+        uri,
+        content,
+        &HashMap::new(),
+        &None,
+        false,
+        &mut ignored,
+    );
+    let containers = literals
+        .iter()
+        .filter_map(|literal| {
+            if !php_literal_is_array_key(content, literal) {
+                return None;
+            }
+            let name = php_semantic_string(literal.value.trim());
+            let (start, end) = php_array_value_range(content, literal)?;
+            Some((literal.quote_start, start, end, name))
+        })
+        .collect::<Vec<_>>();
+    for literal in &literals {
+        if !php_literal_is_array_key(content, literal) {
+            continue;
+        }
+        if containers
+            .iter()
+            .any(|(key_start, _, _, _)| *key_start == literal.quote_start)
+        {
+            continue;
+        }
+        let leaf = php_semantic_string(literal.value.trim());
+        let name = containers
+            .iter()
+            .filter(|(_, start, end, _)| *start < literal.quote_start && literal.quote_end < *end)
+            .map(|(_, _, _, parent)| parent.as_str())
+            .chain(std::iter::once(leaf.as_str()))
+            .collect::<Vec<_>>()
+            .join(".");
+        if valid_translation_key(&name) {
+            push_translation(
+                &mut refs,
+                uri,
+                domain.clone(),
+                name,
+                literal.start,
+                literal.end,
+                true,
+            );
+        }
+    }
+    refs
+}
+
+fn php_array_value_range(content: &str, literal: &PhpStringLiteral<'_>) -> Option<(usize, usize)> {
+    let bytes = content.as_bytes();
+    let mut cursor = literal.quote_end + 1;
+    skip_ascii_whitespace(bytes, &mut cursor);
+    if bytes.get(cursor..cursor + 2) != Some(b"=>") {
+        return None;
+    }
+    cursor += 2;
+    skip_ascii_whitespace(bytes, &mut cursor);
+    let (open, close) = if bytes.get(cursor) == Some(&b'[') {
+        (b'[', b']')
+    } else if content
+        .get(cursor..cursor + 5)
+        .is_some_and(|value| value.eq_ignore_ascii_case("array"))
+    {
+        cursor += 5;
+        skip_ascii_whitespace(bytes, &mut cursor);
+        if bytes.get(cursor) != Some(&b'(') {
+            return None;
+        }
+        (b'(', b')')
+    } else {
+        return None;
+    };
+    matching_delimiter(content, cursor, open, close).map(|end| (cursor, end))
+}
+
+fn matching_delimiter(content: &str, start: usize, open: u8, close: u8) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut cursor = start;
+    let mut depth = 0u32;
+    let mut quote = None;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if let Some(active_quote) = quote {
+            if byte == b'\\' {
+                cursor = (cursor + 2).min(bytes.len());
+                continue;
+            }
+            if byte == active_quote {
+                quote = None;
+            }
+        } else if matches!(byte, b'\'' | b'"') {
+            quote = Some(byte);
+        } else if byte == open {
+            depth += 1;
+        } else if byte == close {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some(cursor);
+            }
+        }
+        cursor += 1;
+    }
+    None
 }
 
 fn scan_php_route_parameters(
@@ -1741,6 +2012,7 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
     {
         scan_twig_route_references(uri, content, &mut refs);
         scan_twig_template_references(uri, content, &mut refs);
+        scan_twig_translation_references(uri, content, &mut refs);
         refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
         refs.dedup();
         return refs;
@@ -1748,6 +2020,17 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
 
     scan_class_like_tokens(uri, content, &mut refs);
     scan_path_scalars(uri, content, &mut refs);
+    if let Some(domain) = translation_catalog_domain(uri) {
+        if uri
+            .split('?')
+            .next()
+            .is_some_and(|path| path.ends_with(".yaml") || path.ends_with(".yml"))
+        {
+            scan_symfony_yaml_translation_catalog(uri, content, &domain, &mut refs);
+        } else {
+            scan_symfony_xliff_translation_catalog(uri, content, &domain, &mut refs);
+        }
+    }
     if uri
         .split('?')
         .next()
@@ -1766,6 +2049,242 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
     refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
     refs.dedup();
     refs
+}
+
+fn translation_catalog_domain(uri: &str) -> Option<String> {
+    let url = Url::parse(uri).ok()?;
+    let path = url.to_file_path().ok()?;
+    if !path
+        .components()
+        .any(|component| matches!(component, Component::Normal(name) if name == "translations"))
+    {
+        return None;
+    }
+    let filename = path.file_name()?.to_str()?;
+    let mut parts = filename.split('.').collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return None;
+    }
+    parts.pop();
+    parts.pop();
+    let domain = parts.join(".");
+    let domain = domain.strip_suffix("+intl-icu").unwrap_or(&domain);
+    valid_translation_domain(domain).then(|| domain.to_string())
+}
+
+fn scan_symfony_yaml_translation_catalog(
+    uri: &str,
+    content: &str,
+    domain: &str,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let mut parents: Vec<(usize, String)> = Vec::new();
+    for (line_start, line) in line_offsets(content) {
+        let semantic = yaml_content_before_comment(line);
+        if semantic.trim().is_empty() || semantic.trim_start().starts_with('-') {
+            continue;
+        }
+        let Some((raw_key, key_start, key_end, value_start)) =
+            yaml_mapping_entry(semantic, line_start)
+        else {
+            continue;
+        };
+        let indent = leading_spaces(semantic);
+        while parents
+            .last()
+            .is_some_and(|(parent_indent, _)| *parent_indent >= indent)
+        {
+            parents.pop();
+        }
+        let (key, quote_adjust) = strip_yaml_quotes(raw_key);
+        if !valid_translation_key(key) {
+            continue;
+        }
+        let name = parents
+            .iter()
+            .map(|(_, parent)| parent.as_str())
+            .chain(std::iter::once(key))
+            .collect::<Vec<_>>()
+            .join(".");
+        let value = semantic.get(value_start..).unwrap_or_default().trim();
+        if value.is_empty() {
+            parents.push((indent, key.to_string()));
+        } else {
+            push_translation(
+                refs,
+                uri,
+                domain.to_string(),
+                name,
+                key_start + quote_adjust.0,
+                key_end.saturating_sub(quote_adjust.1),
+                true,
+            );
+        }
+    }
+}
+
+fn scan_symfony_xliff_translation_catalog(
+    uri: &str,
+    content: &str,
+    domain: &str,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let lower = content.to_ascii_lowercase();
+    let mut search = 0usize;
+    while let Some(rel_start) = lower[search..].find('<') {
+        let tag_start = search + rel_start;
+        let Some(rel_end) = content[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + rel_end + 1;
+        let tag = &content[tag_start..tag_end];
+        let tag_lower = tag.to_ascii_lowercase();
+        let unit_tag = tag_lower.starts_with("<trans-unit") || tag_lower.starts_with("<unit");
+        if unit_tag
+            && let Some((name, start, end)) = xml_attr_value(tag, tag_start, &["resname"])
+                .or_else(|| xml_attr_value(tag, tag_start, &["name"]))
+                .or_else(|| xliff_source_value(content, tag_end))
+                .or_else(|| xml_attr_value(tag, tag_start, &["id"]))
+            && valid_translation_key(&name)
+        {
+            push_translation(refs, uri, domain.to_string(), name, start, end, true);
+        }
+        search = tag_end;
+    }
+}
+
+fn xliff_source_value(content: &str, unit_tag_end: usize) -> Option<(String, usize, usize)> {
+    let lower = content.to_ascii_lowercase();
+    let unit_end_rel = lower[unit_tag_end..]
+        .find("</trans-unit>")
+        .or_else(|| lower[unit_tag_end..].find("</unit>"))?;
+    let unit_end = unit_tag_end + unit_end_rel;
+    let source_tag_rel = lower[unit_tag_end..unit_end].find("<source")?;
+    let source_tag_start = unit_tag_end + source_tag_rel;
+    let source_start = content[source_tag_start..unit_end].find('>')? + source_tag_start + 1;
+    let source_end = lower[source_start..unit_end].find("</source>")? + source_start;
+    let value = content[source_start..source_end].trim();
+    let leading = content[source_start..source_end].len()
+        - content[source_start..source_end].trim_start().len();
+    Some((
+        value.to_string(),
+        source_start + leading,
+        source_start + leading + value.len(),
+    ))
+}
+
+fn scan_twig_translation_references(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    let default_domain =
+        twig_default_translation_domain(content).unwrap_or_else(|| "messages".to_string());
+    let bytes = content.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        if !matches!(bytes[cursor], b'\'' | b'"') {
+            cursor += 1;
+            continue;
+        }
+        let quote = bytes[cursor];
+        let start = cursor + 1;
+        let mut end = start;
+        while end < bytes.len() {
+            if bytes[end] == b'\\' {
+                end = (end + 2).min(bytes.len());
+                continue;
+            }
+            if bytes[end] == quote {
+                break;
+            }
+            end += 1;
+        }
+        if end >= bytes.len() {
+            break;
+        }
+        let mut pipe = end + 1;
+        skip_ascii_whitespace(bytes, &mut pipe);
+        if bytes.get(pipe) != Some(&b'|') {
+            cursor = end + 1;
+            continue;
+        }
+        pipe += 1;
+        skip_ascii_whitespace(bytes, &mut pipe);
+        let filter_start = pipe;
+        while bytes
+            .get(pipe)
+            .is_some_and(|byte| is_php_identifier_char(*byte))
+        {
+            pipe += 1;
+        }
+        if !content[filter_start..pipe].eq_ignore_ascii_case("trans") {
+            cursor = end + 1;
+            continue;
+        }
+        let name = &content[start..end];
+        if valid_translation_key(name) {
+            let domain = twig_translation_filter_domain(content, pipe)
+                .unwrap_or_else(|| default_domain.clone());
+            push_translation(refs, uri, domain, name.to_string(), start, end, false);
+        }
+        cursor = end + 1;
+    }
+}
+
+fn twig_default_translation_domain(content: &str) -> Option<String> {
+    let lower = content.to_ascii_lowercase();
+    let start = lower.find("trans_default_domain")? + "trans_default_domain".len();
+    let tag_end = lower[start..].find("%}").map(|end| start + end)?;
+    let (domain, _, _) = first_quoted_value(content, start, tag_end)?;
+    valid_translation_domain(domain).then(|| domain.to_string())
+}
+
+fn twig_translation_filter_domain(content: &str, filter_end: usize) -> Option<String> {
+    let bytes = content.as_bytes();
+    let mut cursor = filter_end;
+    skip_ascii_whitespace(bytes, &mut cursor);
+    if bytes.get(cursor) != Some(&b'(') {
+        return None;
+    }
+    let args_start = cursor + 1;
+    let mut depth = 0u32;
+    let mut argument = 0usize;
+    let mut quote = None;
+    cursor = args_start;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if let Some(active_quote) = quote {
+            if byte == b'\\' {
+                cursor = (cursor + 2).min(bytes.len());
+                continue;
+            }
+            if byte == active_quote {
+                quote = None;
+            }
+            cursor += 1;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') {
+            if argument == 1
+                || content[args_start..cursor]
+                    .rsplit_once(',')
+                    .map_or(&content[args_start..cursor], |(_, tail)| tail)
+                    .trim_start()
+                    .starts_with("domain")
+            {
+                let (domain, _, _) = first_quoted_value(content, cursor, bytes.len())?;
+                return valid_translation_domain(domain).then(|| domain.to_string());
+            }
+            quote = Some(byte);
+        } else {
+            match byte {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' if depth == 0 => break,
+                b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+                b',' if depth == 0 => argument += 1,
+                _ => {}
+            }
+        }
+        cursor += 1;
+    }
+    None
 }
 
 fn is_twig_uri(uri: &str) -> bool {
@@ -2597,11 +3116,43 @@ fn push_symfony_symbol(
     });
 }
 
+fn push_translation(
+    refs: &mut Vec<FrameworkReference>,
+    uri: &str,
+    domain: String,
+    name: String,
+    start: usize,
+    end: usize,
+    declaration: bool,
+) {
+    refs.push(FrameworkReference {
+        uri: uri.to_string(),
+        start: start as u32,
+        end: end as u32,
+        kind: FrameworkReferenceKind::Translation {
+            domain,
+            name,
+            declaration,
+        },
+    });
+}
+
 fn valid_symfony_symbol_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .bytes()
             .all(|byte| is_symfony_symbol_char(byte) || byte == b'\\')
+}
+
+fn valid_translation_key(name: &str) -> bool {
+    !name.is_empty() && !name.bytes().any(|byte| matches!(byte, b'\r' | b'\n'))
+}
+
+fn valid_translation_domain(domain: &str) -> bool {
+    !domain.is_empty()
+        && domain
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
 }
 
 fn is_symfony_symbol_char(byte: u8) -> bool {

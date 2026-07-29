@@ -1449,3 +1449,242 @@ async fn symfony_bundle_override_templates_use_twig_namespaces() {
     };
     assert_eq!(location.uri, template_uri);
 }
+
+#[tokio::test]
+async fn symfony_translations_complete_navigate_reference_and_show_lenses() {
+    let messages_yaml = "navigation:\n  welcome: Welcome\n";
+    let validators_xlf = r#"<?xml version="1.0"?>
+<xliff version="1.2">
+  <file>
+    <body>
+      <trans-unit id="hash" resname="app.invalid">
+        <source>app.invalid</source>
+        <target>Invalid</target>
+      </trans-unit>
+      <trans-unit id="source-hash">
+        <source>source.only</source>
+        <target>Source fallback</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>
+"#;
+    let admin_php = "<?php\nreturn ['dashboard' => ['title' => 'Dashboard']];\n";
+    let consumer_php = r#"<?php
+use Symfony\Contracts\Translation\TranslatorInterface;
+use Symfony\Component\Translation\TranslatableMessage;
+
+function translate(TranslatorInterface $translator): void
+{
+    $translator->trans('navigation.welcome');
+    $translator->trans('app.invalid', [], 'validators');
+    $translator->trans('source.only', domain: 'validators');
+    new TranslatableMessage('dashboard.title', [], 'admin');
+}
+"#;
+    let template = r#"{% trans_default_domain 'validators' %}
+{{ 'app.invalid'|trans }}
+{{ 'navigation.welcome'|trans({}, 'messages') }}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("translations/messages.en.yaml", messages_yaml),
+            ("translations/validators.en.xlf", validators_xlf),
+            ("translations/admin.en.php", admin_php),
+            ("src/translate.php", consumer_php),
+            ("templates/translated.html.twig", template),
+        ],
+    );
+    let messages_uri = uri_for(&dir, "translations/messages.en.yaml");
+    let validators_uri = uri_for(&dir, "translations/validators.en.xlf");
+    let admin_uri = uri_for(&dir, "translations/admin.en.php");
+    let consumer_uri = uri_for(&dir, "src/translate.php");
+    let template_uri = uri_for(&dir, "templates/translated.html.twig");
+    open_doc(&backend, messages_uri.clone(), "yaml", messages_yaml).await;
+    open_doc(&backend, validators_uri.clone(), "xml", validators_xlf).await;
+    open_doc(&backend, admin_uri.clone(), "php", admin_php).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+    open_doc(&backend, template_uri.clone(), "twig", template).await;
+
+    for (uri, content, name, occurrence, expected_uri) in [
+        (
+            &consumer_uri,
+            consumer_php,
+            "navigation.welcome",
+            0,
+            &messages_uri,
+        ),
+        (
+            &consumer_uri,
+            consumer_php,
+            "app.invalid",
+            0,
+            &validators_uri,
+        ),
+        (
+            &consumer_uri,
+            consumer_php,
+            "dashboard.title",
+            0,
+            &admin_uri,
+        ),
+        (
+            &consumer_uri,
+            consumer_php,
+            "source.only",
+            0,
+            &validators_uri,
+        ),
+        (
+            &template_uri,
+            template,
+            "navigation.welcome",
+            0,
+            &messages_uri,
+        ),
+    ] {
+        let offset = content
+            .match_indices(name)
+            .nth(occurrence)
+            .expect("translation occurrence")
+            .0;
+        let position = position_in(content, &content[offset..offset + name.len()], 3);
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("translation reference '{name}' should resolve"));
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(&location.uri, expected_uri, "wrong definition for {name}");
+    }
+
+    for (uri, content, name) in [
+        (&consumer_uri, consumer_php, "navigation.welcome"),
+        (&consumer_uri, consumer_php, "app.invalid"),
+        (&consumer_uri, consumer_php, "dashboard.title"),
+        (&consumer_uri, consumer_php, "source.only"),
+        (&template_uri, template, "app.invalid"),
+    ] {
+        let response = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, name, 4),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .expect("translation completion should return candidates");
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        assert!(
+            items.iter().any(|item| item.label == name),
+            "expected {name} completion, got {:?}",
+            items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let references = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: consumer_uri.clone(),
+                },
+                position: position_in(consumer_php, "navigation.welcome", 4),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap()
+        .expect("translation references should be returned");
+    assert!(
+        references
+            .iter()
+            .any(|location| location.uri == messages_uri)
+    );
+    assert!(
+        references
+            .iter()
+            .any(|location| location.uri == template_uri)
+    );
+
+    let lenses = backend
+        .handle_code_lens(messages_uri.as_str(), messages_yaml)
+        .unwrap_or_default();
+    assert!(
+        lenses.iter().any(|lens| {
+            lens.command
+                .as_ref()
+                .is_some_and(|command| command.title == "Symfony translation: 2 refs")
+        }),
+        "expected a translation reference lens, got {lenses:?}"
+    );
+}
+
+#[tokio::test]
+async fn symfony_translation_diagnostics_are_scoped_to_known_domains() {
+    let messages_yaml = "known.message: Known\n";
+    let consumer_php = r#"<?php
+use Symfony\Contracts\Translation\TranslatorInterface;
+
+function translate(TranslatorInterface $translator): void
+{
+    $translator->trans('missing.message');
+    $translator->trans('dynamic.vendor.message', [], 'vendor');
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("translations/messages.en.yaml", messages_yaml),
+            ("src/translate.php", consumer_php),
+        ],
+    );
+    let messages_uri = uri_for(&dir, "translations/messages.en.yaml");
+    let consumer_uri = uri_for(&dir, "src/translate.php");
+    open_doc(&backend, messages_uri, "yaml", messages_yaml).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(consumer_uri.as_str(), consumer_php, &mut diagnostics);
+    let translations = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code == "unknown_symfony_translation"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        translations.len(),
+        1,
+        "only missing keys in known domains should be diagnosed"
+    );
+    assert!(translations[0].message.contains("missing.message"));
+    assert!(translations[0].message.contains("'messages' domain"));
+}

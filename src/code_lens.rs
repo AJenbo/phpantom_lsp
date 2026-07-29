@@ -597,6 +597,29 @@ impl Backend {
         };
 
         for (idx, declaration) in references.iter().enumerate() {
+            if let FrameworkReferenceKind::Translation {
+                domain,
+                name,
+                declaration: true,
+            } = &declaration.kind
+            {
+                let usages = self.framework_translation_locations(domain, name, false, true);
+                if !usages.is_empty() {
+                    self.push_locations_lens(
+                        uri,
+                        offset_to_position(content, declaration.start as usize),
+                        format!(
+                            "Symfony translation: {} {}",
+                            usages.len(),
+                            if usages.len() == 1 { "ref" } else { "refs" }
+                        ),
+                        usages,
+                        lenses,
+                        seen,
+                    );
+                }
+                continue;
+            }
             let FrameworkReferenceKind::SymfonySymbol {
                 kind,
                 name,

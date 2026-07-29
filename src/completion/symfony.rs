@@ -20,6 +20,7 @@ struct SymfonyCompletionContext {
     content_start: usize,
     escape_backslashes: bool,
     route_name: Option<String>,
+    translation_domain: Option<String>,
 }
 
 impl Backend {
@@ -36,6 +37,8 @@ impl Backend {
         };
         let candidates = if context.kind == SymfonySymbolKind::RouteParameter {
             self.framework_route_parameter_names(context.route_name.as_deref()?)
+        } else if context.kind == SymfonySymbolKind::Translation {
+            self.framework_translation_names(context.translation_domain.as_deref()?)
         } else {
             self.framework_symfony_symbol_names(context.kind)
         };
@@ -66,6 +69,7 @@ impl Backend {
                         SymfonySymbolKind::Route => CompletionItemKind::VALUE,
                         SymfonySymbolKind::RouteParameter => CompletionItemKind::FIELD,
                         SymfonySymbolKind::Template => CompletionItemKind::FILE,
+                        SymfonySymbolKind::Translation => CompletionItemKind::VALUE,
                     }),
                     detail: Some(format!("Symfony {}", context.kind.label())),
                     sort_text: Some(format!("{index:05}")),
@@ -96,6 +100,7 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
             content_start: quote_start + percent + 2,
             escape_backslashes: false,
             route_name: None,
+            translation_domain: None,
         });
     }
 
@@ -117,6 +122,7 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
             content_start: quote_start + 1,
             escape_backslashes: false,
             route_name: Some(route_name),
+            translation_domain: None,
         });
     }
     let service_context = (matches!(call_name.as_str(), "service" | "decorate" | "target")
@@ -145,6 +151,8 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
             "render" | "renderview" | "renderblock" | "htmltemplate" | "texttemplate"
         ) || (call_name == "template"
             && named_argument.is_none_or(|name| name.eq_ignore_ascii_case("template"))));
+    let translation_context =
+        argument_index == 0 && matches!(call_name.as_str(), "trans" | "translatablemessage");
     let kind = if service_context {
         SymfonySymbolKind::Service
     } else if parameter_context {
@@ -153,6 +161,8 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
         SymfonySymbolKind::Route
     } else if template_context {
         SymfonySymbolKind::Template
+    } else if translation_context {
+        SymfonySymbolKind::Translation
     } else {
         return None;
     };
@@ -163,6 +173,9 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
         content_start: quote_start + 1 + service_prefix,
         escape_backslashes: quote == b'\'' || quote == b'"',
         route_name: None,
+        translation_domain: (kind == SymfonySymbolKind::Translation)
+            .then(|| php_translation_domain(content, args_start))
+            .flatten(),
     })
 }
 
@@ -186,6 +199,7 @@ fn detect_resource_context(
                 content_start: quote_start + 1,
                 escape_backslashes: false,
                 route_name: None,
+                translation_domain: None,
             });
         }
         if matches!(call_name, "path" | "url")
@@ -198,6 +212,7 @@ fn detect_resource_context(
                 content_start: quote_start + 1,
                 escape_backslashes: false,
                 route_name: Some(route_name),
+                translation_domain: None,
             });
         }
         if is_twig_uri(uri)
@@ -214,6 +229,16 @@ fn detect_resource_context(
     if is_twig_uri(uri)
         && let Some((quote_start, _)) = opening_quote(content, cursor)
     {
+        if let Some(domain) = twig_translation_domain(content, quote_start) {
+            return Some(SymfonyCompletionContext {
+                kind: SymfonySymbolKind::Translation,
+                prefix: content[quote_start + 1..cursor].to_string(),
+                content_start: quote_start + 1,
+                escape_backslashes: false,
+                route_name: None,
+                translation_domain: Some(domain),
+            });
+        }
         let statement = content[line_start..quote_start].trim_end();
         let keyword = statement
             .rsplit_once("{%")
@@ -238,6 +263,7 @@ fn detect_resource_context(
             content_start: line_start + percent + 1,
             escape_backslashes: false,
             route_name: None,
+            translation_domain: None,
         });
     }
 
@@ -251,6 +277,7 @@ fn detect_resource_context(
                 content_start: line_start + at + 1 + adjust,
                 escape_backslashes: false,
                 route_name: None,
+                translation_domain: None,
             });
         }
     }
@@ -269,6 +296,7 @@ fn detect_resource_context(
                 content_start: line_start + typed_start,
                 escape_backslashes: false,
                 route_name: None,
+                translation_domain: None,
             });
         }
     }
@@ -287,7 +315,138 @@ fn template_context(
         content_start: quote_start + 1,
         escape_backslashes: false,
         route_name: None,
+        translation_domain: None,
     })
+}
+
+fn php_translation_domain(content: &str, args_start: usize) -> Option<String> {
+    string_argument(content, args_start, 2)
+        .or_else(|| named_string_argument(content, args_start, "domain"))
+        .or_else(|| Some("messages".to_string()))
+}
+
+fn string_argument(content: &str, args_start: usize, target: usize) -> Option<String> {
+    let bytes = content.as_bytes();
+    let mut cursor = args_start;
+    let mut argument = 0usize;
+    let mut depth = 0u32;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\'' | b'"' => {
+                let quote = bytes[cursor];
+                let start = cursor + 1;
+                let mut end = start;
+                while end < bytes.len() {
+                    if bytes[end] == b'\\' {
+                        end = (end + 2).min(bytes.len());
+                        continue;
+                    }
+                    if bytes[end] == quote {
+                        break;
+                    }
+                    end += 1;
+                }
+                if argument == target && depth == 0 {
+                    return Some(content[start..end].to_string());
+                }
+                cursor = end;
+            }
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' if depth == 0 => break,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => argument += 1,
+            _ => {}
+        }
+        cursor += 1;
+    }
+    None
+}
+
+fn named_string_argument(content: &str, args_start: usize, target: &str) -> Option<String> {
+    let call = content.get(args_start..)?;
+    let end = call.find(')')?;
+    let call = &call[..end];
+    let target = format!("{target}:");
+    let start = call.to_ascii_lowercase().find(&target)? + target.len();
+    let quote_rel = call[start..].find(['\'', '"'])?;
+    let quote_start = start + quote_rel;
+    let quote = call.as_bytes()[quote_start];
+    let value_start = quote_start + 1;
+    let value_end = call[value_start..].find(quote as char)? + value_start;
+    Some(call[value_start..value_end].to_string())
+}
+
+fn twig_translation_domain(content: &str, quote_start: usize) -> Option<String> {
+    let bytes = content.as_bytes();
+    let quote = *bytes.get(quote_start)?;
+    let mut quote_end = quote_start + 1;
+    while quote_end < bytes.len() {
+        if bytes[quote_end] == b'\\' {
+            quote_end = (quote_end + 2).min(bytes.len());
+            continue;
+        }
+        if bytes[quote_end] == quote {
+            break;
+        }
+        quote_end += 1;
+    }
+    let mut cursor = quote_end + 1;
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'|') {
+        return None;
+    }
+    cursor += 1;
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        cursor += 1;
+    }
+    let name_start = cursor;
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| is_identifier_char(*byte))
+    {
+        cursor += 1;
+    }
+    if !content[name_start..cursor].eq_ignore_ascii_case("trans") {
+        return None;
+    }
+    twig_filter_domain(content, cursor)
+        .or_else(|| twig_default_domain(content))
+        .or_else(|| Some("messages".to_string()))
+}
+
+fn twig_filter_domain(content: &str, filter_end: usize) -> Option<String> {
+    let bytes = content.as_bytes();
+    let mut cursor = filter_end;
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'(') {
+        return None;
+    }
+    string_argument(content, cursor + 1, 1)
+        .or_else(|| named_string_argument(content, cursor + 1, "domain"))
+}
+
+fn twig_default_domain(content: &str) -> Option<String> {
+    let lower = content.to_ascii_lowercase();
+    let start = lower.find("trans_default_domain")? + "trans_default_domain".len();
+    let quote_rel = content[start..].find(['\'', '"'])?;
+    let quote_start = start + quote_rel;
+    let quote = content.as_bytes()[quote_start];
+    let value_start = quote_start + 1;
+    let value_end = content[value_start..].find(quote as char)? + value_start;
+    Some(content[value_start..value_end].to_string())
 }
 
 fn is_twig_uri(uri: &str) -> bool {

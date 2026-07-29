@@ -114,12 +114,20 @@ impl Backend {
                 name,
                 declaration: false,
             } => self.framework_route_parameter_locations(&route_name, &name, true, false),
+            FrameworkReferenceKind::Translation {
+                domain,
+                name,
+                declaration: false,
+            } => self.framework_translation_locations(&domain, &name, true, false),
             FrameworkReferenceKind::Namespace { .. }
             | FrameworkReferenceKind::Path { .. }
             | FrameworkReferenceKind::SymfonySymbol {
                 declaration: true, ..
             }
             | FrameworkReferenceKind::RouteParameter {
+                declaration: true, ..
+            }
+            | FrameworkReferenceKind::Translation {
                 declaration: true, ..
             } => Vec::new(),
         }

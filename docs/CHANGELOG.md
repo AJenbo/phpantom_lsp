@@ -174,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Symfony and Doctrine
 
+- **Symfony translation intelligence.** Translation keys declared in YAML, XLIFF, and PHP catalogues now complete and navigate from PHP translator calls, translatable messages, and Twig filters with domain-aware references, diagnostics, and declaration-side code lenses. Contributed by @sidux.
 - **Symfony Twig template intelligence.** Template files now complete and navigate from controller rendering, templated emails, and Twig inheritance or inclusion expressions, with cross-file references and declaration-side code lenses. Missing project templates produce diagnostics with a create-template quick fix. Contributed by @sidux.
 - **Symfony route intelligence.** Route names and path parameters declared with attributes or in YAML, XML, and PHP now complete, navigate, find references, rename, highlight, and show declaration-side code lenses across controllers and Twig templates. Project-local missing route names produce diagnostics. Contributed by @sidux.
 - **Symfony service container intelligence.** Service IDs and parameters declared in YAML, XML, and PHP configuration now complete, navigate, find references, rename, highlight, and show declaration-side code lenses across configuration and PHP usage sites. Project-local missing IDs and parameters produce diagnostics. Contributed by @sidux.

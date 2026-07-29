@@ -365,6 +365,7 @@ impl Backend {
             FrameworkReferenceKind::RouteParameter { name, .. } => {
                 (reference.start, reference.end, name)
             }
+            FrameworkReferenceKind::Translation { .. } => return None,
             FrameworkReferenceKind::Path { .. } => return None,
         };
 
@@ -421,6 +422,7 @@ impl Backend {
                     self.find_framework_references_for_rename(uri, content, position, true)?;
                 build_simple_rename_edit(self, uri, content, &locations, new_name, false)
             }
+            FrameworkReferenceKind::Translation { .. } => None,
             FrameworkReferenceKind::Path { .. } => None,
         }
     }

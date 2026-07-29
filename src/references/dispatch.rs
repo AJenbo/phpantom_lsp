@@ -219,6 +219,9 @@ impl Backend {
                 include_declaration,
                 true,
             ),
+            FrameworkReferenceKind::Translation { domain, name, .. } => {
+                self.framework_translation_locations(&domain, &name, include_declaration, true)
+            }
             FrameworkReferenceKind::Namespace { .. } | FrameworkReferenceKind::Path { .. } => {
                 Vec::new()
             }
