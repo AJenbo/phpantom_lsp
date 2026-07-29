@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785260763286,
+  "lastUpdate": 1785284862528,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22007,6 +22007,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f99fb2b929b7fdf0228bb24e005159c1cd75264f",
+          "message": "Laravel string keys are collected once instead of once per CPU core",
+          "timestamp": "2026-07-29T02:11:19+02:00",
+          "tree_id": "f68caec8d37bf5270dcca9f7b1e8f1266c4c82df",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f99fb2b929b7fdf0228bb24e005159c1cd75264f"
+        },
+        "date": 1785284859346,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.1,
             "unit": "MiB"
           }
         ]
