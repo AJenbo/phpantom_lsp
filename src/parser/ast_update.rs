@@ -215,6 +215,14 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
+        // Symfony's PHP configurators contain semantic class and callable
+        // strings that the normal PHP symbol map deliberately treats as
+        // plain strings. Keep their lightweight framework index in step with
+        // every parse, including incomplete edits where the main parse fails.
+        if crate::framework::is_framework_php_config_uri(uri) {
+            self.index_framework_uri_content(uri, content);
+        }
+
         let content_to_parse = if self.is_blade_file(uri) {
             // Seed the template scope with the set cached by the refresh
             // passes (post-index refresh, Blade did_open, caller save):

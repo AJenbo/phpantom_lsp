@@ -32,6 +32,17 @@ fn edit_texts_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn position_in(content: &str, needle: &str, inside: usize) -> Position {
+    let offset = content.find(needle).expect("needle should exist") + inside;
+    let prefix = &content[..offset];
+    Position::new(
+        prefix.bytes().filter(|byte| *byte == b'\n').count() as u32,
+        prefix
+            .rsplit_once('\n')
+            .map_or(prefix.len(), |(_, line)| line.len()) as u32,
+    )
+}
+
 #[tokio::test]
 async fn symfony_yaml_service_class_goes_to_php_definition() {
     let service_php = "<?php\nnamespace App\\Service;\nclass Mailer {}\n";
@@ -282,21 +293,202 @@ async fn symfony_route_controller_action_resolves_and_renames_method() {
 }
 
 #[tokio::test]
+async fn symfony_php_service_config_links_class_references_and_code_lens() {
+    let service_php = "<?php\nnamespace App\\Service;\nclass Mailer {}\n";
+    let services_php = r#"<?php
+namespace Symfony\Component\DependencyInjection\Loader\Configurator;
+
+use Symfony\Component\DependencyInjection\Loader\Configurator\App;
+use App\Service\Mailer;
+
+return App::config([
+    'services' => [
+        Mailer::class => [],
+        'App\\Service\\Mailer' => [],
+    ],
+]);
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Service/Mailer.php", service_php),
+            ("config/services.php", services_php),
+        ],
+    );
+
+    let service_uri = uri_for(&dir, "src/Service/Mailer.php");
+    let config_uri = uri_for(&dir, "config/services.php");
+    open_doc(&backend, service_uri.clone(), "php", service_php).await;
+    open_doc(&backend, config_uri.clone(), "php", services_php).await;
+
+    let definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: config_uri.clone(),
+                },
+                position: position_in(services_php, "App\\\\Service\\\\Mailer", 5),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("PHP service string should resolve to its class");
+    let GotoDefinitionResponse::Scalar(location) = definition else {
+        panic!("expected a single definition location");
+    };
+    assert_eq!(location.uri, service_uri);
+
+    let lenses = backend
+        .handle_code_lens(service_uri.as_str(), service_php)
+        .unwrap_or_default();
+    let titles: Vec<&str> = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref().map(|command| command.title.as_str()))
+        .collect();
+    assert!(
+        titles.contains(&"Symfony/Doctrine config: 2 refs"),
+        "expected PHP service references in the class code lens, got {titles:?}"
+    );
+
+    let edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: service_uri.clone(),
+                },
+                position: position_in(service_php, "class Mailer", 7),
+            },
+            new_name: "MessageMailer".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("class rename should update PHP service config");
+    let config_edits = edit_texts_for_uri(&edit, &config_uri);
+    assert!(
+        config_edits.iter().any(|text| text == "MessageMailer"),
+        "expected imported class-constant edit, got {config_edits:?}"
+    );
+    assert!(
+        config_edits
+            .iter()
+            .any(|text| text == "App\\\\Service\\\\MessageMailer"),
+        "expected escaped service class edit, got {config_edits:?}"
+    );
+}
+
+#[tokio::test]
+async fn symfony_php_route_config_links_callable_methods() {
+    let controller_php = "<?php\nnamespace App\\Controller;\nclass HomeController {\n    public function index(): void {}\n}\n";
+    let routes_php = r#"<?php
+namespace Symfony\Component\Routing\Loader\Configurator;
+
+use App\Controller\HomeController;
+
+return static function (RoutingConfigurator $routes): void {
+    $routes->add('home', '/')->controller([HomeController::class, 'index']);
+    $routes->add('other', '/other')->controller('App\\Controller\\HomeController::index');
+    $routes->import('../src/Controller/', 'attribute');
+};
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Controller/HomeController.php", controller_php),
+            ("config/routes.php", routes_php),
+        ],
+    );
+
+    let controller_uri = uri_for(&dir, "src/Controller/HomeController.php");
+    let routes_uri = uri_for(&dir, "config/routes.php");
+    open_doc(&backend, controller_uri.clone(), "php", controller_php).await;
+    open_doc(&backend, routes_uri.clone(), "php", routes_php).await;
+
+    let definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: routes_uri.clone(),
+                },
+                position: position_in(routes_php, "'index'", 2),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("PHP route callable should resolve to its method");
+    let GotoDefinitionResponse::Scalar(location) = definition else {
+        panic!("expected a single method definition");
+    };
+    assert_eq!(location.uri, controller_uri);
+    assert_eq!(location.range.start.line, 3);
+
+    let lenses = backend
+        .handle_code_lens(controller_uri.as_str(), controller_php)
+        .unwrap_or_default();
+    let titles: Vec<&str> = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref().map(|command| command.title.as_str()))
+        .collect();
+    assert!(
+        titles.contains(&"Symfony route config: 2 refs"),
+        "expected PHP route references in the method code lens, got {titles:?}"
+    );
+
+    let edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: controller_uri,
+                },
+                position: position_in(controller_php, "function index", 10),
+            },
+            new_name: "dashboard".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("method rename should update PHP route config");
+    let route_edits = edit_texts_for_uri(&edit, &routes_uri);
+    assert_eq!(
+        route_edits
+            .iter()
+            .filter(|text| text.as_str() == "dashboard")
+            .count(),
+        2,
+        "expected both PHP route callables to be renamed, got {route_edits:?}"
+    );
+}
+
+#[tokio::test]
 async fn symfony_namespace_prefix_rename_updates_yaml_and_php_namespace() {
     let mailer_php = "<?php\nnamespace App\\Service;\nclass Mailer {}\n";
     let services_yaml = "services:\n  App\\Service\\:\n    resource: '../src/Service/'\n  App\\Service\\Mailer: ~\n";
+    let services_php = r#"<?php
+namespace Symfony\Component\DependencyInjection\Loader\Configurator;
+
+return static function (ContainerConfigurator $container): void {
+    $container->services()->load('App\\Service\\', '../src/Service/');
+};
+"#;
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
         &[
             ("src/Service/Mailer.php", mailer_php),
             ("config/services.yaml", services_yaml),
+            ("config/services.php", services_php),
         ],
     );
 
     let mailer_uri = uri_for(&dir, "src/Service/Mailer.php");
     let yaml_uri = uri_for(&dir, "config/services.yaml");
+    let php_config_uri = uri_for(&dir, "config/services.php");
     open_doc(&backend, mailer_uri.clone(), "php", mailer_php).await;
     open_doc(&backend, yaml_uri.clone(), "yaml", services_yaml).await;
+    open_doc(&backend, php_config_uri.clone(), "php", services_php).await;
 
     let edit = backend
         .rename(RenameParams {
@@ -332,5 +524,16 @@ async fn symfony_namespace_prefix_rename_updates_yaml_and_php_namespace() {
             .any(|text| text == "App\\Domain"),
         "expected PHP namespace declaration edit, got {:?}",
         edit_texts_for_uri(&edit, &mailer_uri)
+    );
+    let php_config_edits = edit_texts_for_uri(&edit, &php_config_uri);
+    assert!(
+        php_config_edits
+            .iter()
+            .any(|text| text == "App\\\\Domain\\\\"),
+        "expected PHP configurator namespace-prefix edit, got {php_config_edits:?}"
+    );
+    assert!(
+        php_config_edits.iter().any(|text| text == "../src/Domain/"),
+        "expected PHP configurator resource path edit, got {php_config_edits:?}"
     );
 }

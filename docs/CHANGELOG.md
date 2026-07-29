@@ -172,6 +172,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Laravel and Carbon macros registered with `mixin()`.** A `Str::mixin(new StrMixin())` or `Collection::mixin(CollectionMixin::class)` call contributes one macro per public method of the mixin, taking the signature of the closure that method returns, so those methods complete, hover, resolve, and type-check. Carbon's trait-based `mixin()` is read the way Carbon reads it, where the trait's methods become methods on the target directly. Contributed by @shuvroroy (#256) and @calebdw.
 - **Larastan's `model-property<Model>` is checked and completed.** The pseudo-type is resolved against the model's known properties during argument checking, so a string literal that names no property is flagged, and typing inside such an argument completes the model's property names. Contributed by @calebdw.
 
+#### Symfony and Doctrine
+
+- **Symfony and Doctrine configuration navigation.** Service declarations, route controllers, and Doctrine mappings in YAML, XML, and Symfony PHP configurators now participate in go-to-definition, find references, rename, document highlights, and PHP code lenses. Namespace and resource-path refactors also update matching framework configuration. Contributed by @sidux.
+
 #### Diagnostics
 
 - **Two new diagnostics: illegal `readonly` writes and self-contradicting docblocks.** A write to a `readonly` property from anywhere PHP forbids one, and a `@param` or `@return` tag that contradicts the nullability of the declaration it documents, are now reported where you write them rather than when the code runs. Every form the readonly write can take is checked, including the ones that are easy to overlook (`unset()`, a `foreach` or destructuring target, taking a reference), and the writes the language allows are left alone.

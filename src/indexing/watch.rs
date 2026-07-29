@@ -150,6 +150,9 @@ impl Backend {
                     continue;
                 };
 
+                if crate::framework::is_framework_php_config_path(&file_path) {
+                    framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                }
                 if change.typ == FileChangeType::CHANGED {
                     // `parsed_uris` records the editor URI for open files and
                     // the canonical `file://` URI for lazily loaded ones;

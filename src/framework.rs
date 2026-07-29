@@ -1,9 +1,10 @@
-//! Symfony and Doctrine resource-file reference indexing.
+//! Symfony and Doctrine configuration reference indexing.
 //!
 //! PHPantom's normal [`SymbolMap`](crate::symbol_map::SymbolMap) is built from
-//! PHP ASTs, so YAML/XML framework resources need a parallel lightweight index
-//! if they are going to participate in go-to-definition, find-references,
-//! rename, and namespace/folder refactors.
+//! PHP ASTs, but framework configuration also encodes symbols in YAML/XML and
+//! PHP string literals. A parallel lightweight index lets those references
+//! participate in go-to-definition, find-references, rename, code lenses, and
+//! namespace/folder refactors.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -131,6 +132,37 @@ fn is_framework_resource_path(path: &Path) -> bool {
     )
 }
 
+fn is_php_uri(uri: &str) -> bool {
+    let path = uri
+        .strip_prefix("file://")
+        .unwrap_or(uri)
+        .split('?')
+        .next()
+        .unwrap_or(uri);
+    path.get(path.len().saturating_sub(4)..)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(".php"))
+}
+
+pub(crate) fn is_framework_php_config_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
+        && path
+            .components()
+            .any(|component| matches!(component, Component::Normal(name) if name == "config"))
+}
+
+pub(crate) fn is_framework_php_config_uri(uri: &str) -> bool {
+    if !is_php_uri(uri) {
+        return false;
+    }
+    uri.split('?')
+        .next()
+        .unwrap_or(uri)
+        .split('/')
+        .any(|component| component == "config")
+}
+
 fn is_skipped_resource_path(path: &Path) -> bool {
     path.components().any(|component| match component {
         Component::Normal(name) => {
@@ -219,7 +251,7 @@ impl Backend {
         }
     }
 
-    /// Scan all YAML/XML framework resources under the workspace root.
+    /// Scan framework configuration under the workspace root.
     pub(crate) fn index_framework_workspace(&self) -> usize {
         let Some(root) = self.workspace.workspace_root.read().clone() else {
             return 0;
@@ -237,19 +269,26 @@ impl Backend {
             if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                 continue;
             }
-            if !is_framework_resource_path(path) || is_skipped_resource_path(path) {
+            if (!is_framework_resource_path(path) && !is_framework_php_config_path(path))
+                || is_skipped_resource_path(path)
+            {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(path) else {
                 continue;
             };
             let uri = crate::util::path_to_uri(path);
-            let mappings = scan_doctrine_repository_mappings(&uri, &content);
+            let mappings = if is_framework_resource_uri(&uri) {
+                scan_doctrine_repository_mappings(&uri, &content)
+            } else {
+                Vec::new()
+            };
             if !mappings.is_empty() {
                 doctrine_repositories.insert(uri.clone(), Arc::new(mappings));
             }
-            let refs = scan_framework_references(&uri, &content);
-            if !refs.is_empty() {
+            if let Some(refs) = self.scan_framework_uri_references(&uri, &content)
+                && !refs.is_empty()
+            {
                 Self::replace_framework_lookup_uri(&mut lookup, &uri, &content, &refs);
                 indexed.insert(uri, Arc::new(refs));
             }
@@ -263,19 +302,26 @@ impl Backend {
     }
 
     pub(crate) fn index_framework_uri_content(&self, uri: &str, content: &str) {
-        if !is_framework_resource_uri(uri) {
+        let refs = self.scan_framework_uri_references(uri, content);
+        if refs.is_none() && !self.framework_references.read().contains_key(uri) {
             return;
         }
-        let refs = scan_framework_references(uri, content);
-        let mappings = scan_doctrine_repository_mappings(uri, content);
+        let mappings = if is_framework_resource_uri(uri) {
+            scan_doctrine_repository_mappings(uri, content)
+        } else {
+            Vec::new()
+        };
         let mut index = self.framework_references.write();
         let mut lookup = self.framework_reference_lookup.write();
-        if refs.is_empty() {
-            index.remove(uri);
-            Self::remove_framework_lookup_uri(&mut lookup, uri);
-        } else {
-            Self::replace_framework_lookup_uri(&mut lookup, uri, content, &refs);
-            index.insert(uri.to_string(), Arc::new(refs));
+        match refs {
+            Some(refs) if !refs.is_empty() => {
+                Self::replace_framework_lookup_uri(&mut lookup, uri, content, &refs);
+                index.insert(uri.to_string(), Arc::new(refs));
+            }
+            Some(_) | None => {
+                index.remove(uri);
+                Self::remove_framework_lookup_uri(&mut lookup, uri);
+            }
         }
         let mut doctrine_repositories = self.framework_doctrine_repositories.write();
         if mappings.is_empty() {
@@ -286,7 +332,10 @@ impl Backend {
     }
 
     pub(crate) fn reindex_framework_uri_from_disk(&self, uri: &str) {
-        if !is_framework_resource_uri(uri) {
+        if !is_framework_resource_uri(uri)
+            && !is_framework_php_config_uri(uri)
+            && !self.framework_references.read().contains_key(uri)
+        {
             return;
         }
         let content = self.get_file_content(uri).or_else(|| {
@@ -313,7 +362,9 @@ impl Backend {
         path: &Path,
         change_type: tower_lsp::lsp_types::FileChangeType,
     ) -> bool {
-        if !is_framework_resource_path(path) || is_skipped_resource_path(path) {
+        if (!is_framework_resource_path(path) && !is_framework_php_config_path(path))
+            || is_skipped_resource_path(path)
+        {
             return false;
         }
 
@@ -341,17 +392,16 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<FrameworkReference> {
-        if !is_framework_resource_uri(uri) {
-            return None;
-        }
-
         let offset = position_to_offset(content, position);
         let refs = self
             .framework_references
             .read()
             .get(uri)
             .cloned()
-            .unwrap_or_else(|| Arc::new(scan_framework_references(uri, content)));
+            .or_else(|| {
+                self.scan_framework_uri_references(uri, content)
+                    .map(Arc::new)
+            })?;
 
         refs.iter()
             .find(|reference| {
@@ -450,7 +500,10 @@ impl Backend {
             .read()
             .get(uri)
             .cloned()
-            .unwrap_or_else(|| Arc::new(scan_framework_references(uri, content)));
+            .or_else(|| {
+                self.scan_framework_uri_references(uri, content)
+                    .map(Arc::new)
+            })?;
 
         let mut highlights = Vec::new();
         for candidate in refs.iter() {
@@ -628,6 +681,70 @@ impl Backend {
             }
         }
     }
+
+    fn scan_framework_uri_references(
+        &self,
+        uri: &str,
+        content: &str,
+    ) -> Option<Vec<FrameworkReference>> {
+        if is_framework_resource_uri(uri) {
+            return Some(scan_framework_references(uri, content));
+        }
+        if is_framework_php_config_uri(uri) && is_symfony_php_config_content(content) {
+            return Some(self.scan_symfony_php_config_references(uri, content));
+        }
+        None
+    }
+
+    fn scan_symfony_php_config_references(
+        &self,
+        uri: &str,
+        content: &str,
+    ) -> Vec<FrameworkReference> {
+        let use_map = self.parse_use_statements(content);
+        let namespace = self.parse_namespace(content);
+        let mut refs = Vec::new();
+        let literals =
+            scan_php_config_class_constants(uri, content, &use_map, &namespace, &mut refs);
+
+        for (idx, literal) in literals.iter().enumerate() {
+            scan_php_config_literal(uri, literal, &mut refs);
+
+            let value = literal.value.trim();
+            if valid_framework_segment(value) {
+                let class_fqn =
+                    php_callable_class_before(content, literal.quote_start, &use_map, &namespace)
+                        .or_else(|| php_callable_string_class_before(content, &literals, idx));
+                if let Some(class_fqn) = class_fqn {
+                    refs.push(FrameworkReference {
+                        uri: uri.to_string(),
+                        start: literal.start as u32,
+                        end: literal.end as u32,
+                        kind: FrameworkReferenceKind::Method {
+                            class_fqn,
+                            member_name: value.to_string(),
+                        },
+                    });
+                }
+            }
+
+            if looks_like_path_value(value) && php_literal_has_path_context(content, &literals, idx)
+            {
+                refs.push(FrameworkReference {
+                    uri: uri.to_string(),
+                    start: literal.start as u32,
+                    end: literal.end as u32,
+                    kind: FrameworkReferenceKind::Path {
+                        value: value.to_string(),
+                    },
+                });
+            }
+        }
+
+        refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
+        refs.dedup();
+        refs
+    }
 }
 
 fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Option<&str> {
@@ -635,6 +752,349 @@ fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Opti
         FrameworkReferenceKind::Class { fqn } => Some(fqn),
         FrameworkReferenceKind::Namespace { prefix } => Some(prefix),
         FrameworkReferenceKind::Method { .. } | FrameworkReferenceKind::Path { .. } => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PhpStringLiteral<'a> {
+    value: &'a str,
+    quote_start: usize,
+    quote_end: usize,
+    start: usize,
+    end: usize,
+}
+
+fn is_symfony_php_config_content(content: &str) -> bool {
+    let has_configurator = content.contains("Configurator");
+    if !has_configurator && !content.contains("Symfony\\Config\\") {
+        return false;
+    }
+
+    content.contains(r"Symfony\Component\DependencyInjection\Loader\Configurator")
+        || content.contains(r"Symfony\Component\Routing\Loader\Configurator")
+        || content.contains("Symfony\\Config\\")
+        || (has_configurator
+            && (content.contains("ContainerConfigurator")
+                || content.contains("RoutingConfigurator"))
+            && [
+                "->services(",
+                "->set(",
+                "->load(",
+                "->controller(",
+                "->import(",
+                "::config(",
+            ]
+            .iter()
+            .any(|needle| content.contains(needle)))
+}
+
+fn scan_php_config_class_constants<'a>(
+    uri: &str,
+    content: &'a str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+    refs: &mut Vec<FrameworkReference>,
+) -> Vec<PhpStringLiteral<'a>> {
+    let bytes = content.as_bytes();
+    let mut literals = Vec::new();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'#' && bytes.get(i + 1) != Some(&b'[') {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/')) {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
+
+        if matches!(bytes[i], b'\'' | b'"') {
+            let quote = bytes[i];
+            let quote_start = i;
+            let start = i + 1;
+            i = start;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == quote {
+                    literals.push(PhpStringLiteral {
+                        value: &content[start..i],
+                        quote_start,
+                        quote_end: i,
+                        start,
+                        end: i,
+                    });
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        if is_php_name_start(bytes[i]) && (i == 0 || !is_php_name_char(bytes[i.saturating_sub(1)]))
+        {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && is_php_name_char(bytes[i]) {
+                i += 1;
+            }
+            let end = i;
+            let mut cursor = end;
+            skip_ascii_whitespace(bytes, &mut cursor);
+            if bytes.get(cursor..cursor + 2) != Some(b"::") {
+                continue;
+            }
+            cursor += 2;
+            skip_ascii_whitespace(bytes, &mut cursor);
+            if !content
+                .get(cursor..cursor + 5)
+                .is_some_and(|keyword| keyword.eq_ignore_ascii_case("class"))
+                || bytes
+                    .get(cursor + 5)
+                    .is_some_and(|byte| is_php_identifier_char(*byte))
+            {
+                continue;
+            }
+
+            let raw_name = &content[start..end];
+            if matches!(
+                raw_name.to_ascii_lowercase().as_str(),
+                "self" | "static" | "parent"
+            ) {
+                continue;
+            }
+            let fqn =
+                normalize_framework_fqn(&crate::util::resolve_to_fqn(raw_name, use_map, namespace));
+            if valid_framework_name(&fqn) {
+                refs.push(FrameworkReference {
+                    uri: uri.to_string(),
+                    start: start as u32,
+                    end: end as u32,
+                    kind: FrameworkReferenceKind::Class { fqn },
+                });
+            }
+            continue;
+        }
+
+        i += 1;
+    }
+
+    literals
+}
+
+fn scan_php_config_literal(
+    uri: &str,
+    literal: &PhpStringLiteral<'_>,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let leading_whitespace = literal.value.len() - literal.value.trim_start().len();
+    let trimmed = literal.value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    let service_prefix = trimmed
+        .bytes()
+        .take_while(|byte| matches!(byte, b'@' | b'?'))
+        .count();
+    let source = &trimmed[service_prefix..];
+    if source.is_empty() {
+        return;
+    }
+    let start = literal.start + leading_whitespace + service_prefix;
+
+    if let Some(separator) = source.find("::") {
+        let class_source = &source[..separator];
+        let method_name = &source[separator + 2..];
+        let class_fqn = normalize_framework_fqn(class_source);
+        if valid_framework_name(&class_fqn) && valid_framework_segment(method_name) {
+            refs.push(FrameworkReference {
+                uri: uri.to_string(),
+                start: start as u32,
+                end: (start + class_source.len()) as u32,
+                kind: FrameworkReferenceKind::Class {
+                    fqn: class_fqn.clone(),
+                },
+            });
+            refs.push(FrameworkReference {
+                uri: uri.to_string(),
+                start: (start + separator + 2) as u32,
+                end: (start + source.len()) as u32,
+                kind: FrameworkReferenceKind::Method {
+                    class_fqn,
+                    member_name: method_name.to_string(),
+                },
+            });
+        }
+        return;
+    }
+
+    let normalized = normalize_framework_fqn(source);
+    if !source.contains('\\') || !valid_framework_name(&normalized) {
+        return;
+    }
+
+    let kind = if source.ends_with('\\') {
+        FrameworkReferenceKind::Namespace { prefix: normalized }
+    } else {
+        FrameworkReferenceKind::Class { fqn: normalized }
+    };
+    refs.push(FrameworkReference {
+        uri: uri.to_string(),
+        start: start as u32,
+        end: (start + source.len()) as u32,
+        kind,
+    });
+}
+
+fn php_callable_class_before(
+    content: &str,
+    quote_start: usize,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<String> {
+    let bytes = content.as_bytes();
+    let mut cursor = quote_start;
+    skip_ascii_whitespace_backwards(bytes, &mut cursor);
+    if cursor == 0 || bytes[cursor - 1] != b',' {
+        return None;
+    }
+    cursor -= 1;
+    skip_ascii_whitespace_backwards(bytes, &mut cursor);
+    let keyword_start = cursor.checked_sub(5)?;
+    if !content[keyword_start..cursor].eq_ignore_ascii_case("class") {
+        return None;
+    }
+    cursor = keyword_start;
+    skip_ascii_whitespace_backwards(bytes, &mut cursor);
+    if cursor < 2 || &bytes[cursor - 2..cursor] != b"::" {
+        return None;
+    }
+    cursor -= 2;
+    skip_ascii_whitespace_backwards(bytes, &mut cursor);
+    let end = cursor;
+    while cursor > 0 && is_php_name_char(bytes[cursor - 1]) {
+        cursor -= 1;
+    }
+    if cursor == end {
+        return None;
+    }
+    let raw_name = &content[cursor..end];
+    let fqn = normalize_framework_fqn(&crate::util::resolve_to_fqn(raw_name, use_map, namespace));
+    valid_framework_name(&fqn).then_some(fqn)
+}
+
+fn php_callable_string_class_before(
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    current_idx: usize,
+) -> Option<String> {
+    let previous = literals.get(current_idx.checked_sub(1)?)?;
+    let current = literals.get(current_idx)?;
+    if content[previous.quote_end + 1..current.quote_start].trim() != "," {
+        return None;
+    }
+    if !content[..previous.quote_start].trim_end().ends_with('[') {
+        return None;
+    }
+    let class_fqn = normalize_framework_fqn(previous.value.trim());
+    valid_framework_name(&class_fqn).then_some(class_fqn)
+}
+
+fn php_literal_has_path_context(
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    current_idx: usize,
+) -> bool {
+    let current = &literals[current_idx];
+    let prefix = &content[..current.quote_start];
+    if let Some(open_paren) = prefix.rfind('(') {
+        let mut name_end = open_paren;
+        skip_ascii_whitespace_backwards(content.as_bytes(), &mut name_end);
+        let mut name_start = name_end;
+        while name_start > 0 && is_php_identifier_char(content.as_bytes()[name_start - 1]) {
+            name_start -= 1;
+        }
+        let call_name = &content[name_start..name_end];
+        let argument_index = content[open_paren + 1..current.quote_start]
+            .bytes()
+            .filter(|byte| *byte == b',')
+            .count();
+        if (call_name == "import" && argument_index == 0)
+            || (call_name == "load" && argument_index == 1)
+        {
+            return true;
+        }
+    }
+
+    for previous in literals[..current_idx].iter().rev() {
+        if current.quote_start.saturating_sub(previous.quote_end) > 512 {
+            break;
+        }
+        if !matches!(
+            previous.value.trim(),
+            "resource" | "exclude" | "path" | "paths" | "dir" | "directory"
+        ) {
+            continue;
+        }
+        let between = content[previous.quote_end + 1..current.quote_start].trim();
+        let Some(after_arrow) = between.strip_prefix("=>") else {
+            continue;
+        };
+        let after_arrow = after_arrow.trim();
+        if after_arrow.is_empty() {
+            return true;
+        }
+        if after_arrow.starts_with('[')
+            && after_arrow.bytes().filter(|byte| *byte == b'[').count()
+                > after_arrow.bytes().filter(|byte| *byte == b']').count()
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn is_php_name_start(byte: u8) -> bool {
+    byte == b'\\' || byte == b'_' || byte.is_ascii_alphabetic()
+}
+
+fn is_php_name_char(byte: u8) -> bool {
+    byte == b'\\' || is_php_identifier_char(byte)
+}
+
+fn is_php_identifier_char(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphanumeric()
+}
+
+fn skip_ascii_whitespace(bytes: &[u8], cursor: &mut usize) {
+    while bytes.get(*cursor).is_some_and(u8::is_ascii_whitespace) {
+        *cursor += 1;
+    }
+}
+
+fn skip_ascii_whitespace_backwards(bytes: &[u8], cursor: &mut usize) {
+    while *cursor > 0 && bytes[*cursor - 1].is_ascii_whitespace() {
+        *cursor -= 1;
     }
 }
 
@@ -1107,18 +1567,26 @@ pub(crate) fn namespace_segment_range_at_offset(
     absolute_start: u32,
     cursor: u32,
 ) -> Option<(usize, u32, u32)> {
-    let normalized_source = source.trim_end_matches('\\');
-    let mut offset = absolute_start;
-    for (idx, segment) in normalized_source.split('\\').enumerate() {
-        if segment.is_empty() {
-            offset += 1;
-            continue;
+    let bytes = source.as_bytes();
+    let mut source_offset = 0usize;
+    let mut segment_idx = 0usize;
+    while source_offset < bytes.len() {
+        while source_offset < bytes.len() && bytes[source_offset] == b'\\' {
+            source_offset += 1;
         }
-        let end = offset + segment.len() as u32;
-        if cursor >= offset && cursor <= end {
-            return Some((idx, offset, end));
+        if source_offset >= bytes.len() {
+            break;
         }
-        offset = end + 1;
+        let segment_start = source_offset;
+        while source_offset < bytes.len() && bytes[source_offset] != b'\\' {
+            source_offset += 1;
+        }
+        let start = absolute_start + segment_start as u32;
+        let end = absolute_start + source_offset as u32;
+        if cursor >= start && cursor <= end {
+            return Some((segment_idx, start, end));
+        }
+        segment_idx += 1;
     }
     None
 }

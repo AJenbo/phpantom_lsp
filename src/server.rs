@@ -1006,6 +1006,10 @@ impl LanguageServer for Backend {
             return;
         }
 
+        if crate::framework::is_framework_php_config_uri(&uri) {
+            self.reindex_framework_uri_from_disk(&uri);
+        }
+
         self.clear_file_maps(&uri);
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
