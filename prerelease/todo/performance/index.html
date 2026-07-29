@@ -1505,10 +1505,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p45-emit-docblock-symbol-spans-from-the-phpdoc-cst" class="md-nav__link">
+  <a href="#p47-inline-see-references-are-still-found-by-scanning-raw-text" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P45. Emit docblock symbol spans from the PHPDoc CST
+        P47. Inline <code>{@see}</code> references are still found by scanning raw text
       </span>
     </span>
   </a>
@@ -2251,10 +2251,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p45-emit-docblock-symbol-spans-from-the-phpdoc-cst" class="md-nav__link">
+  <a href="#p47-inline-see-references-are-still-found-by-scanning-raw-text" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P45. Emit docblock symbol spans from the PHPDoc CST
+        P47. Inline <code>{@see}</code> references are still found by scanning raw text
       </span>
     </span>
   </a>
@@ -2975,32 +2975,21 @@ PclZip return-type-inference hang, but was reverted at the time
 because it did not address that hang's dominant cost (uncached
 body-return inference, since fixed by memoization).</p>
 <hr />
-<h2 id="p45-emit-docblock-symbol-spans-from-the-phpdoc-cst">P45. Emit docblock symbol spans from the PHPDoc CST<a class="headerlink" href="#p45-emit-docblock-symbol-spans-from-the-phpdoc-cst" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium-High</strong></p>
-<p><code>src/symbol_map/docblock.rs</code> is the last consumer that re-derives tag
-structure from raw text. The extractors in <code>docblock/</code> now read the
-parsed grammar (see the <code>TagValueInfo</code> snapshot on <code>TagInfo</code>), but the
-symbol map needs a <em>byte offset in the file</em> for every identifier inside
-a type, not just the type's text, so it still finds the type itself by
-hand: <code>emit_type_first_tag</code> strips <code>@assert</code> modifiers and calls
-<code>split_type_token</code>, <code>extract_method_tag_symbols</code> re-implements the
-<code>[static] Return name(params)</code> split with its own paren-depth scan and a
-heuristic for telling a return type from a method name,
-<code>extract_template_tag_symbols</code> re-finds the <code>of</code> bound, and
-<code>extract_property_tag_symbols</code> re-splits type from variable.</p>
-<p>The CST has a span on every type, identifier and variable, which would
-replace all of that guessing. The obstacle is multi-line types:
-<code>join_multiline_type</code> builds an offset map so that a position inside the
-joined type string can be mapped back to the file, and the folded text
-kept in <code>TagValueInfo</code> cannot be mapped that way. Recording each type's
-span alongside its text is enough to anchor the <em>start</em> of a type
-precisely; the per-identifier offsets inside a folded multi-line type
-still need the offset map, or a walk over the CST type tree in place of
-<code>emit_type_spans</code>.</p>
-<p>Walking the CST directly is the endgame: it deletes <code>join_multiline_type</code>,
-<code>emit_type_spans_from_ast</code> and the offset-map machinery outright, since
-every identifier already carries its own span. That is the larger of the
-two options and is what makes this Medium-High rather than Medium.</p>
+<h2 id="p47-inline-see-references-are-still-found-by-scanning-raw-text">P47. Inline <code>{@see}</code> references are still found by scanning raw text<a class="headerlink" href="#p47-inline-see-references-are-still-found-by-scanning-raw-text" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><code>extract_inline_see_symbols</code> in <code>src/symbol_map/docblock.rs</code> is the last
+place the symbol map reads a docblock as a string: it searches for the
+literal <code>{@see</code> and takes everything up to the next <code>}</code>. The rest of
+the module now walks the PHPDoc CST, where an inline tag is a
+<code>TextSegment::InlineTag</code> carrying a full <code>Tag</code> with its own spans.</p>
+<p>The reason the scan survived is reach rather than capability. Inline
+tags turn up in any prose, so a CST-based version has to visit the free
+text before the first tag <em>and</em> the description of every tag shape that
+has one, which means a <code>Text</code> visitor threaded through the tag match in
+<code>emit_tag_symbols</code>. The string scan reaches all of them in one pass.</p>
+<p>Doing it properly would pick up <code>{@link}</code> and the other inline tags for
+free, and stop the scan tripping over a <code>}</code> that belongs to a nested
+type rather than the inline tag.</p>
 <hr />
 <h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
@@ -3015,11 +3004,15 @@ whole tag is dropped:</p>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x"> * @method static (callable(): string) getCallable()</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x"> */</span>
 </code></pre></div>
-<p>Both forms appear in Psalm's own magic-method test suite.
-<code>recover_static_method_tag</code> in <code>src/docblock/virtual_members.rs</code> works
-around it by re-parsing the value without the modifier and reapplying
-<code>static</code> afterwards. Report it upstream; remove the workaround once the
-grammar disambiguates on the whitespace before the <code>(</code>.</p>
+<p>Both forms appear in Psalm's own magic-method test suite. Two places
+work around it: <code>recover_static_method_tag</code> in
+<code>src/docblock/virtual_members.rs</code> re-parses the value without the
+modifier and reapplies <code>static</code> afterwards, and
+<code>recover_static_method_tags</code> in <code>src/symbol_map/docblock.rs</code> blanks the
+keyword out with spaces and re-parses the whole docblock, because it
+needs the tag's original byte offsets as well as its signature. Report
+it upstream; remove both workarounds once the grammar disambiguates on
+the whitespace before the <code>(</code>.</p>
 <hr />
 <h2 id="p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code><a class="headerlink" href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: High</strong></p>
