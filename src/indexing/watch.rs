@@ -163,6 +163,14 @@ impl Backend {
                     if !loaded {
                         continue;
                     }
+                    if !crate::framework::is_framework_php_config_path(&file_path) {
+                        framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                    }
+                } else if change.typ == FileChangeType::DELETED
+                    && self.framework_references.read().contains_key(&uri_str)
+                    && !crate::framework::is_framework_php_config_path(&file_path)
+                {
+                    framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
                 }
 
                 php_changes.push((uri_str, file_path, change.typ));

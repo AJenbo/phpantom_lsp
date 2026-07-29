@@ -10,6 +10,7 @@ use crate::Backend;
 use crate::atom::Atom;
 use crate::class_lookup::find_class_at_offset;
 use crate::definition::member::MemberKind;
+use crate::framework::{FrameworkReferenceKind, SymfonySymbolKind};
 use crate::reference_index::ReferenceIndexKey;
 use crate::references::{
     doctrine_repository_matches_entity_convention, looks_like_doctrine_repository,
@@ -214,6 +215,7 @@ impl Backend {
             &mut lenses,
             &mut seen,
         );
+        self.push_symfony_resource_lenses(uri, content, &mut lenses, &mut seen);
 
         lenses.sort_by(|a, b| {
             a.range
@@ -581,6 +583,86 @@ impl Backend {
                 end: position,
             },
         })
+    }
+
+    fn push_symfony_resource_lenses(
+        &self,
+        uri: &str,
+        content: &str,
+        lenses: &mut Vec<CodeLens>,
+        seen: &mut HashSet<String>,
+    ) {
+        let Some(references) = self.framework_references.read().get(uri).cloned() else {
+            return;
+        };
+
+        for (idx, declaration) in references.iter().enumerate() {
+            let FrameworkReferenceKind::SymfonySymbol {
+                kind,
+                name,
+                declaration: true,
+            } = &declaration.kind
+            else {
+                continue;
+            };
+            if !matches!(
+                kind,
+                SymfonySymbolKind::Service | SymfonySymbolKind::Parameter
+            ) {
+                continue;
+            }
+
+            let pos = offset_to_position(content, declaration.start as usize);
+            let usages = self.framework_symfony_symbol_locations(*kind, name, false, true);
+            if !usages.is_empty() {
+                let title = format!(
+                    "Symfony {}: {} {}",
+                    kind.label(),
+                    usages.len(),
+                    if usages.len() == 1 { "ref" } else { "refs" }
+                );
+                self.push_locations_lens(uri, pos, title, usages, lenses, seen);
+            }
+
+            if *kind != SymfonySymbolKind::Service {
+                continue;
+            }
+            let block_end = references
+                .iter()
+                .skip(idx + 1)
+                .find_map(|candidate| {
+                    matches!(
+                        candidate.kind,
+                        FrameworkReferenceKind::SymfonySymbol {
+                            kind: SymfonySymbolKind::Service,
+                            declaration: true,
+                            ..
+                        }
+                    )
+                    .then_some(candidate.start)
+                })
+                .unwrap_or(content.len() as u32);
+
+            if let Some(class_fqn) = references.iter().find_map(|candidate| {
+                if candidate.start <= declaration.start || candidate.start >= block_end {
+                    return None;
+                }
+                let FrameworkReferenceKind::Class { fqn } = &candidate.kind else {
+                    return None;
+                };
+                Some(fqn.as_str())
+            }) && let Some(location) = self.class_location(class_fqn, uri, content)
+            {
+                self.push_locations_lens(
+                    uri,
+                    pos,
+                    format!("Symfony service class: {}", short_name(class_fqn)),
+                    vec![location],
+                    lenses,
+                    seen,
+                );
+            }
+        }
     }
 
     fn push_framework_class_lenses(

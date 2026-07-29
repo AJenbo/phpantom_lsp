@@ -537,3 +537,334 @@ return static function (ContainerConfigurator $container): void {
         "expected PHP configurator resource path edit, got {php_config_edits:?}"
     );
 }
+
+#[tokio::test]
+async fn symfony_service_ids_and_parameters_work_across_yaml_and_php() {
+    let mailer_php = "<?php\nnamespace App\\Service;\nclass Mailer {}\n";
+    let services_yaml = r#"parameters:
+  app.sender_name: PHPantom
+services:
+  app.mailer:
+    class: App\Service\Mailer
+    arguments: ['%app.sender_name%']
+  app.mailer_alias: '@app.mailer'
+"#;
+    let consumer_php = r#"<?php
+namespace App\Controller;
+
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+final class MailController
+{
+    public function __construct(
+        #[Autowire(param: 'app.sender_name')]
+        private string $sender,
+    ) {}
+
+    public function send(ContainerInterface $container): void
+    {
+        $container->get('app.mailer');
+    }
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Service/Mailer.php", mailer_php),
+            ("src/Controller/MailController.php", consumer_php),
+            ("config/services.yaml", services_yaml),
+        ],
+    );
+    let mailer_uri = uri_for(&dir, "src/Service/Mailer.php");
+    let consumer_uri = uri_for(&dir, "src/Controller/MailController.php");
+    let yaml_uri = uri_for(&dir, "config/services.yaml");
+    open_doc(&backend, mailer_uri.clone(), "php", mailer_php).await;
+    open_doc(&backend, yaml_uri.clone(), "yaml", services_yaml).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+
+    let definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: consumer_uri.clone(),
+                },
+                position: position_in(consumer_php, "app.mailer", 5),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("service ID usage should resolve to its declaration");
+    let locations = match definition {
+        GotoDefinitionResponse::Scalar(location) => vec![location],
+        GotoDefinitionResponse::Array(locations) => locations,
+        GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+    };
+    assert_eq!(locations.len(), 1);
+    assert_eq!(locations[0].uri, yaml_uri);
+    assert_eq!(locations[0].range.start.line, 3);
+
+    let lenses = backend
+        .handle_code_lens(yaml_uri.as_str(), services_yaml)
+        .unwrap_or_default();
+    let titles = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref().map(|command| command.title.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        titles.contains(&"Symfony service: 2 refs"),
+        "expected declaration-side service reference lens, got {titles:?}"
+    );
+    assert!(
+        titles.contains(&"Symfony service class: Mailer"),
+        "expected service declaration to link to its PHP class, got {titles:?}"
+    );
+
+    let edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: yaml_uri.clone(),
+                },
+                position: position_in(services_yaml, "app.mailer:", 5),
+            },
+            new_name: "app.message_mailer".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("service ID rename should update its usages");
+    assert!(
+        edit_texts_for_uri(&edit, &consumer_uri)
+            .iter()
+            .any(|text| text == "app.message_mailer"),
+        "expected PHP container lookup edit"
+    );
+    assert!(
+        edit_texts_for_uri(&edit, &yaml_uri)
+            .iter()
+            .filter(|text| text.as_str() == "app.message_mailer")
+            .count()
+            >= 2,
+        "expected YAML declaration and alias edits"
+    );
+}
+
+#[tokio::test]
+async fn symfony_service_and_parameter_completion_uses_workspace_declarations() {
+    let services_yaml = "parameters:\n  app.sender_name: PHPantom\nservices:\n  app.mailer: ~\n";
+    let consumer_php = r#"<?php
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+function send(ContainerInterface $container): void {
+    $container->get('app.m');
+}
+
+#[Autowire(param: 'app.s')]
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("config/services.yaml", services_yaml),
+            ("src/consumer.php", consumer_php),
+        ],
+    );
+    let yaml_uri = uri_for(&dir, "config/services.yaml");
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+    open_doc(&backend, yaml_uri, "yaml", services_yaml).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+
+    for (needle, expected) in [("app.m", "app.mailer"), ("app.s", "app.sender_name")] {
+        let response = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: consumer_uri.clone(),
+                    },
+                    position: position_in(consumer_php, needle, needle.len()),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .expect("Symfony completion should return candidates");
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        assert!(
+            items.iter().any(|item| item.label == expected),
+            "expected {expected} completion, got {:?}",
+            items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[tokio::test]
+async fn symfony_xml_service_alias_resolves_to_service_declaration() {
+    let services_xml = r#"<?xml version="1.0"?>
+<container>
+  <parameters>
+    <parameter key="app.sender_name">PHPantom</parameter>
+  </parameters>
+  <services>
+    <service id="app.mailer" class="App\Service\Mailer"/>
+    <service id="app.mailer_alias" alias="app.mailer"/>
+  </services>
+</container>
+"#;
+    let (backend, dir) = create_psr4_workspace(COMPOSER, &[("config/services.xml", services_xml)]);
+    let xml_uri = uri_for(&dir, "config/services.xml");
+    open_doc(&backend, xml_uri.clone(), "xml", services_xml).await;
+
+    let definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: xml_uri.clone(),
+                },
+                position: position_in(services_xml, "alias=\"app.mailer\"", 10),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("XML service alias should resolve");
+    let location = match definition {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+        GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+    };
+    assert_eq!(location.uri, xml_uri);
+    assert_eq!(location.range.start.line, 6);
+}
+
+#[tokio::test]
+async fn symfony_reports_only_missing_project_local_container_symbols() {
+    let services_yaml = "parameters:\n  app.sender: PHPantom\nservices:\n  app.mailer: ~\n";
+    let consumer_php = r#"<?php
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+function send(ContainerInterface $container): void {
+    $container->get('app.mailer');
+    $container->get('app.missing');
+    $container->getParameter('app.sender');
+    $container->getParameter('app.missing_parameter');
+    $container->get('vendor.dynamic_service');
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("config/services.yaml", services_yaml),
+            ("src/consumer.php", consumer_php),
+        ],
+    );
+    let yaml_uri = uri_for(&dir, "config/services.yaml");
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+    open_doc(&backend, yaml_uri, "yaml", services_yaml).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(consumer_uri.as_str(), consumer_php, &mut diagnostics);
+    let symfony = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code.starts_with("unknown_symfony_")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        symfony.len(),
+        2,
+        "expected only missing app-local symbols, got {symfony:?}"
+    );
+    assert!(
+        symfony
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("app.missing'"))
+    );
+    assert!(
+        symfony
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("app.missing_parameter'"))
+    );
+}
+
+#[tokio::test]
+async fn symfony_php_configurator_declares_services_and_parameters() {
+    let mailer_php = "<?php\nnamespace App\\Service;\nclass Mailer {}\n";
+    let services_php = r#"<?php
+namespace Symfony\Component\DependencyInjection\Loader\Configurator;
+
+use App\Service\Mailer;
+
+return static function (ContainerConfigurator $container): void {
+    $services = $container->services();
+    $parameters = $container->parameters();
+    $services->set('app.php_mailer', Mailer::class);
+    $parameters->set('app.php_sender', 'PHPantom');
+    $services->alias('app.php_mailer_alias', 'app.php_mailer');
+};
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Service/Mailer.php", mailer_php),
+            ("config/services.php", services_php),
+        ],
+    );
+    let mailer_uri = uri_for(&dir, "src/Service/Mailer.php");
+    let config_uri = uri_for(&dir, "config/services.php");
+    open_doc(&backend, mailer_uri, "php", mailer_php).await;
+    open_doc(&backend, config_uri.clone(), "php", services_php).await;
+
+    let definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: config_uri.clone(),
+                },
+                position: position_in(services_php, "'app.php_mailer');", "'app.php_".len()),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("PHP service alias target should resolve");
+    let location = match definition {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+        GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+    };
+    assert_eq!(location.uri, config_uri);
+    assert_eq!(location.range.start.line, 8);
+
+    let lenses = backend
+        .handle_code_lens(config_uri.as_str(), services_php)
+        .unwrap_or_default();
+    let titles = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref().map(|command| command.title.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        titles.contains(&"Symfony service: 1 ref"),
+        "expected PHP declaration-side service lens, got {titles:?}"
+    );
+    assert!(
+        titles.contains(&"Symfony service class: Mailer"),
+        "expected PHP service declaration class lens, got {titles:?}"
+    );
+}

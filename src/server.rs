@@ -1006,7 +1006,9 @@ impl LanguageServer for Backend {
             return;
         }
 
-        if crate::framework::is_framework_php_config_uri(&uri) {
+        if crate::framework::is_framework_php_config_uri(&uri)
+            || self.framework_references.read().contains_key(&uri)
+        {
             self.reindex_framework_uri_from_disk(&uri);
         }
 

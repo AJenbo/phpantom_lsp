@@ -16,8 +16,24 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::Backend;
+use crate::references::push_unique_location;
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::util::strip_fqn_prefix;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SymfonySymbolKind {
+    Service,
+    Parameter,
+}
+
+impl SymfonySymbolKind {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Parameter => "parameter",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FrameworkReferenceKind {
@@ -33,6 +49,12 @@ pub(crate) enum FrameworkReferenceKind {
     Namespace { prefix: String },
     /// A path-like scalar used by Symfony resource/exclude imports.
     Path { value: String },
+    /// A named Symfony resource such as a service ID or parameter name.
+    SymfonySymbol {
+        kind: SymfonySymbolKind,
+        name: String,
+        declaration: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +185,20 @@ pub(crate) fn is_framework_php_config_uri(uri: &str) -> bool {
         .any(|component| component == "config")
 }
 
+pub(crate) fn should_index_framework_php_content(uri: &str, content: &str) -> bool {
+    is_php_uri(uri)
+        && (is_framework_php_config_uri(uri)
+            || content.contains("Autowire")
+            || content.contains("ContainerInterface")
+            || content.contains("ContainerBagInterface")
+            || content.contains("ServiceLocator")
+            || content.contains("getParameter(")
+            || content.contains("hasParameter(")
+            || content.contains("service(")
+            || content.contains("param(")
+            || content.contains("$container->get("))
+}
+
 fn is_skipped_resource_path(path: &Path) -> bool {
     path.components().any(|component| match component {
         Component::Normal(name) => {
@@ -217,7 +253,9 @@ impl Backend {
                     );
                     keys.methods.insert(member_name.clone());
                 }
-                FrameworkReferenceKind::Namespace { .. } | FrameworkReferenceKind::Path { .. } => {}
+                FrameworkReferenceKind::Namespace { .. }
+                | FrameworkReferenceKind::Path { .. }
+                | FrameworkReferenceKind::SymfonySymbol { .. } => {}
             }
         }
 
@@ -362,9 +400,11 @@ impl Backend {
         path: &Path,
         change_type: tower_lsp::lsp_types::FileChangeType,
     ) -> bool {
-        if (!is_framework_resource_path(path) && !is_framework_php_config_path(path))
-            || is_skipped_resource_path(path)
-        {
+        let is_php = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("php"));
+        if (!is_framework_resource_path(path) && !is_php) || is_skipped_resource_path(path) {
             return false;
         }
 
@@ -456,6 +496,73 @@ impl Backend {
         locations
     }
 
+    pub(crate) fn framework_symfony_symbol_names(
+        &self,
+        target_kind: SymfonySymbolKind,
+    ) -> Vec<String> {
+        let mut names = Vec::new();
+        for refs in self.framework_references.read().values() {
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::SymfonySymbol {
+                    kind,
+                    name,
+                    declaration: true,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                if *kind == target_kind {
+                    push_unique_string(&mut names, name.clone());
+                }
+            }
+        }
+        names.sort_unstable();
+        names
+    }
+
+    pub(crate) fn framework_symfony_symbol_locations(
+        &self,
+        target_kind: SymfonySymbolKind,
+        target_name: &str,
+        include_declarations: bool,
+        include_references: bool,
+    ) -> Vec<Location> {
+        let mut locations = Vec::new();
+        for (uri, refs) in self.framework_references.read().iter() {
+            let Ok(parsed_uri) = Url::parse(uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(uri) else {
+                continue;
+            };
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::SymfonySymbol {
+                    kind,
+                    name,
+                    declaration,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                if *kind != target_kind
+                    || name != target_name
+                    || (*declaration && !include_declarations)
+                    || (!*declaration && !include_references)
+                {
+                    continue;
+                }
+                push_unique_location(
+                    &mut locations,
+                    &parsed_uri,
+                    offset_to_position(&content, reference.start as usize),
+                    offset_to_position(&content, reference.end as usize),
+                );
+            }
+        }
+        sort_locations(&mut locations);
+        locations
+    }
+
     pub(crate) fn framework_doctrine_repository_fqns_for_entity(
         &self,
         entity_fqn: &str,
@@ -537,6 +644,18 @@ impl Backend {
                         FrameworkReferenceKind::Path { value: lhs },
                         FrameworkReferenceKind::Path { value: rhs },
                     ) => lhs == rhs,
+                    (
+                        FrameworkReferenceKind::SymfonySymbol {
+                            kind: lhs_kind,
+                            name: lhs_name,
+                            ..
+                        },
+                        FrameworkReferenceKind::SymfonySymbol {
+                            kind: rhs_kind,
+                            name: rhs_name,
+                            ..
+                        },
+                    ) => lhs_kind == rhs_kind && lhs_name == rhs_name,
                     _ => false,
                 };
             if matched {
@@ -690,28 +809,42 @@ impl Backend {
         if is_framework_resource_uri(uri) {
             return Some(scan_framework_references(uri, content));
         }
-        if is_framework_php_config_uri(uri) && is_symfony_php_config_content(content) {
-            return Some(self.scan_symfony_php_config_references(uri, content));
+        if should_index_framework_php_content(uri, content) {
+            return Some(self.scan_symfony_php_references(uri, content));
         }
         None
     }
 
-    fn scan_symfony_php_config_references(
-        &self,
-        uri: &str,
-        content: &str,
-    ) -> Vec<FrameworkReference> {
+    fn scan_symfony_php_references(&self, uri: &str, content: &str) -> Vec<FrameworkReference> {
         let use_map = self.parse_use_statements(content);
         let namespace = self.parse_namespace(content);
         let mut refs = Vec::new();
-        let literals =
-            scan_php_config_class_constants(uri, content, &use_map, &namespace, &mut refs);
+        let include_config_resources =
+            is_framework_php_config_uri(uri) && is_symfony_php_config_content(content);
+        let literals = scan_php_string_literals_and_class_constants(
+            uri,
+            content,
+            &use_map,
+            &namespace,
+            include_config_resources,
+            &mut refs,
+        );
 
         for (idx, literal) in literals.iter().enumerate() {
-            scan_php_config_literal(uri, literal, &mut refs);
+            if include_config_resources {
+                scan_php_config_literal(uri, literal, &mut refs);
+            }
+            scan_php_symfony_literal(
+                uri,
+                content,
+                &literals,
+                idx,
+                include_config_resources,
+                &mut refs,
+            );
 
             let value = literal.value.trim();
-            if valid_framework_segment(value) {
+            if include_config_resources && valid_framework_segment(value) {
                 let class_fqn =
                     php_callable_class_before(content, literal.quote_start, &use_map, &namespace)
                         .or_else(|| php_callable_string_class_before(content, &literals, idx));
@@ -728,7 +861,9 @@ impl Backend {
                 }
             }
 
-            if looks_like_path_value(value) && php_literal_has_path_context(content, &literals, idx)
+            if include_config_resources
+                && looks_like_path_value(value)
+                && php_literal_has_path_context(content, &literals, idx)
             {
                 refs.push(FrameworkReference {
                     uri: uri.to_string(),
@@ -736,6 +871,32 @@ impl Backend {
                     end: literal.end as u32,
                     kind: FrameworkReferenceKind::Path {
                         value: value.to_string(),
+                    },
+                });
+            }
+        }
+
+        if include_config_resources {
+            let class_service_declarations: Vec<(u32, u32, String)> = refs
+                .iter()
+                .filter_map(|reference| {
+                    let FrameworkReferenceKind::Class { fqn } = &reference.kind else {
+                        return None;
+                    };
+                    let call = php_call_context(content, reference.start as usize)?;
+                    (call.name == "set" && call.argument_index == 0)
+                        .then(|| (reference.start, reference.end, normalize_framework_fqn(fqn)))
+                })
+                .collect();
+            for (start, end, name) in class_service_declarations {
+                refs.push(FrameworkReference {
+                    uri: uri.to_string(),
+                    start,
+                    end,
+                    kind: FrameworkReferenceKind::SymfonySymbol {
+                        kind: SymfonySymbolKind::Service,
+                        name,
+                        declaration: true,
                     },
                 });
             }
@@ -751,7 +912,9 @@ fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Opti
     match kind {
         FrameworkReferenceKind::Class { fqn } => Some(fqn),
         FrameworkReferenceKind::Namespace { prefix } => Some(prefix),
-        FrameworkReferenceKind::Method { .. } | FrameworkReferenceKind::Path { .. } => None,
+        FrameworkReferenceKind::Method { .. }
+        | FrameworkReferenceKind::Path { .. }
+        | FrameworkReferenceKind::SymfonySymbol { .. } => None,
     }
 }
 
@@ -788,11 +951,12 @@ fn is_symfony_php_config_content(content: &str) -> bool {
             .any(|needle| content.contains(needle)))
 }
 
-fn scan_php_config_class_constants<'a>(
+fn scan_php_string_literals_and_class_constants<'a>(
     uri: &str,
     content: &'a str,
     use_map: &HashMap<String, String>,
     namespace: &Option<String>,
+    capture_class_references: bool,
     refs: &mut Vec<FrameworkReference>,
 ) -> Vec<PhpStringLiteral<'a>> {
     let bytes = content.as_bytes();
@@ -883,7 +1047,7 @@ fn scan_php_config_class_constants<'a>(
             }
             let fqn =
                 normalize_framework_fqn(&crate::util::resolve_to_fqn(raw_name, use_map, namespace));
-            if valid_framework_name(&fqn) {
+            if capture_class_references && valid_framework_name(&fqn) {
                 refs.push(FrameworkReference {
                     uri: uri.to_string(),
                     start: start as u32,
@@ -898,6 +1062,224 @@ fn scan_php_config_class_constants<'a>(
     }
 
     literals
+}
+
+#[derive(Clone, Copy)]
+struct PhpCallContext<'a> {
+    name: &'a str,
+    argument_index: usize,
+    args_start: usize,
+}
+
+fn scan_php_symfony_literal(
+    uri: &str,
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    literal_idx: usize,
+    in_configurator: bool,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let literal = &literals[literal_idx];
+    scan_parameter_placeholders(uri, literal.value, literal.start, refs);
+
+    let leading = literal.value.len() - literal.value.trim_start().len();
+    let trailing = literal.value.len() - literal.value.trim_end().len();
+    let raw = &literal.value[leading..literal.value.len().saturating_sub(trailing)];
+    if raw.is_empty() {
+        return;
+    }
+
+    if in_configurator {
+        let service_prefix = raw
+            .bytes()
+            .take_while(|byte| matches!(byte, b'@' | b'?' | b'!'))
+            .count();
+        if service_prefix > 0 {
+            let name = php_semantic_string(&raw[service_prefix..]);
+            if valid_symfony_symbol_name(&name) {
+                push_symfony_symbol(
+                    refs,
+                    uri,
+                    SymfonySymbolKind::Service,
+                    name,
+                    literal.start + leading + service_prefix,
+                    literal.end - trailing,
+                    false,
+                );
+            }
+        }
+    }
+
+    let Some(call) = php_call_context(content, literal.quote_start) else {
+        return;
+    };
+    let call_name = call.name.to_ascii_lowercase();
+    let named_argument = php_named_argument_before(content, call.args_start, literal.quote_start);
+    let semantic_value = php_semantic_string(raw);
+    if !valid_symfony_symbol_name(&semantic_value) {
+        return;
+    }
+
+    let service_reference = (call_name == "alias" && call.argument_index == 1)
+        || (matches!(call_name.as_str(), "service" | "decorate" | "target")
+            && call.argument_index == 0)
+        || (matches!(call_name.as_str(), "get" | "has")
+            && call.argument_index == 0
+            && looks_like_container_call(content, call))
+        || (call_name == "autowire"
+            && named_argument.is_some_and(|name| name.eq_ignore_ascii_case("service")));
+    let parameter_reference = (matches!(
+        call_name.as_str(),
+        "param" | "getparameter" | "hasparameter"
+    ) && call.argument_index == 0)
+        || (call_name == "autowire"
+            && named_argument.is_some_and(|name| name.eq_ignore_ascii_case("param")));
+    let (kind, declaration) = if in_configurator
+        && call.argument_index == 0
+        && call_name == "set"
+        && looks_like_parameter_set(content, call)
+    {
+        (SymfonySymbolKind::Parameter, true)
+    } else if in_configurator
+        && call.argument_index == 0
+        && matches!(call_name.as_str(), "set" | "alias")
+    {
+        (SymfonySymbolKind::Service, true)
+    } else if in_configurator && call_name == "setparameter" && call.argument_index == 0 {
+        (SymfonySymbolKind::Parameter, true)
+    } else if service_reference {
+        (SymfonySymbolKind::Service, false)
+    } else if parameter_reference {
+        (SymfonySymbolKind::Parameter, false)
+    } else {
+        return;
+    };
+
+    push_symfony_symbol(
+        refs,
+        uri,
+        kind,
+        semantic_value,
+        literal.start + leading,
+        literal.end - trailing,
+        declaration,
+    );
+}
+
+fn php_call_context(content: &str, offset: usize) -> Option<PhpCallContext<'_>> {
+    let prefix = content.get(..offset)?;
+    let search_start = offset.saturating_sub(2048);
+    let open = prefix[search_start..].rfind('(')? + search_start;
+    let bytes = content.as_bytes();
+    let mut name_end = open;
+    skip_ascii_whitespace_backwards(bytes, &mut name_end);
+    let mut name_start = name_end;
+    while name_start > 0 && is_php_identifier_char(bytes[name_start - 1]) {
+        name_start -= 1;
+    }
+    if name_start == name_end {
+        return None;
+    }
+
+    let mut argument_index = 0usize;
+    let mut paren_depth = 0u32;
+    let mut bracket_depth = 0u32;
+    let mut brace_depth = 0u32;
+    let mut quote = None;
+    let mut escaped = false;
+    for byte in bytes[open + 1..offset].iter().copied() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if byte == b'\\' && quote.is_some() {
+            escaped = true;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') {
+            if quote == Some(byte) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(byte);
+            }
+            continue;
+        }
+        if quote.is_some() {
+            continue;
+        }
+        match byte {
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth = bracket_depth.saturating_sub(1),
+            b'{' => brace_depth += 1,
+            b'}' => brace_depth = brace_depth.saturating_sub(1),
+            b',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                argument_index += 1;
+            }
+            _ => {}
+        }
+    }
+
+    Some(PhpCallContext {
+        name: &content[name_start..name_end],
+        argument_index,
+        args_start: open + 1,
+    })
+}
+
+fn php_named_argument_before(content: &str, args_start: usize, quote_start: usize) -> Option<&str> {
+    let before = content.get(args_start..quote_start)?;
+    let segment = before
+        .rsplit_once(',')
+        .map_or(before, |(_, tail)| tail)
+        .trim();
+    let colon = segment.rfind(':')?;
+    let name = segment[..colon].trim();
+    (!name.is_empty() && name.bytes().all(is_php_identifier_char)).then_some(name)
+}
+
+fn looks_like_container_call(content: &str, call: PhpCallContext<'_>) -> bool {
+    let name_offset = call.name.as_ptr() as usize - content.as_ptr() as usize;
+    let before = content[..name_offset].trim_end();
+    let receiver_end = before.strip_suffix("->").map(str::trim_end);
+    let Some(receiver_end) = receiver_end else {
+        return false;
+    };
+    let receiver_start = receiver_end
+        .rfind(|character: char| {
+            !(character == '$' || character == '_' || character.is_ascii_alphanumeric())
+        })
+        .map_or(0, |index| index + 1);
+    let receiver = &receiver_end[receiver_start..];
+    matches!(
+        receiver,
+        "$container" | "$serviceLocator" | "$locator" | "container"
+    ) || (!receiver.is_empty()
+        && [
+            format!("ContainerInterface {receiver}"),
+            format!("ServiceLocator {receiver}"),
+            format!("ContainerBagInterface {receiver}"),
+        ]
+        .iter()
+        .any(|typed| content.contains(typed)))
+}
+
+fn looks_like_parameter_set(content: &str, call: PhpCallContext<'_>) -> bool {
+    let name_offset = call.name.as_ptr() as usize - content.as_ptr() as usize;
+    let start = name_offset.saturating_sub(160);
+    let prefix = &content[start..name_offset];
+    prefix.contains("->parameters()->")
+        || prefix.trim_end().ends_with("$parameters->")
+        || prefix.trim_end().ends_with("$params->")
+}
+
+fn php_semantic_string(raw: &str) -> String {
+    if raw.contains('\\') {
+        raw.replace("\\\\", "\\")
+    } else {
+        raw.to_string()
+    }
 }
 
 fn scan_php_config_literal(
@@ -1102,9 +1484,385 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
     let mut refs = Vec::new();
     scan_class_like_tokens(uri, content, &mut refs);
     scan_path_scalars(uri, content, &mut refs);
+    if uri
+        .split('?')
+        .next()
+        .is_some_and(|path| path.ends_with(".yaml") || path.ends_with(".yml"))
+    {
+        scan_symfony_yaml_container_symbols(uri, content, &mut refs);
+    } else if uri
+        .split('?')
+        .next()
+        .is_some_and(|path| path.ends_with(".xml"))
+    {
+        scan_symfony_xml_container_symbols(uri, content, &mut refs);
+    }
     refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
     refs.dedup();
     refs
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum YamlContainerSectionKind {
+    Services,
+    Parameters,
+}
+
+struct YamlContainerSection {
+    kind: YamlContainerSectionKind,
+    indent: usize,
+    child_indent: Option<usize>,
+}
+
+fn scan_symfony_yaml_container_symbols(
+    uri: &str,
+    content: &str,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let mut section: Option<YamlContainerSection> = None;
+    let has_container_section = content.lines().any(|line| {
+        matches!(
+            line.trim(),
+            "services:"
+                | "\"services\":"
+                | "'services':"
+                | "parameters:"
+                | "\"parameters\":"
+                | "'parameters':"
+        )
+    });
+    if !has_container_section {
+        return;
+    }
+
+    for (line_start, line) in line_offsets(content) {
+        let semantic = yaml_content_before_comment(line);
+        let trimmed = semantic.trim();
+        if trimmed.is_empty() || trimmed.starts_with('-') {
+            continue;
+        }
+        scan_parameter_placeholders(uri, semantic, line_start, refs);
+
+        let indent = leading_spaces(semantic);
+        let section_kind = match trimmed {
+            "services:" | "\"services\":" | "'services':" => {
+                Some(YamlContainerSectionKind::Services)
+            }
+            "parameters:" | "\"parameters\":" | "'parameters':" => {
+                Some(YamlContainerSectionKind::Parameters)
+            }
+            _ => None,
+        };
+        if let Some(kind) = section_kind {
+            section = Some(YamlContainerSection {
+                kind,
+                indent,
+                child_indent: None,
+            });
+            continue;
+        }
+
+        if section
+            .as_ref()
+            .is_some_and(|current| indent <= current.indent)
+        {
+            section = None;
+        }
+
+        let Some(current) = section.as_mut() else {
+            continue;
+        };
+        if current.child_indent.is_none() {
+            current.child_indent = Some(indent);
+        }
+
+        if current.child_indent == Some(indent)
+            && let Some((raw_key, key_start, key_end, value_start)) =
+                yaml_mapping_entry(semantic, line_start)
+        {
+            let (key, quote_adjust) = strip_yaml_quotes(raw_key);
+            let key_start = key_start + quote_adjust.0;
+            let key_end = key_end.saturating_sub(quote_adjust.1);
+            let is_declaration = match current.kind {
+                YamlContainerSectionKind::Services => !key.starts_with('_') && !key.ends_with('\\'),
+                YamlContainerSectionKind::Parameters => !key.starts_with('_'),
+            };
+            if is_declaration && valid_symfony_symbol_name(key) {
+                refs.push(FrameworkReference {
+                    uri: uri.to_string(),
+                    start: key_start as u32,
+                    end: key_end as u32,
+                    kind: FrameworkReferenceKind::SymfonySymbol {
+                        kind: match current.kind {
+                            YamlContainerSectionKind::Services => SymfonySymbolKind::Service,
+                            YamlContainerSectionKind::Parameters => SymfonySymbolKind::Parameter,
+                        },
+                        name: key.to_string(),
+                        declaration: true,
+                    },
+                });
+            }
+
+            if matches!(current.kind, YamlContainerSectionKind::Services) {
+                scan_service_references_in_text(uri, semantic, line_start, value_start, refs);
+            }
+        }
+
+        if matches!(current.kind, YamlContainerSectionKind::Services) {
+            scan_service_references_in_text(uri, semantic, line_start, indent, refs);
+        }
+    }
+}
+
+fn yaml_mapping_entry(line: &str, line_start: usize) -> Option<(&str, usize, usize, usize)> {
+    let indent = leading_spaces(line);
+    let trimmed = &line[indent..];
+    let colon = trimmed.find(':')?;
+    let raw_key = trimmed[..colon].trim();
+    if raw_key.is_empty() {
+        return None;
+    }
+    let raw_offset = trimmed[..colon].find(raw_key)?;
+    let key_start = line_start + indent + raw_offset;
+    let key_end = key_start + raw_key.len();
+    Some((raw_key, key_start, key_end, indent + colon + 1))
+}
+
+fn yaml_content_before_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut quote = None;
+    let mut escaped = false;
+    for (idx, byte) in bytes.iter().copied().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if byte == b'\\' && quote.is_some() {
+            escaped = true;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') {
+            if quote == Some(byte) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(byte);
+            }
+            continue;
+        }
+        if byte == b'#' && quote.is_none() {
+            return &line[..idx];
+        }
+    }
+    line
+}
+
+fn scan_service_references_in_text(
+    uri: &str,
+    text: &str,
+    absolute_start: usize,
+    from: usize,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let bytes = text.as_bytes();
+    let mut cursor = from.min(bytes.len());
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'@' {
+            cursor += 1;
+            continue;
+        }
+        let mut start = cursor + 1;
+        while bytes
+            .get(start)
+            .is_some_and(|byte| matches!(*byte, b'?' | b'!'))
+        {
+            start += 1;
+        }
+        let mut end = start;
+        while bytes
+            .get(end)
+            .is_some_and(|byte| is_symfony_symbol_char(*byte))
+        {
+            end += 1;
+        }
+        let name = &text[start..end];
+        if valid_symfony_symbol_name(name) {
+            refs.push(FrameworkReference {
+                uri: uri.to_string(),
+                start: (absolute_start + start) as u32,
+                end: (absolute_start + end) as u32,
+                kind: FrameworkReferenceKind::SymfonySymbol {
+                    kind: SymfonySymbolKind::Service,
+                    name: name.to_string(),
+                    declaration: false,
+                },
+            });
+        }
+        cursor = end.max(cursor + 1);
+    }
+}
+
+fn scan_parameter_placeholders(
+    uri: &str,
+    text: &str,
+    absolute_start: usize,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let bytes = text.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let Some(open_rel) = text[cursor..].find('%') else {
+            break;
+        };
+        let open = cursor + open_rel;
+        let Some(close_rel) = text[open + 1..].find('%') else {
+            break;
+        };
+        let close = open + 1 + close_rel;
+        let name = &text[open + 1..close];
+        if valid_symfony_symbol_name(name)
+            && !name.starts_with("env(")
+            && !name.starts_with("resolve:")
+        {
+            refs.push(FrameworkReference {
+                uri: uri.to_string(),
+                start: (absolute_start + open + 1) as u32,
+                end: (absolute_start + close) as u32,
+                kind: FrameworkReferenceKind::SymfonySymbol {
+                    kind: SymfonySymbolKind::Parameter,
+                    name: name.to_string(),
+                    declaration: false,
+                },
+            });
+        }
+        cursor = close + 1;
+    }
+}
+
+fn scan_symfony_xml_container_symbols(
+    uri: &str,
+    content: &str,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    if !content.contains("<service")
+        && !content.contains("<parameter")
+        && !content.contains("<argument")
+    {
+        return;
+    }
+    scan_parameter_placeholders(uri, content, 0, refs);
+
+    let lower = content.to_ascii_lowercase();
+    let mut search = 0usize;
+    while let Some(rel_start) = lower[search..].find('<') {
+        let tag_start = search + rel_start;
+        let Some(rel_end) = content[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + rel_end + 1;
+        let tag = &content[tag_start..tag_end];
+        let tag_lower = tag.to_ascii_lowercase();
+
+        if tag_lower.starts_with("<service") {
+            if let Some((name, start, end)) = xml_attr_value(tag, tag_start, &["id"])
+                && valid_symfony_symbol_name(&name)
+            {
+                push_symfony_symbol(
+                    refs,
+                    uri,
+                    SymfonySymbolKind::Service,
+                    name,
+                    start,
+                    end,
+                    true,
+                );
+            }
+            for attr in [
+                "alias",
+                "decorates",
+                "parent",
+                "factory-service",
+                "configurator-service",
+            ] {
+                if let Some((name, start, end)) = xml_attr_value(tag, tag_start, &[attr])
+                    && valid_symfony_symbol_name(&name)
+                {
+                    push_symfony_symbol(
+                        refs,
+                        uri,
+                        SymfonySymbolKind::Service,
+                        name,
+                        start,
+                        end,
+                        false,
+                    );
+                }
+            }
+        } else if tag_lower.starts_with("<argument") {
+            let service_argument = xml_attr_value(tag, tag_start, &["type"])
+                .is_some_and(|(value, _, _)| value.eq_ignore_ascii_case("service"));
+            if service_argument
+                && let Some((name, start, end)) = xml_attr_value(tag, tag_start, &["id", "service"])
+                && valid_symfony_symbol_name(&name)
+            {
+                push_symfony_symbol(
+                    refs,
+                    uri,
+                    SymfonySymbolKind::Service,
+                    name,
+                    start,
+                    end,
+                    false,
+                );
+            }
+        } else if tag_lower.starts_with("<parameter")
+            && let Some((name, start, end)) = xml_attr_value(tag, tag_start, &["key", "name", "id"])
+            && valid_symfony_symbol_name(&name)
+        {
+            push_symfony_symbol(
+                refs,
+                uri,
+                SymfonySymbolKind::Parameter,
+                name,
+                start,
+                end,
+                true,
+            );
+        }
+
+        search = tag_end;
+    }
+}
+
+fn push_symfony_symbol(
+    refs: &mut Vec<FrameworkReference>,
+    uri: &str,
+    kind: SymfonySymbolKind,
+    name: String,
+    start: usize,
+    end: usize,
+    declaration: bool,
+) {
+    refs.push(FrameworkReference {
+        uri: uri.to_string(),
+        start: start as u32,
+        end: end as u32,
+        kind: FrameworkReferenceKind::SymfonySymbol {
+            kind,
+            name,
+            declaration,
+        },
+    });
+}
+
+fn valid_symfony_symbol_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| is_symfony_symbol_char(byte) || byte == b'\\')
+}
+
+fn is_symfony_symbol_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b':' | b'/' | b'\\')
 }
 
 fn scan_doctrine_repository_mappings(uri: &str, content: &str) -> Vec<DoctrineRepositoryMapping> {

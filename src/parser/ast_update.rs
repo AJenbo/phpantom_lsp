@@ -219,7 +219,9 @@ impl Backend {
         // strings that the normal PHP symbol map deliberately treats as
         // plain strings. Keep their lightweight framework index in step with
         // every parse, including incomplete edits where the main parse fails.
-        if crate::framework::is_framework_php_config_uri(uri) {
+        if crate::framework::should_index_framework_php_content(uri, content)
+            || self.framework_references.read().contains_key(uri)
+        {
             self.index_framework_uri_content(uri, content);
         }
 

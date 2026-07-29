@@ -354,6 +354,9 @@ impl Backend {
                     .to_string();
                 (start, end, placeholder)
             }
+            FrameworkReferenceKind::SymfonySymbol { name, .. } => {
+                (reference.start, reference.end, name)
+            }
             FrameworkReferenceKind::Path { .. } => return None,
         };
 
@@ -387,7 +390,7 @@ impl Backend {
             FrameworkReferenceKind::Method { .. } => {
                 let locations =
                     self.find_framework_references_for_rename(uri, content, position, true)?;
-                build_simple_rename_edit(self, uri, content, &locations, new_name)
+                build_simple_rename_edit(self, uri, content, &locations, new_name, false)
             }
             FrameworkReferenceKind::Namespace { prefix } => {
                 let source = content.get(reference.start as usize..reference.end as usize)?;
@@ -395,6 +398,11 @@ impl Backend {
                 let (segment_idx, _start, _end) =
                     namespace_segment_range_at_offset(source, reference.start, cursor)?;
                 self.build_namespace_rename_edit(&prefix, segment_idx, new_name)
+            }
+            FrameworkReferenceKind::SymfonySymbol { .. } => {
+                let locations =
+                    self.find_framework_references_for_rename(uri, content, position, true)?;
+                build_simple_rename_edit(self, uri, content, &locations, new_name, true)
             }
             FrameworkReferenceKind::Path { .. } => None,
         }
@@ -530,6 +538,7 @@ fn build_simple_rename_edit(
     current_content: &str,
     locations: &[Location],
     new_name: &str,
+    preserve_php_escaping: bool,
 ) -> Option<WorkspaceEdit> {
     if locations.is_empty() {
         return None;
@@ -543,16 +552,31 @@ fn build_simple_rename_edit(
         } else {
             backend.get_file_content(&loc_uri_str)
         };
-        if loc_content.is_none() {
+        let Some(loc_content) = loc_content else {
             continue;
-        }
+        };
+        let replacement = if preserve_php_escaping && loc_uri_str.ends_with(".php") {
+            let start =
+                crate::text_position::position_to_offset(&loc_content, location.range.start);
+            let end = crate::text_position::position_to_offset(&loc_content, location.range.end);
+            let source = loc_content
+                .get(start as usize..end as usize)
+                .unwrap_or_default();
+            if source.contains("\\\\") {
+                new_name.replace('\\', "\\\\")
+            } else {
+                new_name.to_string()
+            }
+        } else {
+            new_name.to_string()
+        };
 
         changes
             .entry(location.uri.clone())
             .or_default()
             .push(TextEdit {
                 range: location.range,
-                new_text: new_name.to_string(),
+                new_text: replacement,
             });
     }
 
