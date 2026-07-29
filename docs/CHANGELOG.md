@@ -177,6 +177,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Symfony and Doctrine
 
+- **Symfony events and Messenger intelligence.** Named events declared by listener attributes or service tags and Messenger buses declared in configuration now complete, navigate, find references, diagnose missing project-local names, and show declaration-side code lenses. Event listener methods and Messenger message-to-handler relationships link directly to their PHP declarations. Contributed by @sidux.
 - **Symfony translation intelligence.** Translation keys declared in YAML, XLIFF, and PHP catalogues now complete and navigate from PHP translator calls, translatable messages, and Twig filters with domain-aware references, diagnostics, and declaration-side code lenses. Contributed by @sidux.
 - **Symfony Twig template intelligence.** Template files now complete and navigate from controller rendering, templated emails, and Twig inheritance or inclusion expressions, with cross-file references and declaration-side code lenses. Missing project templates produce diagnostics with a create-template quick fix. Contributed by @sidux.
 - **Symfony route intelligence.** Route names and path parameters declared with attributes or in YAML, XML, and PHP now complete, navigate, find references, rename, highlight, and show declaration-side code lenses across controllers and Twig templates. Project-local missing route names produce diagnostics. Contributed by @sidux.

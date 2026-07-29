@@ -434,7 +434,7 @@ return static function (RoutingConfigurator $routes): void {
         .filter_map(|lens| lens.command.as_ref().map(|command| command.title.as_str()))
         .collect();
     assert!(
-        titles.contains(&"Symfony route config: 2 refs"),
+        titles.contains(&"Symfony config: 2 refs"),
         "expected PHP route references in the method code lens, got {titles:?}"
     );
 
@@ -1687,4 +1687,276 @@ function translate(TranslatorInterface $translator): void
     );
     assert!(translations[0].message.contains("missing.message"));
     assert!(translations[0].message.contains("'messages' domain"));
+}
+
+#[tokio::test]
+async fn symfony_events_link_dispatchers_listeners_and_listener_methods() {
+    let listener_php = r#"<?php
+namespace App\EventListener;
+
+use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+
+#[AsEventListener(event: 'app.order.placed', method: 'onOrderPlaced')]
+final class OrderListener
+{
+    public function onOrderPlaced(object $event): void {}
+}
+"#;
+    let services_yaml = r#"services:
+  app.yaml_listener:
+    tags:
+      - { name: kernel.event_listener, event: app.yaml_event }
+"#;
+    let services_xml = r#"<container>
+  <services>
+    <service id="app.xml_listener">
+      <tag name="kernel.event_listener" event="app.xml_event"/>
+    </service>
+  </services>
+</container>
+"#;
+    let consumer_php = r#"<?php
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
+
+function send(EventDispatcherInterface $dispatcher, object $event): void
+{
+    $dispatcher->dispatch($event, 'app.order.placed');
+    $dispatcher->dispatch($event, 'app.yaml_event');
+    $dispatcher->dispatch($event, 'app.xml_event');
+    $dispatcher->dispatch($event, 'app.missing_event');
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/EventListener/OrderListener.php", listener_php),
+            ("config/services.yaml", services_yaml),
+            ("config/services.xml", services_xml),
+            ("src/send.php", consumer_php),
+        ],
+    );
+    let listener_uri = uri_for(&dir, "src/EventListener/OrderListener.php");
+    let yaml_uri = uri_for(&dir, "config/services.yaml");
+    let xml_uri = uri_for(&dir, "config/services.xml");
+    let consumer_uri = uri_for(&dir, "src/send.php");
+    open_doc(&backend, listener_uri.clone(), "php", listener_php).await;
+    open_doc(&backend, yaml_uri.clone(), "yaml", services_yaml).await;
+    open_doc(&backend, xml_uri.clone(), "xml", services_xml).await;
+    open_doc(&backend, consumer_uri.clone(), "php", consumer_php).await;
+
+    for (name, expected_uri) in [
+        ("app.order.placed", &listener_uri),
+        ("app.yaml_event", &yaml_uri),
+        ("app.xml_event", &xml_uri),
+    ] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: consumer_uri.clone(),
+                    },
+                    position: position_in(consumer_php, name, 4),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("event '{name}' should resolve"));
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(&location.uri, expected_uri, "wrong event definition");
+    }
+
+    let method_definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: listener_uri.clone(),
+                },
+                position: position_in(listener_php, "'onOrderPlaced'", 5),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("event listener method should resolve");
+    let method_location = match method_definition {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+        GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+    };
+    assert_eq!(method_location.uri, listener_uri);
+    assert_eq!(method_location.range.start.line, 8);
+
+    let response = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: consumer_uri.clone(),
+                },
+                position: position_in(consumer_php, "app.order.placed", 4),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+        .expect("event completion should return candidates");
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(items.iter().any(|item| item.label == "app.order.placed"));
+    assert!(items.iter().any(|item| item.label == "app.yaml_event"));
+
+    let lenses = backend
+        .handle_code_lens(listener_uri.as_str(), listener_php)
+        .unwrap_or_default();
+    let titles = lenses
+        .iter()
+        .filter_map(|lens| lens.command.as_ref().map(|command| command.title.as_str()))
+        .collect::<Vec<_>>();
+    assert!(titles.contains(&"Symfony event: 1 ref"));
+    assert!(titles.contains(&"Symfony config: 1 ref"));
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(consumer_uri.as_str(), consumer_php, &mut diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        matches!(
+            &diagnostic.code,
+            Some(NumberOrString::String(code)) if code == "unknown_symfony_event"
+        ) && diagnostic.message.contains("app.missing_event")
+    }));
+}
+
+#[tokio::test]
+async fn symfony_messenger_links_messages_handlers_and_named_buses() {
+    let message_php = "<?php\nnamespace App\\Message;\nfinal class PlaceOrder {}\n";
+    let handler_php = r#"<?php
+namespace App\MessageHandler;
+
+use App\Message\PlaceOrder;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+
+#[AsMessageHandler(bus: 'command.bus')]
+#[AsMessageHandler(bus: 'app.missing_bus')]
+final class PlaceOrderHandler
+{
+    public function __construct() {}
+
+    public function __invoke(PlaceOrder $message): void {}
+}
+"#;
+    let messenger_yaml = r#"framework:
+  messenger:
+    buses:
+      command.bus: ~
+      query.bus: ~
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Message/PlaceOrder.php", message_php),
+            ("src/MessageHandler/PlaceOrderHandler.php", handler_php),
+            ("config/packages/messenger.yaml", messenger_yaml),
+        ],
+    );
+    let message_uri = uri_for(&dir, "src/Message/PlaceOrder.php");
+    let handler_uri = uri_for(&dir, "src/MessageHandler/PlaceOrderHandler.php");
+    let config_uri = uri_for(&dir, "config/packages/messenger.yaml");
+    open_doc(&backend, message_uri.clone(), "php", message_php).await;
+    open_doc(&backend, handler_uri.clone(), "php", handler_php).await;
+    open_doc(&backend, config_uri.clone(), "yaml", messenger_yaml).await;
+
+    let bus_definition = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: handler_uri.clone(),
+                },
+                position: position_in(handler_php, "command.bus", 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("Messenger bus should resolve");
+    let location = match bus_definition {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+        GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+    };
+    assert_eq!(location.uri, config_uri);
+
+    let completion = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: handler_uri.clone(),
+                },
+                position: position_in(handler_php, "command.bus", 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+        .expect("Messenger bus completion should return candidates");
+    let items = match completion {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(items.iter().any(|item| item.label == "command.bus"));
+    assert!(items.iter().any(|item| item.label == "query.bus"));
+
+    for (uri, content, expected_title) in [
+        (
+            &message_uri,
+            message_php,
+            "Symfony Messenger handler: PlaceOrderHandler",
+        ),
+        (
+            &handler_uri,
+            handler_php,
+            "Symfony Messenger message: PlaceOrder",
+        ),
+    ] {
+        let lenses = backend
+            .handle_code_lens(uri.as_str(), content)
+            .unwrap_or_default();
+        assert!(
+            lenses.iter().any(|lens| {
+                lens.command
+                    .as_ref()
+                    .is_some_and(|command| command.title == expected_title)
+            }),
+            "expected '{expected_title}', got {lenses:?}"
+        );
+    }
+
+    let config_lenses = backend
+        .handle_code_lens(config_uri.as_str(), messenger_yaml)
+        .unwrap_or_default();
+    assert!(config_lenses.iter().any(|lens| {
+        lens.command
+            .as_ref()
+            .is_some_and(|command| command.title == "Symfony Messenger bus: 1 ref")
+    }));
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(handler_uri.as_str(), handler_php, &mut diagnostics);
+    assert!(diagnostics.iter().any(|diagnostic| {
+        matches!(
+            &diagnostic.code,
+            Some(NumberOrString::String(code)) if code == "unknown_symfony_messenger_bus"
+        ) && diagnostic.message.contains("app.missing_bus")
+    }));
 }

@@ -222,6 +222,11 @@ impl Backend {
             FrameworkReferenceKind::Translation { domain, name, .. } => {
                 self.framework_translation_locations(&domain, &name, include_declaration, true)
             }
+            FrameworkReferenceKind::MessengerHandler {
+                message_fqn,
+                handler_fqn,
+                ..
+            } => self.framework_messenger_handler_locations(&message_fqn, &handler_fqn),
             FrameworkReferenceKind::Namespace { .. } | FrameworkReferenceKind::Path { .. } => {
                 Vec::new()
             }

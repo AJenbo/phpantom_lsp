@@ -24,7 +24,7 @@ use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::composer;
-use crate::framework::FrameworkReferenceKind;
+use crate::framework::{FrameworkReferenceKind, MessengerHandlerRole};
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo, MAX_INHERITANCE_DEPTH};
@@ -119,6 +119,19 @@ impl Backend {
                 name,
                 declaration: false,
             } => self.framework_translation_locations(&domain, &name, true, false),
+            FrameworkReferenceKind::MessengerHandler {
+                message_fqn,
+                handler_fqn,
+                role,
+            } => {
+                let target = match role {
+                    MessengerHandlerRole::Message => handler_fqn,
+                    MessengerHandlerRole::Handler => message_fqn,
+                };
+                self.resolve_class_reference(uri, content, &target, true, reference.start)
+                    .into_iter()
+                    .collect()
+            }
             FrameworkReferenceKind::Namespace { .. }
             | FrameworkReferenceKind::Path { .. }
             | FrameworkReferenceKind::SymfonySymbol {

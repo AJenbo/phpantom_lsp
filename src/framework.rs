@@ -28,6 +28,8 @@ pub(crate) enum SymfonySymbolKind {
     RouteParameter,
     Template,
     Translation,
+    Event,
+    MessengerBus,
 }
 
 impl SymfonySymbolKind {
@@ -39,6 +41,21 @@ impl SymfonySymbolKind {
             Self::RouteParameter => "route parameter",
             Self::Template => "template",
             Self::Translation => "translation",
+            Self::Event => "event",
+            Self::MessengerBus => "Messenger bus",
+        }
+    }
+
+    pub(crate) fn diagnostic_name(self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Parameter => "parameter",
+            Self::Route => "route",
+            Self::RouteParameter => "route_parameter",
+            Self::Template => "template",
+            Self::Translation => "translation",
+            Self::Event => "event",
+            Self::MessengerBus => "messenger_bus",
         }
     }
 }
@@ -75,6 +92,18 @@ pub(crate) enum FrameworkReferenceKind {
         name: String,
         declaration: bool,
     },
+    /// One side of a Symfony Messenger message-to-handler relationship.
+    MessengerHandler {
+        message_fqn: String,
+        handler_fqn: String,
+        role: MessengerHandlerRole,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MessengerHandlerRole {
+    Message,
+    Handler,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,7 +289,13 @@ pub(crate) fn should_index_framework_php_content(uri: &str, content: &str) -> bo
             || content.contains("#[\\Template(")
             || content.contains("TranslatorInterface")
             || content.contains("TranslatableMessage")
-            || content.contains("->trans("))
+            || content.contains("->trans(")
+            || content.contains("EventDispatcherInterface")
+            || content.contains("AsEventListener")
+            || content.contains("->dispatch(")
+            || content.contains("AsMessageHandler")
+            || content.contains("MessageBusInterface")
+            || content.contains("Messenger\\"))
 }
 
 fn is_skipped_resource_path(path: &Path) -> bool {
@@ -758,6 +793,46 @@ impl Backend {
         locations
     }
 
+    pub(crate) fn framework_messenger_handler_locations(
+        &self,
+        message_fqn: &str,
+        handler_fqn: &str,
+    ) -> Vec<Location> {
+        let message_fqn = normalize_framework_fqn(message_fqn);
+        let handler_fqn = normalize_framework_fqn(handler_fqn);
+        let mut locations = Vec::new();
+        for (uri, refs) in self.framework_references.read().iter() {
+            let Ok(parsed_uri) = Url::parse(uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(uri) else {
+                continue;
+            };
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::MessengerHandler {
+                    message_fqn: candidate_message,
+                    handler_fqn: candidate_handler,
+                    ..
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                if normalize_framework_fqn(candidate_message).eq_ignore_ascii_case(&message_fqn)
+                    && normalize_framework_fqn(candidate_handler).eq_ignore_ascii_case(&handler_fqn)
+                {
+                    push_unique_location(
+                        &mut locations,
+                        &parsed_uri,
+                        offset_to_position(&content, reference.start as usize),
+                        offset_to_position(&content, reference.end as usize),
+                    );
+                }
+            }
+        }
+        sort_locations(&mut locations);
+        locations
+    }
+
     pub(crate) fn framework_doctrine_repository_fqns_for_entity(
         &self,
         entity_fqn: &str,
@@ -875,6 +950,23 @@ impl Backend {
                             ..
                         },
                     ) => lhs_domain == rhs_domain && lhs_name == rhs_name,
+                    (
+                        FrameworkReferenceKind::MessengerHandler {
+                            message_fqn: lhs_message,
+                            handler_fqn: lhs_handler,
+                            ..
+                        },
+                        FrameworkReferenceKind::MessengerHandler {
+                            message_fqn: rhs_message,
+                            handler_fqn: rhs_handler,
+                            ..
+                        },
+                    ) => {
+                        normalize_framework_fqn(lhs_message)
+                            .eq_ignore_ascii_case(&normalize_framework_fqn(rhs_message))
+                            && normalize_framework_fqn(lhs_handler)
+                                .eq_ignore_ascii_case(&normalize_framework_fqn(rhs_handler))
+                    }
                     _ => false,
                 };
             if matched {
@@ -1104,6 +1196,8 @@ impl Backend {
             }
         }
         scan_php_route_parameters(uri, content, &literals, &mut refs);
+        scan_php_event_listener_methods(uri, content, &literals, &namespace, &mut refs);
+        scan_php_messenger_handlers(uri, content, &use_map, &namespace, &mut refs);
 
         if include_config_resources {
             let class_service_declarations: Vec<(u32, u32, String)> = refs
@@ -1165,7 +1259,8 @@ fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Opti
         | FrameworkReferenceKind::Path { .. }
         | FrameworkReferenceKind::SymfonySymbol { .. }
         | FrameworkReferenceKind::RouteParameter { .. }
-        | FrameworkReferenceKind::Translation { .. } => None,
+        | FrameworkReferenceKind::Translation { .. }
+        | FrameworkReferenceKind::MessengerHandler { .. } => None,
     }
 }
 
@@ -1369,6 +1464,18 @@ fn scan_php_symfony_literal(
     let semantic_value = php_semantic_string(raw);
     let translation_reference =
         call.argument_index == 0 && matches!(call_name.as_str(), "trans" | "translatablemessage");
+    let event_listener_attribute = call_name.ends_with("eventlistener");
+    let event_declaration = (event_listener_attribute
+        && (call.argument_index == 0
+            || named_argument.is_some_and(|name| name.eq_ignore_ascii_case("event"))))
+        || (call_name == "addlistener" && call.argument_index == 0);
+    let event_reference = call_name == "dispatch" && call.argument_index == 1;
+    let messenger_bus_reference = call_name.ends_with("messagehandler")
+        && named_argument.is_some_and(|name| name.eq_ignore_ascii_case("bus"));
+    let messenger_bus_declaration = in_configurator
+        && call_name == "bus"
+        && call.argument_index == 0
+        && content.contains("Messenger");
     let template_reference = call.argument_index == 0
         && (matches!(
             call_name.as_str(),
@@ -1442,6 +1549,14 @@ fn scan_php_symfony_literal(
         (SymfonySymbolKind::Route, false)
     } else if template_reference {
         (SymfonySymbolKind::Template, false)
+    } else if event_declaration {
+        (SymfonySymbolKind::Event, true)
+    } else if event_reference {
+        (SymfonySymbolKind::Event, false)
+    } else if messenger_bus_declaration {
+        (SymfonySymbolKind::MessengerBus, true)
+    } else if messenger_bus_reference {
+        (SymfonySymbolKind::MessengerBus, false)
     } else {
         return;
     };
@@ -1455,6 +1570,287 @@ fn scan_php_symfony_literal(
         literal.end - trailing,
         declaration,
     );
+}
+
+fn scan_php_event_listener_methods(
+    uri: &str,
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    namespace: &Option<String>,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    for literal in literals {
+        let Some(call) = php_call_context(content, literal.quote_start) else {
+            continue;
+        };
+        if !call.name.to_ascii_lowercase().ends_with("eventlistener")
+            || !php_named_argument_before(content, call.args_start, literal.quote_start)
+                .is_some_and(|name| name.eq_ignore_ascii_case("method"))
+        {
+            continue;
+        }
+        let method = php_semantic_string(literal.value.trim());
+        if !valid_framework_segment(&method) {
+            continue;
+        }
+        let Some(class_fqn) =
+            php_enclosing_class_fqn(content, literal.quote_start, namespace.as_deref())
+                .or_else(|| php_class_fqn_after(content, literal.quote_end, namespace.as_deref()))
+        else {
+            continue;
+        };
+        refs.push(FrameworkReference {
+            uri: uri.to_string(),
+            start: literal.start as u32,
+            end: literal.end as u32,
+            kind: FrameworkReferenceKind::Method {
+                class_fqn,
+                member_name: method,
+            },
+        });
+    }
+}
+
+fn php_class_fqn_after(content: &str, offset: usize, namespace: Option<&str>) -> Option<String> {
+    let class_start = php_keyword_after(content, offset, "class", 1024)?;
+    let mut name_start = class_start + "class".len();
+    skip_ascii_whitespace(content.as_bytes(), &mut name_start);
+    let mut name_end = name_start;
+    while content
+        .as_bytes()
+        .get(name_end)
+        .is_some_and(|byte| is_php_identifier_char(*byte))
+    {
+        name_end += 1;
+    }
+    let name = content.get(name_start..name_end)?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(namespace.map_or_else(
+        || name.to_string(),
+        |namespace| format!("{namespace}\\{name}"),
+    ))
+}
+
+fn php_enclosing_class_fqn(
+    content: &str,
+    offset: usize,
+    namespace: Option<&str>,
+) -> Option<String> {
+    let prefix = content.get(..offset)?;
+    let (class_start, keyword) = ["class", "trait", "enum"]
+        .iter()
+        .filter_map(|keyword| {
+            prefix
+                .rmatch_indices(keyword)
+                .find(|(start, _)| {
+                    let before = start
+                        .checked_sub(1)
+                        .and_then(|idx| prefix.as_bytes().get(idx));
+                    let after = prefix.as_bytes().get(start + keyword.len());
+                    before.is_none_or(|byte| !is_php_identifier_char(*byte))
+                        && after.is_some_and(u8::is_ascii_whitespace)
+                })
+                .map(|(start, _)| (start, *keyword))
+        })
+        .max_by_key(|(start, _)| *start)?;
+    let mut name_start = class_start + keyword.len();
+    skip_ascii_whitespace(content.as_bytes(), &mut name_start);
+    let mut name_end = name_start;
+    while content
+        .as_bytes()
+        .get(name_end)
+        .is_some_and(|byte| is_php_identifier_char(*byte))
+    {
+        name_end += 1;
+    }
+    let name = content.get(name_start..name_end)?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(namespace.map_or_else(
+        || name.to_string(),
+        |namespace| format!("{namespace}\\{name}"),
+    ))
+}
+
+fn scan_php_messenger_handlers(
+    uri: &str,
+    content: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let mut search = 0usize;
+    while let Some(rel_attribute) = content[search..].find("AsMessageHandler") {
+        let attribute_name = search + rel_attribute;
+        let Some(attribute_end_rel) = content[attribute_name..].find(']') else {
+            break;
+        };
+        let attribute_end = attribute_name + attribute_end_rel + 1;
+        let Some(class_start) = php_keyword_after(content, attribute_end, "class", 512) else {
+            search = attribute_end;
+            continue;
+        };
+        if php_keyword_after(
+            content,
+            attribute_end,
+            "function",
+            class_start - attribute_end,
+        )
+        .is_some()
+        {
+            search = attribute_end;
+            continue;
+        }
+        let mut handler_start = class_start + "class".len();
+        skip_ascii_whitespace(content.as_bytes(), &mut handler_start);
+        let mut handler_end = handler_start;
+        while content
+            .as_bytes()
+            .get(handler_end)
+            .is_some_and(|byte| is_php_identifier_char(*byte))
+        {
+            handler_end += 1;
+        }
+        let handler_name = &content[handler_start..handler_end];
+        if handler_name.is_empty() {
+            search = attribute_end;
+            continue;
+        }
+        let handler_fqn = namespace.as_ref().map_or_else(
+            || handler_name.to_string(),
+            |namespace| format!("{namespace}\\{handler_name}"),
+        );
+
+        let Some(body_open_rel) = content[handler_end..].find('{') else {
+            search = handler_end;
+            continue;
+        };
+        let body_open = handler_end + body_open_rel;
+        let body_end = matching_delimiter(content, body_open, b'{', b'}').unwrap_or(content.len());
+        let explicit_message = messenger_attribute_message_type(
+            content,
+            attribute_name,
+            attribute_end,
+            use_map,
+            namespace,
+        );
+        let inferred_message = content[body_open + 1..body_end]
+            .find("__invoke")
+            .map(|invoke| body_open + 1 + invoke)
+            .and_then(|invoke| {
+                let function_start = content[body_open + 1..invoke]
+                    .rfind("function")
+                    .map(|start| body_open + 1 + start)?;
+                let signature_end = content[function_start..body_end]
+                    .find('{')
+                    .map_or(body_end, |end| function_start + end);
+                php_first_parameter_type(content, function_start, signature_end, use_map, namespace)
+            });
+        let Some((message_fqn, message_start, message_end)) = explicit_message.or(inferred_message)
+        else {
+            search = body_end;
+            continue;
+        };
+        refs.push(FrameworkReference {
+            uri: uri.to_string(),
+            start: message_start as u32,
+            end: message_end as u32,
+            kind: FrameworkReferenceKind::MessengerHandler {
+                message_fqn: message_fqn.clone(),
+                handler_fqn: handler_fqn.clone(),
+                role: MessengerHandlerRole::Message,
+            },
+        });
+        refs.push(FrameworkReference {
+            uri: uri.to_string(),
+            start: handler_start as u32,
+            end: handler_end as u32,
+            kind: FrameworkReferenceKind::MessengerHandler {
+                message_fqn,
+                handler_fqn,
+                role: MessengerHandlerRole::Handler,
+            },
+        });
+        search = body_end;
+    }
+}
+
+fn php_keyword_after(
+    content: &str,
+    start: usize,
+    keyword: &str,
+    max_distance: usize,
+) -> Option<usize> {
+    let end = (start + max_distance).min(content.len());
+    content[start..end]
+        .match_indices(keyword)
+        .find_map(|(relative, _)| {
+            let absolute = start + relative;
+            let before = absolute
+                .checked_sub(1)
+                .and_then(|idx| content.as_bytes().get(idx));
+            let after = content.as_bytes().get(absolute + keyword.len());
+            (before.is_none_or(|byte| !is_php_identifier_char(*byte))
+                && after.is_none_or(|byte| !is_php_identifier_char(*byte)))
+            .then_some(absolute)
+        })
+}
+
+fn messenger_attribute_message_type(
+    content: &str,
+    attribute_start: usize,
+    attribute_end: usize,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<(String, usize, usize)> {
+    let attribute = &content[attribute_start..attribute_end];
+    let handles = attribute.find("handles")?;
+    let class_suffix = attribute[handles..].find("::class")? + handles;
+    let bytes = attribute.as_bytes();
+    let mut name_end = class_suffix;
+    skip_ascii_whitespace_backwards(bytes, &mut name_end);
+    let mut name_start = name_end;
+    while name_start > 0 && is_php_name_char(bytes[name_start - 1]) {
+        name_start -= 1;
+    }
+    let raw = &attribute[name_start..name_end];
+    let fqn = normalize_framework_fqn(&crate::util::resolve_to_fqn(raw, use_map, namespace));
+    valid_framework_name(&fqn).then_some((
+        fqn,
+        attribute_start + name_start,
+        attribute_start + name_end,
+    ))
+}
+
+fn php_first_parameter_type(
+    content: &str,
+    function_start: usize,
+    signature_end: usize,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<(String, usize, usize)> {
+    let open = content[function_start..signature_end].find('(')? + function_start;
+    let parameter_end = content[open + 1..signature_end]
+        .find([',', ')'])
+        .map(|end| open + 1 + end)?;
+    let parameter = &content[open + 1..parameter_end];
+    let variable = parameter.find('$')?;
+    let type_part = parameter[..variable].trim();
+    let raw = type_part
+        .trim_start_matches(['?', '&'])
+        .split_whitespace()
+        .last()?;
+    if raw.contains('|') || raw.contains('&') || raw.is_empty() {
+        return None;
+    }
+    let relative_start = parameter[..variable].find(raw)?;
+    let start = open + 1 + relative_start;
+    let end = start + raw.len();
+    let fqn = normalize_framework_fqn(&crate::util::resolve_to_fqn(raw, use_map, namespace));
+    valid_framework_name(&fqn).then_some((fqn, start, end))
 }
 
 fn php_call_context(content: &str, offset: usize) -> Option<PhpCallContext<'_>> {
@@ -2038,6 +2434,7 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
     {
         scan_symfony_yaml_container_symbols(uri, content, &mut refs);
         scan_symfony_yaml_routes(uri, content, &mut refs);
+        scan_symfony_yaml_events_and_buses(uri, content, &mut refs);
     } else if uri
         .split('?')
         .next()
@@ -2045,6 +2442,7 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
     {
         scan_symfony_xml_container_symbols(uri, content, &mut refs);
         scan_symfony_xml_routes(uri, content, &mut refs);
+        scan_symfony_xml_events_and_buses(uri, content, &mut refs);
     }
     refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
     refs.dedup();
@@ -2605,6 +3003,160 @@ fn scan_string_call_symbols(
             push_symfony_symbol(refs, uri, kind, value.to_string(), start, end, declaration);
         }
         cursor = end.saturating_add(1);
+    }
+}
+
+fn scan_symfony_yaml_events_and_buses(
+    uri: &str,
+    content: &str,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let lines = line_offsets(content);
+    for (idx, (line_start, line)) in lines.iter().enumerate() {
+        if let Some((event, start, end)) = yaml_named_field_value(line, *line_start, "event") {
+            let window_start = idx.saturating_sub(4);
+            let window_end = (idx + 5).min(lines.len());
+            if lines[window_start..window_end]
+                .iter()
+                .any(|(_, candidate)| candidate.contains("kernel.event_listener"))
+                && valid_symfony_symbol_name(&event)
+            {
+                push_symfony_symbol(refs, uri, SymfonySymbolKind::Event, event, start, end, true);
+            }
+        }
+    }
+
+    let mut buses_indent = None;
+    let mut bus_child_indent = None;
+    for (line_start, line) in lines {
+        let semantic = yaml_content_before_comment(line);
+        let trimmed = semantic.trim();
+        let indent = leading_spaces(semantic);
+        if matches!(trimmed, "buses:" | "'buses':" | "\"buses\":") {
+            buses_indent = Some(indent);
+            bus_child_indent = None;
+            continue;
+        }
+        let Some(parent_indent) = buses_indent else {
+            continue;
+        };
+        if trimmed.is_empty() {
+            continue;
+        }
+        if indent <= parent_indent {
+            buses_indent = None;
+            continue;
+        }
+        if bus_child_indent.is_none() {
+            bus_child_indent = Some(indent);
+        }
+        if bus_child_indent != Some(indent) {
+            continue;
+        }
+        let Some((raw_key, start, end, _)) = yaml_mapping_entry(semantic, line_start) else {
+            continue;
+        };
+        let (name, quote_adjust) = strip_yaml_quotes(raw_key);
+        if valid_symfony_symbol_name(name) {
+            push_symfony_symbol(
+                refs,
+                uri,
+                SymfonySymbolKind::MessengerBus,
+                name.to_string(),
+                start + quote_adjust.0,
+                end.saturating_sub(quote_adjust.1),
+                true,
+            );
+        }
+    }
+}
+
+fn yaml_named_field_value(
+    line: &str,
+    line_start: usize,
+    field: &str,
+) -> Option<(String, usize, usize)> {
+    let bytes = line.as_bytes();
+    let mut search = 0usize;
+    while let Some(rel) = line[search..].find(field) {
+        let field_start = search + rel;
+        let field_end = field_start + field.len();
+        if field_start > 0 && is_php_identifier_char(bytes[field_start - 1]) {
+            search = field_end;
+            continue;
+        }
+        let mut colon = field_end;
+        skip_ascii_whitespace(bytes, &mut colon);
+        if bytes.get(colon) != Some(&b':') {
+            search = field_end;
+            continue;
+        }
+        colon += 1;
+        skip_ascii_whitespace(bytes, &mut colon);
+        let raw = &line[colon..];
+        let raw = raw
+            .split([',', '}', '#'])
+            .next()
+            .unwrap_or_default()
+            .trim_end();
+        let (value, adjustment) = strip_yaml_quotes(raw);
+        if value.is_empty() {
+            return None;
+        }
+        return Some((
+            value.to_string(),
+            line_start + colon + adjustment.0,
+            line_start + colon + raw.len().saturating_sub(adjustment.1),
+        ));
+    }
+    None
+}
+
+fn scan_symfony_xml_events_and_buses(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    let lower = content.to_ascii_lowercase();
+    let mut search = 0usize;
+    while let Some(rel_start) = lower[search..].find("<tag") {
+        let tag_start = search + rel_start;
+        let Some(rel_end) = content[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + rel_end + 1;
+        let tag = &content[tag_start..tag_end];
+        if xml_attr_value(tag, tag_start, &["name"])
+            .is_some_and(|(name, _, _)| name == "kernel.event_listener")
+            && let Some((event, start, end)) = xml_attr_value(tag, tag_start, &["event"])
+            && valid_symfony_symbol_name(&event)
+        {
+            push_symfony_symbol(refs, uri, SymfonySymbolKind::Event, event, start, end, true);
+        }
+        search = tag_end;
+    }
+
+    if !lower.contains("messenger") && !lower.contains("<bus") {
+        return;
+    }
+    search = 0;
+    while let Some(rel_start) = lower[search..].find("<bus") {
+        let tag_start = search + rel_start;
+        let Some(rel_end) = content[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + rel_end + 1;
+        let tag = &content[tag_start..tag_end];
+        if let Some((name, start, end)) = xml_attr_value(tag, tag_start, &["name", "id"])
+            && valid_symfony_symbol_name(&name)
+        {
+            push_symfony_symbol(
+                refs,
+                uri,
+                SymfonySymbolKind::MessengerBus,
+                name,
+                start,
+                end,
+                true,
+            );
+        }
+        search = tag_end;
     }
 }
 

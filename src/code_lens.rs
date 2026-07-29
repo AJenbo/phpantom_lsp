@@ -633,6 +633,8 @@ impl Backend {
                     | SymfonySymbolKind::Parameter
                     | SymfonySymbolKind::Route
                     | SymfonySymbolKind::Template
+                    | SymfonySymbolKind::Event
+                    | SymfonySymbolKind::MessengerBus
             ) {
                 continue;
             }
@@ -651,7 +653,10 @@ impl Backend {
 
             if matches!(
                 kind,
-                SymfonySymbolKind::Parameter | SymfonySymbolKind::Template
+                SymfonySymbolKind::Parameter
+                    | SymfonySymbolKind::Template
+                    | SymfonySymbolKind::Event
+                    | SymfonySymbolKind::MessengerBus
             ) {
                 continue;
             }
@@ -756,6 +761,48 @@ impl Backend {
             );
         }
 
+        let messenger_mappings = {
+            let mut mappings = HashSet::new();
+            for references in self.framework_references.read().values() {
+                for reference in references.iter() {
+                    if let FrameworkReferenceKind::MessengerHandler {
+                        message_fqn,
+                        handler_fqn,
+                        ..
+                    } = &reference.kind
+                    {
+                        mappings.insert((message_fqn.clone(), handler_fqn.clone()));
+                    }
+                }
+            }
+            mappings
+        };
+        for (message_fqn, handler_fqn) in messenger_mappings {
+            let (target, title) = if framework_fqn_eq(&class_fqn, &message_fqn) {
+                (
+                    handler_fqn.as_str(),
+                    format!("Symfony Messenger handler: {}", short_name(&handler_fqn)),
+                )
+            } else if framework_fqn_eq(&class_fqn, &handler_fqn) {
+                (
+                    message_fqn.as_str(),
+                    format!("Symfony Messenger message: {}", short_name(&message_fqn)),
+                )
+            } else {
+                continue;
+            };
+            if let Some(location) = self.class_location(target, uri, content) {
+                self.push_locations_lens(
+                    uri,
+                    source_pos,
+                    title,
+                    vec![location],
+                    &mut *lenses,
+                    &mut *seen,
+                );
+            }
+        }
+
         for repo_fqn in self
             .doctrine_repository_fqns_for_entity(class_fqn.as_str(), class_loader)
             .into_iter()
@@ -812,9 +859,9 @@ impl Backend {
         }
 
         let title = if route_locations.len() == 1 {
-            "Symfony route config: 1 ref".to_string()
+            "Symfony config: 1 ref".to_string()
         } else {
-            format!("Symfony route config: {} refs", route_locations.len())
+            format!("Symfony config: {} refs", route_locations.len())
         };
         self.push_locations_lens(uri, pos, title, route_locations, lenses, seen);
     }
@@ -1362,6 +1409,11 @@ impl Backend {
             position,
         })
     }
+}
+
+fn framework_fqn_eq(lhs: &str, rhs: &str) -> bool {
+    lhs.trim_start_matches('\\')
+        .eq_ignore_ascii_case(rhs.trim_start_matches('\\'))
 }
 
 #[derive(Clone, Copy)]

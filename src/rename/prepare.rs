@@ -366,6 +366,7 @@ impl Backend {
                 (reference.start, reference.end, name)
             }
             FrameworkReferenceKind::Translation { .. } => return None,
+            FrameworkReferenceKind::MessengerHandler { .. } => return None,
             FrameworkReferenceKind::Path { .. } => return None,
         };
 
@@ -423,6 +424,7 @@ impl Backend {
                 build_simple_rename_edit(self, uri, content, &locations, new_name, false)
             }
             FrameworkReferenceKind::Translation { .. } => None,
+            FrameworkReferenceKind::MessengerHandler { .. } => None,
             FrameworkReferenceKind::Path { .. } => None,
         }
     }

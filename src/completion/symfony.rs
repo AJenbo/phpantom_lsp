@@ -70,6 +70,8 @@ impl Backend {
                         SymfonySymbolKind::RouteParameter => CompletionItemKind::FIELD,
                         SymfonySymbolKind::Template => CompletionItemKind::FILE,
                         SymfonySymbolKind::Translation => CompletionItemKind::VALUE,
+                        SymfonySymbolKind::Event => CompletionItemKind::EVENT,
+                        SymfonySymbolKind::MessengerBus => CompletionItemKind::REFERENCE,
                     }),
                     detail: Some(format!("Symfony {}", context.kind.label())),
                     sort_text: Some(format!("{index:05}")),
@@ -153,6 +155,13 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
             && named_argument.is_none_or(|name| name.eq_ignore_ascii_case("template"))));
     let translation_context =
         argument_index == 0 && matches!(call_name.as_str(), "trans" | "translatablemessage");
+    let event_context = (call_name.ends_with("eventlistener")
+        && (argument_index == 0
+            || named_argument.is_some_and(|name| name.eq_ignore_ascii_case("event"))))
+        || (call_name == "dispatch" && argument_index == 1)
+        || (call_name == "addlistener" && argument_index == 0);
+    let messenger_bus_context = call_name.ends_with("messagehandler")
+        && named_argument.is_some_and(|name| name.eq_ignore_ascii_case("bus"));
     let kind = if service_context {
         SymfonySymbolKind::Service
     } else if parameter_context {
@@ -163,6 +172,10 @@ fn detect_php_context(content: &str, position: Position) -> Option<SymfonyComple
         SymfonySymbolKind::Template
     } else if translation_context {
         SymfonySymbolKind::Translation
+    } else if event_context {
+        SymfonySymbolKind::Event
+    } else if messenger_bus_context {
+        SymfonySymbolKind::MessengerBus
     } else {
         return None;
     };
@@ -251,6 +264,25 @@ fn detect_resource_context(
             "extends" | "include" | "embed" | "use" | "import" | "from"
         ) {
             return template_context(content, quote_start, cursor);
+        }
+    }
+
+    if let Some((quote_start, _)) = opening_quote(content, cursor) {
+        let nearby_start = line_start.saturating_sub(512);
+        let nearby = &content[nearby_start..cursor];
+        let line_before_quote = &content[line_start..quote_start];
+        if nearby.contains("kernel.event_listener")
+            && (line_before_quote.contains("event:")
+                || line_before_quote.to_ascii_lowercase().contains("event="))
+        {
+            return Some(SymfonyCompletionContext {
+                kind: SymfonySymbolKind::Event,
+                prefix: content[quote_start + 1..cursor].to_string(),
+                content_start: quote_start + 1,
+                escape_backslashes: false,
+                route_name: None,
+                translation_domain: None,
+            });
         }
     }
 

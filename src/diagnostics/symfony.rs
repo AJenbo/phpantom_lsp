@@ -34,6 +34,14 @@ impl Backend {
             .framework_symfony_symbol_names(SymfonySymbolKind::Template)
             .into_iter()
             .collect::<HashSet<_>>();
+        let known_events = self
+            .framework_symfony_symbol_names(SymfonySymbolKind::Event)
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let known_buses = self
+            .framework_symfony_symbol_names(SymfonySymbolKind::MessengerBus)
+            .into_iter()
+            .collect::<HashSet<_>>();
         let mut translation_domains = HashSet::new();
         let mut known_translations = HashSet::new();
         for refs in self.framework_references.read().values() {
@@ -99,6 +107,8 @@ impl Backend {
                 SymfonySymbolKind::RouteParameter => true,
                 SymfonySymbolKind::Template => known_templates.contains(name),
                 SymfonySymbolKind::Translation => true,
+                SymfonySymbolKind::Event => known_events.contains(name),
+                SymfonySymbolKind::MessengerBus => known_buses.contains(name),
             };
             if known || !is_project_local_name(*kind, name) {
                 continue;
@@ -111,7 +121,10 @@ impl Backend {
                     end: offset_to_position(content, reference.end as usize),
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String(format!("unknown_symfony_{label}"))),
+                code: Some(NumberOrString::String(format!(
+                    "unknown_symfony_{}",
+                    kind.diagnostic_name()
+                ))),
                 source: Some("PHPantom".to_string()),
                 message: format!("Symfony {label} '{}' is not declared", name),
                 ..Default::default()
@@ -130,4 +143,8 @@ fn is_project_local_name(kind: SymfonySymbolKind, name: &str) -> bool {
             && !name.starts_with(['@', '/', '\\'])
             && !name.starts_with("./")
             && !name.starts_with("../"))
+        || (kind == SymfonySymbolKind::Event
+            && (lower.starts_with("app.") || lower.starts_with("app_")))
+        || (kind == SymfonySymbolKind::MessengerBus
+            && (lower.starts_with("app.") || lower.starts_with("app_")))
 }
