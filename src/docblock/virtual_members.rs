@@ -11,7 +11,7 @@ use crate::atom::{Atom, AtomMap, atom};
 
 use super::tag_kind::TagKind;
 
-use super::parser::{DocblockInfo, parse_docblock_for_tags};
+use super::parser::{DocblockInfo, MethodTagInfo, parse_docblock_for_tags};
 use super::tags::sanitise_and_parse_docblock_type;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
@@ -53,47 +53,18 @@ pub fn extract_property_tags_from_info(info: &DocblockInfo) -> Vec<(Atom, Option
     let mut results = Vec::new();
 
     for tag in info.tags_by_kinds(PROPERTY_KINDS) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        // `@property $name` declares an untyped magic property; `@property`
+        // with no variable at all declares nothing.
+        let Some(variable) = tag.variable() else {
             continue;
-        }
-
-        // Format: @property Type $name  (or)  @property $name
-        if desc.starts_with('$') {
-            // No explicit type: `@property $name`
-            let prop_name = desc.split_whitespace().next().unwrap_or(desc);
-            let name = prop_name.strip_prefix('$').unwrap_or(prop_name);
-            if name.is_empty() {
-                continue;
-            }
-            results.push((atom(name), None));
+        };
+        let Some(name) = variable.strip_prefix('$').filter(|n| !n.is_empty()) else {
             continue;
-        }
-
-        // Extract the type token, respecting `<…>` nesting so that
-        // generics like `Collection<int, Model>` are treated as one unit.
-        let (type_token, remainder) = split_type_token(desc);
-
-        // Find the `$name` in the remainder.
-        let prop_name = match remainder.split_whitespace().find(|t| t.starts_with('$')) {
-            Some(name) => name,
-            None => continue,
         };
 
-        let name = prop_name.strip_prefix('$').unwrap_or(prop_name);
-        if name.is_empty() {
-            continue;
-        }
-
-        // Strip trailing punctuation that could leak from descriptions
-        // (e.g. trailing `.` or `,`).  The full type string including
-        // nullability is preserved.
-        let type_str = type_token.trim_end_matches(['.', ',']);
-        let parsed = if type_str.is_empty() {
-            None
-        } else {
-            sanitise_and_parse_docblock_type(type_str)
-        };
+        let parsed = tag
+            .type_text()
+            .and_then(|type_text| sanitise_and_parse_docblock_type(&type_text));
         results.push((atom(name), parsed));
     }
 
@@ -133,119 +104,86 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
         std::collections::HashSet::new();
 
     for tag in info.tags_by_kind(TagKind::Method) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
-            continue;
-        }
-
-        // Multi-line tag values keep their newlines; normalise them.
-        let desc = desc.replace('\n', " ");
-        let rest = desc.as_str();
-
-        // Check for optional `static` keyword.
-        let (is_static, rest) = if let Some(after_static) = rest.strip_prefix("static") {
-            // "static" must be followed by whitespace or `(` to avoid
-            // matching a method literally named "staticFoo".
-            if after_static.is_empty() {
-                continue;
-            }
-            let next_char = after_static.chars().next().unwrap();
-            if next_char.is_whitespace() || next_char == '(' {
-                (true, after_static.trim_start())
-            } else {
-                (false, rest)
-            }
-        } else {
-            (false, rest)
-        };
-
-        // Find the method name and its parameter list.
-        //
-        // The method name is a bare identifier immediately followed by `(`
-        // at nesting depth 0.  We must skip parenthesised type prefixes
-        // like `(string|int)[]` and `(callable():string)` where the `(`
-        // is part of the return type, not the parameter list.
-        let Some((method_name, return_type_raw, params_str, after_params, template_str)) =
-            parse_method_signature(rest)
-        else {
-            continue;
-        };
-
-        if method_name.is_empty() {
-            continue;
-        }
-
-        // When the `static` keyword was consumed as the static modifier
-        // but no return type was found before the method name AND no
-        // colon return type follows, `static` was actually the return
-        // type (e.g. `@method static getStatic()`).  Re-interpret it.
-        let (is_static, return_type_raw) = if is_static && return_type_raw.is_none() {
-            // Peek ahead: if there IS a colon return type, keep
-            // is_static=true (e.g. `@method static foo(): bool`).
-            let has_colon_return = after_params.trim_start().starts_with(':');
-            if has_colon_return {
-                (true, None)
-            } else {
-                (false, Some("static"))
-            }
-        } else {
-            (is_static, return_type_raw)
-        };
-
-        // Check for colon return type syntax after the parameter list:
-        //   `@method methodName(params) : ReturnType description…`
-        // If a return type was already found before the method name, the
-        // colon syntax is ignored (prefix syntax takes precedence).
-        let return_type: Option<PhpType> = if return_type_raw.is_none() {
-            // Look for `: Type` after the closing paren.
-            let after = after_params.trim_start();
-            if let Some(after_colon) = after.strip_prefix(':') {
-                let after_colon = after_colon.trim_start();
-                if !after_colon.is_empty() {
-                    let (type_token, _) = split_type_token(after_colon);
-                    let trimmed = type_token.trim_end_matches(['.', ',']);
-                    if !trimmed.is_empty() {
-                        Some(PhpType::parse(trimmed))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+        let recovered;
+        let method = match tag.value.as_method() {
+            Some(method) => method,
+            None => match recover_static_method_tag(&tag.description) {
+                Some(method) => {
+                    recovered = method;
+                    &recovered
                 }
-            } else {
-                None
+                None => continue,
+            },
+        };
+        if method.name.is_empty() {
+            continue;
+        }
+
+        // The grammar models `@method Type name(…)` but not the
+        // `@method name(…): Type` spelling, which leaves the `: Type` at
+        // the head of the description.
+        let colon_return = method
+            .description
+            .as_deref()
+            .and_then(|desc| desc.trim_start().strip_prefix(':'))
+            .map(|after_colon| split_type_token(after_colon.trim_start()).0.trim())
+            .filter(|type_token| !type_token.is_empty());
+
+        // A lone `static` before the method name is ambiguous: the grammar
+        // reads it as the return type, which is right for
+        // `@method static getStatic()` but wrong for
+        // `@method static foo(): bool`, where the real return type follows
+        // the parameter list and `static` is the modifier.
+        let static_is_modifier =
+            !method.is_static && method.return_type.as_deref() == Some("static");
+        let (is_static, prefix_return) = match (static_is_modifier, colon_return.is_some()) {
+            (true, true) => (true, None),
+            _ => (method.is_static, method.return_type.as_deref()),
+        };
+
+        // The prefix form wins when both are written.
+        let return_type = prefix_return.or(colon_return).map(PhpType::parse);
+
+        let parameters: Vec<ParameterInfo> = method
+            .parameters
+            .iter()
+            .map(|param| {
+                let type_hint = param.type_text.as_deref().map(PhpType::parse);
+                ParameterInfo {
+                    name: atom(&param.name),
+                    is_required: !param.optional && !param.variadic,
+                    type_hint: type_hint.clone(),
+                    native_type_hint: type_hint,
+                    description: None,
+                    default_value: None,
+                    is_variadic: param.variadic,
+                    is_reference: false,
+                    closure_this_type: None,
+                }
+            })
+            .collect();
+
+        // Method-level `<T of Bound>` template parameters.
+        let mut template_params: Vec<Atom> = Vec::with_capacity(method.templates.len());
+        let mut template_param_bounds = AtomMap::default();
+        for template in &method.templates {
+            let name = atom(&template.name);
+            template_params.push(name);
+            if let Some(bound) = &template.bound {
+                template_param_bounds.insert(name, PhpType::parse(bound));
             }
-        } else {
-            return_type_raw
-                .map(|s| s.trim_end_matches(['.', ',']))
-                .filter(|s| !s.is_empty())
-                .map(PhpType::parse)
-        };
+        }
 
-        let parameters = if params_str.is_empty() {
-            Vec::new()
-        } else {
-            parse_method_tag_params(params_str)
-        };
-
-        let method_atom = crate::atom::atom(method_name);
-        let is_vendor_tag = tag.vendor.is_some();
-
-        // Parse method-level template parameters from `<T, U of Bound>` syntax.
-        let (template_params, template_param_bounds) = if let Some(tpl) = template_str {
-            parse_inline_template_params(tpl)
-        } else {
-            (Vec::new(), AtomMap::default())
-        };
-
-        // Compute template bindings: map template param names to the
-        // parameter names that directly use them as their type.
+        // Map template param names to the parameters that use them.
         let template_bindings = if template_params.is_empty() {
             Vec::new()
         } else {
             let tpl_names: Vec<String> = template_params.iter().map(|a| a.to_string()).collect();
             compute_template_bindings_from_params(&parameters, &tpl_names)
         };
+
+        let method_atom = atom(&method.name);
+        let is_vendor_tag = tag.vendor.is_some();
 
         results.push(MethodInfo {
             name: method_atom,
@@ -276,7 +214,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
         });
 
         if is_vendor_tag {
-            vendor_names.insert(crate::atom::atom(method_name));
+            vendor_names.insert(method_atom);
         }
     }
 
@@ -304,339 +242,26 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
 
 // ─── Internal Helpers ───────────────────────────────────────────────────────────
 
-/// Parsed components of a `@method` tag signature:
-/// (method_name, return_type_raw, params_str, after_params, template_str).
-type MethodSignatureParts<'a> = (&'a str, Option<&'a str>, &'a str, &'a str, Option<&'a str>);
-
-/// Parse the method signature from the text after the optional `static`
-/// keyword.
+/// Recover a `static` `@method` declaration the PHPDoc grammar rejected.
 ///
-/// Handles parenthesised return type prefixes like `(string|int)[]` and
-/// `(callable():string)` by tracking `()` nesting depth.  The method
-/// name is the bare identifier token immediately before a `(` (or `<...>(`) at
-/// depth 0 that is NOT preceded by a type-like token.
-fn parse_method_signature(input: &str) -> Option<MethodSignatureParts<'_>> {
-    // Strategy: scan for `identifier(` or `identifier<...>(` patterns at paren depth 0.
-    // The last such pattern where `identifier` looks like a method name
-    // (not a type keyword like `callable`) is the method name.
-    //
-    // Actually, a simpler approach: use `split_type_token` to consume
-    // the return type (if present), then expect `methodName(...)` or
-    // `methodName<TemplateParams>(...)`.
-    //
-    // Template params appear between the method name and the opening
-    // paren: `@method TVal doThing<TVal of mixed>(TVal $param)`
+/// `mago-phpdoc-syntax` reads `@method static (…) name()` as a method
+/// literally named `static` whose parameter list is `(…)`, because
+/// `@method static(int $x)` is how a method actually called `static` would
+/// be written and the two are indistinguishable once whitespace is gone.
+/// The parenthesised return type then fails to parse as a parameter list
+/// and the whole tag is dropped.  Re-parsing without the modifier recovers
+/// the signature; the modifier is reapplied afterwards.
+fn recover_static_method_tag(value: &str) -> Option<MethodTagInfo> {
+    let rest = value
+        .trim_start()
+        .strip_prefix("static")
+        .and_then(|rest| rest.strip_prefix(char::is_whitespace))?
+        .trim_start();
 
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    // Try to find a method name by scanning for `ident(` at depth 0.
-    // We need to find the *correct* `(` — the one that starts the
-    // parameter list, not one inside a type expression.
-    //
-    // The method name is a PHP identifier: [a-zA-Z_][a-zA-Z0-9_]*
-    // immediately followed by `(`.  We scan left-to-right, tracking
-    // paren depth, and look for this pattern at depth 0.
-
-    let bytes = trimmed.as_bytes();
-    let len = bytes.len();
-    let mut paren_depth: i32 = 0;
-    let mut i = 0;
-
-    while i < len {
-        let b = bytes[i];
-        match b {
-            b'(' if paren_depth == 0 => {
-                // Check if preceded by `>` (closing a template param list)
-                // or by an identifier directly.
-                let (ident_end, template_str) = if i > 1 && bytes[i - 1] == b'>' {
-                    // Walk backwards to find matching `<` at depth 0.
-                    let mut angle_depth = 1i32;
-                    let mut k = i - 2; // start before the `>`
-                    loop {
-                        if bytes[k] == b'>' {
-                            angle_depth += 1;
-                        } else if bytes[k] == b'<' {
-                            angle_depth -= 1;
-                            if angle_depth == 0 {
-                                break;
-                            }
-                        }
-                        if k == 0 {
-                            break;
-                        }
-                        k -= 1;
-                    }
-                    if angle_depth == 0 {
-                        // k points to `<`, template content is between k+1 and i-1
-                        let tpl = trimmed[k + 1..i - 1].trim();
-                        (k, Some(tpl))
-                    } else {
-                        (i, None)
-                    }
-                } else {
-                    (i, None)
-                };
-
-                // Check if the text immediately before `(` (or `<`) is an identifier.
-                if ident_end > 0 && is_ident_byte(bytes[ident_end - 1]) {
-                    // Walk backwards to find the start of the identifier.
-                    let mut id_start = ident_end - 1;
-                    while id_start > 0 && is_ident_byte(bytes[id_start - 1]) {
-                        id_start -= 1;
-                    }
-                    let ident = &trimmed[id_start..ident_end];
-
-                    // Make sure this looks like a method name, not a type
-                    // keyword.  Type keywords that can appear before `(`
-                    // in type expressions: `callable`, `Closure`.
-                    // However, if the ident IS the first token (id_start
-                    // after trimming == 0 or only whitespace before), and
-                    // there's no return type before it, it could still be
-                    // a method named `callable`.  We use a heuristic:
-                    // if the text before the identifier (after trimming)
-                    // is empty or only whitespace, this is the method name
-                    // regardless of what it's called.  Otherwise, check
-                    // that it's not a type keyword embedded in a type
-                    // expression.
-                    let before_ident = trimmed[..id_start].trim_end();
-
-                    // If before_ident ends with `)`, `]`, `>`, or a type
-                    // char, the ident might be part of a grouped type
-                    // expression.  But actually, grouped types like
-                    // `(string|int)[]` don't have an ident before `(`.
-                    // And `callable()` has `callable` before `(`.
-                    //
-                    // The key insight: `callable` and `Closure` before
-                    // `(` are type constructors only when they appear
-                    // INSIDE the return type portion.  If the text before
-                    // the ident is non-empty, this ident is the method
-                    // name only if it's NOT `callable` or `Closure` when
-                    // the preceding text looks like a type.  But this
-                    // gets complicated.
-                    //
-                    // Simpler approach: if the ident is `callable` or
-                    // `Closure`, skip this `(` and continue scanning
-                    // (unless there's nothing before the ident, meaning
-                    // the method is literally named `callable`).
-                    if (ident == "callable" || ident == "Closure") && !before_ident.is_empty() {
-                        // This is a callable/Closure type expression
-                        // inside the return type.  Skip past the matching
-                        // closing paren.
-                        paren_depth += 1;
-                        i += 1;
-                        continue;
-                    }
-
-                    // Found the method name.  Now extract the parts.
-                    let return_type_raw = if before_ident.is_empty() {
-                        None
-                    } else {
-                        Some(before_ident)
-                    };
-
-                    // Find the matching closing paren for the parameter list.
-                    let params_start = i + 1;
-                    let mut depth = 1i32;
-                    let mut j = params_start;
-                    while j < len && depth > 0 {
-                        match bytes[j] {
-                            b'(' => depth += 1,
-                            b')' => depth -= 1,
-                            _ => {}
-                        }
-                        j += 1;
-                    }
-                    // j is now one past the closing paren (or end of string).
-                    let params_end = j - 1; // index of closing paren
-                    let params_str = if params_start < params_end {
-                        trimmed[params_start..params_end].trim()
-                    } else {
-                        ""
-                    };
-                    let after_params = if j < len { &trimmed[j..] } else { "" };
-
-                    return Some((
-                        ident,
-                        return_type_raw,
-                        params_str,
-                        after_params,
-                        template_str,
-                    ));
-                } else {
-                    // `(` at depth 0 but not preceded by an identifier
-                    // (and not preceded by a `>` with a valid template block).
-                    // This is a grouped type like `(string|int)[]`.
-                    // Track depth and continue.
-                    paren_depth += 1;
-                    i += 1;
-                    continue;
-                }
-            }
-            b'(' => {
-                paren_depth += 1;
-            }
-            b')' => {
-                paren_depth -= 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    None
-}
-
-/// Returns `true` if the byte is valid in a PHP identifier
-/// (`[a-zA-Z0-9_]`).
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-/// Parse the parameter list from a `@method` tag.
-///
-/// Handles formats like:
-///   - `string $abstract, callable():mixed $mockDefinition = null`
-///   - `array<string, mixed> $data, string $connection = null`
-///
-/// Splits on commas while respecting `<>` and `()` nesting.
-fn parse_method_tag_params(params_str: &str) -> Vec<ParameterInfo> {
-    let parts = split_params(params_str);
-    let mut result = Vec::new();
-
-    for part in &parts {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-
-        // Check for default value: ` = ...` after the variable name.
-        // We look for the last `$` to find the variable name, then check
-        // if `=` follows.
-        let has_default = part.contains('=');
-
-        // Check for variadic `...`
-        let is_variadic = part.contains("...");
-
-        // Find the parameter name (token starting with `$`).
-        // Scan tokens right-to-left to find the `$name` token (it may be
-        // followed by `= default`).
-        let dollar_pos = part.rfind('$');
-        let (parsed_type, param_name) = if let Some(dp) = dollar_pos {
-            let name_and_rest = &part[dp..];
-            // The name ends at whitespace, `=`, `)`, or end of string.
-            let name_end = name_and_rest
-                .find(|c: char| c.is_whitespace() || c == '=' || c == ')')
-                .unwrap_or(name_and_rest.len());
-            let name = &name_and_rest[..name_end];
-
-            let before = part[..dp].trim().trim_end_matches("...");
-            let parsed_type = if before.is_empty() {
-                None
-            } else {
-                let trimmed = before.trim_end_matches(['.', ',']);
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(PhpType::parse(trimmed))
-                }
-            };
-
-            (parsed_type, name.to_string())
-        } else {
-            // No `$` found — treat the whole thing as a name-less param.
-            // This is unusual but we handle it gracefully.
-            continue;
-        };
-
-        let is_required = !has_default && !is_variadic;
-
-        result.push(ParameterInfo {
-            name: crate::atom::atom(&param_name),
-            is_required,
-            type_hint: parsed_type.clone(),
-            native_type_hint: parsed_type,
-            description: None,
-            default_value: None,
-            is_variadic,
-            is_reference: false,
-            closure_this_type: None,
-        });
-    }
-
-    result
-}
-
-/// Split a parameter string on commas while respecting `<>` and `()`
-/// nesting so that `array<string, mixed>` is not split.
-fn split_params(s: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth_angle = 0i32;
-    let mut depth_paren = 0i32;
-    let mut start = 0;
-
-    for (i, ch) in s.char_indices() {
-        match ch {
-            '<' => depth_angle += 1,
-            '>' => depth_angle -= 1,
-            '(' => depth_paren += 1,
-            ')' => depth_paren -= 1,
-            ',' if depth_angle == 0 && depth_paren == 0 => {
-                parts.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    // Push the last segment.
-    parts.push(&s[start..]);
-    parts
-}
-
-/// Parse inline template parameters from the `<...>` block of a `@method` tag.
-///
-/// Input example: `"TVal of mixed, U, V of \Countable"`
-/// Returns a list of template param names (as `Atom`s) and a bounds map.
-fn parse_inline_template_params(input: &str) -> (Vec<crate::atom::Atom>, AtomMap<PhpType>) {
-    let mut params = Vec::new();
-    let mut bounds = AtomMap::default();
-
-    for segment in input.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-        // Format: `Name` or `Name of Bound`
-        let (name, bound) = if let Some(of_pos) = segment.find(" of ") {
-            let name = segment[..of_pos].trim();
-            let bound_str = segment[of_pos + 4..].trim();
-            (
-                name,
-                if bound_str.is_empty() {
-                    None
-                } else {
-                    Some(bound_str)
-                },
-            )
-        } else {
-            (segment, None)
-        };
-
-        // Skip if name doesn't look like a valid identifier.
-        if name.is_empty() || !name.chars().next().unwrap().is_alphabetic() {
-            continue;
-        }
-
-        let atom = crate::atom::atom(name);
-        params.push(atom);
-        if let Some(bound_str) = bound {
-            bounds.insert(atom, PhpType::parse(bound_str));
-        }
-    }
-
-    (params, bounds)
+    let info = parse_docblock_for_tags(&format!("/** @method {rest} */"))?;
+    let mut method = info.tags.first()?.value.as_method()?.clone();
+    method.is_static = true;
+    Some(method)
 }
 
 /// Compute template bindings from a method's parameters.
@@ -671,93 +296,6 @@ fn compute_template_bindings_from_params(
 mod tests {
     use super::*;
 
-    // ─── parse_method_signature ─────────────────────────────────────────
-
-    #[test]
-    fn simple_no_return_type() {
-        let (name, ret, params, _, tpl) = parse_method_signature("getString()").unwrap();
-        assert_eq!(name, "getString");
-        assert!(ret.is_none());
-        assert_eq!(params, "");
-        assert!(tpl.is_none());
-    }
-
-    #[test]
-    fn simple_with_return_type() {
-        let (name, ret, params, _, tpl) = parse_method_signature("string getString()").unwrap();
-        assert_eq!(name, "getString");
-        assert_eq!(ret, Some("string"));
-        assert_eq!(params, "");
-        assert!(tpl.is_none());
-    }
-
-    #[test]
-    fn with_params() {
-        let (name, ret, params, _, _) =
-            parse_method_signature("void setInteger(int $integer)").unwrap();
-        assert_eq!(name, "setInteger");
-        assert_eq!(ret, Some("void"));
-        assert_eq!(params, "int $integer");
-    }
-
-    #[test]
-    fn grouped_union_array_return() {
-        let (name, ret, params, _, _) =
-            parse_method_signature("(string|int)[] getArray() with some text").unwrap();
-        assert_eq!(name, "getArray");
-        assert_eq!(ret, Some("(string|int)[]"));
-        assert_eq!(params, "");
-    }
-
-    #[test]
-    fn callable_return_in_parens() {
-        let (name, ret, params, _, _) =
-            parse_method_signature("(callable() : string) getCallable() dsa sada").unwrap();
-        assert_eq!(name, "getCallable");
-        assert_eq!(ret, Some("(callable() : string)"));
-        assert_eq!(params, "");
-    }
-
-    #[test]
-    fn colon_return_after_params() {
-        let (name, ret, _, after, _) =
-            parse_method_signature("getBool(string $foo)  :   bool dsa sada").unwrap();
-        assert_eq!(name, "getBool");
-        assert!(ret.is_none());
-        assert!(after.trim_start().starts_with(':'));
-    }
-
-    #[test]
-    fn callable_param_type_not_confused_with_method_name() {
-        let (name, ret, params, _, _) =
-            parse_method_signature("void setCallback(callable():mixed $mockDefinition = null)")
-                .unwrap();
-        assert_eq!(name, "setCallback");
-        assert_eq!(ret, Some("void"));
-        assert!(params.contains("$mockDefinition"));
-    }
-
-    #[test]
-    fn template_params_after_method_name() {
-        let (name, ret, params, _, tpl) =
-            parse_method_signature("TVal get<TVal of mixed>(TVal $default)").unwrap();
-        assert_eq!(name, "get");
-        assert_eq!(ret, Some("TVal"));
-        assert_eq!(params, "TVal $default");
-        assert_eq!(tpl, Some("TVal of mixed"));
-    }
-
-    #[test]
-    fn multiple_template_params() {
-        let (name, ret, params, _, tpl) =
-            parse_method_signature("TVal doThing<TKey, TVal of mixed>(TKey $key, TVal $val)")
-                .unwrap();
-        assert_eq!(name, "doThing");
-        assert_eq!(ret, Some("TVal"));
-        assert_eq!(params, "TKey $key, TVal $val");
-        assert_eq!(tpl, Some("TKey, TVal of mixed"));
-    }
-
     // ─── extract_method_tags ────────────────────────────────────────────
 
     fn make_docblock(lines: &[&str]) -> String {
@@ -767,6 +305,127 @@ mod tests {
         }
         s.push_str(" */");
         s
+    }
+
+    /// Parse one `@method` line and return the single method it declares.
+    fn single_method(line: &str) -> MethodInfo {
+        let methods = extract_method_tags(&make_docblock(&[line]));
+        assert_eq!(methods.len(), 1, "expected one @method from {line:?}");
+        methods.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn simple_no_return_type() {
+        let method = single_method("@method getString()");
+        assert_eq!(method.name.as_str(), "getString");
+        assert!(method.return_type.is_none());
+        assert!(method.parameters.is_empty());
+        assert!(method.template_params.is_empty());
+    }
+
+    #[test]
+    fn simple_with_return_type() {
+        let method = single_method("@method string getString()");
+        assert_eq!(method.name.as_str(), "getString");
+        assert_eq!(method.return_type.as_ref().unwrap().to_string(), "string");
+        assert!(method.parameters.is_empty());
+    }
+
+    #[test]
+    fn with_params() {
+        let method = single_method("@method void setInteger(int $integer)");
+        assert_eq!(method.name.as_str(), "setInteger");
+        assert_eq!(method.return_type.as_ref().unwrap().to_string(), "void");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.as_str(), "$integer");
+        assert_eq!(
+            method.parameters[0].type_hint.as_ref().unwrap().to_string(),
+            "int"
+        );
+    }
+
+    #[test]
+    fn callable_param_type_not_confused_with_method_name() {
+        // The `(` of `callable():mixed` must not be mistaken for the start
+        // of the parameter list.
+        let method =
+            single_method("@method void setCallback(callable():mixed $mockDefinition = null)");
+        assert_eq!(method.name.as_str(), "setCallback");
+        assert_eq!(method.return_type.as_ref().unwrap().to_string(), "void");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.as_str(), "$mockDefinition");
+        assert!(!method.parameters[0].is_required);
+    }
+
+    #[test]
+    fn template_params_after_method_name() {
+        let method = single_method("@method TVal get<TVal of mixed>(TVal $default)");
+        assert_eq!(method.name.as_str(), "get");
+        assert_eq!(method.return_type.as_ref().unwrap().to_string(), "TVal");
+        assert_eq!(
+            method
+                .template_params
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>(),
+            ["TVal"]
+        );
+        assert_eq!(
+            method.template_param_bounds[&atom("TVal")].to_string(),
+            "mixed"
+        );
+        assert_eq!(method.parameters.len(), 1);
+    }
+
+    #[test]
+    fn multiple_template_params() {
+        let method =
+            single_method("@method TVal doThing<TKey, TVal of mixed>(TKey $key, TVal $val)");
+        assert_eq!(method.name.as_str(), "doThing");
+        assert_eq!(
+            method
+                .template_params
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>(),
+            ["TKey", "TVal"]
+        );
+        assert_eq!(method.parameters.len(), 2);
+        // Both parameters bind their template directly.
+        assert_eq!(method.template_bindings.len(), 2);
+    }
+
+    #[test]
+    fn static_modifier_with_parenthesised_return_type() {
+        // The PHPDoc grammar cannot tell `@method static (…) foo()` from a
+        // method literally named `static`, so this form has to be recovered
+        // by re-parsing without the modifier.
+        let method = single_method("@method static (string|int)[] getArray() with some text");
+        assert_eq!(method.name.as_str(), "getArray");
+        assert!(method.is_static);
+        assert!(method.return_type.is_some());
+
+        let method = single_method("@method static (callable() : string) getCallable() dsa");
+        assert_eq!(method.name.as_str(), "getCallable");
+        assert!(method.is_static);
+        assert!(method.return_type.is_some());
+    }
+
+    #[test]
+    fn method_named_static_is_not_treated_as_a_modifier() {
+        let method = single_method("@method static(int $x)");
+        assert_eq!(method.name.as_str(), "static");
+        assert!(!method.is_static);
+        assert_eq!(method.parameters.len(), 1);
+    }
+
+    #[test]
+    fn variadic_param_is_optional() {
+        let method = single_method("@method void log(string $msg, mixed ...$context)");
+        assert_eq!(method.parameters.len(), 2);
+        assert!(method.parameters[0].is_required);
+        assert!(method.parameters[1].is_variadic);
+        assert!(!method.parameters[1].is_required);
     }
 
     #[test]

@@ -13,25 +13,42 @@
 //! the tag data we need without borrowing from the arena.  That keeps the
 //! arena lifetime contained within each call.
 //!
-//! Each tag is reduced to its [`TagKind`], its vendor prefix, and the raw
-//! source text of its value.  The value text is taken straight from the
-//! docblock via the tag's span, with the `*` continuation prefixes removed,
-//! so the extractors in [`super::tags`] and friends see the type and
-//! description exactly as the author wrote them.
+//! Each tag keeps its [`TagKind`], its vendor prefix, the raw source text of
+//! its value, and — for every tag shape the PHPDoc grammar models — a
+//! structured [`TagValueInfo`] snapshot of the pieces the parser already
+//! identified.  The raw text is taken straight from the docblock via the
+//! tag's span, with the `*` continuation prefixes removed, so extractors
+//! that still need the value as written see it exactly as the author typed
+//! it.
+//!
+//! Prefer [`TagValueInfo`] over re-scanning [`TagInfo::description`]: the
+//! structured form comes from the real grammar, so it splits types from
+//! variables and descriptions the way PHPStan and Psalm do.  Tags the
+//! grammar does not model (`@see`, `@link`, `@removed`, …) and tags whose
+//! value it could not make sense of arrive as [`TagValueInfo::Unstructured`],
+//! and those are the only ones the text scanners still have to handle.
+
+use std::borrow::Cow;
 
 use mago_allocator::LocalArena;
 use mago_phpdoc_syntax::PHPDocParser;
-use mago_phpdoc_syntax::cst::{Document, Element};
+use mago_phpdoc_syntax::cst::r#type::Type;
+use mago_phpdoc_syntax::cst::{
+    AssertPattern, Document, Element, MethodTagValue, TagValue,
+    TemplateTagValue as CstTemplateTagValue,
+};
 use mago_span::{HasSpan, Position, Span};
 
 use super::tag_kind::tag_kind;
+use super::type_strings::split_type_token;
 
 pub use super::tag_kind::{TagKind, TagVendor};
 
 /// Owned snapshot of a parsed tag.
 ///
-/// This captures the tag name, kind, vendor prefix, and value text as owned
-/// data so callers do not need to worry about arena lifetimes.
+/// This captures the tag name, kind, vendor prefix, value text, and the
+/// structured value as owned data so callers do not need to worry about
+/// arena lifetimes.
 #[derive(Debug, Clone)]
 pub struct TagInfo {
     /// The raw tag name without the `@` (e.g. `"param"`, `"phpstan-return"`,
@@ -45,11 +62,227 @@ pub struct TagInfo {
     /// For `@param string $foo A description` this is
     /// `"string $foo A description"`.
     pub description: String,
+    /// The value as the PHPDoc grammar parsed it, or
+    /// [`TagValueInfo::Unstructured`] for tags it does not model.
+    pub value: TagValueInfo,
     /// The span of the entire tag (from `@` to the end of its value) in the
     /// source file.
     pub span: Span,
     /// The span of just the value portion of the tag.
     pub description_span: Span,
+}
+
+/// A tag value as the PHPDoc grammar parsed it.
+///
+/// Each variant holds the pieces the grammar identified, already interned
+/// into owned data.  Type positions keep the author's own text (generic
+/// arguments, shapes and callable signatures included) so they can be fed
+/// straight to [`crate::php_type::PhpType::parse`].
+#[derive(Debug, Clone, Default)]
+pub enum TagValueInfo {
+    /// A tag the grammar does not model, or one whose value it could not
+    /// parse.  Callers fall back to scanning [`TagInfo::description`].
+    #[default]
+    Unstructured,
+    /// A type with an optional variable and description: `@return`, `@var`,
+    /// `@param`, `@throws`, `@mixin`, `@extends`, `@property`, …
+    Typed(TypedTagValue),
+    /// `@template` and its variance variants.
+    Template(TemplateTagValue),
+    /// `@method`, boxed to keep [`TagInfo`] small.
+    Method(Box<MethodTagInfo>),
+    /// `@assert` and its `-if-true` / `-if-false` variants.
+    Assert(AssertTagInfo),
+    /// `@phpstan-type` / `@psalm-type` local alias.
+    TypeAlias(TypeAliasTagInfo),
+    /// `@phpstan-import-type` / `@psalm-import-type`.
+    TypeAliasImport(TypeAliasImportTagInfo),
+}
+
+/// A single type, optionally attached to a variable and followed by prose.
+#[derive(Debug, Clone, Default)]
+pub struct TypedTagValue {
+    /// The type as written, or `None` for a typeless `@param $foo`.
+    pub type_text: Option<String>,
+    /// The variable the type applies to, `$` included.
+    pub variable: Option<String>,
+    /// Whether the variable was written as `...$foo`.
+    pub variadic: bool,
+    /// The prose that follows, with `*` continuation prefixes removed.
+    pub description: Option<String>,
+}
+
+/// A `@template` declaration: `@template T of Bound = Default`.
+#[derive(Debug, Clone, Default)]
+pub struct TemplateTagValue {
+    pub name: String,
+    /// The `of` / `as` upper bound, as written.
+    pub bound: Option<String>,
+    /// The `= Default` type, as written.
+    pub default: Option<String>,
+}
+
+/// A `@method` declaration.
+#[derive(Debug, Clone, Default)]
+pub struct MethodTagInfo {
+    pub name: String,
+    pub is_static: bool,
+    /// The return type written before the method name, as written.  The
+    /// `methodName(): Type` spelling is not part of the grammar, so it
+    /// arrives in [`Self::description`] instead.
+    pub return_type: Option<String>,
+    /// Method-level `<T of Bound>` template parameters.
+    pub templates: Vec<TemplateTagValue>,
+    pub parameters: Vec<MethodParamTagInfo>,
+    /// Everything after the parameter list.
+    pub description: Option<String>,
+}
+
+/// One entry in a `@method` parameter list.
+#[derive(Debug, Clone, Default)]
+pub struct MethodParamTagInfo {
+    /// The parameter name, `$` included.
+    pub name: String,
+    pub type_text: Option<String>,
+    pub variadic: bool,
+    /// Whether the parameter has a `= default`.
+    pub optional: bool,
+}
+
+/// An `@assert` declaration: `@assert !Type $subject`.
+#[derive(Debug, Clone, Default)]
+pub struct AssertTagInfo {
+    pub negated: bool,
+    /// The asserted type, or `None` for the truthy / falsy / non-empty
+    /// patterns, which assert a shape rather than a type.
+    pub type_text: Option<String>,
+    /// What is asserted about: `$param`, `$param->prop` or
+    /// `$param->method()`.
+    pub subject: String,
+}
+
+/// A `@phpstan-type Alias = Definition` declaration.
+#[derive(Debug, Clone, Default)]
+pub struct TypeAliasTagInfo {
+    pub alias: String,
+    pub definition: String,
+}
+
+/// A `@phpstan-import-type Alias from Source as Local` declaration.
+#[derive(Debug, Clone, Default)]
+pub struct TypeAliasImportTagInfo {
+    pub imported: String,
+    pub from: String,
+    /// The `as Local` rename, when present.
+    pub local: Option<String>,
+}
+
+impl TagValueInfo {
+    /// The [`TypedTagValue`] payload, when this tag carries one.
+    pub fn as_typed(&self) -> Option<&TypedTagValue> {
+        match self {
+            TagValueInfo::Typed(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// The [`MethodTagInfo`] payload, when this is a `@method` tag the
+    /// grammar could parse.
+    pub fn as_method(&self) -> Option<&MethodTagInfo> {
+        match self {
+            TagValueInfo::Method(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// The [`TemplateTagValue`] payload, when this is a `@template` tag.
+    pub fn as_template(&self) -> Option<&TemplateTagValue> {
+        match self {
+            TagValueInfo::Template(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// Accessors for the tags that lead with a type (`@param`, `@return`,
+/// `@var`, `@property`, `@extends`, …).
+///
+/// Each falls back to scanning [`Self::description`] when the grammar could
+/// not parse the tag, so a half-typed or non-standard annotation still
+/// yields whatever can be salvaged from it.
+impl TagInfo {
+    /// The type this tag declares, as written.
+    pub fn type_text(&self) -> Option<Cow<'_, str>> {
+        if let TagValueInfo::Typed(value) = &self.value {
+            return value.type_text.as_deref().map(Cow::Borrowed);
+        }
+        match self.fallback_value() {
+            Cow::Borrowed(raw) => split_leading_type(raw).map(Cow::Borrowed),
+            Cow::Owned(raw) => split_leading_type(&raw).map(|t| Cow::Owned(t.to_owned())),
+        }
+    }
+
+    /// The variable this tag attaches its type to, `$` included and any
+    /// `...` variadic marker dropped.
+    pub fn variable(&self) -> Option<Cow<'_, str>> {
+        if let TagValueInfo::Typed(value) = &self.value {
+            return value.variable.as_deref().map(Cow::Borrowed);
+        }
+        match self.fallback_value() {
+            Cow::Borrowed(raw) => fallback_variable(raw).map(Cow::Borrowed),
+            Cow::Owned(raw) => fallback_variable(&raw).map(|v| Cow::Owned(v.to_owned())),
+        }
+    }
+
+    /// The prose that follows this tag's type and variable.
+    pub fn type_description(&self) -> Option<Cow<'_, str>> {
+        if let TagValueInfo::Typed(value) = &self.value {
+            return value.description.as_deref().map(Cow::Borrowed);
+        }
+        match self.fallback_value() {
+            Cow::Borrowed(raw) => fallback_description(raw).map(Cow::Borrowed),
+            Cow::Owned(raw) => fallback_description(&raw).map(|d| Cow::Owned(d.to_owned())),
+        }
+    }
+
+    /// The raw value folded onto one line, ready for the token scanners.
+    fn fallback_value(&self) -> Cow<'_, str> {
+        let raw = self.description.trim();
+        if raw.contains('\n') {
+            Cow::Owned(collapse_newlines(raw))
+        } else {
+            Cow::Borrowed(raw)
+        }
+    }
+}
+
+/// The first type token of a tag value, minus any trailing sentence
+/// punctuation that ran into it.
+fn split_leading_type(raw: &str) -> Option<&str> {
+    let (token, _) = split_type_token(raw);
+    let token = token.trim_end_matches(['.', ',']);
+    (!token.is_empty()).then_some(token)
+}
+
+/// The `$variable` token that follows the type, if the value has one.
+fn fallback_variable(raw: &str) -> Option<&str> {
+    let (_, rest) = split_type_token(raw);
+    let token = rest.split_whitespace().next()?;
+    let token = token.strip_prefix("...").unwrap_or(token);
+    token.starts_with('$').then_some(token)
+}
+
+/// Everything after the type token and the `$variable` that may follow it.
+fn fallback_description(raw: &str) -> Option<&str> {
+    let (_, rest) = split_type_token(raw);
+    let rest = rest.trim_start();
+    let rest = match rest.split_whitespace().next() {
+        Some(token) if token.strip_prefix("...").unwrap_or(token).starts_with('$') => {
+            rest[token.len()..].trim_start()
+        }
+        _ => rest,
+    };
+    (!rest.is_empty()).then_some(rest)
 }
 
 /// Owned snapshot of a parsed docblock.
@@ -165,6 +398,7 @@ fn collect_tags(document: &Document<'_>, docblock: &str, base_offset: u32) -> Do
                     kind: tag_kind(tag),
                     vendor: tag.vendor,
                     description: source_text(docblock, base_offset, value_span),
+                    value: tag_value_info(&tag.value, docblock, base_offset),
                     span: tag.span(),
                     description_span: value_span,
                 });
@@ -186,6 +420,271 @@ fn collect_tags(document: &Document<'_>, docblock: &str, base_offset: u32) -> Do
     };
 
     DocblockInfo { description, tags }
+}
+
+/// Intern the pieces the PHPDoc grammar identified in a tag value.
+///
+/// Types keep the author's own text: the span is sliced out of the docblock
+/// and normalised the way a PHPDoc reader would (continuation `*` prefixes
+/// dropped, line breaks folded away), so a multi-line `array{…}` shape comes
+/// back as one parseable type string.
+fn tag_value_info(value: &TagValue<'_>, docblock: &str, base_offset: u32) -> TagValueInfo {
+    /// A type plus a variable — the shape most tag values share.
+    macro_rules! typed {
+        ($type_text:expr, $variable:expr, $description:expr $(,)?) => {
+            TagValueInfo::Typed(TypedTagValue {
+                type_text: $type_text,
+                variable: $variable,
+                variadic: false,
+                description: $description,
+            })
+        };
+    }
+
+    let ty = |t: &Type<'_>| Some(type_text(docblock, base_offset, t.span()));
+
+    match value {
+        TagValue::Param(value) => TagValueInfo::Typed(TypedTagValue {
+            type_text: ty(value.r#type),
+            variable: value.parameter.map(|v| variable_text(v.value)),
+            variadic: value.is_variadic(),
+            description: value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        }),
+        TagValue::TypelessParam(value) => TagValueInfo::Typed(TypedTagValue {
+            type_text: None,
+            variable: Some(variable_text(value.parameter.value)),
+            variadic: value.is_variadic(),
+            description: value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        }),
+        TagValue::ParamOut(value) => typed!(
+            ty(value.r#type),
+            Some(variable_text(value.parameter.value)),
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::ParamClosureThis(value) => typed!(
+            ty(value.r#type),
+            Some(variable_text(value.parameter.value)),
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::ParamImmediatelyInvokedCallable(value) => typed!(
+            None,
+            Some(variable_text(value.parameter.value)),
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::ParamLaterInvokedCallable(value) => typed!(
+            None,
+            Some(variable_text(value.parameter.value)),
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Return(value) | TagValue::RealReturn(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Var(value) => typed!(
+            ty(value.r#type),
+            value.variable.map(|v| variable_text(v.value)),
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Throws(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Mixin(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::SelfOut(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Extends(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Implements(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Use(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::RequireExtends(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::RequireImplements(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Sealed(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Inheritors(value) => typed!(
+            ty(value.r#type),
+            None,
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Property(value)
+        | TagValue::PropertyRead(value)
+        | TagValue::PropertyWrite(value) => typed!(
+            value.r#type.and_then(ty),
+            Some(variable_text(value.variable.value)),
+            value
+                .description
+                .map(|d| source_text(docblock, base_offset, d.span)),
+        ),
+        TagValue::Template(value) => {
+            TagValueInfo::Template(template_tag_value(value, docblock, base_offset))
+        }
+        TagValue::Method(value) => {
+            TagValueInfo::Method(Box::new(method_tag_info(value, docblock, base_offset)))
+        }
+        TagValue::Assert(value)
+        | TagValue::AssertIfTrue(value)
+        | TagValue::AssertIfFalse(value) => TagValueInfo::Assert(AssertTagInfo {
+            negated: value.is_negated(),
+            type_text: match value.pattern {
+                AssertPattern::Type(t) => ty(t),
+                _ => None,
+            },
+            subject: source_text(docblock, base_offset, value.subject.span()),
+        }),
+        TagValue::TypeAlias(value) => TagValueInfo::TypeAlias(TypeAliasTagInfo {
+            alias: crate::atom::bytes_to_str(value.alias.value).to_owned(),
+            definition: type_text(docblock, base_offset, value.r#type.span()),
+        }),
+        TagValue::TypeAliasImport(value) => TagValueInfo::TypeAliasImport(TypeAliasImportTagInfo {
+            imported: crate::atom::bytes_to_str(value.imported_alias.value).to_owned(),
+            from: crate::atom::bytes_to_str(value.imported_from.value).to_owned(),
+            local: value
+                .imported_as
+                .map(|as_clause| crate::atom::bytes_to_str(as_clause.local.value).to_owned()),
+        }),
+        // Tags with no value worth modelling (`@deprecated`, `@pure`, …),
+        // tags the grammar does not know, and tags it could not parse.
+        _ => TagValueInfo::Unstructured,
+    }
+}
+
+/// Intern a `@template` declaration.
+fn template_tag_value(
+    value: &CstTemplateTagValue<'_>,
+    docblock: &str,
+    base_offset: u32,
+) -> TemplateTagValue {
+    TemplateTagValue {
+        name: crate::atom::bytes_to_str(value.name.value).to_owned(),
+        bound: value
+            .bound
+            .map(|bound| type_text(docblock, base_offset, bound.r#type.span())),
+        default: value
+            .default
+            .map(|default| type_text(docblock, base_offset, default.r#type.span())),
+    }
+}
+
+/// Intern a `@method` declaration, including its inline template list and
+/// parameter list.
+fn method_tag_info(value: &MethodTagValue<'_>, docblock: &str, base_offset: u32) -> MethodTagInfo {
+    MethodTagInfo {
+        name: crate::atom::bytes_to_str(value.name.value).to_owned(),
+        is_static: value.is_static(),
+        return_type: value
+            .return_type
+            .map(|t| type_text(docblock, base_offset, t.span())),
+        templates: value
+            .templates
+            .map(|list| {
+                list.entries
+                    .iter()
+                    .map(|entry| template_tag_value(&entry.template, docblock, base_offset))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        parameters: value
+            .parameters
+            .entries
+            .iter()
+            .map(|param| MethodParamTagInfo {
+                name: variable_text(param.parameter.value),
+                type_text: param
+                    .r#type
+                    .map(|t| type_text(docblock, base_offset, t.span())),
+                variadic: param.is_variadic(),
+                optional: param.is_optional(),
+            })
+            .collect(),
+        description: value
+            .description
+            .map(|d| source_text(docblock, base_offset, d.span)),
+    }
+}
+
+/// A variable token's text, `$` included.
+fn variable_text(value: &[u8]) -> String {
+    crate::atom::bytes_to_str(value).to_owned()
+}
+
+/// Slice a type out of the docblock and fold it onto one line.
+///
+/// A type written across several lines carries the `*` continuation prefix
+/// and the source indentation; both have to go before the string can be
+/// handed to the type parser.
+fn type_text(docblock: &str, base_offset: u32, span: Span) -> String {
+    let raw = source_text(docblock, base_offset, span);
+    if raw.contains('\n') {
+        collapse_newlines(&raw)
+    } else {
+        raw
+    }
 }
 
 /// The span of a tag's value: everything from the first byte after the tag
@@ -500,6 +999,149 @@ mod tests {
             .first_tag_by_kind_vendor_first(TagKind::Return)
             .expect("should have return");
         assert_eq!(tag.description, "literal-string");
+    }
+
+    // ── Structured tag values ───────────────────────────────────────
+
+    #[test]
+    fn param_tag_splits_type_variable_and_description() {
+        let doc = "/** @param int|string $a description with a $dollar */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let value = info.tags[0].value.as_typed().expect("structured param");
+        assert_eq!(value.type_text.as_deref(), Some("int|string"));
+        assert_eq!(value.variable.as_deref(), Some("$a"));
+        assert_eq!(
+            value.description.as_deref(),
+            Some("description with a $dollar")
+        );
+    }
+
+    #[test]
+    fn variadic_param_reports_the_bare_variable() {
+        let doc = "/** @param string ...$rest */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let value = info.tags[0].value.as_typed().expect("structured param");
+        assert_eq!(value.variable.as_deref(), Some("$rest"));
+        assert!(value.variadic);
+    }
+
+    #[test]
+    fn typeless_param_has_no_type() {
+        let doc = "/** @param $foo */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let value = info.tags[0].value.as_typed().expect("structured param");
+        assert_eq!(value.type_text, None);
+        assert_eq!(value.variable.as_deref(), Some("$foo"));
+    }
+
+    #[test]
+    fn multiline_shape_type_is_folded_onto_one_line() {
+        let doc = "/**\n * @param array{\n *   name: string,\n *   age: int\n * } $data desc\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let value = info.tags[0].value.as_typed().expect("structured param");
+        assert_eq!(
+            value.type_text.as_deref(),
+            Some("array{name: string, age: int}")
+        );
+        assert_eq!(value.variable.as_deref(), Some("$data"));
+        assert_eq!(value.description.as_deref(), Some("desc"));
+    }
+
+    #[test]
+    fn return_description_excludes_the_type() {
+        let doc = "/** @return array an array of everything */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let value = info.tags[0].value.as_typed().expect("structured return");
+        assert_eq!(value.type_text.as_deref(), Some("array"));
+        assert_eq!(value.description.as_deref(), Some("an array of everything"));
+    }
+
+    #[test]
+    fn template_tag_reports_bound_and_default() {
+        let doc = "/** @template T of array<int, string> = array{} */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let value = info.tags[0]
+            .value
+            .as_template()
+            .expect("structured template");
+        assert_eq!(value.name, "T");
+        assert_eq!(value.bound.as_deref(), Some("array<int, string>"));
+        assert_eq!(value.default.as_deref(), Some("array{}"));
+    }
+
+    #[test]
+    fn method_tag_reports_signature_pieces() {
+        let doc = "/** @method static TVal get<TVal of mixed>(TVal $default = null) desc */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let value = info.tags[0].value.as_method().expect("structured method");
+        assert_eq!(value.name, "get");
+        assert!(value.is_static);
+        assert_eq!(value.return_type.as_deref(), Some("TVal"));
+        assert_eq!(value.templates.len(), 1);
+        assert_eq!(value.templates[0].bound.as_deref(), Some("mixed"));
+        assert_eq!(value.parameters.len(), 1);
+        assert_eq!(value.parameters[0].name, "$default");
+        assert!(value.parameters[0].optional);
+        assert_eq!(value.description.as_deref(), Some("desc"));
+    }
+
+    #[test]
+    fn assert_tag_reports_negation_and_subject() {
+        let doc = "/**\n * @phpstan-assert !string $value\n * @psalm-assert Type $this->prop\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+
+        let TagValueInfo::Assert(first) = &info.tags[0].value else {
+            panic!("expected a structured assert: {:?}", info.tags[0].value);
+        };
+        assert!(first.negated);
+        assert_eq!(first.type_text.as_deref(), Some("string"));
+        assert_eq!(first.subject, "$value");
+
+        let TagValueInfo::Assert(second) = &info.tags[1].value else {
+            panic!("expected a structured assert: {:?}", info.tags[1].value);
+        };
+        assert!(!second.negated);
+        assert_eq!(second.subject, "$this->prop");
+    }
+
+    #[test]
+    fn type_alias_tags_report_their_pieces() {
+        let doc = "/**\n * @phpstan-type Money = array{amount: int}\n * @phpstan-import-type Id from \\App\\Calc as Key\n */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+
+        let TagValueInfo::TypeAlias(alias) = &info.tags[0].value else {
+            panic!("expected a structured type alias: {:?}", info.tags[0].value);
+        };
+        assert_eq!(alias.alias, "Money");
+        assert_eq!(alias.definition, "array{amount: int}");
+
+        let TagValueInfo::TypeAliasImport(import) = &info.tags[1].value else {
+            panic!("expected a structured import: {:?}", info.tags[1].value);
+        };
+        assert_eq!(import.imported, "Id");
+        assert_eq!(import.from, "\\App\\Calc");
+        assert_eq!(import.local.as_deref(), Some("Key"));
+    }
+
+    #[test]
+    fn unparseable_tag_falls_back_to_scanning_the_raw_value() {
+        // Stacked assertion modifiers are not part of the grammar, so the
+        // tag arrives unstructured and the accessors scan the text.
+        let doc = "/** @phpstan-assert =!Foo $x */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        assert!(matches!(info.tags[0].value, TagValueInfo::Unstructured));
+        assert_eq!(info.tags[0].type_text().as_deref(), Some("=!Foo"));
+        assert_eq!(info.tags[0].variable().as_deref(), Some("$x"));
+    }
+
+    #[test]
+    fn accessors_read_the_structured_value_when_there_is_one() {
+        let doc = "/** @property-read Collection<int, Model> $models the models */";
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let tag = &info.tags[0];
+        assert_eq!(tag.type_text().as_deref(), Some("Collection<int, Model>"));
+        assert_eq!(tag.variable().as_deref(), Some("$models"));
+        assert_eq!(tag.type_description().as_deref(), Some("the models"));
     }
 
     #[test]

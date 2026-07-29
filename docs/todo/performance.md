@@ -678,38 +678,62 @@ body-return inference, since fixed by memoization).
 
 ---
 
-## P44. Consume the PHPDoc CST directly instead of re-parsing tag text
+## P45. Emit docblock symbol spans from the PHPDoc CST
 
-**Impact: Medium · Effort: High**
+**Impact: Low-Medium · Effort: Medium-High**
 
-`src/docblock/parser.rs` adapts `mago-phpdoc-syntax` by reducing each tag
-to its `TagKind`, its vendor prefix, and the *raw source text* of its
-value. Everything downstream then re-parses that text: `tags.rs` splits
-the type token off the front with `split_type_token`, `templates.rs`
-pulls the name and `of` bound out of a `@template` value by whitespace,
-`virtual_members.rs` hand-parses `@method` signatures (parameter list,
-defaults, inline `<T of Bound>` templates) and `@property` declarations,
-and `symbol_map/docblock.rs` re-scans the same text a third time to emit
-navigable spans.
+`src/symbol_map/docblock.rs` is the last consumer that re-derives tag
+structure from raw text. The extractors in `docblock/` now read the
+parsed grammar (see the `TagValueInfo` snapshot on `TagInfo`), but the
+symbol map needs a *byte offset in the file* for every identifier inside
+a type, not just the type's text, so it still finds the type itself by
+hand: `emit_type_first_tag` strips `@assert` modifiers and calls
+`split_type_token`, `extract_method_tag_symbols` re-implements the
+`[static] Return name(params)` split with its own paren-depth scan and a
+heuristic for telling a return type from a method name,
+`extract_template_tag_symbols` re-finds the `of` bound, and
+`extract_property_tag_symbols` re-splits type from variable.
 
-The parser already produced all of that structurally on the way in:
-`ParamTagValue` carries a `&Type` plus the `Variable`, `TemplateTagValue`
-carries the name, variance, bound and default, `MethodTagValue` carries
-the return type, visibility, name, template list and a full
-`MethodParameterList` with per-parameter types, defaults and variadic
-flags, and `AssertTagValue` carries the negation/exactness flags, the
-pattern and the subject. Reading those fields instead of re-deriving them
-from a string would delete a large amount of hand-rolled scanning, remove
-one full parse per tag from the hot path, and fix the class of bug where
-our splitter and the real grammar disagree.
+The CST has a span on every type, identifier and variable, which would
+replace all of that guessing. The obstacle is multi-line types:
+`join_multiline_type` builds an offset map so that a position inside the
+joined type string can be mapped back to the file, and the folded text
+kept in `TagValueInfo` cannot be mapped that way. Recording each type's
+span alongside its text is enough to anchor the *start* of a type
+precisely; the per-identifier offsets inside a folded multi-line type
+still need the offset map, or a walk over the CST type tree in place of
+`emit_type_spans`.
 
-The reason it was not done as part of the migration is the shape of the
-boundary, not the parsing: `DocblockInfo` is owned (it must outlive the
-per-call arena), so exposing the CST means either interning the pieces we
-need into owned structures per tag kind, or keeping the arena alive for as
-long as the extracted data. The first is mechanical but touches every
-extractor in `docblock/`; the second changes the ownership model of every
-caller. Sized for several sprint items.
+Walking the CST directly is the endgame: it deletes `join_multiline_type`,
+`emit_type_spans_from_ast` and the offset-map machinery outright, since
+every identifier already carries its own span. That is the larger of the
+two options and is what makes this Medium-High rather than Medium.
+
+---
+
+## P46. `mago-phpdoc-syntax` cannot parse `@method static (…) name()`
+
+**Impact: Low · Effort: Low (upstream)**
+
+The PHPDoc grammar reads `static` followed by `(` as a method literally
+named `static` whose parameter list follows, because
+`@method static(int $x)` is how such a method would be written and the
+two are indistinguishable once whitespace is discarded. A parenthesised
+return type after the `static` modifier therefore fails to parse and the
+whole tag is dropped:
+
+```php
+/**
+ * @method static (string|int)[] getArray()
+ * @method static (callable(): string) getCallable()
+ */
+```
+
+Both forms appear in Psalm's own magic-method test suite.
+`recover_static_method_tag` in `src/docblock/virtual_members.rs` works
+around it by re-parsing the value without the modifier and reapplying
+`static` afterwards. Report it upstream; remove the workaround once the
+grammar disambiguates on the whitespace before the `(`.
 
 ---
 

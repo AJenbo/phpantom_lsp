@@ -17,6 +17,8 @@
 //! Virtual member tags (`@property`, `@method`) live in
 //! [`super::virtual_members`].
 
+use std::borrow::Cow;
+
 use super::tag_kind::TagKind;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
@@ -24,7 +26,9 @@ use mago_syntax::cst::*;
 use crate::symbol_map::docblock::get_docblock_text_with_offset;
 use crate::types::{AssertionKind, PhpVersion, TypeAssertion};
 
-use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
+use super::parser::{
+    DocblockInfo, TagInfo, TagValueInfo, collapse_newlines, parse_docblock_for_tags,
+};
 use super::type_strings::split_type_token;
 use crate::php_type::{PhpType, TypeKind};
 
@@ -98,15 +102,7 @@ pub fn extract_if_this_is_type_from_info(info: &DocblockInfo) -> Option<PhpType>
         .tags
         .iter()
         .find(|t| t.name == "psalm-if-this-is" || t.name == "phpstan-if-this-is")?;
-    let desc = tag.description.trim();
-    if desc.is_empty() {
-        return None;
-    }
-    let (type_str, _) = split_type_token(desc);
-    if type_str.is_empty() {
-        return None;
-    }
-    Some(PhpType::parse(type_str))
+    Some(PhpType::parse(&tag.type_text()?))
 }
 
 /// Extract the PHP version from a `@removed` PHPDoc tag.
@@ -222,18 +218,13 @@ pub fn extract_mixin_tags_from_info(info: &DocblockInfo) -> Vec<(String, Vec<Php
     let mut results = Vec::new();
 
     for tag in info.tags_by_kind(TagKind::Mixin) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(type_text) = tag.type_text() else {
             continue;
-        }
+        };
 
-        // Extract the full type token (respects `<…>` nesting so that
-        // generics like `Builder<TRelatedModel>` are treated as one unit).
-        let (type_token, _remainder) = split_type_token(desc);
-
-        // Parse the type token into a structured PhpType and extract
-        // the base class name and optional generic arguments.
-        let parsed = PhpType::parse(type_token);
+        // Parse the type into a structured PhpType and extract the base
+        // class name and optional generic arguments.
+        let parsed = PhpType::parse(&type_text);
 
         // Collect individual type members. A union like `Foo|Bar` yields
         // multiple mixin entries, one per member.
@@ -287,14 +278,10 @@ pub fn extract_require_extends(docblock: &str) -> Option<String> {
 /// [`DocblockInfo`].
 pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> {
     for tag in info.tags_by_kind(TagKind::RequireExtends) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(type_text) = tag.type_text() else {
             continue;
-        }
-        // Take the first type token so a trailing description or generic
-        // argument list does not leak into the class name.
-        let (type_token, _remainder) = split_type_token(desc);
-        let base = match PhpType::parse(type_token).kind() {
+        };
+        let base = match PhpType::parse(&type_text).kind() {
             TypeKind::Generic(g) => g.name.to_string(),
             TypeKind::Named(name) => name.to_string(),
             _ => continue,
@@ -325,12 +312,10 @@ pub fn extract_require_implements(docblock: &str) -> Vec<String> {
 pub fn extract_require_implements_from_info(info: &DocblockInfo) -> Vec<String> {
     let mut out = Vec::new();
     for tag in info.tags_by_kind(TagKind::RequireImplements) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(type_text) = tag.type_text() else {
             continue;
-        }
-        let (type_token, _remainder) = split_type_token(desc);
-        let interface = match PhpType::parse(type_token).kind() {
+        };
+        let interface = match PhpType::parse(&type_text).kind() {
             TypeKind::Generic(g) => g.name.to_string(),
             TypeKind::Named(name) => name.to_string(),
             _ => continue,
@@ -372,18 +357,11 @@ pub fn extract_throws_tags_from_info(info: &DocblockInfo) -> Vec<PhpType> {
     let mut results = Vec::new();
 
     for tag in info.tags_by_kind(TagKind::Throws) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(type_text) = tag.type_text() else {
             continue;
-        }
-
-        // The type name is the first whitespace-delimited token.
-        let type_name = match desc.split_whitespace().next() {
-            Some(name) => name,
-            None => continue,
         };
 
-        let cleaned = type_name.trim_start_matches('\\');
+        let cleaned = type_text.trim_start_matches('\\');
         if !cleaned.is_empty() {
             results.push(PhpType::parse(cleaned));
         }
@@ -433,49 +411,63 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
     let mut results = Vec::new();
 
     for tag in info.tags_by_kinds(ASSERT_KINDS) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some((negated, type_str, subject)) = assert_parts(tag) else {
             continue;
-        }
-
-        // Strip leading assertion-type modifiers in any order: `!` marks a
-        // negated assertion; `=` marks an exact-type assertion (PHPUnit's
-        // `assertInstanceOf`, `assertSame`, etc. use `=ExpectedType`).  For
-        // narrowing purposes the exact form behaves the same as the default
-        // subtype form, so the `=` is dropped.
-        let mut rest = desc;
-        let mut negated = false;
-        loop {
-            if let Some(r) = rest.strip_prefix('!') {
-                negated = !negated;
-                rest = r.trim_start();
-            } else if let Some(r) = rest.strip_prefix('=') {
-                rest = r.trim_start();
-            } else {
-                break;
-            }
-        }
-
-        // Next token is the type (which may contain spaces in generics).
-        let (type_str, remainder) = split_type_token(rest);
-        if type_str.is_empty() {
-            continue;
-        }
-        // The parameter name follows the type token.
-        let param_str = match remainder.split_whitespace().next() {
-            Some(p) if p.starts_with('$') => p,
-            _ => continue,
         };
 
         results.push(TypeAssertion {
             kind: assertion_kind_for(tag.kind),
-            param_name: param_str.to_string(),
-            asserted_type: PhpType::parse(type_str.trim_end_matches(['.', ','])),
+            param_name: subject.into_owned(),
+            asserted_type: PhpType::parse(&type_str),
             negated,
         });
     }
 
     results
+}
+
+/// Split an assertion tag into `(negated, asserted_type, subject)`.
+///
+/// The grammar reports the negation flag, the pattern and the subject
+/// separately.  When it could not parse the tag (as with the modifier
+/// stacking in `@phpstan-assert =!Foo $x`, which it declines to model), the
+/// modifiers are peeled off by hand instead: `!` negates and `=` marks an
+/// exact-type assertion, which narrows the same way the default subtype
+/// form does and is therefore dropped.
+fn assert_parts(tag: &TagInfo) -> Option<(bool, Cow<'_, str>, Cow<'_, str>)> {
+    if let TagValueInfo::Assert(value) = &tag.value {
+        let type_text = value.type_text.as_deref()?;
+        return Some((
+            value.negated,
+            Cow::Borrowed(type_text),
+            Cow::Borrowed(value.subject.as_str()),
+        ));
+    }
+
+    let mut rest = tag.description.trim();
+    let mut negated = false;
+    loop {
+        if let Some(r) = rest.strip_prefix('!') {
+            negated = !negated;
+            rest = r.trim_start();
+        } else if let Some(r) = rest.strip_prefix('=') {
+            rest = r.trim_start();
+        } else {
+            break;
+        }
+    }
+
+    let (type_str, remainder) = split_type_token(rest);
+    let type_str = type_str.trim_end_matches(['.', ',']);
+    if type_str.is_empty() {
+        return None;
+    }
+    let subject = remainder
+        .split_whitespace()
+        .next()
+        .filter(|token| token.starts_with('$'))?;
+
+    Some((negated, Cow::Borrowed(type_str), Cow::Borrowed(subject)))
 }
 
 /// Extract the type from a `@var` PHPDoc tag.
@@ -509,28 +501,12 @@ pub fn extract_var_type_with_name_from_info(
     info: &DocblockInfo,
 ) -> Option<(PhpType, Option<String>)> {
     for tag in info.tags_by_kind_vendor_first(TagKind::Var) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(type_text) = tag.type_text() else {
             continue;
-        }
+        };
 
-        // Extract the type token, respecting `<…>` nesting so that
-        // generics like `Collection<int, User>` are treated as one unit.
-        let (type_str, remainder) = split_type_token(desc);
-        let cleaned_type = type_str.trim_end_matches(['.', ',']);
-        if cleaned_type.is_empty() {
-            return None;
-        }
-
-        // Check for an optional `$variable` name after the type.
-        let var_name = remainder
-            .split_whitespace()
-            .next()
-            .filter(|t| t.starts_with('$'))
-            .map(|t| t.to_string());
-
-        let parsed = sanitise_and_parse_docblock_type(cleaned_type)?;
-        return Some((parsed, var_name));
+        let parsed = sanitise_and_parse_docblock_type(&type_text)?;
+        return Some((parsed, tag.variable().map(Cow::into_owned)));
     }
     None
 }
@@ -695,21 +671,10 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
     // the more specific variant must win, so iterate in vendor
     // precedence order rather than document order.
     for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
-            continue;
-        }
-
-        // Extract the full type token (respects `<…>` nesting).
-        let (type_token, remainder) = split_type_token(desc);
-
-        // The next token should be the parameter name.
-        // Handle `...$name` (variadic) by stripping the leading `...`.
-        if let Some(name) = remainder.split_whitespace().next() {
-            let name = name.strip_prefix("...").unwrap_or(name);
-            if name == var_name {
-                return sanitise_and_parse_docblock_type(type_token);
-            }
+        if tag.variable().as_deref() == Some(var_name)
+            && let Some(type_text) = tag.type_text()
+        {
+            return sanitise_and_parse_docblock_type(&type_text);
         }
     }
 
@@ -742,24 +707,12 @@ pub fn extract_all_param_tags_from_info(info: &DocblockInfo) -> Vec<(String, Php
     // `@psalm-param` document the same parameter, the more specific
     // variant wins.
     for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
-            continue;
-        }
-
-        // Extract the full type token (respects `<…>` nesting).
-        let (type_token, remainder) = split_type_token(desc);
-
-        // The next token should be the parameter name.
-        // Handle `...$name` (variadic) by stripping the leading `...`.
-        if let Some(name) = remainder.split_whitespace().next() {
-            let name = name.strip_prefix("...").unwrap_or(name);
-            if name.starts_with('$')
-                && seen_params.insert(name.to_string())
-                && let Some(parsed) = sanitise_and_parse_docblock_type(type_token)
-            {
-                results.push((name.to_string(), parsed));
-            }
+        if let Some(name) = tag.variable()
+            && let Some(type_text) = tag.type_text()
+            && seen_params.insert(name.to_string())
+            && let Some(parsed) = sanitise_and_parse_docblock_type(&type_text)
+        {
+            results.push((name.into_owned(), parsed));
         }
     }
 
@@ -784,24 +737,12 @@ pub fn extract_param_types_positional_from_info(
     let mut results = Vec::new();
 
     for tag in info.tags_by_kind(TagKind::Param) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(type_text) = tag.type_text() else {
             continue;
-        }
+        };
 
-        let (type_token, remainder) = split_type_token(desc);
-
-        let param_name = remainder.split_whitespace().next().and_then(|name| {
-            let name = name.strip_prefix("...").unwrap_or(name);
-            if name.starts_with('$') {
-                Some(name.to_string())
-            } else {
-                None
-            }
-        });
-
-        if let Some(parsed) = sanitise_and_parse_docblock_type(type_token) {
-            results.push((param_name, parsed));
+        if let Some(parsed) = sanitise_and_parse_docblock_type(&type_text) {
+            results.push((tag.variable().map(Cow::into_owned), parsed));
         }
     }
 
@@ -831,22 +772,10 @@ pub fn extract_param_closure_this_from_info(info: &DocblockInfo) -> Vec<(PhpType
     let mut results = Vec::new();
 
     for tag in info.tags_by_kind(TagKind::ParamClosureThis) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
-            continue;
-        }
-
-        // Extract the type token (respects `<…>` nesting).
-        let (type_token, remainder) = split_type_token(desc);
-        if type_token.is_empty() {
-            continue;
-        }
-
-        // The next token should be the parameter name (`$paramName`).
-        if let Some(name) = remainder.split_whitespace().next()
-            && name.starts_with('$')
+        if let Some(type_text) = tag.type_text()
+            && let Some(name) = tag.variable()
         {
-            results.push((PhpType::parse(type_token), name.to_string()));
+            results.push((PhpType::parse(&type_text), name.into_owned()));
         }
     }
 
@@ -872,30 +801,13 @@ pub fn extract_param_description(docblock: &str, var_name: &str) -> Option<Strin
 /// Like [`extract_param_description`], but operates on a pre-parsed [`DocblockInfo`].
 pub fn extract_param_description_from_info(info: &DocblockInfo, var_name: &str) -> Option<String> {
     for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        if tag.variable().as_deref() != Some(var_name) {
             continue;
         }
 
-        // Skip the type token.
-        let (_type_token, remainder) = split_type_token(desc);
-        let remainder = remainder.trim_start();
-
-        // Check if the next token is our parameter name.
-        // Handle `...$name` (variadic) by stripping the leading `...`.
-        let name_token = remainder.split_whitespace().next().unwrap_or("");
-        let name_stripped = name_token.strip_prefix("...").unwrap_or(name_token);
-        if name_stripped != var_name {
-            continue;
-        }
-
-        // Skip past the parameter name to get the description.
-        let after_name = remainder.get(name_token.len()..).unwrap_or("").trim_start();
-
-        // Multi-line tag values keep their newlines.
-        // The old code joined continuation lines with spaces, so
-        // normalise newlines to spaces to preserve existing behaviour.
-        let normalised = collapse_newlines(after_name);
+        // Multi-line tag values keep their newlines.  The description is
+        // prose, so continuation lines join with a space.
+        let normalised = collapse_newlines(tag.type_description().unwrap_or_default().as_ref());
         let cleaned = strip_html_tags(&normalised);
         let desc = cleaned.trim().to_string();
         if desc.is_empty() {
@@ -935,14 +847,9 @@ pub fn extract_return_description_from_info(info: &DocblockInfo) -> Option<Strin
             return None;
         }
 
-        // Skip the type token.
-        let (_type_token, remainder) = split_type_token(desc);
-        let remainder = remainder.trim_start();
-
-        // Multi-line tag values keep their newlines.
-        // The old code joined continuation lines with spaces, so
-        // normalise newlines to spaces to preserve existing behaviour.
-        let normalised = collapse_newlines(remainder);
+        // Multi-line tag values keep their newlines.  The description is
+        // prose, so continuation lines join with a space.
+        let normalised = collapse_newlines(tag.type_description().unwrap_or_default().as_ref());
         let cleaned = strip_html_tags(&normalised);
         let result = cleaned.trim().to_string();
         if result.is_empty() {
@@ -1682,22 +1589,11 @@ fn extract_type_via_mago_from_info(info: &DocblockInfo, kind: TagKind) -> Option
     // Vendor-prefixed tags outrank the plain form; return on the first
     // usable match.
     for tag in info.tags_by_kind_vendor_first(kind) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(type_text) = tag.type_text() else {
             continue;
-        }
+        };
 
-        // Multi-line tag values keep their newlines.  Normalise them (and
-        // the surrounding indentation whitespace) into a single space so
-        // that `split_type_token` sees single-line input.
-        let normalised = collapse_newlines(desc);
-        let (type_str, _remainder) = split_type_token(&normalised);
-        if type_str.is_empty() {
-            continue;
-        }
-
-        let raw = type_str.trim_end_matches(['.', ',']);
-        let parsed = sanitise_and_parse_docblock_type(raw);
+        let parsed = sanitise_and_parse_docblock_type(&type_text);
 
         // A leading `(` may open either a PHPStan conditional return type
         // (`($p is T ? A : B)`) or a parenthesized type group such as a

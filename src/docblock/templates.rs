@@ -10,8 +10,7 @@ use std::collections::HashMap;
 
 use super::tag_kind::TagKind;
 
-use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
-use super::type_strings::split_type_token;
+use super::parser::{DocblockInfo, TagInfo, TagValueInfo, parse_docblock_for_tags};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{TemplateVariance, TypeAliasDef};
 use crate::util::strip_fqn_prefix;
@@ -110,70 +109,16 @@ pub fn extract_template_params_full_from_info(
     let mut results = Vec::new();
 
     for tag in info.tags_by_kinds(TEMPLATE_KINDS) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let Some(template) = tag.value.as_template() else {
             continue;
-        }
+        };
 
-        let variance = variance_for(tag.kind);
-
-        // The template parameter name is the first whitespace-delimited token.
-        let mut tokens = desc.split_whitespace();
-        if let Some(name) = tokens.next() {
-            // Sanity: template names are identifiers (start with a letter or _).
-            if name
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-            {
-                // Everything after the parameter name, used for
-                // `split_type_token`-based parsing that respects `<>` nesting.
-                let rest = desc[name.len()..].trim_start();
-
-                // Check for a bound keyword: `@template T of SomeClass` or `@template T as SomeClass`
-                let (bound, rest_after_bound) = if let Some(after_of) = rest
-                    .strip_prefix("of")
-                    .and_then(|s| s.strip_prefix(|c: char| c.is_whitespace()))
-                    .or_else(|| {
-                        rest.strip_prefix("as")
-                            .and_then(|s| s.strip_prefix(|c: char| c.is_whitespace()))
-                    }) {
-                    let after_of = after_of.trim_start();
-                    if after_of.is_empty() {
-                        (None, "")
-                    } else {
-                        let (type_tok, remainder) = split_type_token(after_of);
-                        if type_tok.is_empty() {
-                            (None, remainder)
-                        } else {
-                            (Some(PhpType::parse(type_tok)), remainder)
-                        }
-                    }
-                } else {
-                    (None, rest)
-                };
-
-                // Check for a `= default` value: `@template T of bool = false`
-                let rest_trimmed = rest_after_bound.trim_start();
-                let default = if let Some(after_eq) = rest_trimmed.strip_prefix('=') {
-                    let after_eq = after_eq.trim_start();
-                    if after_eq.is_empty() {
-                        None
-                    } else {
-                        let (default_tok, _) = split_type_token(after_eq);
-                        if default_tok.is_empty() {
-                            None
-                        } else {
-                            Some(PhpType::parse(default_tok))
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                results.push((name.to_string(), bound, variance, default));
-            }
-        }
+        results.push((
+            template.name.clone(),
+            template.bound.as_deref().map(PhpType::parse),
+            variance_for(tag.kind),
+            template.default.as_deref().map(PhpType::parse),
+        ));
     }
 
     results
@@ -215,27 +160,15 @@ pub fn extract_template_param_bindings_from_info(
     let mut results = Vec::new();
 
     for tag in info.tags_by_kind(TagKind::Param) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let (Some(type_text), Some(param_name)) = (tag.type_text(), tag.variable()) else {
             continue;
-        }
-
-        // Extract the full type token (respects `<…>` nesting).
-        let (type_token, remainder) = split_type_token(desc);
-
-        // The next token should be the parameter name (e.g. `$model`).
-        // It may have a variadic prefix: `...$items`.
-        let param_name = match remainder.split_whitespace().next() {
-            Some(name) if name.starts_with('$') => name,
-            Some(name) if name.starts_with("...$") => &name[3..],
-            _ => continue,
         };
 
-        // Parse the type token into a PhpType tree and walk it to find
-        // all template parameter references, correctly handling nested
+        // Parse the type into a PhpType tree and walk it to find all
+        // template parameter references, correctly handling nested
         // generics like `Wrapper<Collection<T>, V>`.
-        let parsed = PhpType::parse(type_token);
-        collect_template_bindings(&parsed, template_params, param_name, &mut results);
+        let parsed = PhpType::parse(&type_text);
+        collect_template_bindings(&parsed, template_params, &param_name, &mut results);
     }
 
     results
@@ -344,55 +277,27 @@ pub fn extract_generics_tag_from_info(
         _ => None,
     };
 
-    let mut results = Vec::new();
-
-    match kind {
-        Some(kind) => {
-            for tag in info.tags_by_kind(kind) {
-                if let Some(result) = parse_generics_from_description(&tag.description) {
-                    results.push(result);
-                }
-            }
-        }
+    let matches_tag = |tag: &TagInfo| match kind {
+        Some(kind) => tag.kind == kind,
         // Any other tag name is not modelled structurally; match it by name.
-        None => {
-            for tag in &info.tags {
-                if tag.name == bare_tag
-                    && let Some(result) = parse_generics_from_description(&tag.description)
-                {
-                    results.push(result);
-                }
-            }
-        }
-    }
+        None => tag.name == bare_tag,
+    };
 
-    results
+    info.tags
+        .iter()
+        .filter(|tag| matches_tag(tag))
+        .filter_map(|tag| parse_generics_type(&tag.type_text()?))
+        .collect()
 }
 
-/// Parse a generics tag description (e.g. `"Collection<int, Language>"`) into
-/// a `(base_name, generic_args)` tuple.
-fn parse_generics_from_description(desc: &str) -> Option<(String, Vec<PhpType>)> {
-    let desc = desc.trim();
-    if desc.is_empty() {
-        return None;
-    }
-
-    // Multi-line tag values keep their newlines; normalise them.
-    let normalised = collapse_newlines(desc);
-
-    // Extract the full type token (e.g. `Collection<int, Language>`),
-    // respecting `<…>` nesting.
-    let (type_token, _remainder) = split_type_token(&normalised);
-
-    // Parse the type token and extract base name + generic arguments.
-    let parsed = PhpType::parse(type_token);
-    match parsed.kind() {
+/// Split a generics tag type (e.g. `"Collection<int, Language>"`) into a
+/// `(base_name, generic_args)` tuple.  Types without arguments are not
+/// generic bindings and yield `None`.
+fn parse_generics_type(type_text: &str) -> Option<(String, Vec<PhpType>)> {
+    match PhpType::parse(type_text).kind() {
         TypeKind::Generic(g) if !g.args.is_empty() => {
             let base_name = strip_fqn_prefix(&g.name).to_string();
-            if base_name.is_empty() {
-                return None;
-            }
-            Some((base_name, g.args.clone()))
+            (!base_name.is_empty()).then(|| (base_name, g.args.clone()))
         }
         _ => None,
     }
@@ -419,108 +324,34 @@ pub fn extract_type_aliases(docblock: &str) -> HashMap<String, TypeAliasDef> {
 pub fn extract_type_aliases_from_info(info: &DocblockInfo) -> HashMap<String, TypeAliasDef> {
     let mut aliases = HashMap::new();
 
-    // ── Local type alias: @phpstan-type / @psalm-type ──
-    for tag in info.tags_by_kind(TagKind::TypeAlias) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
-            continue;
-        }
-
-        // Multi-line tag values keep their newlines; normalise them.
-        let normalised = collapse_newlines(desc);
-
-        // Split into alias name and definition.
-        // Format: `AliasName = Definition` or `AliasName Definition`
-        if let Some((name, def)) = parse_local_type_alias(&normalised)
-            && !name.is_empty()
-            && !def.is_empty()
-        {
-            aliases.insert(name.to_string(), TypeAliasDef::Local(PhpType::parse(def)));
-        }
-    }
-
-    // ── Imported type alias: @phpstan-import-type / @psalm-import-type ──
-    for tag in info.tags_by_kind(TagKind::TypeAliasImport) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
-            continue;
-        }
-
-        // Format: `TypeName from ClassName` or `TypeName from ClassName as LocalAlias`
-        if let Some((alias_name, definition)) = parse_import_type_alias(desc) {
-            aliases.insert(alias_name, definition);
+    for tag in &info.tags {
+        match &tag.value {
+            // Local alias: `@phpstan-type AliasName = Definition`.
+            TagValueInfo::TypeAlias(alias) => {
+                aliases.insert(
+                    alias.alias.clone(),
+                    TypeAliasDef::Local(PhpType::parse(&alias.definition)),
+                );
+            }
+            // Imported alias: `@phpstan-import-type Name from Class as Local`.
+            TagValueInfo::TypeAliasImport(import) => {
+                let local = import
+                    .local
+                    .clone()
+                    .unwrap_or_else(|| import.imported.clone());
+                aliases.insert(
+                    local,
+                    TypeAliasDef::Import {
+                        source_class: import.from.clone(),
+                        original_name: import.imported.clone(),
+                    },
+                );
+            }
+            _ => {}
         }
     }
 
     aliases
-}
-
-/// Parse a local `@phpstan-type` alias definition.
-///
-/// Accepts both `AliasName = Definition` and `AliasName Definition` forms.
-/// The definition may contain complex types with `{…}`, `<…>`, `(…)` nesting.
-///
-/// Returns `(alias_name, definition)` or `None` if parsing fails.
-fn parse_local_type_alias(rest: &str) -> Option<(&str, &str)> {
-    // The alias name is the first word (identifier characters).
-    let name_end = rest
-        .find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(rest.len());
-    let name = &rest[..name_end];
-    if name.is_empty() {
-        return None;
-    }
-
-    let after_name = rest[name_end..].trim_start();
-
-    // Optional `=` separator
-    let definition = after_name
-        .strip_prefix('=')
-        .unwrap_or(after_name)
-        .trim_start();
-
-    if definition.is_empty() {
-        return None;
-    }
-
-    // The definition runs to the end of the line (docblock lines are
-    // already split).  Trim trailing whitespace.
-    let definition = definition.trim_end();
-
-    Some((name, definition))
-}
-
-/// Parse an `@phpstan-import-type` alias.
-///
-/// Format: `TypeName from ClassName` or `TypeName from ClassName as LocalAlias`
-///
-/// Returns `(local_alias_name, TypeAliasDef::Import { … })` so the
-/// resolver can look up the alias in the source class.
-fn parse_import_type_alias(rest: &str) -> Option<(String, TypeAliasDef)> {
-    // Split: TypeName from ClassName [as LocalAlias]
-    let parts: Vec<&str> = rest.split_whitespace().collect();
-
-    // Minimum: TypeName from ClassName  (3 parts)
-    if parts.len() < 3 || parts[1] != "from" {
-        return None;
-    }
-
-    let original_name = parts[0];
-    let source_class = parts[2];
-
-    // Check for `as LocalAlias`
-    let alias_name = if parts.len() >= 5 && parts[3] == "as" {
-        parts[4].to_string()
-    } else {
-        original_name.to_string()
-    };
-
-    let definition = TypeAliasDef::Import {
-        source_class: source_class.to_string(),
-        original_name: original_name.to_string(),
-    };
-
-    Some((alias_name, definition))
 }
 
 // ─── Conditional Return Type Synthesis ──────────────────────────────────────
@@ -628,26 +459,14 @@ fn find_all_class_string_param_names_from_info(
 ) -> Vec<String> {
     let mut names = Vec::new();
     for tag in info.tags_by_kind(TagKind::Param) {
-        let desc = tag.description.trim();
-        if desc.is_empty() {
+        let (Some(type_text), Some(var_name)) = (tag.type_text(), tag.variable()) else {
+            continue;
+        };
+        if !contains_class_string_of(&PhpType::parse(&type_text), template_name) {
             continue;
         }
-        let (type_token, remainder) = split_type_token(desc);
-        let parsed = PhpType::parse(type_token);
-        if !contains_class_string_of(&parsed, template_name) {
-            continue;
-        }
-        let mut search = remainder;
-        while let Some(rest) = search.strip_prefix('|') {
-            let rest = rest.trim_start();
-            let (_, after) = split_type_token(rest);
-            search = after;
-        }
-        if let Some(var_name) = search.split_whitespace().next() {
-            let var_name = var_name.strip_prefix("...").unwrap_or(var_name);
-            if let Some(name) = var_name.strip_prefix('$') {
-                names.push(name.to_string());
-            }
+        if let Some(name) = var_name.strip_prefix('$') {
+            names.push(name.to_string());
         }
     }
     names

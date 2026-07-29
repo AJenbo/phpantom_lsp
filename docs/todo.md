@@ -196,7 +196,8 @@ unlikely to move the needle for most users.
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P44 | [Consume the PHPDoc CST directly instead of re-parsing tag text](todo/performance.md#p44-consume-the-phpdoc-cst-directly-instead-of-re-parsing-tag-text)                     | Medium      | High        |
+| P45 | [Emit docblock symbol spans from the PHPDoc CST](todo/performance.md#p45-emit-docblock-symbol-spans-from-the-phpdoc-cst)                                                     | Low-Medium  | Medium-High |
+| P46 | [`mago-phpdoc-syntax` cannot parse `@method static (…) name()`](todo/performance.md#p46-mago-phpdoc-syntax-cannot-parse-method-static--name)                                | Low         | Low         |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.45.0, still no `mago-hir` consumers upstream) | Medium-High | High        |
 | P43 | [`init_single_project` is the longest single-threaded stretch of a run](todo/performance.md#p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run)        | Medium-High | Medium      |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
