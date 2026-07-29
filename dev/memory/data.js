@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785353169003,
+  "lastUpdate": 1785356501891,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22279,6 +22279,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 68.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "600f8eb6e4c0a17729131b8c586cc1f325b7e8dd",
+          "message": "Docblock navigation works in `@method` and `@property` tags written\nacross several lines",
+          "timestamp": "2026-07-29T22:05:10+02:00",
+          "tree_id": "134b0acc530375c17f5d3c04a3d282e19f03fed9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/600f8eb6e4c0a17729131b8c586cc1f325b7e8dd"
+        },
+        "date": 1785356498126,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.6,
             "unit": "MiB"
           }
         ]
