@@ -485,15 +485,12 @@ impl Backend {
     }
 
     pub(crate) fn cached_config_trees(&self) -> Vec<(String, ConfigNode)> {
-        {
-            let cache = self.laravel_string_key_cache.read();
-            if let Some(ref trees) = cache.config_trees {
-                return trees.clone();
-            }
-        }
-        let trees = self.enumerate_config_trees();
-        self.laravel_string_key_cache.write().config_trees = Some(trees.clone());
-        trees
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.config_trees,
+            |cache| cache.config_trees.clone(),
+            |cache, trees| cache.config_trees = Some(trees),
+            || self.enumerate_config_trees(),
+        )
     }
 
     fn enumerate_config_trees(&self) -> Vec<(String, ConfigNode)> {

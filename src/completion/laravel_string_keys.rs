@@ -394,52 +394,68 @@ impl Backend {
         keys
     }
 
-    pub(crate) fn cached_route_names(&self) -> Vec<String> {
-        {
-            let cache = self.laravel_string_key_cache.read();
-            if let Some(ref names) = cache.route_names {
-                return names.clone();
-            }
+    /// Read one slot of [`LaravelStringKeyCache`], building it under
+    /// `build_lock` when empty.
+    ///
+    /// The build is guarded rather than raced because every enumeration
+    /// walks the workspace from disk: the parallel diagnostic pass
+    /// otherwise has all N workers miss the same empty slot at once and
+    /// each repeat the identical walk. Waiters re-check the slot after
+    /// acquiring the guard, so exactly one walk happens per
+    /// invalidation.
+    pub(crate) fn cached_laravel_enumeration<T: Clone>(
+        &self,
+        build_lock: &parking_lot::Mutex<()>,
+        read: impl Fn(&crate::LaravelStringKeyCache) -> Option<T>,
+        store: impl Fn(&mut crate::LaravelStringKeyCache, T),
+        build: impl FnOnce() -> T,
+    ) -> T {
+        if let Some(cached) = read(&self.laravel_string_key_cache.read()) {
+            return cached;
         }
-        let names = crate::virtual_members::laravel::enumerate_all_route_names(self);
-        self.laravel_string_key_cache.write().route_names = Some(names.clone());
-        names
+        let _build_guard = build_lock.lock();
+        if let Some(cached) = read(&self.laravel_string_key_cache.read()) {
+            return cached;
+        }
+        let value = build();
+        store(&mut self.laravel_string_key_cache.write(), value.clone());
+        value
+    }
+
+    pub(crate) fn cached_route_names(&self) -> Vec<String> {
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.route_names,
+            |cache| cache.route_names.clone(),
+            |cache, names| cache.route_names = Some(names),
+            || crate::virtual_members::laravel::enumerate_all_route_names(self),
+        )
     }
 
     pub(crate) fn cached_config_keys(&self) -> Vec<String> {
-        {
-            let cache = self.laravel_string_key_cache.read();
-            if let Some(ref keys) = cache.config_keys {
-                return keys.clone();
-            }
-        }
-        let keys = self.enumerate_all_config_keys();
-        self.laravel_string_key_cache.write().config_keys = Some(keys.clone());
-        keys
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.config_keys,
+            |cache| cache.config_keys.clone(),
+            |cache, keys| cache.config_keys = Some(keys),
+            || self.enumerate_all_config_keys(),
+        )
     }
 
     pub(crate) fn cached_view_names(&self) -> Vec<String> {
-        {
-            let cache = self.laravel_string_key_cache.read();
-            if let Some(ref names) = cache.view_names {
-                return names.clone();
-            }
-        }
-        let names = self.enumerate_all_view_names();
-        self.laravel_string_key_cache.write().view_names = Some(names.clone());
-        names
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.view_names,
+            |cache| cache.view_names.clone(),
+            |cache, names| cache.view_names = Some(names),
+            || self.enumerate_all_view_names(),
+        )
     }
 
     pub(crate) fn cached_trans_keys(&self) -> Vec<String> {
-        {
-            let cache = self.laravel_string_key_cache.read();
-            if let Some(ref keys) = cache.trans_keys {
-                return keys.clone();
-            }
-        }
-        let keys = self.enumerate_all_trans_keys();
-        self.laravel_string_key_cache.write().trans_keys = Some(keys.clone());
-        keys
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.trans_keys,
+            |cache| cache.trans_keys.clone(),
+            |cache, keys| cache.trans_keys = Some(keys),
+            || self.enumerate_all_trans_keys(),
+        )
     }
 }
 
@@ -993,6 +1009,52 @@ final class UserPermissionController extends BaseController\n\
                 "completion should include 'about', got: {:?}",
                 labels
             );
+        }
+    }
+
+    /// Concurrent first callers must share one build, not run one each:
+    /// every enumeration behind these accessors walks the workspace from
+    /// disk, and the diagnostic pass hits them from all N workers at once.
+    #[test]
+    fn concurrent_first_callers_build_the_enumeration_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let backend = crate::Backend::new_test();
+        let builds = AtomicUsize::new(0);
+        let build_lock = parking_lot::Mutex::new(());
+
+        let results: Vec<Vec<String>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    let backend = &backend;
+                    let builds = &builds;
+                    let build_lock = &build_lock;
+                    scope.spawn(move || {
+                        backend.cached_laravel_enumeration(
+                            build_lock,
+                            |cache| cache.route_names.clone(),
+                            |cache, names| cache.route_names = Some(names),
+                            || {
+                                builds.fetch_add(1, Ordering::SeqCst);
+                                // Long enough that an unguarded
+                                // check-then-fill has every thread miss.
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                                vec!["home".to_string()]
+                            },
+                        )
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            1,
+            "the enumeration must be built once and shared, not once per caller"
+        );
+        for names in &results {
+            assert_eq!(names, &vec!["home".to_string()]);
         }
     }
 }

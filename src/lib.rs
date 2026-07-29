@@ -332,6 +332,28 @@ pub(crate) struct LaravelStringKeyCache {
     >,
 }
 
+/// Compute-once guards for the entries of [`LaravelStringKeyCache`].
+///
+/// Every enumeration behind that cache walks the workspace from disk.
+/// A plain check-then-fill cache stampedes under the parallel
+/// diagnostic pass: all workers miss the empty slot in the same
+/// instant, and each one repeats the identical walk while the others
+/// queue behind the workspace index lock. Holding the matching guard
+/// across the build means one worker walks and the rest wait once,
+/// then read the filled slot.
+///
+/// One guard per slot rather than one shared guard: the enumerations
+/// are independent, and a shared guard would let a worker that needs
+/// view names wait out an unrelated route-name build.
+#[derive(Default)]
+pub(crate) struct LaravelStringKeyBuildLocks {
+    pub route_names: parking_lot::Mutex<()>,
+    pub config_keys: parking_lot::Mutex<()>,
+    pub view_names: parking_lot::Mutex<()>,
+    pub trans_keys: parking_lot::Mutex<()>,
+    pub config_trees: parking_lot::Mutex<()>,
+}
+
 impl LaravelStringKeyCache {
     fn invalidate_for_uri(&mut self, uri: &str) {
         if uri.contains("/routes/") {
@@ -596,6 +618,9 @@ pub struct Backend {
     /// or `lang/` is updated.
     pub(crate) laravel_provider_resources: Arc<RwLock<virtual_members::laravel::ProviderResources>>,
     pub(crate) laravel_string_key_cache: Arc<RwLock<LaravelStringKeyCache>>,
+    /// Compute-once guards for `laravel_string_key_cache`; see
+    /// [`LaravelStringKeyBuildLocks`].
+    pub(crate) laravel_string_key_build_locks: Arc<LaravelStringKeyBuildLocks>,
     pub(crate) schema_index: Arc<RwLock<virtual_members::laravel::database_schema::SchemaIndex>>,
     /// Per-target member completion cache.
     ///
@@ -864,6 +889,7 @@ impl Backend {
                 virtual_members::laravel::ProviderResources::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
+            laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
                 virtual_members::laravel::database_schema::SchemaIndex::default(),
             )),
@@ -948,6 +974,7 @@ impl Backend {
                 virtual_members::laravel::ProviderResources::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
+            laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
                 virtual_members::laravel::database_schema::SchemaIndex::default(),
             )),
@@ -1556,6 +1583,7 @@ impl Backend {
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
+            laravel_string_key_build_locks: Arc::clone(&self.laravel_string_key_build_locks),
             schema_index: Arc::clone(&self.schema_index),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
             stub_function_index: Arc::clone(&self.stub_function_index),

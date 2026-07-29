@@ -197,6 +197,7 @@ unlikely to move the needle for most users.
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
 | P29 | [Migrate to `mago-phpdoc-syntax`](todo/performance.md#p29-migrate-to-mago-phpdoc-syntax) (drop deprecated `mago-docblock` / `mago-type-syntax`)                             | Medium      | Medium      |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (blocked on upstream API stabilizing — see triggers) | Medium-High | High        |
+| P43 | [`init_single_project` is the longest single-threaded stretch of a run](todo/performance.md#p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run)        | Medium-High | Medium      |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
 | P25 | [`type_mismatch_argument` / `argument_count_mismatch` slow on large single files](todo/performance.md#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files) | Medium      | Medium      |
 | P22 | [Signature change re-queues slow diagnostics for every open file](todo/performance.md#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file)                  | Medium-High | Medium      |

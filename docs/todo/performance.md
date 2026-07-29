@@ -894,39 +894,60 @@ current single populate thread.
 **Impact: Medium-High · Effort: Medium**
 
 Measured on a 32-core machine against large Laravel projects (release
-build): the `analyze` Phase 2 diagnostic pass peaks around 14 cores and
-averages fewer, despite spawning one worker per core with atomic
-work-stealing. The original worst offender (every worker deep-cloning
+build): the `analyze` Phase 2 diagnostic pass spawns one worker per
+core with atomic work-stealing but does not keep them busy. Two
+offenders are fixed. The original one was every worker deep-cloning
 the embedded stub class/function/constant indexes twice per file via
-`clone_for_diagnostic_worker`) is fixed; the indexes are Arc-shared
-now. The remaining ceiling, per a frame-pointer `perf` profile of the
-diag workers after that fix:
+`clone_for_diagnostic_worker`; the indexes are Arc-shared now. The
+second was the Laravel string-key enumerations
+(`cached_route_names`/`cached_config_keys`/`cached_view_names`/
+`cached_trans_keys`/`cached_config_trees`): each walks the workspace
+from disk, and the plain check-then-fill cache stampeded, so all 32
+workers missed the same empty slot at once and each repeated the same
+gitignore-aware walk. They are guarded by
+`LaravelStringKeyBuildLocks` now, which took Phase 2 on a large
+Laravel project from 11.6 to 22.6 of 32 cores (1.91 s → 1.31 s) and
+whole-run wall clock down ~15%.
 
-- ~18% of worker on-CPU time is still malloc/free/memmove, now diffuse:
+Sampling `/proc/<pid>/task/*/stat` is the fastest way to see the
+remaining ceiling: workers in `S` rather than `R` are blocked, not
+computing. After the stampede fix the remaining gap is:
+
+- ~18% of worker on-CPU time is malloc/free/memmove, diffuse:
   `PhpType`, `MethodInfo`, and `ParameterInfo` clones throughout the
-  type engine, plus glibc malloc arena contention (visible as
-  `arena_get2`/futex kernel time) when 32 workers allocate heavily.
-- Read-lock contention on `fqn_class_index` and `class_not_found_cache`
-  is measurable but small (~1.5% on-CPU in the rwlock slow paths).
+  type engine, plus allocator arena contention when 32 workers
+  allocate heavily.
+- The `PhpType` interner (`php_type::intern`) is hit ~13 M times in a
+  1.3 s Phase 2, roughly a quarter of which fall through the shard
+  read lock to the write path. Its 64 shards are the largest single
+  source of measured lock-wait time left (~5 s of thread-time across
+  all workers), and `sched_yield` volume shows the workers spinning
+  before parking.
+- `ensure_workspace_indexed_with_progress` still re-walks the whole
+  workspace on every call, so the four surviving string-key
+  enumerations do four full walks per diagnostic pass (down from ~44).
+  The walk is deliberate — it is how PHP files created outside the
+  editor get discovered — so removing it needs a change to that
+  contract, not just another cache.
 - Projects that keep substantial code in `vendor/` (e.g. models shipped
   in a shared vendor package) pay extra: eager population only walks
   classes from the indexed user files, so every vendor class is parsed
   lazily on first touch during the diagnostic pass, serialising workers
   on the load path early in the run. Measured on a large Laravel
   project (release build, 32 threads): eager population covers only
-  ~1,300 user classes, and the diagnostic pass then resolves ~17,400
-  vendor classes lazily (~19 s of thread-CPU, roughly 30% of the
-  run's total CPU) with
-  6,425 cycle-break re-merges that eager dependency-first ordering
-  would have avoided (eager population itself hit only 3).
+  ~1,300 user classes, and the diagnostic pass then resolves ~2,100
+  further classes lazily, with cycle-break re-merges that eager
+  dependency-first ordering would have avoided (eager population
+  itself hit only 3).
 
 Likely next steps, in rough value order: reduce clone traffic in the
 hot type-engine paths (share via `Arc`/`Cow` instead of cloning
-`PhpType`/member vectors), include depended-upon vendor classes in
-eager population, and only then consider allocator-level fixes. The
-LSP workspace diagnostics pass uses the same collectors and has the
-same ceiling. Re-measure with `perf` (frame-pointer build) or the
-CPU-sampling loop in the Appendix after any change.
+`PhpType`/member vectors), cut interner traffic or widen its sharding,
+include depended-upon vendor classes in eager population, and only
+then consider allocator-level fixes. The LSP workspace diagnostics
+pass uses the same collectors and has the same ceiling. Re-measure
+with `perf` (frame-pointer build) or the CPU-sampling loop in the
+Appendix after any change.
 
 ---
 
@@ -949,6 +970,38 @@ process-global static or thread-local, so test isolation between
 and `reindex_references_for_symbol_maps_batch` checks before doing any
 work, so the skip applies uniformly to every caller of `update_ast` in
 headless mode rather than special-casing the `analyze` call site.
+
+---
+
+## P43. `init_single_project` is the longest single-threaded stretch of a run
+
+**Impact: Medium-High · Effort: Medium**
+
+With the diagnostic pass now reaching ~22 of 32 cores (P35), project
+init is the least parallel phase left and the largest remaining share
+of wall clock. Per-phase timing of `analyze` on a large Laravel
+project (32-core machine, release build, warm page cache):
+
+| Phase | Wall | Avg cores |
+| --- | --- | --- |
+| `init_single_project` | 1.09 s | 2.3 |
+| `discover_user_files` | 0.03 s | 0.8 |
+| Phase 1 index | 0.10 s | 7.1 |
+| Phase 1.5 eager populate | 0.22 s | 1.0 |
+| Phase 2 diagnostics | 1.31 s | 22.6 |
+
+Init is ~40% of the run at barely two cores. It covers composer
+reading, autoload/classmap scanning, stub setup, and the vendor
+package scan, and it gates everything after it, so the same stretch is
+in front of the LSP's time-to-usable as well as the CLI's. Worth a
+per-phase breakdown inside init before choosing a fix — P32 (vendor
+scan reads every file twice) and P34 (eager population is
+single-threaded, the 1.0-core row above) are both already-filed pieces
+of the same window.
+
+Reproduce with the CPU-sampling loop in the Appendix, or by reading
+`utime + stime` from `/proc/self/stat` at each phase boundary and
+dividing by the phase's wall time.
 
 ---
 
