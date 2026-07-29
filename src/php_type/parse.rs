@@ -5,23 +5,20 @@ use super::*;
 impl PhpType {
     /// Parse a PHP type string into a structured [`PhpType`].
     ///
-    /// This never fails. If the input cannot be parsed by `mago_type_syntax`,
-    /// returns `PhpType::raw(input)`.
+    /// This never fails. If the input cannot be parsed by
+    /// `mago_phpdoc_syntax`, returns `PhpType::raw(input)`.
     ///
     /// PHPStan/Larastan variance annotations (`covariant`, `contravariant`)
-    /// inside generic parameter positions are stripped before parsing so
-    /// that types like `BelongsTo<Category, covariant $this>` parse as
-    /// `Generic("BelongsTo", [Named("Category"), Named("$this")])` instead
-    /// of falling back to `Raw(…)`.
+    /// inside generic parameter positions are parsed and discarded, so
+    /// types like `BelongsTo<Category, covariant $this>` become
+    /// `Generic("BelongsTo", [Named("Category"), Named("$this")])`.
     pub fn parse(input: &str) -> PhpType {
         if input.is_empty() {
             return PhpType::untyped();
         }
 
-        // Strip variance annotations that mago_type_syntax cannot parse.
-        let cleaned = strip_variance_annotations_from_type(input);
         // Replace PHPStan `*` wildcards in generic positions with `mixed`.
-        let cleaned = replace_star_wildcards(&cleaned);
+        let cleaned = replace_star_wildcards(input);
         // Replace known hyphenated pseudo-types (e.g. `model-property`)
         // with underscore placeholders so Mago can parse the surrounding
         // type structure.  The placeholders are restored in the result.
@@ -36,11 +33,7 @@ impl PhpType {
 
         let arena = LocalArena::new();
         let effective = arena.alloc_slice_copy(effective.as_bytes());
-        // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
-        // the migration is tracked as a separate task.
-        #[allow(deprecated)]
-        let parsed = mago_type_syntax::parse_str(&arena, span, effective);
-        match parsed {
+        match mago_phpdoc_syntax::parse_type(&arena, effective, span) {
             Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
             Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
         }
@@ -120,7 +113,7 @@ pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {
 /// PHPStan's phpdoc-parser supports `*` as a bivariant wildcard inside
 /// generic angle brackets, e.g. `Relation<TRelatedModel, *, *>`.  The
 /// `*` simply means "any type" and is equivalent to `mixed`.
-/// `mago-type-syntax` does not support this syntax, so we pre-process it.
+/// `mago-phpdoc-syntax` does not model it as a type, so we pre-process it.
 ///
 /// Only replaces `*` tokens that appear inside angle brackets at generic
 /// argument boundaries: preceded (ignoring whitespace) by `<` or `,` and
@@ -130,13 +123,13 @@ pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {
 ///   by `_` or identifier chars)
 ///
 /// Returns the input unchanged (no allocation) when no wildcards are found.
-/// Hyphenated PHPDoc pseudo-type names that `mago_type_syntax` cannot
+/// Hyphenated PHPDoc pseudo-type names that `mago_phpdoc_syntax` cannot
 /// parse because hyphens are not valid PHP identifier characters.
 /// Each pair is `(hyphenated, placeholder)`.
 const HYPHENATED_KEYWORDS: &[(&str, &str)] = &[("model-property", "__model_property__")];
 
 /// Replace known hyphenated pseudo-type names with underscore
-/// placeholders so that `mago_type_syntax` can parse the surrounding
+/// placeholders so that `mago_phpdoc_syntax` can parse the surrounding
 /// type structure (e.g. `array<model-property<T>, mixed>`).
 fn replace_hyphenated_keywords(s: &str) -> std::borrow::Cow<'_, str> {
     let mut result = std::borrow::Cow::Borrowed(s);
@@ -163,7 +156,7 @@ fn restore_hyphenated_keywords(ty: PhpType) -> PhpType {
 }
 
 /// Try to parse a hyphenated PHPDoc pseudo-type with generic arguments
-/// that `mago_type_syntax` does not recognise (e.g. `model-property<T>`).
+/// that `mago_phpdoc_syntax` does not recognise (e.g. `model-property<T>`).
 ///
 /// Hyphens are not valid PHP identifier characters, so the Mago parser
 /// rejects them.  Known pseudo-types like `class-string` and
@@ -258,57 +251,19 @@ pub(crate) fn is_generic_wildcard(bytes: &[u8], pos: usize) -> bool {
     false
 }
 
-/// Strip `covariant ` and `contravariant ` prefixes from generic type
-/// arguments so that `mago_type_syntax` can parse the type.
+/// The written name of a class-like reference.
 ///
-/// Only strips the keywords when they appear immediately after `<` or `,`
-/// (with optional whitespace), i.e. inside generic parameter positions.
-/// Returns the input unchanged (no allocation) when no annotations are
-/// found.
-pub(crate) fn strip_variance_annotations_from_type(s: &str) -> std::borrow::Cow<'_, str> {
-    // Fast path: no variance annotations at all.
-    if !s.contains("covariant ") && !s.contains("contravariant ") {
-        return std::borrow::Cow::Borrowed(s);
+/// `mago-phpdoc-syntax` distinguishes the relative keywords (`self`,
+/// `static`, `parent`) from ordinary identifiers, but every consumer here
+/// resolves them later against the enclosing class, so both forms collapse
+/// to the source text.
+pub(crate) fn reference_kind_name<'a>(kind: &cst::ReferenceKind<'a>) -> &'a str {
+    match kind {
+        cst::ReferenceKind::Identifier(identifier) => bytes_to_str(identifier.value),
+        cst::ReferenceKind::Self_(keyword)
+        | cst::ReferenceKind::Static(keyword)
+        | cst::ReferenceKind::Parent(keyword) => bytes_to_str(keyword.value),
     }
-
-    let mut cleaned = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        // Check whether the preceding non-whitespace is `<` or `,`,
-        // meaning we are inside a generic parameter position.
-        let preceded_by_generic_delimiter = || -> bool {
-            let mut j = i;
-            while j > 0 {
-                j -= 1;
-                if !bytes[j].is_ascii_whitespace() {
-                    return bytes[j] == b'<' || bytes[j] == b',';
-                }
-            }
-            false
-        };
-
-        if i + "covariant ".len() <= bytes.len()
-            && &bytes[i..i + "covariant ".len()] == b"covariant "
-            && preceded_by_generic_delimiter()
-        {
-            i += "covariant ".len();
-        } else if i + "contravariant ".len() <= bytes.len()
-            && &bytes[i..i + "contravariant ".len()] == b"contravariant "
-            && preceded_by_generic_delimiter()
-        {
-            i += "contravariant ".len();
-        } else {
-            // Copy the whole UTF-8 character so multibyte characters in the
-            // type string survive intact.
-            let ch = s[i..].chars().next().unwrap();
-            cleaned.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-
-    std::borrow::Cow::Owned(cleaned)
 }
 
 /// Convert a borrowed mago AST `Type` into an owned `PhpType`.
@@ -322,7 +277,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
 
         // -- Named / Reference types ------------------------------------------
         cst::Type::Reference(r) => {
-            let name = bytes_to_str(r.identifier.value);
+            let name = reference_kind_name(&r.kind);
             match &r.parameters {
                 Some(params) => {
                     let mut args: Vec<PhpType> =
@@ -444,7 +399,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
             c.is_negated(),
             convert(c.target),
             convert(c.then),
-            convert(c.otherwise),
+            convert(c.r#else),
         ),
 
         // -- class-string / interface-string ----------------------------------
@@ -468,7 +423,9 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         cst::Type::IndexAccess(i) => PhpType::index_access(convert(i.target), convert(i.index)),
 
         // -- Variable (e.g. $this in conditional types) -----------------------
-        cst::Type::Variable(v) => PhpType::named(atom(bytes_to_str(v.value))),
+        cst::Type::Variable(v) | cst::Type::ThisVariable(v) => {
+            PhpType::named(atom(bytes_to_str(v.value)))
+        }
 
         // -- Literal types ----------------------------------------------------
         cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw)),
@@ -476,8 +433,8 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         cst::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw)),
 
         // -- Negated / Posited literals (e.g. -42, +42) -----------------------
-        cst::Type::Negated(n) => literal_number_type(format!("-{}", n.number)),
-        cst::Type::Posited(p) => literal_number_type(format!("+{}", p.number)),
+        cst::Type::Negated(n) => literal_number_type(format!("-{}", n.operand)),
+        cst::Type::Posited(p) => literal_number_type(format!("+{}", p.operand)),
 
         // -- Keyword types → Named -------------------------------------------
         cst::Type::Mixed(k)

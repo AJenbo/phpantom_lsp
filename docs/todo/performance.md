@@ -678,65 +678,52 @@ body-return inference, since fixed by memoization).
 
 ---
 
-## P29. Migrate to `mago-phpdoc-syntax`
+## P44. Consume the PHPDoc CST directly instead of re-parsing tag text
 
 **Impact: Medium · Effort: High**
 
-As of the 1.42/1.43 mago releases, `mago-docblock` and
-`mago-type-syntax` are both deprecated and frozen at 1.42.0. Upstream
-folded them into a single unified crate, `mago-phpdoc-syntax`, which
-parses docblock comments and their embedded type and constant
-expressions in one pass and is meant to replace both.
+`src/docblock/parser.rs` adapts `mago-phpdoc-syntax` by reducing each tag
+to its `TagKind`, its vendor prefix, and the *raw source text* of its
+value. Everything downstream then re-parses that text: `tags.rs` splits
+the type token off the front with `split_type_token`, `templates.rs`
+pulls the name and `of` bound out of a `@template` value by whitespace,
+`virtual_members.rs` hand-parses `@method` signatures (parameter list,
+defaults, inline `<T of Bound>` templates) and `@property` declarations,
+and `symbol_map/docblock.rs` re-scans the same text a third time to emit
+navigable spans.
 
-This is **not** a same-shaped API rename. The deprecation notices
-point at `mago_phpdoc_syntax::PHPDocParser` (replacing
-`parse_phpdoc_with_span`) and `mago_phpdoc_syntax::parse_type`
-(replacing `parse_str`), but the new crate produces a fundamentally
-different CST: the old flat `mago_docblock::document::{Document, Tag,
-TagKind}` (one enum with `tags_by_kind(TagKind::X)` lookups) is
-replaced by a `TagValue` enum with ~60 per-tag-kind structs
-(`ThrowsTagValue`, `TemplateTagValue`, `ParamTagValue`, ...), and
-`mago_type_syntax::cst::Type` (69 variants) is replaced by an equally
-restructured type CST. Confirmed by reading both crate sources
-directly rather than relying on docs.rs.
+The parser already produced all of that structurally on the way in:
+`ParamTagValue` carries a `&Type` plus the `Variable`, `TemplateTagValue`
+carries the name, variance, bound and default, `MethodTagValue` carries
+the return type, visibility, name, template list and a full
+`MethodParameterList` with per-parameter types, defaults and variadic
+flags, and `AssertTagValue` carries the negation/exactness flags, the
+pattern and the subject. Reading those fields instead of re-deriving them
+from a string would delete a large amount of hand-rolled scanning, remove
+one full parse per tag from the hot path, and fix the class of bug where
+our splitter and the real grammar disagree.
 
-Grepping for `mago_docblock`/`mago_type_syntax` usage turns up far
-more than the three call sites in the old writeup — at last count 14
-files, including the core of the shared type engine
-(`src/php_type/mod.rs`, `src/php_type/parse.rs` build `PhpType` off
-`mago_type_syntax::cst::Type` directly) and every consumer that
-filters tags by `TagKind` (`src/docblock/tags.rs`, `templates.rs`,
-`conditional.rs`, `virtual_members.rs`, `completion/phpdoc/mod.rs`,
-`code_actions/update_docblock.rs`, `code_actions/phpstan/add_throws.rs`,
-`completion/source/throws_analysis/scanning.rs`, `hover/formatting.rs`).
-This is a full rewrite of the docblock/type parsing foundation, sized
-for several sprint items, not one.
+The reason it was not done as part of the migration is the shape of the
+boundary, not the parsing: `DocblockInfo` is owned (it must outlive the
+per-call arena), so exposing the CST means either interning the pieces we
+need into owned structures per tag kind, or keeping the arena alive for as
+long as the extracted data. The first is mechanical but touches every
+extractor in `docblock/`; the second changes the ownership model of every
+caller. Sized for several sprint items.
 
-**Sequencing with P30:** [P30](#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir)
-evaluates `mago-hir`, which — if it pans out — replaces this entire
-hand-rolled layer (docblock tag parsing and type-string parsing both)
-with a single upstream pass. Hand-migrating to `mago-phpdoc-syntax`
-now risks being thrown away if `mago-hir` is adopted later. Do not
-start the CST rewrite until P30's triggers have been evaluated one way
-or the other — either `mago-hir` is adopted (making this migration
-moot) or its triggers are judged unmet for the foreseeable future
-(making this migration the fallback worth doing).
+Two smaller pieces of the same cleanup can land independently:
 
-The rest of the mago toolchain (`mago-syntax`, `mago-allocator`,
-`mago-database`, `mago-names`, `mago-span`, `mago-formatter`,
-`mago-php-version`, `mago-composer`) is already on 1.44.0 — that bump
-was independent of this CST rewrite and safe to do ahead of it (see
-the `[Unreleased]` changelog entry for the one user-visible effect, a
-`mago-formatter` chain-breaking fix). `mago-docblock` and
-`mago-type-syntax` are still pinned at 1.42.0 pending this migration.
-Do not go past 1.44.0 for the rest of the toolchain until this
-migration (or P30) is underway: `mago-allocator` 1.45.0 rewrites
-`LocalArena`/`SharedArena` into a unified `Arena` trait (new
-`boxed.rs`, `iter.rs`, `collections.rs`, `vec.rs` modules) — a real
-breaking change to the arena API this codebase uses throughout the
-parse hot path (`src/parser/ast_update.rs`'s `with_reusable_arena`,
-the parse-worker threads, etc.) — and taking it piecemeal ahead of a
-real reason to touch that code would be its own unreviewed migration.
+- **The `*` wildcard pre-pass is obsolete.** `PhpType::parse` and
+  `symbol_map/docblock.rs::emit_type_spans` both still rewrite PHPStan's
+  `*` generic wildcard to `mixed` in the type string before parsing, and
+  the latter maintains a byte offset map to undo the 1→5 character
+  expansion afterwards. The grammar now models `*` natively as
+  `Type::Wildcard`, so both passes (and the offset map) can go, replaced
+  by mapping `Type::Wildcard` to `mixed` in `convert`.
+- **`get_docblock_text_for_node` re-reads raw comment text.** Tags are
+  parsed from a `&str` recovered from trivia rather than from the trivia
+  the main `mago-syntax` parse already produced. Feeding the parser the
+  trivia bytes directly would drop a copy per docblock.
 
 ---
 
@@ -744,8 +731,8 @@ real reason to touch that code would be its own unreviewed migration.
 
 **Impact: Medium-High · Effort: High**
 
-Mago 1.44.0 introduces `mago-hir`, a new intermediate representation
-that lowers the CST plus PHPDoc comments into a single flat,
+`mago-hir` is an intermediate representation that lowers the CST plus
+PHPDoc comments into a single flat,
 fully-resolved tree in one pass: names are resolved
 (`Local`/`Qualified`/`FullyQualified` + `imported` flag on every
 identifier), docblock tags are parsed into structured annotations
@@ -755,9 +742,10 @@ identifier), docblock tags are parsed into structured annotations
 `@self-out`, type aliases), and types are parsed into a full
 PHPStan/Psalm-grade type language (generics with resolved bounds,
 conditional types, `key-of`/`value-of`, array/object shapes,
-int-ranges, class-string variants, int-masks). This is exactly the
-layer PHPantom currently hand-rolls across `parser/`, `names.rs`,
-`docblock/`, and parts of `php_type.rs`.
+int-ranges, class-string variants, int-masks). `mago-phpdoc-syntax`
+already supplies the docblock and type half of that; what `mago-hir`
+adds on top is the resolved-name and single-tree lowering PHPantom
+hand-rolls across `parser/` and `names.rs`.
 
 The IR threads three generic "hole" parameters
 (`IR<'arena, I, S, E>`, defaulting to `()`) through every node so a
@@ -766,7 +754,7 @@ item/statement/expression granularity without changing the tree
 shape — this is the "groundwork for the upcoming rule-based checker"
 azjezz described.
 
-Confirmed by reading the 1.44.0 source directly (docs.rs is only
+Confirmed by reading the source directly (docs.rs is only
 ~1% documented, so don't rely on it): `mago-hir` depends only on
 crates we already use (`mago-syntax`, `mago-syntax-core`,
 `mago-phpdoc-syntax`, `mago-span`, `mago-database`,
@@ -789,10 +777,15 @@ Potential payoff if it holds up:
   Blade files instead of only a subset, as flagged in the Discord
   discussion with azjezz.
 
-**Do not start this now.** The crate is brand new (shipped in
-1.44.0, not the 1.43.0 this project is currently on), ~19k LOC,
-under active redesign ("final touches... in the next branch" per
-azjezz), and its public API should be expected to move.
+**Do not start this now.** The crate is ~19k LOC of essentially
+undocumented API with no consumers, and was described as under active
+redesign ("final touches... in the next branch" per azjezz).
+
+Note for anyone re-reading the history here: `mago-hir` did **not**
+arrive in 1.44.0. It first shipped in 1.40.0 (2026-06-24) and had
+already reached its current size by 1.43.0. The "brand new crate"
+framing in the original writeup was wrong, which matters because it
+means the API-settling clock below started earlier than assumed.
 
 **Triggers to revisit — start only once at least two of these hold:**
 
@@ -804,6 +797,33 @@ azjezz), and its public API should be expected to move.
 - rustdoc coverage for `mago-hir` is substantially more complete
   (the 1.44.0 release is ~1% documented), or azjezz confirms the
   shape is stable enough to build against.
+
+**Re-evaluated at mago 1.45.0 (2026-07-29): one of three triggers
+holds, so this stays parked and the prototype below was not run.**
+
+- *API settled — technically yes, but for the wrong reason.* The
+  `mago-hir` sources are byte-identical across 1.43.0, 1.44.0 and
+  1.45.0 (verified by unpacking the crates and diffing: zero changed
+  lines). That is not an API that settled through use, it is one that
+  has seen no development at all.
+- *Upstream checker builds on it — no, and upstream picked something
+  else.* `mago-analyzer`, `mago-linter` and `mago-codex` at 1.45.0
+  all depend on `mago-syntax` plus `mago-phpdoc-syntax` directly, and
+  none of them depends on `mago-hir`. `mago-hir` has zero reverse
+  dependencies on crates.io. Six releases and a month after it
+  appeared, the rule-based checker it was billed as groundwork for is
+  being built on a different foundation. This is the load-bearing
+  trigger: adopting the IR now would make PHPantom its first and only
+  user, betting the parse layer on an inference "holes" mechanism that
+  nothing has exercised end to end.
+- *rustdoc coverage — no.* 84 doc-comment lines against 876 `pub`
+  items in 1.45.0, still about the ~1% the original writeup found.
+
+The cheap way to re-check is the second trigger on its own: if
+anything in mago's own workspace starts depending on `mago-hir`, or
+its crates.io reverse-dependency count moves off zero, that flips the
+one trigger that carries real evidence and this becomes worth another
+look.
 
 **Before committing to a full migration, prototype first:** feed
 `symbol_map` extraction (or `ClassInfo` construction) for a single

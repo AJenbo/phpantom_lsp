@@ -15,9 +15,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::docblock::TagKind;
 #[cfg(test)]
 use mago_allocator::LocalArena;
-use mago_docblock::document::TagKind;
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::*;
@@ -488,7 +488,7 @@ fn parse_doc_params_from_info(info: &DocblockInfo) -> Vec<DocParam> {
 
         let name = name_token.to_string();
 
-        // mago-docblock joins continuation lines with \n; collapse to spaces
+        // Continuation lines are joined with \n; collapse to spaces
         // for the description to match the old behaviour.
         let description = after_params
             .trim()

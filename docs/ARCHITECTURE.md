@@ -142,18 +142,25 @@ every consumer benefits.
 
 ## External Crates
 
-PHPantom uses three crates from the [Mago](https://github.com/carthage-software/mago)
+PHPantom uses several crates from the [Mago](https://github.com/carthage-software/mago)
 project for PHP parsing and type representation:
 
-| Crate              | Purpose                                                |
-| ------------------ | ------------------------------------------------------ |
-| `mago-docblock`    | Structured PHPDoc parsing (replaces manual scanning)   |
-| `mago-names`       | Use-statement and namespace resolution                 |
-| `mago-type-syntax` | PHPStan/Psalm type expression parsing into `PhpType`   |
+| Crate                 | Purpose                                                    |
+| --------------------- | ---------------------------------------------------------- |
+| `mago-names`          | Use-statement and namespace resolution                     |
+| `mago-phpdoc-syntax`  | PHPDoc parsing, including the PHPStan/Psalm type mini-language |
+| `mago-syntax`         | PHP source to CST                                          |
+
+`mago-phpdoc-syntax` parses a docblock comment and the type expressions
+embedded in its tags in one pass. `src/docblock/parser.rs` adapts its CST
+to the owned `DocblockInfo` / `TagInfo` pair the rest of the codebase
+works with, reducing each tag to a vendor-agnostic `TagKind`
+(`src/docblock/tag_kind.rs`), the vendor prefix it was written with, and
+the raw source text of its value.
 
 `PhpType` (`src/php_type/`) is a pointer-sized handle to an interned
 `TypeKind` node, itself built from the borrowed
-`mago_type_syntax::cst::Type` AST. Every type-carrying field in the
+`mago_phpdoc_syntax::cst::type::Type` AST. Every type-carrying field in the
 data model (`type_hint`, `return_type`, `native_type_hint`,
 `native_return_type`, `asserted_type`, `template_param_bounds` values,
 generics type arguments, `ResolvedType::type_string`) uses `PhpType`.

@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use mago_docblock::document::TagKind;
+use super::tag_kind::TagKind;
 
 use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
 use super::type_strings::split_type_token;
@@ -90,12 +90,8 @@ pub fn extract_template_params_full(
 /// Map a `TagKind` to the corresponding `TemplateVariance`.
 pub(crate) const fn variance_for(kind: TagKind) -> TemplateVariance {
     match kind {
-        TagKind::TemplateCovariant
-        | TagKind::PhpstanTemplateCovariant
-        | TagKind::PsalmTemplateCovariant => TemplateVariance::Covariant,
-        TagKind::TemplateContravariant
-        | TagKind::PhpstanTemplateContravariant
-        | TagKind::PsalmTemplateContravariant => TemplateVariance::Contravariant,
+        TagKind::TemplateCovariant => TemplateVariance::Covariant,
+        TagKind::TemplateContravariant => TemplateVariance::Contravariant,
         _ => TemplateVariance::Invariant,
     }
 }
@@ -105,12 +101,6 @@ pub(crate) const TEMPLATE_KINDS: &[TagKind] = &[
     TagKind::Template,
     TagKind::TemplateCovariant,
     TagKind::TemplateContravariant,
-    TagKind::PhpstanTemplate,
-    TagKind::PhpstanTemplateCovariant,
-    TagKind::PhpstanTemplateContravariant,
-    TagKind::PsalmTemplate,
-    TagKind::PsalmTemplateCovariant,
-    TagKind::PsalmTemplateContravariant,
 ];
 
 /// Like [`extract_template_params_full`], but operates on a pre-parsed [`DocblockInfo`].
@@ -224,7 +214,7 @@ pub fn extract_template_param_bindings_from_info(
 
     let mut results = Vec::new();
 
-    for tag in info.tags_by_kinds(&[TagKind::PhpstanParam, TagKind::PsalmParam, TagKind::Param]) {
+    for tag in info.tags_by_kind(TagKind::Param) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -342,45 +332,37 @@ pub fn extract_generics_tag_from_info(
     info: &DocblockInfo,
     tag: &str,
 ) -> Vec<(String, Vec<PhpType>)> {
-    // Map the tag string to the corresponding TagKinds.
-    // For `@extends` we also accept `@phpstan-extends` and `@template-extends`.
-    // Note: `@phpstan-extends`, `@phpstan-implements`, and `@phpstan-use`
-    // are classified as `TagKind::Other` by mago-docblock, so we also
-    // need to match them by tag name.
+    // Map the tag string to the corresponding `TagKind`.  Vendor prefixes
+    // and the `@template-` spelling are already folded together by the
+    // parser, so `@extends`, `@phpstan-extends` and `@template-extends`
+    // all arrive as `TagKind::Extends`.
     let bare_tag = tag.strip_prefix('@').unwrap_or(tag);
-    let (kinds, name_fallbacks): (Vec<TagKind>, Vec<&str>) = match bare_tag {
-        "extends" => (
-            vec![TagKind::Extends, TagKind::TemplateExtends],
-            vec!["phpstan-extends"],
-        ),
-        "implements" => (
-            vec![TagKind::Implements, TagKind::TemplateImplements],
-            vec!["phpstan-implements"],
-        ),
-        "use" => (
-            vec![TagKind::Use, TagKind::TemplateUse],
-            vec!["phpstan-use"],
-        ),
-        _ => (vec![], vec![bare_tag]),
+    let kind = match bare_tag {
+        "extends" => Some(TagKind::Extends),
+        "implements" => Some(TagKind::Implements),
+        "use" => Some(TagKind::Use),
+        _ => None,
     };
 
     let mut results = Vec::new();
 
-    // Match by TagKind first.
-    for tag in info.tags_by_kinds(&kinds) {
-        if let Some(result) = parse_generics_from_description(&tag.description) {
-            results.push(result);
+    match kind {
+        Some(kind) => {
+            for tag in info.tags_by_kind(kind) {
+                if let Some(result) = parse_generics_from_description(&tag.description) {
+                    results.push(result);
+                }
+            }
         }
-    }
-
-    // Also match by tag name for variants that mago-docblock classifies
-    // as `TagKind::Other` (e.g. `@phpstan-extends`).
-    for tag in &info.tags {
-        if name_fallbacks.contains(&tag.name.as_str())
-            && tag.kind == TagKind::Other
-            && let Some(result) = parse_generics_from_description(&tag.description)
-        {
-            results.push(result);
+        // Any other tag name is not modelled structurally; match it by name.
+        None => {
+            for tag in &info.tags {
+                if tag.name == bare_tag
+                    && let Some(result) = parse_generics_from_description(&tag.description)
+                {
+                    results.push(result);
+                }
+            }
         }
     }
 
@@ -395,7 +377,7 @@ fn parse_generics_from_description(desc: &str) -> Option<(String, Vec<PhpType>)>
         return None;
     }
 
-    // mago-docblock joins multi-line descriptions with \n; normalise.
+    // Multi-line tag values keep their newlines; normalise them.
     let normalised = collapse_newlines(desc);
 
     // Extract the full type token (e.g. `Collection<int, Language>`),
@@ -438,13 +420,13 @@ pub fn extract_type_aliases_from_info(info: &DocblockInfo) -> HashMap<String, Ty
     let mut aliases = HashMap::new();
 
     // ── Local type alias: @phpstan-type / @psalm-type ──
-    for tag in info.tags_by_kinds(&[TagKind::PhpstanType, TagKind::PsalmType, TagKind::Type]) {
+    for tag in info.tags_by_kind(TagKind::TypeAlias) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
         }
 
-        // mago-docblock joins multi-line descriptions with \n; normalise.
+        // Multi-line tag values keep their newlines; normalise them.
         let normalised = collapse_newlines(desc);
 
         // Split into alias name and definition.
@@ -458,11 +440,7 @@ pub fn extract_type_aliases_from_info(info: &DocblockInfo) -> HashMap<String, Ty
     }
 
     // ── Imported type alias: @phpstan-import-type / @psalm-import-type ──
-    for tag in info.tags_by_kinds(&[
-        TagKind::PhpstanImportType,
-        TagKind::PsalmImportType,
-        TagKind::ImportType,
-    ]) {
+    for tag in info.tags_by_kind(TagKind::TypeAliasImport) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -649,7 +627,7 @@ fn find_all_class_string_param_names_from_info(
     template_name: &str,
 ) -> Vec<String> {
     let mut names = Vec::new();
-    for tag in info.tags_by_kinds(&[TagKind::PhpstanParam, TagKind::PsalmParam, TagKind::Param]) {
+    for tag in info.tags_by_kind(TagKind::Param) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;

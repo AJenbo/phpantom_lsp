@@ -11,7 +11,7 @@
 //! evaluate at call-sites by matching the actual argument types against
 //! the declared conditions.
 
-use mago_docblock::document::TagKind;
+use super::tag_kind::TagKind;
 
 use crate::php_type::{PhpType, TypeKind};
 
@@ -53,16 +53,12 @@ pub fn extract_conditional_return_type_from_info(info: &DocblockInfo) -> Option<
 
 /// Extract the raw content after `@return` from a pre-parsed docblock.
 ///
-/// mago-docblock already handles `/** */` stripping, leading `*`
-/// removal, and multi-line tag continuation.  The description is
-/// returned with internal `\n` normalised to spaces so that downstream
-/// parsers see a single-line string (matching the old behaviour of
-/// joining continuation lines with spaces).
+/// The parser already handles `/** */` stripping, leading `*` removal,
+/// and multi-line tag continuation.  The value is returned with internal
+/// `\n` normalised to spaces so that downstream parsers see a single-line
+/// string.
 fn extract_raw_return_content_from_info(info: &DocblockInfo) -> Option<String> {
-    let tag = info
-        .first_tag_by_kind(TagKind::PhpstanReturn)
-        .or_else(|| info.first_tag_by_kind(TagKind::PsalmReturn))
-        .or_else(|| info.first_tag_by_kind(TagKind::Return))?;
+    let tag = info.first_tag_by_kind_vendor_first(TagKind::Return)?;
 
     let desc = tag.description.trim();
     if desc.is_empty() {

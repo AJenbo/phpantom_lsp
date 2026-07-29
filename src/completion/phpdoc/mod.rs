@@ -78,7 +78,7 @@ pub use context::{
 /// Collect the names of parameters already documented with `@param` tags
 /// in the current docblock above the cursor.
 pub fn find_existing_param_tags(content: &str, position: Position) -> Vec<String> {
-    use mago_docblock::document::TagKind;
+    use crate::docblock::TagKind;
 
     let byte_offset = position_to_byte_offset(content, position);
     let before_cursor = &content[..byte_offset.min(content.len())];
@@ -91,7 +91,7 @@ pub fn find_existing_param_tags(content: &str, position: Position) -> Vec<String
 
     let docblock_so_far = &before_cursor[open_pos..];
 
-    let info = match crate::docblock::parser::parse_docblock_for_tags_lossy(docblock_so_far) {
+    let info = match crate::docblock::parser::parse_docblock_for_tags(docblock_so_far) {
         Some(info) => info,
         None => return Vec::new(),
     };
@@ -113,7 +113,7 @@ pub fn find_existing_param_tags(content: &str, position: Position) -> Vec<String
 
 /// Check whether `@return` is already documented in the current docblock.
 fn has_existing_return_tag(content: &str, position: Position) -> bool {
-    use mago_docblock::document::TagKind;
+    use crate::docblock::TagKind;
 
     let byte_offset = position_to_byte_offset(content, position);
     let before_cursor = &content[..byte_offset.min(content.len())];
@@ -125,7 +125,7 @@ fn has_existing_return_tag(content: &str, position: Position) -> bool {
 
     let docblock_so_far = &before_cursor[open_pos..];
 
-    match crate::docblock::parser::parse_docblock_for_tags_lossy(docblock_so_far) {
+    match crate::docblock::parser::parse_docblock_for_tags(docblock_so_far) {
         Some(info) => info.tags_by_kind(TagKind::Return).next().is_some(),
         None => false,
     }
@@ -137,7 +137,7 @@ fn has_existing_return_tag(content: &str, position: Position) -> bool {
 /// Returns short type names as written in the docblock (e.g.
 /// `"InvalidArgumentException"`, `"\\RuntimeException"`).
 pub fn find_existing_throws_tags(content: &str, position: Position) -> Vec<String> {
-    use mago_docblock::document::TagKind;
+    use crate::docblock::TagKind;
 
     let byte_offset = position_to_byte_offset(content, position);
     let before_cursor = &content[..byte_offset.min(content.len())];
@@ -156,7 +156,7 @@ pub fn find_existing_throws_tags(content: &str, position: Position) -> Vec<Strin
         &content[open_pos..byte_offset.min(content.len())]
     };
 
-    let info = match crate::docblock::parser::parse_docblock_for_tags_lossy(docblock) {
+    let info = match crate::docblock::parser::parse_docblock_for_tags(docblock) {
         Some(info) => info,
         None => return Vec::new(),
     };

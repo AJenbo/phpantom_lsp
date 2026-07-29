@@ -17,7 +17,7 @@
 //! Virtual member tags (`@property`, `@method`) live in
 //! [`super::virtual_members`].
 
-use mago_docblock::document::TagKind;
+use super::tag_kind::TagKind;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
@@ -42,26 +42,12 @@ use crate::php_type::{PhpType, TypeKind};
 /// Returns the cleaned type string (leading `\` stripped) or `None` if no
 /// `@return` tag is found.
 pub fn extract_return_type(docblock: &str) -> Option<PhpType> {
-    extract_type_via_mago(
-        docblock,
-        &[
-            TagKind::PhpstanReturn,
-            TagKind::PsalmReturn,
-            TagKind::Return,
-        ],
-    )
+    extract_type_via_mago(docblock, TagKind::Return)
 }
 
 /// Like [`extract_return_type`], but operates on a pre-parsed [`DocblockInfo`].
 pub fn extract_return_type_from_info(info: &DocblockInfo) -> Option<PhpType> {
-    extract_type_via_mago_from_info(
-        info,
-        &[
-            TagKind::PhpstanReturn,
-            TagKind::PsalmReturn,
-            TagKind::Return,
-        ],
-    )
+    extract_type_via_mago_from_info(info, TagKind::Return)
 }
 
 /// Extract the deprecation message from a `@deprecated` PHPDoc tag.
@@ -132,8 +118,8 @@ pub fn extract_if_this_is_type_from_info(info: &DocblockInfo) -> Option<PhpType>
 /// cannot be parsed.
 pub fn extract_removed_version(docblock: &str) -> Option<PhpVersion> {
     let info = parse_docblock_for_tags(docblock)?;
-    // `@removed` is not a standard PHPDoc tag, so mago-docblock classifies
-    // it as `TagKind::Other`.  We match by name instead.
+    // `@removed` is not a tag the parser models, so it arrives as
+    // `TagKind::Other`.  We match by name instead.
     let tag = info.tags.iter().find(|t| t.name == "removed")?;
     let desc = tag.description.trim();
     if desc.is_empty() {
@@ -300,11 +286,7 @@ pub fn extract_require_extends(docblock: &str) -> Option<String> {
 /// Like [`extract_require_extends`], but operates on a pre-parsed
 /// [`DocblockInfo`].
 pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> {
-    for tag in info.tags_by_kinds(&[
-        TagKind::RequireExtends,
-        TagKind::PhpstanRequireExtends,
-        TagKind::PsalmRequireExtends,
-    ]) {
+    for tag in info.tags_by_kind(TagKind::RequireExtends) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -342,11 +324,7 @@ pub fn extract_require_implements(docblock: &str) -> Vec<String> {
 /// [`DocblockInfo`].
 pub fn extract_require_implements_from_info(info: &DocblockInfo) -> Vec<String> {
     let mut out = Vec::new();
-    for tag in info.tags_by_kinds(&[
-        TagKind::RequireImplements,
-        TagKind::PhpstanRequireImplements,
-        TagKind::PsalmRequireImplements,
-    ]) {
+    for tag in info.tags_by_kind(TagKind::RequireImplements) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -439,24 +417,14 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
     /// Map a `TagKind` to the corresponding `AssertionKind`.
     const fn assertion_kind_for(kind: TagKind) -> AssertionKind {
         match kind {
-            TagKind::PhpstanAssertIfTrue | TagKind::PsalmAssertIfTrue | TagKind::AssertIfTrue => {
-                AssertionKind::IfTrue
-            }
-            TagKind::PhpstanAssertIfFalse
-            | TagKind::PsalmAssertIfFalse
-            | TagKind::AssertIfFalse => AssertionKind::IfFalse,
-            // TagKind::Assert, PhpstanAssert, PsalmAssert, and anything else
+            TagKind::AssertIfTrue => AssertionKind::IfTrue,
+            TagKind::AssertIfFalse => AssertionKind::IfFalse,
+            // `TagKind::Assert` and anything else
             _ => AssertionKind::Always,
         }
     }
 
     const ASSERT_KINDS: &[TagKind] = &[
-        TagKind::PhpstanAssertIfTrue,
-        TagKind::PhpstanAssertIfFalse,
-        TagKind::PhpstanAssert,
-        TagKind::PsalmAssertIfTrue,
-        TagKind::PsalmAssertIfFalse,
-        TagKind::PsalmAssert,
         TagKind::AssertIfTrue,
         TagKind::AssertIfFalse,
         TagKind::Assert,
@@ -516,18 +484,12 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
 ///   - `/** @var Session */`
 ///   - `/** @var \App\Models\User */`
 pub fn extract_var_type(docblock: &str) -> Option<PhpType> {
-    extract_type_via_mago(
-        docblock,
-        &[TagKind::PhpstanVar, TagKind::PsalmVar, TagKind::Var],
-    )
+    extract_type_via_mago(docblock, TagKind::Var)
 }
 
 /// Like [`extract_var_type`], but operates on a pre-parsed [`DocblockInfo`].
 pub fn extract_var_type_from_info(info: &DocblockInfo) -> Option<PhpType> {
-    extract_type_via_mago_from_info(
-        info,
-        &[TagKind::PhpstanVar, TagKind::PsalmVar, TagKind::Var],
-    )
+    extract_type_via_mago_from_info(info, TagKind::Var)
 }
 
 /// Extract the type and optional variable name from a `@var` PHPDoc tag.
@@ -546,7 +508,7 @@ pub fn extract_var_type_with_name(docblock: &str) -> Option<(PhpType, Option<Str
 pub fn extract_var_type_with_name_from_info(
     info: &DocblockInfo,
 ) -> Option<(PhpType, Option<String>)> {
-    for tag in info.tags_by_kinds(&[TagKind::PhpstanVar, TagKind::PsalmVar, TagKind::Var]) {
+    for tag in info.tags_by_kind_vendor_first(TagKind::Var) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -729,29 +691,24 @@ pub fn extract_param_raw_type(docblock: &str, var_name: &str) -> Option<PhpType>
 /// Like [`extract_param_raw_type`], but operates on a pre-parsed [`DocblockInfo`].
 pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> Option<PhpType> {
     // Check tags in priority order: @phpstan-param > @psalm-param > @param.
-    // When both `@param` and `@psalm-param` exist for the same parameter,
-    // the more specific variant must win.  Because `tags_by_kinds` yields
-    // tags in document order, iterating all kinds at once would return
-    // whichever appears first in the docblock.  Instead, check each
-    // priority level separately so that `@phpstan-param` always beats
-    // `@psalm-param` which always beats `@param`.
-    for kind in &[TagKind::PhpstanParam, TagKind::PsalmParam, TagKind::Param] {
-        for tag in info.tags_by_kind(*kind) {
-            let desc = tag.description.trim();
-            if desc.is_empty() {
-                continue;
-            }
+    // When both `@param` and `@psalm-param` document the same parameter,
+    // the more specific variant must win, so iterate in vendor
+    // precedence order rather than document order.
+    for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
+        let desc = tag.description.trim();
+        if desc.is_empty() {
+            continue;
+        }
 
-            // Extract the full type token (respects `<…>` nesting).
-            let (type_token, remainder) = split_type_token(desc);
+        // Extract the full type token (respects `<…>` nesting).
+        let (type_token, remainder) = split_type_token(desc);
 
-            // The next token should be the parameter name.
-            // Handle `...$name` (variadic) by stripping the leading `...`.
-            if let Some(name) = remainder.split_whitespace().next() {
-                let name = name.strip_prefix("...").unwrap_or(name);
-                if name == var_name {
-                    return sanitise_and_parse_docblock_type(type_token);
-                }
+        // The next token should be the parameter name.
+        // Handle `...$name` (variadic) by stripping the leading `...`.
+        if let Some(name) = remainder.split_whitespace().next() {
+            let name = name.strip_prefix("...").unwrap_or(name);
+            if name == var_name {
+                return sanitise_and_parse_docblock_type(type_token);
             }
         }
     }
@@ -781,29 +738,27 @@ pub fn extract_all_param_tags_from_info(info: &DocblockInfo) -> Vec<(String, Php
     let mut results = Vec::new();
     let mut seen_params = std::collections::HashSet::new();
 
-    // Iterate in priority order: @phpstan-param > @psalm-param > @param.
-    // When both `@param` and `@psalm-param` exist for the same parameter,
-    // the more specific variant wins.
-    for kind in &[TagKind::PhpstanParam, TagKind::PsalmParam, TagKind::Param] {
-        for tag in info.tags_by_kind(*kind) {
-            let desc = tag.description.trim();
-            if desc.is_empty() {
-                continue;
-            }
+    // Iterate in vendor precedence order so that when both `@param` and
+    // `@psalm-param` document the same parameter, the more specific
+    // variant wins.
+    for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
+        let desc = tag.description.trim();
+        if desc.is_empty() {
+            continue;
+        }
 
-            // Extract the full type token (respects `<…>` nesting).
-            let (type_token, remainder) = split_type_token(desc);
+        // Extract the full type token (respects `<…>` nesting).
+        let (type_token, remainder) = split_type_token(desc);
 
-            // The next token should be the parameter name.
-            // Handle `...$name` (variadic) by stripping the leading `...`.
-            if let Some(name) = remainder.split_whitespace().next() {
-                let name = name.strip_prefix("...").unwrap_or(name);
-                if name.starts_with('$')
-                    && seen_params.insert(name.to_string())
-                    && let Some(parsed) = sanitise_and_parse_docblock_type(type_token)
-                {
-                    results.push((name.to_string(), parsed));
-                }
+        // The next token should be the parameter name.
+        // Handle `...$name` (variadic) by stripping the leading `...`.
+        if let Some(name) = remainder.split_whitespace().next() {
+            let name = name.strip_prefix("...").unwrap_or(name);
+            if name.starts_with('$')
+                && seen_params.insert(name.to_string())
+                && let Some(parsed) = sanitise_and_parse_docblock_type(type_token)
+            {
+                results.push((name.to_string(), parsed));
             }
         }
     }
@@ -828,7 +783,7 @@ pub fn extract_param_types_positional_from_info(
 ) -> Vec<(Option<String>, PhpType)> {
     let mut results = Vec::new();
 
-    for tag in info.tags_by_kinds(&[TagKind::PhpstanParam, TagKind::PsalmParam, TagKind::Param]) {
+    for tag in info.tags_by_kind(TagKind::Param) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -916,7 +871,7 @@ pub fn extract_param_description(docblock: &str, var_name: &str) -> Option<Strin
 
 /// Like [`extract_param_description`], but operates on a pre-parsed [`DocblockInfo`].
 pub fn extract_param_description_from_info(info: &DocblockInfo, var_name: &str) -> Option<String> {
-    for tag in info.tags_by_kinds(&[TagKind::PhpstanParam, TagKind::PsalmParam, TagKind::Param]) {
+    for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -937,7 +892,7 @@ pub fn extract_param_description_from_info(info: &DocblockInfo, var_name: &str) 
         // Skip past the parameter name to get the description.
         let after_name = remainder.get(name_token.len()..).unwrap_or("").trim_start();
 
-        // mago-docblock joins multi-line tag descriptions with `\n`.
+        // Multi-line tag values keep their newlines.
         // The old code joined continuation lines with spaces, so
         // normalise newlines to spaces to preserve existing behaviour.
         let normalised = collapse_newlines(after_name);
@@ -969,11 +924,7 @@ pub fn extract_return_description(docblock: &str) -> Option<String> {
 
 /// Like [`extract_return_description`], but operates on a pre-parsed [`DocblockInfo`].
 pub fn extract_return_description_from_info(info: &DocblockInfo) -> Option<String> {
-    for tag in info.tags_by_kinds(&[
-        TagKind::PhpstanReturn,
-        TagKind::PsalmReturn,
-        TagKind::Return,
-    ]) {
+    for tag in info.tags_by_kind_vendor_first(TagKind::Return) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
@@ -988,7 +939,7 @@ pub fn extract_return_description_from_info(info: &DocblockInfo) -> Option<Strin
         let (_type_token, remainder) = split_type_token(desc);
         let remainder = remainder.trim_start();
 
-        // mago-docblock joins multi-line tag descriptions with `\n`.
+        // Multi-line tag values keep their newlines.
         // The old code joined continuation lines with spaces, so
         // normalise newlines to spaces to preserve existing behaviour.
         let normalised = collapse_newlines(remainder);
@@ -1712,57 +1663,52 @@ fn count_braces_on_line(line: &str) -> (i32, i32) {
 ///
 /// **Skips** PHPStan conditional return types (those starting with `(`).
 /// Use [`super::extract_conditional_return_type`] for those.
-/// Shared implementation for tag-type extraction via the mago-docblock parser.
+/// Shared implementation for tag-type extraction.
 ///
-/// Searches the parsed docblock for the first tag matching any of the given
-/// `kinds` (tried in order, so vendor-prefixed kinds like `PhpstanReturn`
-/// should come before the generic `Return` to give them priority).
+/// Searches the parsed docblock for the first usable tag of `kind`,
+/// preferring vendor-prefixed variants (`@phpstan-return` over `@return`).
 ///
-/// The tag's `description` field already contains the joined, multi-line
-/// content after the tag name.  We extract the type portion using
-/// `split_type_token`, stripping trailing punctuation.
+/// The tag's `description` field holds the whole value as written.  We
+/// extract the type portion using `split_type_token`, stripping trailing
+/// punctuation.
 ///
 /// Skips PHPStan conditional return types (descriptions starting with `(`).
-fn extract_type_via_mago(docblock: &str, kinds: &[TagKind]) -> Option<PhpType> {
-    extract_type_via_mago_from_info(&parse_docblock_for_tags(docblock)?, kinds)
+fn extract_type_via_mago(docblock: &str, kind: TagKind) -> Option<PhpType> {
+    extract_type_via_mago_from_info(&parse_docblock_for_tags(docblock)?, kind)
 }
 
 /// Like [`extract_type_via_mago`], but operates on a pre-parsed [`DocblockInfo`].
-fn extract_type_via_mago_from_info(info: &DocblockInfo, kinds: &[TagKind]) -> Option<PhpType> {
-    // Try each kind in priority order; return on the first match.
-    for &kind in kinds {
-        for tag in info.tags_by_kind(kind) {
-            let desc = tag.description.trim();
-            if desc.is_empty() {
-                continue;
-            }
-
-            // mago-docblock joins multi-line tag descriptions with `\n`.
-            // Normalise newlines (and surrounding whitespace from
-            // indentation) into a single space so that `split_type_token`
-            // sees the same single-line input the old line-by-line scanner
-            // produced after trimming and joining continuation lines.
-            let normalised = collapse_newlines(desc);
-            let (type_str, _remainder) = split_type_token(&normalised);
-            if type_str.is_empty() {
-                continue;
-            }
-
-            let raw = type_str.trim_end_matches(['.', ',']);
-            let parsed = sanitise_and_parse_docblock_type(raw);
-
-            // A leading `(` may open either a PHPStan conditional return
-            // type (`($p is T ? A : B)`) or a parenthesized type group
-            // such as a DNF `(A&B)|null`.  Conditionals are handled
-            // separately by `extract_conditional_return_type`, so bail
-            // here only when the type genuinely parses as a conditional;
-            // a parenthesized union/intersection group is a normal type
-            // and must be returned.
-            if matches!(parsed.as_deref(), Some(TypeKind::Conditional { .. })) {
-                return None;
-            }
-            return parsed;
+fn extract_type_via_mago_from_info(info: &DocblockInfo, kind: TagKind) -> Option<PhpType> {
+    // Vendor-prefixed tags outrank the plain form; return on the first
+    // usable match.
+    for tag in info.tags_by_kind_vendor_first(kind) {
+        let desc = tag.description.trim();
+        if desc.is_empty() {
+            continue;
         }
+
+        // Multi-line tag values keep their newlines.  Normalise them (and
+        // the surrounding indentation whitespace) into a single space so
+        // that `split_type_token` sees single-line input.
+        let normalised = collapse_newlines(desc);
+        let (type_str, _remainder) = split_type_token(&normalised);
+        if type_str.is_empty() {
+            continue;
+        }
+
+        let raw = type_str.trim_end_matches(['.', ',']);
+        let parsed = sanitise_and_parse_docblock_type(raw);
+
+        // A leading `(` may open either a PHPStan conditional return type
+        // (`($p is T ? A : B)`) or a parenthesized type group such as a
+        // DNF `(A&B)|null`.  Conditionals are handled separately by
+        // `extract_conditional_return_type`, so bail here only when the
+        // type genuinely parses as a conditional; a parenthesized
+        // union/intersection group is a normal type and must be returned.
+        if matches!(parsed.as_deref(), Some(TypeKind::Conditional { .. })) {
+            return None;
+        }
+        return parsed;
     }
 
     None

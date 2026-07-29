@@ -9,7 +9,7 @@
 
 use crate::atom::{Atom, AtomMap, atom};
 
-use mago_docblock::document::TagKind;
+use super::tag_kind::TagKind;
 
 use super::parser::{DocblockInfo, parse_docblock_for_tags};
 use super::tags::sanitise_and_parse_docblock_type;
@@ -48,9 +48,6 @@ pub fn extract_property_tags_from_info(info: &DocblockInfo) -> Vec<(Atom, Option
         TagKind::Property,
         TagKind::PropertyRead,
         TagKind::PropertyWrite,
-        TagKind::PsalmProperty,
-        TagKind::PsalmPropertyRead,
-        TagKind::PsalmPropertyWrite,
     ];
 
     let mut results = Vec::new();
@@ -128,8 +125,6 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
 /// Class-level docblocks are parsed once during extraction, so the class
 /// parser reuses that [`DocblockInfo`] instead of re-parsing the text.
 pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
-    const METHOD_KINDS: &[TagKind] = &[TagKind::Method, TagKind::PsalmMethod];
-
     let mut results: Vec<MethodInfo> = Vec::new();
     // Track which method names came from vendor-prefixed tags
     // (@psalm-method / @phpstan-method) so they can override
@@ -137,13 +132,13 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
     let mut vendor_names: std::collections::HashSet<crate::atom::Atom> =
         std::collections::HashSet::new();
 
-    for tag in info.tags_by_kinds(METHOD_KINDS) {
+    for tag in info.tags_by_kind(TagKind::Method) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
         }
 
-        // mago-docblock joins multi-line descriptions with \n; normalise.
+        // Multi-line tag values keep their newlines; normalise them.
         let desc = desc.replace('\n', " ");
         let rest = desc.as_str();
 
@@ -234,7 +229,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
         };
 
         let method_atom = crate::atom::atom(method_name);
-        let is_vendor_tag = tag.kind == TagKind::PsalmMethod;
+        let is_vendor_tag = tag.vendor.is_some();
 
         // Parse method-level template parameters from `<T, U of Bound>` syntax.
         let (template_params, template_param_bounds) = if let Some(tpl) = template_str {

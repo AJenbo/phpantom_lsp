@@ -7,17 +7,19 @@
 //!
 //! Tag detection and iteration uses the structured [`DocblockInfo`] /
 //! [`TagInfo`] infrastructure from [`crate::docblock::parser`], which
-//! delegates to `mago-docblock` for parsing.  Type *string* decomposition
-//! (unions, intersections, generics, callables, conditionals) remains
-//! structured via [`emit_type_spans`] which uses `mago-type-syntax` to
-//! parse types and walk the AST with accurate span information.
+//! delegates to `mago-phpdoc-syntax` for parsing.  Type *string*
+//! decomposition (unions, intersections, generics, callables,
+//! conditionals) remains structured via [`emit_type_spans`], which parses
+//! types with the same crate and walks the AST with accurate span
+//! information.
 
 use mago_allocator::{Arena, LocalArena};
 use mago_database::file::FileId;
-use mago_docblock::document::TagKind;
+use mago_phpdoc_syntax::cst::r#type as type_ast;
 use mago_span::{HasSpan, Position, Span};
 use mago_syntax::cst::*;
-use mago_type_syntax::cst as type_ast;
+
+use crate::docblock::TagKind;
 
 use crate::docblock::parser::parse_docblock;
 use crate::docblock::type_strings::split_type_token;
@@ -137,7 +139,10 @@ pub fn get_docblock_text_with_offset<'a>(
 
 // ─── Tag classification ─────────────────────────────────────────────────────
 
-/// `TagKind` values whose description starts with a type expression.
+/// `TagKind` values whose value starts with a type expression.
+///
+/// Vendor prefixes are already folded away by the parser, so `@param`,
+/// `@psalm-param` and `@phpstan-param` all match `TagKind::Param` here.
 const TYPE_FIRST_KINDS: &[TagKind] = &[
     TagKind::Param,
     TagKind::Return,
@@ -150,31 +155,13 @@ const TYPE_FIRST_KINDS: &[TagKind] = &[
     TagKind::Extends,
     TagKind::Implements,
     TagKind::Use,
-    TagKind::TemplateExtends,
-    TagKind::TemplateImplements,
-    TagKind::PhpstanReturn,
-    TagKind::PhpstanParam,
-    TagKind::PhpstanVar,
-    TagKind::PhpstanRequireExtends,
-    TagKind::PhpstanRequireImplements,
-    TagKind::PsalmReturn,
-    TagKind::PsalmParam,
-    TagKind::PsalmVar,
-    TagKind::PhpstanAssert,
-    TagKind::PhpstanAssertIfTrue,
-    TagKind::PhpstanAssertIfFalse,
-    TagKind::PsalmAssert,
-    TagKind::PsalmAssertIfTrue,
-    TagKind::PsalmAssertIfFalse,
+    TagKind::RequireExtends,
+    TagKind::RequireImplements,
+    TagKind::Sealed,
+    TagKind::Assert,
+    TagKind::AssertIfTrue,
+    TagKind::AssertIfFalse,
 ];
-
-/// Tag names (for `TagKind::Other`) whose description starts with a type.
-///
-/// Note: `@psalm-return`, `@psalm-param`, and `@psalm-var` are no longer
-/// listed here because `mago-docblock` now maps them to dedicated
-/// `TagKind::PsalmReturn` / `PsalmParam` / `PsalmVar` variants (handled
-/// in `TYPE_FIRST_KINDS` above).
-const TYPE_FIRST_OTHER_NAMES: &[&str] = &["phpstan-sealed"];
 
 use crate::docblock::templates::{TEMPLATE_KINDS, variance_for};
 
@@ -187,10 +174,9 @@ fn template_variance_for_tag(tag: &TagKind) -> Option<TemplateVariance> {
     }
 }
 
-/// Returns `true` when the tag's description starts with a type expression.
-fn is_type_first_tag(kind: &TagKind, name: &str) -> bool {
+/// Returns `true` when the tag's value starts with a type expression.
+fn is_type_first_tag(kind: &TagKind) -> bool {
     TYPE_FIRST_KINDS.contains(kind)
-        || (*kind == TagKind::Other && TYPE_FIRST_OTHER_NAMES.contains(&name))
 }
 
 // ─── Docblock tag scanning ──────────────────────────────────────────────────
@@ -233,7 +219,7 @@ pub(super) fn extract_docblock_symbols(
         }
 
         // ── @method ─────────────────────────────────────────────────
-        if tag.kind == TagKind::Method || tag.kind == TagKind::PsalmMethod {
+        if tag.kind == TagKind::Method {
             extract_method_tag_symbols(docblock, desc_start_in_docblock, base_offset, spans);
             continue;
         }
@@ -241,12 +227,7 @@ pub(super) fn extract_docblock_symbols(
         // ── @property variants ───────────────────────────────────────
         if matches!(
             tag.kind,
-            TagKind::Property
-                | TagKind::PropertyRead
-                | TagKind::PropertyWrite
-                | TagKind::PsalmProperty
-                | TagKind::PsalmPropertyRead
-                | TagKind::PsalmPropertyWrite
+            TagKind::Property | TagKind::PropertyRead | TagKind::PropertyWrite
         ) {
             extract_property_tag_symbols(docblock, desc_start_in_docblock, base_offset, spans);
             continue;
@@ -263,7 +244,7 @@ pub(super) fn extract_docblock_symbols(
         }
 
         // ── Type-first tags ─────────────────────────────────────────
-        if is_type_first_tag(&tag.kind, &tag.name) {
+        if is_type_first_tag(&tag.kind) {
             emit_type_first_tag(docblock, desc_start_in_docblock, base_offset, spans);
         }
     }
@@ -342,11 +323,7 @@ pub(super) fn extract_param_var_spans(docblock: &str, base_offset: u32) -> Vec<(
     let mut results = Vec::new();
 
     for tag in &info.tags {
-        let is_param = matches!(
-            tag.kind,
-            TagKind::Param | TagKind::PhpstanParam | TagKind::PsalmParam
-        );
-        if !is_param {
+        if tag.kind != TagKind::Param {
             continue;
         }
 
@@ -379,11 +356,7 @@ pub(super) fn extract_param_var_spans(docblock: &str, base_offset: u32) -> Vec<(
     // The `$strict` and `$fallback` tokens must be renamed together with
     // the function parameters.
     for tag in &info.tags {
-        let is_return = matches!(
-            tag.kind,
-            TagKind::Return | TagKind::PhpstanReturn | TagKind::PsalmReturn
-        );
-        if !is_return {
+        if tag.kind != TagKind::Return {
             continue;
         }
 
@@ -439,11 +412,7 @@ pub(super) fn extract_var_docblock_var_spans(
     let mut results = Vec::new();
 
     for tag in &info.tags {
-        let is_var = matches!(
-            tag.kind,
-            TagKind::Var | TagKind::PhpstanVar | TagKind::PsalmVar
-        );
-        if !is_var {
+        if tag.kind != TagKind::Var {
             continue;
         }
 
@@ -577,25 +546,18 @@ pub(super) fn emit_type_spans(
         return;
     }
 
-    // ── Strip PHPStan variance annotations ──────────────────────────
-    // Generic type arguments may carry a variance prefix, e.g.
-    // `Collection<int, covariant array{customer: Customer}>`.
-    // `mago-type-syntax` does not recognise these, so we strip them
-    // before parsing and build an offset map so that spans emitted
-    // from the cleaned string can be translated back to the original.
-    let (cleaned, variance_offset_map) = strip_variance_annotations(type_token);
-
     // ── Replace PHPStan `*` wildcards in generic positions ──────────
     // PHPStan supports `*` as a bivariant wildcard in generic args,
-    // e.g. `Relation<TRelatedModel, *, *>`.  `mago-type-syntax` does
-    // not recognise this.  Replace with `mixed` and build an offset
-    // map that accounts for the 1→5 character expansion.
-    let (effective_cleaned, wildcard_offset_map) = replace_star_wildcards_with_offset_map(&cleaned);
+    // e.g. `Relation<TRelatedModel, *, *>`.  Replace with `mixed` and
+    // build an offset map that accounts for the 1→5 character
+    // expansion, so spans emitted from the cleaned string translate
+    // back to the original.
+    let (effective_cleaned, wildcard_offset_map) =
+        replace_star_wildcards_with_offset_map(type_token);
     let effective_token: &str = &effective_cleaned;
 
-    // Parse the type string using mago-type-syntax.  The span we
-    // provide starts at 0 so that all AST node offsets are relative
-    // to `effective_token`.
+    // Parse the type string.  The span we provide starts at 0 so that
+    // all AST node offsets are relative to `effective_token`.
     let parse_span = Span::new(
         FileId::zero(),
         Position::new(0),
@@ -604,30 +566,14 @@ pub(super) fn emit_type_spans(
 
     let arena = LocalArena::new();
     let effective_token = arena.alloc_slice_copy(effective_token.as_bytes());
-    // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
-    // the migration is tracked as a separate task.
-    #[allow(deprecated)]
-    let parsed = mago_type_syntax::parse_str(&arena, parse_span, effective_token);
-    match parsed {
+    match mago_phpdoc_syntax::parse_type(&arena, effective_token, parse_span) {
         Ok(ty) => {
             let mut local_spans: Vec<SymbolSpan> = Vec::new();
             emit_type_spans_from_ast(&ty, 0, &mut local_spans);
             // Map cleaned-string offsets back to original-string
             // offsets, then shift by token_file_offset.
-            //
-            // Two offset maps may be active:
-            // 1. wildcard_offset_map: effective_token → cleaned (after
-            //    variance stripping but before wildcard replacement)
-            // 2. variance_offset_map: cleaned → original type_token
             for mut sp in local_spans {
                 if let Some(ref map) = wildcard_offset_map {
-                    sp.start = map
-                        .get(sp.start as usize)
-                        .copied()
-                        .unwrap_or(sp.start as usize) as u32;
-                    sp.end = map.get(sp.end as usize).copied().unwrap_or(sp.end as usize) as u32;
-                }
-                if let Some(ref map) = variance_offset_map {
                     sp.start = map
                         .get(sp.start as usize)
                         .copied()
@@ -664,15 +610,6 @@ pub(super) fn emit_type_spans(
     }
 }
 
-/// Strip `covariant ` and `contravariant ` prefixes from generic type
-/// arguments so that `mago-type-syntax` can parse the type.
-///
-/// Returns `(cleaned_string, offset_map)`.  When no variance annotations
-/// are found, `offset_map` is `None` and `cleaned_string` is the original
-/// input (no allocation).  When annotations *are* stripped,
-/// `offset_map[i]` gives the byte offset in the original string that
-/// corresponds to byte `i` in the cleaned string, plus a one-past-end
-/// sentinel.
 /// Replace PHPStan `*` wildcards in generic type argument positions with
 /// `mixed`, returning the cleaned string and an offset map.
 ///
@@ -724,58 +661,7 @@ fn replace_star_wildcards_with_offset_map(s: &str) -> (String, Option<Vec<usize>
     (cleaned, Some(offset_map))
 }
 
-fn strip_variance_annotations(s: &str) -> (String, Option<Vec<usize>>) {
-    // Fast path: no variance annotations at all.
-    if !s.contains("covariant ") && !s.contains("contravariant ") {
-        return (s.to_owned(), None);
-    }
-
-    let mut cleaned = String::with_capacity(s.len());
-    let mut offset_map: Vec<usize> = Vec::with_capacity(s.len() + 1);
-    let bytes = s.as_bytes();
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        // Only strip variance keywords that appear after `<` or `,`
-        // at some nesting depth (i.e. inside generic parameters).
-        // We look for the pattern and check whether the preceding
-        // non-whitespace character is `<` or `,`.
-        let try_strip = |prefix: &str, pos: usize, src: &[u8]| -> bool {
-            if pos + prefix.len() > src.len() {
-                return false;
-            }
-            if &src[pos..pos + prefix.len()] != prefix.as_bytes() {
-                return false;
-            }
-            // Check that the preceding non-whitespace is `<` or `,`.
-            let mut j = pos;
-            while j > 0 {
-                j -= 1;
-                if !src[j].is_ascii_whitespace() {
-                    return src[j] == b'<' || src[j] == b',';
-                }
-            }
-            false
-        };
-
-        if try_strip("covariant ", i, bytes) {
-            i += "covariant ".len();
-        } else if try_strip("contravariant ", i, bytes) {
-            i += "contravariant ".len();
-        } else {
-            offset_map.push(i);
-            cleaned.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-
-    // One-past-end sentinel.
-    offset_map.push(i);
-
-    (cleaned, Some(offset_map))
-}
-
-/// Walk a `mago_type_syntax` AST node and emit [`SymbolSpan`] entries
+/// Walk a parsed PHPDoc type AST node and emit [`SymbolSpan`] entries
 /// for every navigable type reference (class names, `self`, `static`,
 /// `parent`, `$this`).
 ///
@@ -806,9 +692,10 @@ fn emit_type_spans_from_ast(
 
         // ── Named / Reference types ─────────────────────────────────
         type_ast::Type::Reference(r) => {
-            let name = bytes_to_str(r.identifier.value);
-            let id_start = base_offset + r.identifier.span.start.offset;
-            let id_end = base_offset + r.identifier.span.end.offset;
+            let name = crate::php_type::reference_kind_name(&r.kind);
+            let id_span = r.kind.span();
+            let id_start = base_offset + id_span.start.offset;
+            let id_end = base_offset + id_span.end.offset;
 
             // Emit a span for the identifier itself.
             emit_identifier_span(name, id_start, id_end, spans);
@@ -900,7 +787,7 @@ fn emit_type_spans_from_ast(
             // Recurse into the condition, then, and otherwise types.
             emit_type_spans_from_ast(c.target, base_offset, spans);
             emit_type_spans_from_ast(c.then, base_offset, spans);
-            emit_type_spans_from_ast(c.otherwise, base_offset, spans);
+            emit_type_spans_from_ast(c.r#else, base_offset, spans);
         }
 
         // ── class-string / interface-string / enum-string / trait-string ─
@@ -960,6 +847,15 @@ fn emit_type_spans_from_ast(
         }
 
         // ── Variable ($this) ────────────────────────────────────────
+        type_ast::Type::ThisVariable(v) => {
+            let start = base_offset + v.span.start.offset;
+            let end = base_offset + v.span.end.offset;
+            spans.push(SymbolSpan {
+                start,
+                end,
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
+            });
+        }
         type_ast::Type::Variable(v) if v.value == b"$this" => {
             let start = base_offset + v.span.start.offset;
             let end = base_offset + v.span.end.offset;
@@ -1407,7 +1303,7 @@ fn extract_see_tag_symbol(tag: &crate::docblock::parser::TagInfo, spans: &mut Ve
 /// Scan raw docblock text for inline `{@see ...}` references.
 ///
 /// These appear in free-text (descriptions, not top-level tags) and must
-/// be found by scanning the raw string since `mago-docblock` does not
+/// be found by scanning the raw string since the PHPDoc parser does not
 /// expose inline tag positions with sufficient granularity.
 fn extract_inline_see_symbols(docblock: &str, base_offset: u32, spans: &mut Vec<SymbolSpan>) {
     let mut search_from = 0;

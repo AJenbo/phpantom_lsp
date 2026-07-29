@@ -15,10 +15,7 @@ fn assert_round_trip(input: &str) {
     );
     let arena = LocalArena::new();
     let input_arena = arena.alloc_slice_copy(input.as_bytes());
-    // `mago-type-syntax` is deprecated in favour of `mago-phpdoc-syntax`;
-    // the migration is tracked as a separate task.
-    #[allow(deprecated)]
-    let mago_canonical = match mago_type_syntax::parse_str(&arena, span, input_arena) {
+    let mago_canonical = match mago_phpdoc_syntax::parse_type(&arena, input_arena, span) {
         Ok(ty) => ty.to_string(),
         Err(_) => {
             // If mago can't parse it, PhpType should produce Raw.
@@ -440,10 +437,20 @@ fn replace_star_wildcards_preserves_multibyte() {
 }
 
 #[test]
-fn strip_variance_annotations_preserves_multibyte() {
-    use super::strip_variance_annotations_from_type;
-    let result = strip_variance_annotations_from_type("Map<café, covariant Naïve>");
-    assert_eq!(result.as_ref(), "Map<café, Naïve>");
+fn variance_annotations_are_parsed_and_discarded() {
+    // `covariant` / `contravariant` in a generic argument position carry
+    // no meaning for our type model, so they are dropped, leaving the
+    // annotated type behind (multibyte names intact).
+    let ty = PhpType::parse("Map<café, covariant Naïve>");
+    match &ty.kind() {
+        TypeKind::Generic(g) => {
+            assert_eq!(g.name, "Map");
+            assert_eq!(g.args.len(), 2);
+            assert_eq!(g.args[0].to_string(), "café");
+            assert_eq!(g.args[1].to_string(), "Naïve");
+        }
+        other => panic!("Expected Generic, got {:?}", other),
+    }
 }
 
 #[test]

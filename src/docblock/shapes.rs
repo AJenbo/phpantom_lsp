@@ -5,7 +5,7 @@
 //! value types by key.
 //!
 //! All parsing is delegated to `PhpType::parse()` (which uses
-//! `mago_type_syntax` internally), eliminating ~250 lines of
+//! `mago_phpdoc_syntax` internally), eliminating ~250 lines of
 //! hand-rolled depth-tracking parsers.
 //!
 //! Each public function accepts `&PhpType` directly, avoiding a

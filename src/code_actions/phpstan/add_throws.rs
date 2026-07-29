@@ -403,7 +403,7 @@ fn docblock_already_has_throws(
         .strip_prefix('\\')
         .unwrap_or(exception_fqn)
         .to_lowercase();
-    for tag in parsed.tags_by_kind(mago_docblock::document::TagKind::Throws) {
+    for tag in parsed.tags_by_kind(crate::docblock::TagKind::Throws) {
         let rest = tag.description.trim();
         if let Some(type_name) = rest.split_whitespace().next() {
             let tag_fqn =

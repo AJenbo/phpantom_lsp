@@ -21,10 +21,9 @@ tokio = { version = "1.39", features = ["full"] }
 mago-syntax = "=1.45.0"
 mago-allocator = "=1.45.0"
 mago-database = "=1.45.0"
-mago-docblock = "=1.42.0"
 mago-names = "=1.45.0"
+mago-phpdoc-syntax = "=1.45.0"
 mago-span = "=1.45.0"
-mago-type-syntax = "=1.42.0"
 mago-formatter = { version = "=1.45.0", features = ["serde"] }
 mago-php-version = "=1.45.0"
 mago-composer = "=1.45.0"

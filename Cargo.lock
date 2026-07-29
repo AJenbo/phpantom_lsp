@@ -1303,18 +1303,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mago-docblock"
-version = "1.42.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a95eb832594a48e2751c3a3de0f94bffbb73aecb4d70cfc6703e74dde6018d0"
-dependencies = [
- "mago-allocator",
- "mago-span",
- "mago-syntax",
- "memchr",
-]
-
-[[package]]
 name = "mago-formatter"
 version = "1.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1354,6 +1342,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d83ab76ff0a3a9d264b7fbce1d503b1aa544bd7528d7241cc6f9a9bf53060de8"
 dependencies = [
  "schemars",
+]
+
+[[package]]
+name = "mago-phpdoc-syntax"
+version = "1.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8360f99c9c4f8838237f7e92c96c48f5202740560a87610b262aea5cfebe41a6"
+dependencies = [
+ "mago-allocator",
+ "mago-database",
+ "mago-span",
+ "mago-syntax-core",
+ "memchr",
+ "ordered-float",
+ "strum",
 ]
 
 [[package]]
@@ -1420,20 +1423,6 @@ name = "mago-text-edit"
 version = "1.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f32395487592c5858b732462d3dd6254f9a2676b0f885c0a2a6d2254e6ad6bd"
-
-[[package]]
-name = "mago-type-syntax"
-version = "1.42.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "195d414236a48cbd23fa61fa5aad32dc741b4e5c318276bc73a6fa61bbcea1c6"
-dependencies = [
- "mago-allocator",
- "mago-database",
- "mago-span",
- "mago-syntax-core",
- "ordered-float",
- "strum",
-]
 
 [[package]]
 name = "mago-word"
@@ -1651,13 +1640,12 @@ dependencies = [
  "mago-allocator",
  "mago-composer",
  "mago-database",
- "mago-docblock",
  "mago-formatter",
  "mago-names",
  "mago-php-version",
+ "mago-phpdoc-syntax",
  "mago-span",
  "mago-syntax",
- "mago-type-syntax",
  "memchr",
  "memmap2",
  "mimalloc",

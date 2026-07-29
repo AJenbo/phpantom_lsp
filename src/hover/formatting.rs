@@ -448,7 +448,7 @@ pub(super) fn format_see_refs(
 ///   - `@var list<Pen> $batch The batches` → `Some("The batches")`
 ///   - `@var list<Pen>`                    → `None`
 pub(crate) fn extract_var_description_from_info(info: &DocblockInfo) -> Option<String> {
-    use mago_docblock::document::TagKind;
+    use crate::docblock::TagKind;
 
     let tag = info.first_tag_by_kind(TagKind::Var)?;
     let desc = tag.description.trim();
@@ -531,7 +531,7 @@ pub(crate) fn extract_description_from_info(info: &DocblockInfo) -> Option<Strin
 
 /// Extract the human-readable description text from a raw docblock string.
 ///
-/// Parses the docblock with `mago-docblock` and returns the free-text
+/// Parses the docblock with `mago-phpdoc-syntax` and returns the free-text
 /// content before the first `@tag`, with basic HTML converted to Markdown.
 /// Returns `None` if no description text is present.
 pub(crate) fn extract_docblock_description(docblock: Option<&str>) -> Option<String> {
@@ -587,7 +587,7 @@ pub(crate) fn shorten_php_type(ty: &PhpType) -> String {
 }
 
 /// Fallback character-by-character shortener for type strings that
-/// `mago_type_syntax` cannot parse.  Splits on delimiter characters
+/// `mago_phpdoc_syntax` cannot parse.  Splits on delimiter characters
 /// (`|`, `&`, `<`, `>`, `,`, etc.) and shortens each segment
 /// individually.
 fn shorten_type_string_fallback(ty: &str) -> String {

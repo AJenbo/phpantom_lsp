@@ -20,6 +20,7 @@
 
 mod conditional;
 pub(crate) mod parser;
+mod tag_kind;
 mod tags;
 pub(crate) mod templates;
 mod virtual_members;
@@ -36,7 +37,8 @@ pub(crate) mod type_strings;
 // working without modification.
 
 // Parsed docblock representation
-pub use parser::{DocblockInfo, parse_docblock_for_tags};
+pub use parser::{DocblockInfo, TagInfo, parse_docblock_for_tags};
+pub use tag_kind::{TagKind, TagVendor};
 
 // Core tags
 pub(crate) use tags::is_compatible_refinement_typed;

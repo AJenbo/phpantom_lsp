@@ -107,7 +107,8 @@ unlikely to move the needle for most users.
 | D3  | [Deprecated rendering — chain subject resolution](todo/diagnostics.md#d3-deprecated-rendering-chain-subject-resolution)                                                    | Low-Medium  | Medium      |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
-|     | **[Bug Fixes](todo/bugs.md)** (no outstanding items)                                                                                                                        |             |             |
+|     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
+| B1  | [`static`/`$this` return types rejected where a `Stringable` object is accepted](todo/bugs.md#b1-staticthis-return-types-are-rejected-where-a-stringable-object-is-accepted) | Medium      | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
@@ -195,8 +196,8 @@ unlikely to move the needle for most users.
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P29 | [Migrate to `mago-phpdoc-syntax`](todo/performance.md#p29-migrate-to-mago-phpdoc-syntax) (drop deprecated `mago-docblock` / `mago-type-syntax`; sequenced behind P30)         | Medium      | High        |
-| P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (blocked on upstream API stabilizing — see triggers) | Medium-High | High        |
+| P44 | [Consume the PHPDoc CST directly instead of re-parsing tag text](todo/performance.md#p44-consume-the-phpdoc-cst-directly-instead-of-re-parsing-tag-text)                     | Medium      | High        |
+| P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.45.0, still no `mago-hir` consumers upstream) | Medium-High | High        |
 | P43 | [`init_single_project` is the longest single-threaded stretch of a run](todo/performance.md#p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run)        | Medium-High | Medium      |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
 | P25 | [`type_mismatch_argument` / `argument_count_mismatch` slow on large single files](todo/performance.md#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files) | Medium      | Medium      |

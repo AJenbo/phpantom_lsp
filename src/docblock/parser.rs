@@ -1,247 +1,180 @@
-//! Parsing adapter for `mago-docblock`.
+//! Parsing adapter for `mago-phpdoc-syntax`.
 //!
 //! This module bridges our existing docblock extraction code (which works
-//! with raw `&str` slices) and the structured [`mago_docblock::document::Document`]
+//! with raw `&str` slices) and the structured `mago_phpdoc_syntax::cst`
 //! representation.
 //!
 //! # Design
 //!
-//! Most call sites currently pass a raw docblock string (`&str`) obtained
-//! from [`super::tags::get_docblock_text_for_node`].  The adapter provides
-//! one entry point:
+//! Most call sites pass a raw docblock string (`&str`) obtained from
+//! [`super::tags::get_docblock_text_for_node`].  The adapter provides one
+//! entry point, [`parse_docblock`], which creates a short-lived arena,
+//! parses the docblock, and returns an owned [`DocblockInfo`] that captures
+//! the tag data we need without borrowing from the arena.  That keeps the
+//! arena lifetime contained within each call.
 //!
-//! - [`parse_docblock`]: parses a raw `/** … */` string into a `Document`.
-//!
-//! It creates a short-lived bumpalo arena, parses the docblock, and
-//! returns an owned [`DocblockInfo`] that captures the tag data we need
-//! without borrowing from the arena.  This keeps the arena lifetime
-//! contained within each call.
+//! Each tag is reduced to its [`TagKind`], its vendor prefix, and the raw
+//! source text of its value.  The value text is taken straight from the
+//! docblock via the tag's span, with the `*` continuation prefixes removed,
+//! so the extractors in [`super::tags`] and friends see the type and
+//! description exactly as the author wrote them.
 
 use mago_allocator::{Arena, LocalArena};
-use mago_docblock::document::{Element, TagKind, TextSegment};
-use mago_span::Span;
+use mago_phpdoc_syntax::PHPDocParser;
+use mago_phpdoc_syntax::cst::{Document, Element};
+use mago_span::{HasSpan, Position, Span};
 
-/// Owned snapshot of a parsed tag from a `mago-docblock` `Document`.
+use super::tag_kind::tag_kind;
+
+pub use super::tag_kind::{TagKind, TagVendor};
+
+/// Owned snapshot of a parsed tag.
 ///
-/// This captures the tag name, kind, and description as owned `String`s
-/// so callers do not need to worry about arena lifetimes.
+/// This captures the tag name, kind, vendor prefix, and value text as owned
+/// data so callers do not need to worry about arena lifetimes.
 #[derive(Debug, Clone)]
 pub struct TagInfo {
-    /// The raw tag name (e.g. `"param"`, `"return"`, `"deprecated"`).
+    /// The raw tag name without the `@` (e.g. `"param"`, `"phpstan-return"`,
+    /// `"deprecated"`).
     pub name: String,
-    /// The structured tag kind from `mago-docblock`.
+    /// What the tag means, with any vendor prefix folded away.
     pub kind: TagKind,
-    /// The full description text after the tag name.  For a tag like
-    /// `@param string $foo A description`, this would be
+    /// The vendor prefix the tag was written with, if any.
+    pub vendor: Option<TagVendor>,
+    /// The tag's value as written, with `*` continuation prefixes removed.
+    /// For `@param string $foo A description` this is
     /// `"string $foo A description"`.
     pub description: String,
-    /// The span of the entire tag (from `@` to the end of the description)
-    /// in the source file.
+    /// The span of the entire tag (from `@` to the end of its value) in the
+    /// source file.
     pub span: Span,
-    /// The span of just the description portion of the tag.
+    /// The span of just the value portion of the tag.
     pub description_span: Span,
 }
 
 /// Owned snapshot of a parsed docblock.
 ///
 /// Contains the free-text description (before the first tag) and all
-/// structured tag entries extracted from the `Document`.
+/// structured tag entries.
 #[derive(Debug, Clone)]
 pub struct DocblockInfo {
-    /// The free-text description that appears before the first `@tag`.
+    /// The free-text description that appears before the first `@tag`,
+    /// with `*` continuation prefixes removed.  Inline code and inline
+    /// tags are kept verbatim, so `` `code` `` and `{@link …}` survive.
     ///
-    /// This captures `Element::Text` content from the mago-docblock
-    /// `Document`, joining paragraph segments with inline code (wrapped
-    /// in backticks) and inline tags (wrapped in `{@tag ...}`).
-    ///
-    /// Returns `None` when the docblock has no text before the first tag
-    /// (e.g. `/** @return string */`).
+    /// `None` when the docblock has no text before the first tag (e.g.
+    /// `/** @return string */`).
     pub description: Option<String>,
     /// All tags found in the docblock, in source order.
     pub tags: Vec<TagInfo>,
 }
 
 impl DocblockInfo {
-    /// Returns an iterator over tags matching the given `TagKind`.
+    /// Returns an iterator over tags matching the given [`TagKind`].
     pub fn tags_by_kind(&self, kind: TagKind) -> impl Iterator<Item = &TagInfo> {
         self.tags.iter().filter(move |t| t.kind == kind)
     }
 
-    /// Returns an iterator over tags matching any of the given `TagKind`s.
+    /// Returns an iterator over tags matching any of the given [`TagKind`]s.
     pub fn tags_by_kinds<'a>(&'a self, kinds: &'a [TagKind]) -> impl Iterator<Item = &'a TagInfo> {
         self.tags.iter().filter(move |t| kinds.contains(&t.kind))
     }
 
-    /// Returns the first tag matching the given `TagKind`, if any.
+    /// Returns the first tag matching the given [`TagKind`], if any.
     pub fn first_tag_by_kind(&self, kind: TagKind) -> Option<&TagInfo> {
         self.tags_by_kind(kind).next()
+    }
+
+    /// Returns tags of `kind` ordered by vendor precedence rather than by
+    /// position: `@phpstan-…` first, then `@psalm-…`, then any other vendor
+    /// prefix, then the unprefixed form.  Within each group the source order
+    /// is preserved.
+    ///
+    /// PHPStan and Psalm both let a vendor-prefixed tag override the plain
+    /// one on the same symbol, so a docblock carrying both `@param` and
+    /// `@phpstan-param` for one parameter must resolve to the latter.
+    pub fn tags_by_kind_vendor_first(&self, kind: TagKind) -> impl Iterator<Item = &TagInfo> {
+        (0..=VENDOR_RANKS).flat_map(move |rank| {
+            self.tags_by_kind(kind)
+                .filter(move |t| vendor_rank(t) == rank)
+        })
+    }
+
+    /// Returns the highest-precedence tag of `kind`; see
+    /// [`Self::tags_by_kind_vendor_first`].
+    pub fn first_tag_by_kind_vendor_first(&self, kind: TagKind) -> Option<&TagInfo> {
+        self.tags_by_kind_vendor_first(kind).next()
+    }
+}
+
+/// Highest rank produced by [`vendor_rank`].
+const VENDOR_RANKS: u8 = 3;
+
+/// Sort key that puts the most authoritative vendor prefix first.
+fn vendor_rank(tag: &TagInfo) -> u8 {
+    match tag.vendor {
+        Some(TagVendor::PhpStan) => 0,
+        Some(TagVendor::Psalm) => 1,
+        Some(_) => 2,
+        None => VENDOR_RANKS,
     }
 }
 
 /// Parse a raw docblock string (including `/**` and `*/` delimiters) into
 /// a [`DocblockInfo`].
 ///
-/// Returns `None` if the string is not a valid docblock comment or if
-/// parsing fails.  This function never panics.
+/// Returns `None` if the string is not a docblock comment.  Tag-level
+/// syntax errors do not fail the parse: the malformed tag is kept with its
+/// raw text so that partially typed docblocks still yield usable tags.
+/// This function never panics.
 ///
 /// # Arguments
 ///
 /// * `docblock` — The full docblock text, e.g. `"/** @return string */"`.
 /// * `base_span` — The span in the source file where this docblock starts.
 ///   When the caller does not have span information (e.g. unit tests that
-///   work with standalone strings), pass [`Span::default()`] or a
-///   zero-offset span.
+///   work with standalone strings), pass a zero-offset span.
 pub fn parse_docblock(docblock: &str, base_span: Span) -> Option<DocblockInfo> {
+    if !docblock.trim_start().starts_with("/**") {
+        return None;
+    }
+
     let arena = LocalArena::new();
 
-    // Work around a `mago-docblock` lexer quirk before parsing (see
-    // `normalize_tag_indentation`).  The rewrite is length-preserving,
-    // so `base_span` and every span derived from it stay valid.
-    let normalized = normalize_tag_indentation(docblock);
+    // `PHPDocParser::parse_with_span` requires `content: &'arena [u8]`, so
+    // the bytes are allocated into the arena to make the borrow live long
+    // enough.
+    let content: &[u8] = arena.alloc_slice_copy(docblock.as_bytes());
+    let document = PHPDocParser::parse_with_span(&arena, content, base_span);
 
-    // `parse_phpdoc_with_span` requires `content: &'arena [u8]`.
-    // We allocate the bytes into the arena so that the borrow lives
-    // long enough.
-    let content: &[u8] = arena.alloc_slice_copy(normalized.as_bytes());
-
-    // `mago-docblock` is deprecated in favour of `mago-phpdoc-syntax`;
-    // the migration is tracked as a separate task.
-    #[allow(deprecated)]
-    let document = mago_docblock::parse_phpdoc_with_span(&arena, content, base_span).ok()?;
-
-    Some(collect_tags(&document))
+    Some(collect_tags(&document, docblock, base_span.start.offset))
 }
 
-/// Work around a `mago-docblock` lexer quirk that silently drops tags.
-///
-/// The lexer strips the leading asterisk and exactly one following
-/// whitespace character from each docblock line.  A line written with two
-/// or more spaces between the asterisk and the tag (`*  @param`) therefore
-/// reaches the parser with a leading space still attached, and the parser
-/// classifies the leading-whitespace line as an indented code block rather
-/// than a tag.  The tag (and everything it declares: `@param`, `@return`,
-/// `@phpstan-type`, `@phpstan-import-type`, …) is dropped entirely.  PHPDoc
-/// treats any amount of whitespace after the `*` as insignificant, so
-/// `*  @param` must parse exactly like `* @param`.
-///
-/// This rewrites the prefix of each affected line so that exactly one space
-/// separates the asterisk from the `@`, moving the surplus whitespace
-/// *before* the asterisk instead of deleting it.  Because no bytes are added
-/// or removed, the byte offset of the `@` (and of every character after it)
-/// is unchanged, so spans computed against the returned text still map back
-/// to the original source correctly.  Lines that do not match the pattern
-/// are left untouched, and indented code examples (which do not start with
-/// `@` after the asterisk) are unaffected.
-fn normalize_tag_indentation(docblock: &str) -> std::borrow::Cow<'_, str> {
-    // Fast path: bail out unless some line actually needs rewriting.
-    if !needs_tag_indentation_fix(docblock) {
-        return std::borrow::Cow::Borrowed(docblock);
-    }
-
-    let mut out = String::with_capacity(docblock.len());
-    for line in docblock.split_inclusive('\n') {
-        // Separate the (possible) trailing newline so it is preserved.
-        let (body, newline) = match line.strip_suffix('\n') {
-            Some(rest) => (rest, "\n"),
-            None => (line, ""),
-        };
-        match rewrite_tag_line(body) {
-            Some(rewritten) => out.push_str(&rewritten),
-            None => out.push_str(body),
-        }
-        out.push_str(newline);
-    }
-    std::borrow::Cow::Owned(out)
-}
-
-/// Return `true` when any line matches the `*  @tag` (2+ spaces) pattern.
-fn needs_tag_indentation_fix(docblock: &str) -> bool {
-    docblock
-        .split('\n')
-        .any(|line| rewrite_tag_line(line.strip_suffix('\r').unwrap_or(line)).is_some())
-}
-
-/// If `line` has the form `<ws>*<2+ ws>@…`, return the length-preserving
-/// rewrite `<ws>* @…`.  Otherwise return `None`.
-fn rewrite_tag_line(line: &str) -> Option<String> {
-    let bytes = line.as_bytes();
-    let mut i = 0;
-
-    // Leading indentation (spaces or tabs).
-    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
-        i += 1;
-    }
-
-    // Require the docblock asterisk.
-    if i >= bytes.len() || bytes[i] != b'*' {
-        return None;
-    }
-    i += 1;
-
-    // Whitespace between the asterisk and the tag.
-    let ws_start = i;
-    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
-        i += 1;
-    }
-
-    // Only a surplus (2+) triggers the mago quirk; a single space is fine.
-    if i - ws_start < 2 {
-        return None;
-    }
-
-    // The content must be a tag; leave indented code examples alone.
-    if i >= bytes.len() || bytes[i] != b'@' {
-        return None;
-    }
-
-    // Rewrite the prefix `[0, i)` as `<spaces>* ` so the `@` at index `i`
-    // (and everything after it) keeps its byte offset.  `i >= 3` here, so
-    // `i - 2` never underflows.
-    let mut rewritten = String::with_capacity(line.len());
-    rewritten.push_str(&" ".repeat(i - 2));
-    rewritten.push_str("* ");
-    rewritten.push_str(&line[i..]);
-    Some(rewritten)
-}
-
-/// Walk a parsed `Document` and collect all `Tag` elements into owned
-/// [`TagInfo`] values, and extract the free-text description from
-/// `Text` elements that appear before the first tag.
-fn collect_tags(document: &mago_docblock::document::Document<'_>) -> DocblockInfo {
-    use crate::atom::bytes_to_str;
+/// Walk a parsed `Document` and collect all tags into owned [`TagInfo`]
+/// values, along with the free-text description that precedes them.
+fn collect_tags(document: &Document<'_>, docblock: &str, base_offset: u32) -> DocblockInfo {
     let mut tags = Vec::new();
     let mut description_parts: Vec<String> = Vec::new();
     let mut seen_tag = false;
 
-    for element in document.elements {
+    for element in document.elements.iter() {
         match element {
             Element::Tag(tag) => {
                 seen_tag = true;
+                let value_span = value_span(tag, docblock, base_offset);
                 tags.push(TagInfo {
-                    name: bytes_to_str(tag.name).to_owned(),
-                    kind: tag.kind,
-                    description: bytes_to_str(tag.description).to_owned(),
-                    span: tag.span,
-                    description_span: tag.description_span,
+                    name: crate::atom::bytes_to_str(tag.name.value).to_owned(),
+                    kind: tag_kind(tag),
+                    vendor: tag.vendor,
+                    description: source_text(docblock, base_offset, value_span),
+                    span: tag.span(),
+                    description_span: value_span,
                 });
             }
             Element::Text(text) if !seen_tag => {
-                for seg in text.segments {
-                    match seg {
-                        TextSegment::Paragraph { content, .. } => {
-                            description_parts.push(bytes_to_str(content).to_owned());
-                        }
-                        TextSegment::InlineCode(code) => {
-                            description_parts.push(format!("`{}`", bytes_to_str(code.content)));
-                        }
-                        TextSegment::InlineTag(tag) => {
-                            description_parts.push(format!(
-                                "{{@{} {}}}",
-                                bytes_to_str(tag.name),
-                                bytes_to_str(tag.description)
-                            ));
-                        }
-                    }
+                let part = source_text(docblock, base_offset, text.span);
+                if !part.is_empty() {
+                    description_parts.push(part);
                 }
             }
             _ => {}
@@ -251,19 +184,117 @@ fn collect_tags(document: &mago_docblock::document::Document<'_>) -> DocblockInf
     let description = if description_parts.is_empty() {
         None
     } else {
-        Some(description_parts.join(""))
+        Some(description_parts.join("\n"))
     };
 
     DocblockInfo { description, tags }
 }
 
+/// The span of a tag's value: everything from the first byte after the tag
+/// name to the end of what the parser recognised.
+///
+/// This deliberately does not use `TagValue`'s own span.  A `TagValue` spans
+/// only the parts the parser understood, so leading modifiers it consumed
+/// before giving up (the `=!` in `@phpstan-assert =!Foo $x`) and anything it
+/// declined to model at all would drop out of the text.  Taking the region
+/// from the tag name instead yields the value exactly as written, which is
+/// what the extractors re-parse.
+fn value_span(tag: &mago_phpdoc_syntax::cst::Tag<'_>, docblock: &str, base_offset: u32) -> Span {
+    let name_end = tag.name.span.end;
+    let end = tag.value.span().end;
+    let start = if end.offset > name_end.offset {
+        skip_value_gap(docblock, base_offset, name_end, end)
+    } else {
+        name_end
+    };
+
+    Span::new(tag.name.span.file_id, start, end.max(start))
+}
+
+/// Advance past the whitespace (and `*` line prefixes) that separate a tag
+/// name from its value, without running past `end`.
+fn skip_value_gap(docblock: &str, base_offset: u32, from: Position, end: Position) -> Position {
+    let limit = (end.offset.saturating_sub(base_offset) as usize).min(docblock.len());
+    let mut offset = (from.offset.saturating_sub(base_offset) as usize).min(limit);
+    let bytes = docblock.as_bytes();
+
+    // Horizontal whitespace, then — if the value continues on a later line —
+    // the newline, its indentation, and the single `*` that prefixes it.
+    loop {
+        while offset < limit && matches!(bytes[offset], b' ' | b'\t') {
+            offset += 1;
+        }
+        if offset < limit && matches!(bytes[offset], b'\n' | b'\r') {
+            offset += 1;
+            while offset < limit && matches!(bytes[offset], b' ' | b'\t' | b'\r') {
+                offset += 1;
+            }
+            if offset < limit && bytes[offset] == b'*' {
+                offset += 1;
+            }
+            continue;
+        }
+        break;
+    }
+
+    Position::new(base_offset + offset as u32)
+}
+
+/// Return the docblock text covered by `span`, with the `*` continuation
+/// prefix removed from every line after the first.
+///
+/// Spans are file-relative, so `base_offset` (where the docblock starts in
+/// the file) is subtracted first.  Out-of-range spans yield an empty
+/// string rather than panicking.
+fn source_text(docblock: &str, base_offset: u32, span: Span) -> String {
+    let start = span.start.offset.saturating_sub(base_offset) as usize;
+    let end = (span.end.offset.saturating_sub(base_offset) as usize).min(docblock.len());
+    if start >= end || !docblock.is_char_boundary(start) || !docblock.is_char_boundary(end) {
+        return String::new();
+    }
+
+    strip_line_prefixes(&docblock[start..end])
+}
+
+/// Remove the leading `*` (and one following space) from every line but the
+/// first, the way a PHPDoc reader would.
+///
+/// The first line never carries a prefix, because a span always starts at
+/// real content.  Lines that do not have an asterisk are left alone.
+fn strip_line_prefixes(raw: &str) -> String {
+    if !raw.contains('\n') {
+        return raw.to_owned();
+    }
+
+    let mut out = String::with_capacity(raw.len());
+    for (index, line) in raw.split('\n').enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if index == 0 {
+            out.push_str(line.trim_end());
+            continue;
+        }
+        let body = line.trim_start_matches([' ', '\t']);
+        let body = match body.strip_prefix('*') {
+            // A run of `*` only ever means one prefix marker; anything
+            // after the first is content.
+            Some(rest) => rest.strip_prefix([' ', '\t']).unwrap_or(rest),
+            None => line,
+        };
+        out.push_str(body.trim_end());
+    }
+    out
+}
+
 /// Collapse `\n` (and any surrounding horizontal whitespace) into a
 /// single space.
 ///
-/// mago-docblock joins multi-line tag descriptions with `\n`, but the
-/// continuation lines may carry leading whitespace from the source
-/// indentation.  The old line-by-line scanner trimmed each line before
-/// joining with a space; this helper reproduces that behaviour.
+/// Multi-line tag values keep their newlines, but continuation lines may
+/// carry leading whitespace from the source indentation.  This helper
+/// reproduces the behaviour of a line-by-line scanner that trimmed each
+/// line before joining with a space.
 pub fn collapse_newlines(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -304,9 +335,7 @@ pub fn collapse_newlines(s: &str) -> String {
 /// string starting at offset 0, which is correct for standalone extraction
 /// (the spans are only meaningful when the caller needs source positions).
 ///
-/// Returns `None` if the string is not a valid docblock or parsing fails.
-/// For partial docblocks (e.g. during completion when `*/` is missing),
-/// use [`parse_docblock_for_tags_lossy`] instead.
+/// Returns `None` if the string is not a docblock.
 pub fn parse_docblock_for_tags(docblock: &str) -> Option<DocblockInfo> {
     use mago_database::file::FileId;
     use mago_span::Position;
@@ -317,53 +346,6 @@ pub fn parse_docblock_for_tags(docblock: &str) -> Option<DocblockInfo> {
         Position::new(docblock.len() as u32),
     );
     parse_docblock(docblock, span)
-}
-
-/// Like [`parse_docblock_for_tags`], but attempts to fix up partial
-/// docblocks before parsing.
-///
-/// When the standard parse returns `None` (e.g. because the closing `*/`
-/// is missing while the user is still typing), this function appends
-/// `*/` and retries.  This makes it suitable for completion-time tag
-/// detection where the docblock is incomplete.
-///
-/// Callers that need accurate span information should prefer
-/// [`parse_docblock_for_tags`] since the appended `*/` shifts nothing
-/// but may produce a slightly different parse tree.
-pub fn parse_docblock_for_tags_lossy(docblock: &str) -> Option<DocblockInfo> {
-    // Try the normal parse first.
-    if let Some(info) = parse_docblock_for_tags(docblock) {
-        return Some(info);
-    }
-
-    // The docblock contains something mago-docblock can't handle (most
-    // commonly a bare `@` where the user is still typing a tag name).
-    // Try removing bare `@` tokens and re-parsing.
-
-    // Strip lines that are just ` * @` (bare @ with no tag name).
-    // This handles both complete docblocks (`*/` present) and partial
-    // ones (`*/` missing).
-    let cleaned: String = docblock
-        .lines()
-        .filter(|line| {
-            let t = line.trim().trim_start_matches('*').trim();
-            t != "@"
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    if let Some(info) = parse_docblock_for_tags(&cleaned) {
-        return Some(info);
-    }
-
-    // If the docblock is still missing `*/`, append it.
-    let trimmed = cleaned.trim_end();
-    if trimmed.ends_with("*/") {
-        return None;
-    }
-
-    let fixed = format!("{}\n */", trimmed);
-    parse_docblock_for_tags(&fixed)
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -465,17 +447,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_phpstan_assert_tags() {
+    fn vendor_prefixes_fold_into_one_kind() {
         let doc = r#"/**
          * @phpstan-assert string $value
-         * @phpstan-assert-if-true non-empty-string $value
+         * @psalm-assert-if-true non-empty-string $value
          */"#;
         let info = parse_docblock_for_tags(doc).expect("should parse");
-        let kinds: Vec<TagKind> = info.tags.iter().map(|t| t.kind).collect();
-        assert_eq!(
-            kinds,
-            vec![TagKind::PhpstanAssert, TagKind::PhpstanAssertIfTrue]
-        );
+        assert_eq!(info.tags[0].kind, TagKind::Assert);
+        assert_eq!(info.tags[0].vendor, Some(TagVendor::PhpStan));
+        assert_eq!(info.tags[1].kind, TagKind::AssertIfTrue);
+        assert_eq!(info.tags[1].vendor, Some(TagVendor::Psalm));
     }
 
     #[test]
@@ -497,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn tags_by_kinds_filters_multiple() {
+    fn vendor_prefixed_tags_share_a_kind() {
         let doc = r#"/**
          * @phpstan-assert int $x
          * @psalm-assert string $y
@@ -505,10 +486,22 @@ mod tests {
          */"#;
         let info = parse_docblock_for_tags(doc).expect("should parse");
 
-        let asserts: Vec<_> = info
-            .tags_by_kinds(&[TagKind::PhpstanAssert, TagKind::PsalmAssert])
-            .collect();
+        let asserts: Vec<_> = info.tags_by_kind(TagKind::Assert).collect();
         assert_eq!(asserts.len(), 2);
+    }
+
+    #[test]
+    fn first_tag_prefers_the_vendor_variant() {
+        let doc = r#"/**
+         * @return string
+         * @psalm-return non-empty-string
+         * @phpstan-return literal-string
+         */"#;
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let tag = info
+            .first_tag_by_kind_vendor_first(TagKind::Return)
+            .expect("should have return");
+        assert_eq!(tag.description, "literal-string");
     }
 
     #[test]
@@ -573,7 +566,6 @@ mod tests {
         let tag = info
             .first_tag_by_kind(TagKind::Param)
             .expect("should have param");
-        // mago-docblock joins multi-line tag descriptions
         assert!(tag.description.contains("$data"));
         assert!(tag.description.contains("name: string"));
     }
@@ -603,7 +595,7 @@ mod tests {
         let doc = "/** @phpstan-type Money = array{amount: int, currency: string} */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
         let tag = info
-            .first_tag_by_kind(TagKind::PhpstanType)
+            .first_tag_by_kind(TagKind::TypeAlias)
             .expect("should have type");
         assert!(tag.description.contains("Money"));
     }
@@ -613,7 +605,7 @@ mod tests {
         let doc = "/** @phpstan-import-type Money from PriceCalculator */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
         let tag = info
-            .first_tag_by_kind(TagKind::PhpstanImportType)
+            .first_tag_by_kind(TagKind::TypeAliasImport)
             .expect("should have import-type");
         assert!(tag.description.contains("Money"));
         assert!(tag.description.contains("PriceCalculator"));
@@ -635,25 +627,20 @@ mod tests {
         let doc = "/**\n *  @phpstan-import-type Money from PriceCalculator\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
         let tag = info
-            .first_tag_by_kind(TagKind::PhpstanImportType)
+            .first_tag_by_kind(TagKind::TypeAliasImport)
             .expect("import-type must still be found with two leading spaces");
         assert!(tag.description.contains("Money"));
         assert!(tag.description.contains("PriceCalculator"));
     }
 
     #[test]
-    fn tag_indentation_fix_preserves_byte_offsets() {
-        // The rewrite that repairs `*  @tag` must not shift the byte
-        // offset of the tag content, or spans would point at the wrong
-        // source text.  Parse the same docblock with one and two leading
-        // spaces and assert the description spans are identical.
+    fn tag_spans_track_the_source_offset() {
+        // Spans must point at the real source text, so the extra space in
+        // the second docblock shifts the value span by exactly one byte.
         let one = "/**\n * @return string The value\n */";
         let two = "/**\n *  @return string The value\n */";
         let info_one = parse_docblock_for_tags(one).expect("should parse");
         let info_two = parse_docblock_for_tags(two).expect("should parse");
-        // The `@` sits one byte later in `two`, so the spans differ by
-        // exactly one byte — the surplus space moved before the asterisk
-        // keeps everything else aligned.
         assert_eq!(
             info_two.tags[0].description_span.start.offset,
             info_one.tags[0].description_span.start.offset + 1,
@@ -681,14 +668,12 @@ mod tests {
     }
 
     #[test]
-    fn phpstan_extends_tag_parsed_as_other() {
-        // mago-docblock classifies @phpstan-extends as TagKind::Other
-        // since it has no dedicated variant. Our extract_generics_tag
-        // handles this via a name-based fallback.
+    fn phpstan_extends_tag_is_an_extends_tag() {
         let doc = "/**\n * @phpstan-extends Collection<int, User>\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
         assert_eq!(info.tags.len(), 1);
-        assert_eq!(info.tags[0].kind, TagKind::Other);
+        assert_eq!(info.tags[0].kind, TagKind::Extends);
+        assert_eq!(info.tags[0].vendor, Some(TagVendor::PhpStan));
         assert_eq!(info.tags[0].name, "phpstan-extends");
         assert_eq!(info.tags[0].description, "Collection<int, User>");
     }
@@ -698,7 +683,7 @@ mod tests {
         let doc = "/**\n * @phpstan-require-extends JsonResource\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
         assert_eq!(info.tags.len(), 1);
-        assert_eq!(info.tags[0].kind, TagKind::PhpstanRequireExtends);
+        assert_eq!(info.tags[0].kind, TagKind::RequireExtends);
         assert_eq!(info.tags[0].name, "phpstan-require-extends");
         assert_eq!(info.tags[0].description, "JsonResource");
         assert!(
@@ -713,7 +698,7 @@ mod tests {
         let doc = "/**\n * @phpstan-require-implements Countable\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
         assert_eq!(info.tags.len(), 1);
-        assert_eq!(info.tags[0].kind, TagKind::PhpstanRequireImplements);
+        assert_eq!(info.tags[0].kind, TagKind::RequireImplements);
         assert_eq!(info.tags[0].name, "phpstan-require-implements");
         assert_eq!(info.tags[0].description, "Countable");
         assert!(
@@ -728,9 +713,7 @@ mod tests {
         let doc = "/**\n * @phpstan-sealed FooClass|BarClass\n */";
         let info = parse_docblock_for_tags(doc).expect("should parse");
         assert_eq!(info.tags.len(), 1);
-        // mago-docblock doesn't have a dedicated variant for @phpstan-sealed,
-        // so it falls through to TagKind::Other.
-        assert_eq!(info.tags[0].kind, TagKind::Other);
+        assert_eq!(info.tags[0].kind, TagKind::Sealed);
         assert_eq!(info.tags[0].name, "phpstan-sealed");
         assert_eq!(info.tags[0].description, "FooClass|BarClass");
     }
@@ -742,7 +725,6 @@ mod tests {
         let tag = info
             .first_tag_by_kind(TagKind::Return)
             .expect("should have return");
-        // mago-docblock joins continuation lines with \n, not spaces
         assert_eq!(
             tag.description,
             "array an array containing all the elements of arr1\nafter applying the callback function to each one."
@@ -757,7 +739,6 @@ mod tests {
         let tag = info
             .first_tag_by_kind(TagKind::Return)
             .expect("should have return");
-        // mago-docblock joins multi-line type + description with \n
         assert!(
             tag.description.contains("name: string"),
             "should contain shape fields: {:?}",
@@ -850,52 +831,32 @@ mod tests {
 
     #[test]
     fn partial_docblock_without_closing_delimiter() {
-        // When the user is still typing, the docblock may not have a
-        // closing `*/`.  Verify that mago-docblock either parses what
-        // it can or returns None gracefully (no panic).
+        // While the user is still typing, the docblock may have no closing
+        // `*/`.  Everything typed so far must still parse.
         let doc = "/**\n * @param string $name\n * @return ";
-        let result = parse_docblock_for_tags(doc);
-        // Whether it succeeds or returns None is fine — the important
-        // thing is that it does not panic.
-        if let Some(info) = result {
-            // If it does parse, the tags should be reasonable.
-            assert!(
-                !info.tags.is_empty(),
-                "partial parse should find at least one tag"
-            );
-            // Verify the @param tag was parsed correctly.
-            let params: Vec<_> = info.tags_by_kind(TagKind::Param).collect();
-            assert_eq!(params.len(), 1, "should find one @param tag");
-            assert!(
-                params[0].description.contains("$name"),
-                "param description should contain $name: {:?}",
-                params[0].description
-            );
-        }
+        let info = parse_docblock_for_tags(doc).expect("partial docblock should parse");
+        let params: Vec<_> = info.tags_by_kind(TagKind::Param).collect();
+        assert_eq!(params.len(), 1, "should find one @param tag");
+        assert!(
+            params[0].description.contains("$name"),
+            "param description should contain $name: {:?}",
+            params[0].description
+        );
     }
 
     #[test]
     fn partial_docblock_with_trailing_at_sign() {
-        // Simulates a completion scenario: the user has typed `@` on a
-        // new line but hasn't finished the tag yet.  The docblock has
-        // no closing `*/` because the cursor is mid-edit.
+        // Simulates a completion scenario: the user has typed `@` on a new
+        // line but hasn't finished the tag name, and there is no closing
+        // `*/` because the cursor is mid-edit.  The finished tags above it
+        // must still be reported.
         let doc = "/**\n * @param string $name\n * @";
-        // Without fix-up, mago-docblock may return None for partial input.
-        let result = parse_docblock_for_tags(doc);
-        assert!(
-            result.is_none(),
-            "bare partial docblock with trailing @ returns None"
-        );
-
-        // With the fix-up helper, the bare `@` line is stripped and `*/`
-        // is appended, making the docblock parseable.
-        let fixed = parse_docblock_for_tags_lossy(doc);
-        let info = fixed.expect("fix-up should make partial docblock parseable");
+        let info = parse_docblock_for_tags(doc).expect("partial docblock should parse");
         let params: Vec<_> = info.tags_by_kind(TagKind::Param).collect();
         assert_eq!(
             params.len(),
             1,
-            "should find @param after fix-up: tags={:?}",
+            "should find @param: tags={:?}",
             info.tags.iter().map(|t| &t.name).collect::<Vec<_>>()
         );
         assert!(
@@ -906,29 +867,11 @@ mod tests {
     }
 
     #[test]
-    fn lossy_parse_already_complete_docblock() {
-        // When the docblock is already complete, lossy parse behaves
-        // identically to the normal parse.
-        let doc = "/**\n * @param int $x\n * @return string\n */";
-        let info = parse_docblock_for_tags_lossy(doc).expect("should parse");
-        assert_eq!(info.tags.len(), 2);
-        assert_eq!(info.tags[0].kind, TagKind::Param);
-        assert_eq!(info.tags[1].kind, TagKind::Return);
-    }
-
-    #[test]
     fn complete_docblock_with_bare_at_mid_body() {
-        // Simulates the throws-completion scenario: the docblock has a
-        // closing `*/` but contains a bare `@` where the user is typing.
-        // `parse_docblock_for_tags` (strict) may fail on the bare `@`;
-        // `parse_docblock_for_tags_lossy` must still find the @throws tag.
+        // The docblock has a closing `*/` but contains a bare `@` where the
+        // user is typing.  The `@throws` tag above it must still be found.
         let doc = "/**\n * @throws RuntimeException\n * @\n */";
-
-        // Strict parse fails because of the bare `@`.
-        assert!(parse_docblock_for_tags(doc).is_none());
-
-        // Lossy strips the bare-@ line and succeeds.
-        let info = parse_docblock_for_tags_lossy(doc).expect("lossy should parse");
+        let info = parse_docblock_for_tags(doc).expect("should parse");
         let throws: Vec<_> = info.tags_by_kind(TagKind::Throws).collect();
         assert_eq!(
             throws.len(),

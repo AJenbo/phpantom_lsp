@@ -2,15 +2,15 @@
 //!
 //! This module provides [`PhpType`], an owned enum that represents PHP type
 //! expressions as a tree. It is converted from the borrowed
-//! `mago_type_syntax::cst::Type<'input>` AST and can be displayed back into a
-//! canonical string form.
+//! `mago_phpdoc_syntax::cst::type::Type<'arena>` AST and can be displayed back
+//! into a canonical string form.
 //!
 //! # Design
 //!
-//! `mago_type_syntax::cst::Type` is `#[non_exhaustive]` with 69 variants and
-//! borrows from input. `PhpType` is simpler: keyword types are collapsed into
-//! `Named`, generic-parameterised references become `Generic`, and rarely-used
-//! variants fall back to `Raw`.
+//! `mago_phpdoc_syntax::cst::type::Type` is `#[non_exhaustive]` with more than
+//! eighty variants and borrows from the parse arena. `PhpType` is simpler:
+//! keyword types are collapsed into `Named`, generic-parameterised references
+//! become `Generic`, and rarely-used variants fall back to `Raw`.
 //!
 //! `PhpType::parse()` never fails. If the input cannot be parsed or mapped,
 //! it returns `PhpType::raw(input)`.
@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use mago_allocator::{Arena, LocalArena};
 use mago_database::file::FileId;
+use mago_phpdoc_syntax::cst::r#type as cst;
 use mago_span::{Position, Span};
-use mago_type_syntax::cst;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 

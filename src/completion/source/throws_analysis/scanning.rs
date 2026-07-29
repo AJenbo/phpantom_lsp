@@ -289,7 +289,7 @@ pub(crate) fn find_inline_throws_annotations(body: &str) -> Vec<ThrowInfo> {
             if let Some(end) = doc_end {
                 let docblock = &body[doc_start..end];
                 if let Some(info) = crate::docblock::parser::parse_docblock_for_tags(docblock) {
-                    use mago_docblock::document::TagKind;
+                    use crate::docblock::TagKind;
                     for tag in info.tags_by_kind(TagKind::Throws) {
                         let rest = tag.description.trim();
                         if let Some(type_name) = rest.split_whitespace().next() {
@@ -371,7 +371,7 @@ pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> 
         {
             let docblock = &before[doc_start..];
             if let Some(info) = crate::docblock::parser::parse_docblock_for_tags(docblock) {
-                use mago_docblock::document::TagKind;
+                use crate::docblock::TagKind;
                 if let Some(tag) = info.first_tag_by_kind(TagKind::Return) {
                     let rest = tag.description.trim();
                     if let Some(type_str) = rest.split_whitespace().next() {
@@ -426,7 +426,7 @@ pub(crate) fn find_method_throws_tags(file_content: &str, method_name: &str) -> 
         {
             let docblock = &before[doc_start..];
             if let Some(info) = crate::docblock::parser::parse_docblock_for_tags(docblock) {
-                use mago_docblock::document::TagKind;
+                use crate::docblock::TagKind;
                 for tag in info.tags_by_kind(TagKind::Throws) {
                     let rest = tag.description.trim();
                     if let Some(type_str) = rest.split_whitespace().next() {

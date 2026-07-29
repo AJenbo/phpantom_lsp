@@ -192,7 +192,7 @@ fn is_preceding_docblock_removed(
 
     // Simple line-by-line scan for `@removed X.Y` instead of a full
     // docblock parse.  This is called for every stub entry during
-    // `set_php_version`, so avoiding the mago-docblock parser here
+    // `set_php_version`, so avoiding the PHPDoc parser here
     // saves significant startup time.
     for line in docblock.lines() {
         let trimmed = line.trim().trim_start_matches('*').trim();
