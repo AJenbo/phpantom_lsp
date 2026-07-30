@@ -7,12 +7,24 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::classify_class_origin;
 use crate::Backend;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
 use crate::phar;
+
+/// Files claimed per work-stealing block when scanning a phar archive.
+const PHAR_SCAN_BLOCK_FILES: usize = 32;
+
+/// A class found inside a phar: its FQN, the `archive.phar!inner.php`
+/// sentinel path, and the `phar://` URI to open it with.
+type PharClass = (String, PathBuf, String);
+
+/// A block of phar classes, tagged with the block index it was claimed
+/// under so results can be merged back in manifest order.
+type PharScannedBlock = (usize, Vec<PharClass>);
 
 /// Build the vendor URI prefixes (raw and canonicalized) for a vendor
 /// directory path, used to detect and skip vendor files.
@@ -326,20 +338,80 @@ impl Backend {
             .map(String::from)
             .collect();
 
+        // A tool phar is large (phpstan's is tens of megabytes of PHP), so
+        // the byte scan is spread over the cores.  Workers claim blocks
+        // from a shared cursor and their results are merged in manifest
+        // order, keeping the first-wins index inserts below identical to a
+        // sequential scan.
+        let mut scanned: Vec<PharScannedBlock> = {
+            let next_block = AtomicUsize::new(0);
+            let n_blocks = php_files.len().div_ceil(PHAR_SCAN_BLOCK_FILES);
+            let n_threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .min(n_blocks.max(1));
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..n_threads)
+                    .map(|_| {
+                        let next_block = &next_block;
+                        let archive = &archive;
+                        let php_files = &php_files;
+                        s.spawn(move || {
+                            let mut out: Vec<PharScannedBlock> = Vec::new();
+                            loop {
+                                let b = next_block.fetch_add(1, Ordering::Relaxed);
+                                if b >= n_blocks {
+                                    break;
+                                }
+                                let start = b * PHAR_SCAN_BLOCK_FILES;
+                                let end = (start + PHAR_SCAN_BLOCK_FILES).min(php_files.len());
+                                let mut local: Vec<PharClass> = Vec::new();
+                                for internal_path in &php_files[start..end] {
+                                    let Some(content) = archive.read_file(internal_path) else {
+                                        continue;
+                                    };
+                                    for fqn in classmap_scanner::find_classes(content) {
+                                        // Sentinel path: "archive.phar!internal/path.php"
+                                        let sentinel = PathBuf::from(format!(
+                                            "{}!{}",
+                                            phar_path.display(),
+                                            internal_path
+                                        ));
+                                        let phar_uri = format!(
+                                            "phar://{}/{}",
+                                            phar_path.display(),
+                                            internal_path
+                                        );
+                                        local.push((fqn, sentinel, phar_uri));
+                                    }
+                                }
+                                if !local.is_empty() {
+                                    out.push((b, local));
+                                }
+                            }
+                            out
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|h| {
+                        h.join().unwrap_or_else(|_| {
+                            tracing::error!("PHPantom: thread panic while scanning phar archive");
+                            Vec::new()
+                        })
+                    })
+                    .collect()
+            })
+        };
+        scanned.sort_unstable_by_key(|(b, _)| *b);
+
         let mut classmap_entries: Vec<(String, PathBuf)> = Vec::new();
         let mut fqn_uri_entries: Vec<(String, String)> = Vec::new();
-
-        for internal_path in &php_files {
-            if let Some(content) = archive.read_file(internal_path) {
-                let classes = classmap_scanner::find_classes(content);
-                for fqn in classes {
-                    // Sentinel path: "archive.phar!internal/path.php"
-                    let sentinel =
-                        PathBuf::from(format!("{}!{}", phar_path.display(), internal_path));
-                    let phar_uri = format!("phar://{}/{}", phar_path.display(), internal_path);
-                    classmap_entries.push((fqn.clone(), sentinel));
-                    fqn_uri_entries.push((fqn, phar_uri));
-                }
+        for (_, batch) in scanned {
+            for (fqn, sentinel, phar_uri) in batch {
+                classmap_entries.push((fqn.clone(), sentinel));
+                fqn_uri_entries.push((fqn, phar_uri));
             }
         }
 

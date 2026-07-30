@@ -117,16 +117,26 @@ impl Deref for FileBytes {
 /// The scanners read the returned bytes synchronously and drop them
 /// before returning, so the map never outlives the scan.
 pub(crate) fn read_for_scan(path: &Path) -> std::io::Result<FileBytes> {
+    use std::io::Read;
+
     let file = std::fs::File::open(path)?;
-    // SAFETY: The map is read synchronously and dropped before this
-    // scan returns. A concurrent truncation could raise SIGBUS, but
-    // index scanning does not run while the user is deleting files; the
-    // heap-read fallback covers filesystems that reject mapping.
-    match unsafe { Mmap::map(&file) } {
-        Ok(map) => Ok(FileBytes::Mapped(map)),
-        Err(_) => std::fs::read(path).map(FileBytes::Owned),
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    if len >= MMAP_MIN_BYTES {
+        // SAFETY: The map is read synchronously and dropped before this
+        // scan returns. A concurrent truncation could raise SIGBUS, but
+        // index scanning does not run while the user is deleting files; the
+        // heap-read fallback covers filesystems that reject mapping.
+        if let Ok(map) = unsafe { Mmap::map(&file) } {
+            return Ok(FileBytes::Mapped(map));
+        }
     }
+    let mut buf = Vec::with_capacity(len as usize);
+    (&file).read_to_end(&mut buf)?;
+    Ok(FileBytes::Owned(buf))
 }
+
+/// Below this size a file is copied to the heap instead of mapped.
+const MMAP_MIN_BYTES: u64 = 256 * 1024;
 
 // ─── Data structures ────────────────────────────────────────────────────────
 

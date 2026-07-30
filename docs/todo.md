@@ -197,7 +197,7 @@ unlikely to move the needle for most users.
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
 | P46 | [`mago-phpdoc-syntax` cannot parse `@method static (…) name()`](todo/performance.md#p46-mago-phpdoc-syntax-cannot-parse-method-static--name)                                | Low         | Low         |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.45.0, still no `mago-hir` consumers upstream) | Medium-High | High        |
-| P43 | [`init_single_project` is the longest single-threaded stretch of a run](todo/performance.md#p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run)        | Medium-High | Medium      |
+| P48 | [Project init's remaining serial stretches](todo/performance.md#p48-project-inits-remaining-serial-stretches)                                                                | Low-Medium  | Medium      |
 | P47 | [The resolved-class cache lock caps concurrent class resolution](todo/performance.md#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution)                     | Medium      | Medium-High |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
 | P25 | [`type_mismatch_argument` / `argument_count_mismatch` slow on large single files](todo/performance.md#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files) | Medium      | Medium      |

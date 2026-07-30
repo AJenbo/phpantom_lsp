@@ -29,6 +29,18 @@ fn progress_add_done(progress: Option<&ScanProgress>) {
     }
 }
 
+/// One file's scan result together with the path and origin it came from.
+type ScannedFile = (ScanResult, PathBuf, crate::ClassCompletionOrigin);
+
+/// A block of scanned files, tagged with the block index it was claimed
+/// under so results can be merged back in input order.
+type ScannedBlock = (usize, Vec<ScannedFile>);
+
+/// Files claimed per work-stealing block by the batch scanners.  Small
+/// enough that a block of large files cannot hold up the tail of a scan,
+/// large enough that the shared cursor is not the bottleneck.
+const SCAN_BLOCK_FILES: usize = 32;
+
 /// Return the number of available CPU cores, capped at a sensible
 /// default.  Used to size parallel scanning batches.
 fn thread_count() -> usize {
@@ -236,6 +248,149 @@ pub(crate) fn vendor_package_roots(
     roots
 }
 
+/// The PHP files a single Composer package contributes to a vendor scan.
+#[derive(Default)]
+struct PackageFiles {
+    /// Files reachable through the package's `autoload.psr-4` roots,
+    /// paired with the namespace prefix that root maps to.
+    psr4: Vec<(PathBuf, String, crate::ClassCompletionOrigin)>,
+    /// Files from `autoload.files` and `autoload.classmap`, plus the full
+    /// package tree when a `files` entry registers its own autoloader.
+    plain: Vec<(PathBuf, crate::ClassCompletionOrigin)>,
+}
+
+/// Walk one `installed.json` entry and return the PHP files it exposes.
+///
+/// Returns an empty result when the package is not installed, has no
+/// `autoload` section, or declares no PHP sources.
+fn collect_package_files(
+    package: &serde_json::Value,
+    composer_dir: &Path,
+    vendor_path: &Path,
+    vendor_dir_paths: &[PathBuf],
+    skip_paths: &HashSet<PathBuf>,
+    explicit_deps: &HashSet<String>,
+) -> PackageFiles {
+    let mut out = PackageFiles::default();
+    let origin = package
+        .get("name")
+        .and_then(|n| n.as_str())
+        .map(|name| classify_package_origin(name, explicit_deps))
+        .unwrap_or(crate::ClassCompletionOrigin::VendorTransitive);
+    // Locate the package on disk.  Composer 2's installed.json
+    // includes an `install-path` field that is relative to the
+    // `vendor/composer/` directory.  This is the authoritative
+    // location and handles path repositories, custom installers,
+    // and any other layout that doesn't follow the default
+    // `vendor/<name>/` convention.  Fall back to `vendor/<name>`
+    // only when `install-path` is absent (Composer 1 format).
+    let pkg_path = if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str())
+    {
+        composer_dir.join(install_path)
+    } else if let Some(pkg_name) = package.get("name").and_then(|n| n.as_str()) {
+        vendor_path.join(pkg_name)
+    } else {
+        return out;
+    };
+
+    let pkg_path = match pkg_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            // Directory doesn't exist (package not installed yet).
+            if !pkg_path.is_dir() {
+                return out;
+            }
+            pkg_path
+        }
+    };
+
+    if !pkg_path.is_dir() {
+        return out;
+    }
+
+    // Extract autoload section
+    let Some(autoload) = package.get("autoload") else {
+        return out;
+    };
+
+    // PSR-4 entries
+    if let Some(psr4) = autoload.get("psr-4").and_then(|p| p.as_object()) {
+        for (prefix, paths) in psr4 {
+            let prefix = normalise_prefix(prefix);
+            for dir_str in value_to_strings(paths) {
+                let dir = pkg_path.join(&dir_str);
+                if dir.is_dir() {
+                    collect_psr4_php_files(
+                        &dir,
+                        &prefix,
+                        vendor_dir_paths,
+                        skip_paths,
+                        &mut out.psr4,
+                        origin,
+                    );
+                }
+            }
+        }
+    }
+
+    // Files entries (individual PHP files that are always loaded)
+    if let Some(files) = autoload.get("files").and_then(|f| f.as_array()) {
+        let mut has_custom_autoloader = false;
+        for entry in files {
+            if let Some(file_str) = entry.as_str() {
+                let file = pkg_path.join(file_str);
+                if file.is_file()
+                    && file.extension().is_some_and(|ext| ext == "php")
+                    && !skip_paths.contains(&file)
+                {
+                    // Check if this file registers a custom autoloader.
+                    if !has_custom_autoloader
+                        && let Ok(content) = read_for_scan(&file)
+                        && memmem::find(&content, b"spl_autoload_register").is_some()
+                    {
+                        has_custom_autoloader = true;
+                    }
+                    out.plain.push((file, origin));
+                }
+            }
+        }
+
+        // When a files entry registers a custom autoloader via
+        // spl_autoload_register, it will load classes from the
+        // package at runtime. Since we can't execute that logic,
+        // do a full scan of the package directory to discover all
+        // classes it provides.
+        if has_custom_autoloader {
+            collect_php_files(
+                &pkg_path,
+                vendor_dir_paths,
+                skip_paths,
+                &mut out.plain,
+                origin,
+            );
+        }
+    }
+
+    // Classmap entries
+    if let Some(cm) = autoload.get("classmap").and_then(|c| c.as_array()) {
+        for entry in cm {
+            if let Some(dir_str) = entry.as_str() {
+                let dir = pkg_path.join(dir_str);
+                if dir.is_dir() {
+                    collect_php_files(&dir, vendor_dir_paths, skip_paths, &mut out.plain, origin);
+                } else if dir.is_file()
+                    && dir.extension().is_some_and(|ext| ext == "php")
+                    && !skip_paths.contains(&dir)
+                {
+                    out.plain.push((dir, origin));
+                }
+            }
+        }
+    }
+
+    out
+}
+
 /// Like [`scan_vendor_packages`] but accepts a set of absolute file
 /// paths to skip.  Files whose path appears in `skip_paths` are
 /// excluded from scanning.
@@ -274,133 +429,62 @@ pub fn scan_vendor_packages_with_skip(
     // are relative to this directory.
     let composer_dir = vendor_path.join("composer");
 
-    // Phase 1: collect all file paths from all packages (sequential
-    // walk, but no file I/O beyond stat calls).
+    // Phase 1: collect every package's file paths.  Packages are
+    // independent, so their directory walks fan out over all cores.  The
+    // per-package results are concatenated back in `installed.json` order
+    // so a duplicate FQN resolves to the same file a sequential walk
+    // would have picked.
+    let mut collected: Vec<(usize, PackageFiles)> = {
+        let next_pkg = std::sync::atomic::AtomicUsize::new(0);
+        let n_threads = thread_count().min(packages.len().max(1));
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..n_threads)
+                .map(|_| {
+                    let next_pkg = &next_pkg;
+                    let vendor_dir_paths = &vendor_dir_paths;
+                    let composer_dir = &composer_dir;
+                    let vendor_path = &vendor_path;
+                    s.spawn(move || {
+                        let mut out: Vec<(usize, PackageFiles)> = Vec::new();
+                        loop {
+                            let i = next_pkg.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(package) = packages.get(i) else {
+                                break;
+                            };
+                            let files = collect_package_files(
+                                package,
+                                composer_dir,
+                                vendor_path,
+                                vendor_dir_paths,
+                                skip_paths,
+                                explicit_deps,
+                            );
+                            if !files.psr4.is_empty() || !files.plain.is_empty() {
+                                out.push((i, files));
+                            }
+                        }
+                        out
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        tracing::error!("PHPantom: thread panic in vendor package collection");
+                        Vec::new()
+                    })
+                })
+                .collect()
+        })
+    };
+    collected.sort_unstable_by_key(|(i, _)| *i);
+
     let mut psr4_files: Vec<(PathBuf, String, crate::ClassCompletionOrigin)> = Vec::new();
     let mut plain_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
-
-    for package in packages {
-        let origin = package
-            .get("name")
-            .and_then(|n| n.as_str())
-            .map(|name| classify_package_origin(name, explicit_deps))
-            .unwrap_or(crate::ClassCompletionOrigin::VendorTransitive);
-        // Locate the package on disk.  Composer 2's installed.json
-        // includes an `install-path` field that is relative to the
-        // `vendor/composer/` directory.  This is the authoritative
-        // location and handles path repositories, custom installers,
-        // and any other layout that doesn't follow the default
-        // `vendor/<name>/` convention.  Fall back to `vendor/<name>`
-        // only when `install-path` is absent (Composer 1 format).
-        let pkg_path =
-            if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str()) {
-                composer_dir.join(install_path)
-            } else if let Some(pkg_name) = package.get("name").and_then(|n| n.as_str()) {
-                vendor_path.join(pkg_name)
-            } else {
-                continue;
-            };
-
-        let pkg_path = match pkg_path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => {
-                // Directory doesn't exist (package not installed yet).
-                if !pkg_path.is_dir() {
-                    continue;
-                }
-                pkg_path
-            }
-        };
-
-        if !pkg_path.is_dir() {
-            continue;
-        }
-
-        // Extract autoload section
-        let Some(autoload) = package.get("autoload") else {
-            continue;
-        };
-
-        // PSR-4 entries
-        if let Some(psr4) = autoload.get("psr-4").and_then(|p| p.as_object()) {
-            for (prefix, paths) in psr4 {
-                let prefix = normalise_prefix(prefix);
-                for dir_str in value_to_strings(paths) {
-                    let dir = pkg_path.join(&dir_str);
-                    if dir.is_dir() {
-                        collect_psr4_php_files(
-                            &dir,
-                            &prefix,
-                            &vendor_dir_paths,
-                            skip_paths,
-                            &mut psr4_files,
-                            origin,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Files entries (individual PHP files that are always loaded)
-        if let Some(files) = autoload.get("files").and_then(|f| f.as_array()) {
-            let mut has_custom_autoloader = false;
-            for entry in files {
-                if let Some(file_str) = entry.as_str() {
-                    let file = pkg_path.join(file_str);
-                    if file.is_file()
-                        && file.extension().is_some_and(|ext| ext == "php")
-                        && !skip_paths.contains(&file)
-                    {
-                        // Check if this file registers a custom autoloader.
-                        if !has_custom_autoloader
-                            && let Ok(content) = read_for_scan(&file)
-                            && memmem::find(&content, b"spl_autoload_register").is_some()
-                        {
-                            has_custom_autoloader = true;
-                        }
-                        plain_files.push((file, origin));
-                    }
-                }
-            }
-
-            // When a files entry registers a custom autoloader via
-            // spl_autoload_register, it will load classes from the
-            // package at runtime. Since we can't execute that logic,
-            // do a full scan of the package directory to discover all
-            // classes it provides.
-            if has_custom_autoloader {
-                collect_php_files(
-                    &pkg_path,
-                    &vendor_dir_paths,
-                    skip_paths,
-                    &mut plain_files,
-                    origin,
-                );
-            }
-        }
-
-        // Classmap entries
-        if let Some(cm) = autoload.get("classmap").and_then(|c| c.as_array()) {
-            for entry in cm {
-                if let Some(dir_str) = entry.as_str() {
-                    let dir = pkg_path.join(dir_str);
-                    if dir.is_dir() {
-                        collect_php_files(
-                            &dir,
-                            &vendor_dir_paths,
-                            skip_paths,
-                            &mut plain_files,
-                            origin,
-                        );
-                    } else if dir.is_file()
-                        && dir.extension().is_some_and(|ext| ext == "php")
-                        && !skip_paths.contains(&dir)
-                    {
-                        plain_files.push((dir, origin));
-                    }
-                }
-            }
-        }
+    for (_, files) in collected {
+        psr4_files.extend(files.psr4);
+        plain_files.extend(files.plain);
     }
 
     // Phase 2: scan all collected files in parallel. Each file's origin is
@@ -637,17 +721,29 @@ fn scan_files_parallel_full(
     }
 
     let n_threads = thread_count().min(files.len());
-    let chunk_size = files.len().div_ceil(n_threads);
 
-    let results: Vec<Vec<(ScanResult, PathBuf, crate::ClassCompletionOrigin)>> =
-        std::thread::scope(|s| {
-            let handles: Vec<_> = files
-                .chunks(chunk_size)
-                .map(|chunk| {
-                    s.spawn(move || {
-                        let mut local: Vec<(ScanResult, PathBuf, crate::ClassCompletionOrigin)> =
-                            Vec::new();
-                        for (path, origin) in chunk {
+    // Workers claim blocks from a shared cursor rather than taking a
+    // fixed slice each: file sizes vary by orders of magnitude across a
+    // vendor tree, so an even split by count leaves most workers idle
+    // behind whichever slice drew the large files.  Blocks are merged in
+    // index order below, so the result is the same as a sequential scan.
+    let n_blocks = files.len().div_ceil(SCAN_BLOCK_FILES);
+    let next_block = std::sync::atomic::AtomicUsize::new(0);
+    let mut results: Vec<ScannedBlock> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..n_threads)
+            .map(|_| {
+                let next_block = &next_block;
+                s.spawn(move || {
+                    let mut out: Vec<ScannedBlock> = Vec::new();
+                    loop {
+                        let b = next_block.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if b >= n_blocks {
+                            break;
+                        }
+                        let start = b * SCAN_BLOCK_FILES;
+                        let end = (start + SCAN_BLOCK_FILES).min(files.len());
+                        let mut local: Vec<ScannedFile> = Vec::new();
+                        for (path, origin) in &files[start..end] {
                             progress_add_done(progress);
                             if let Ok(content) = read_for_scan(path) {
                                 let scan = super::find_symbols(&content);
@@ -659,23 +755,28 @@ fn scan_files_parallel_full(
                                 }
                             }
                         }
-                        local
-                    })
+                        if !local.is_empty() {
+                            out.push((b, local));
+                        }
+                    }
+                    out
                 })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| {
-                    h.join().unwrap_or_else(|_| {
-                        tracing::error!("PHPantom: thread panic in scan_files_parallel_full");
-                        Vec::new()
-                    })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    tracing::error!("PHPantom: thread panic in scan_files_parallel_full");
+                    Vec::new()
                 })
-                .collect()
-        });
+            })
+            .collect()
+    });
+    results.sort_unstable_by_key(|(b, _)| *b);
 
     let mut result = WorkspaceScanResult::default();
-    for batch in results {
+    for (_, batch) in results {
         for (scan, path, origin) in batch {
             for fqcn in scan.classes {
                 let class_short_name = fqcn_short_name(&fqcn).to_owned();
