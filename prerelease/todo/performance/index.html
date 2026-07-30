@@ -1549,10 +1549,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p48-project-inits-remaining-serial-stretches" class="md-nav__link">
+  <a href="#p49-project-inits-remaining-serial-stretches" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P48. Project init's remaining serial stretches
+        P49. Project init's remaining serial stretches
       </span>
     </span>
   </a>
@@ -2262,10 +2262,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p48-project-inits-remaining-serial-stretches" class="md-nav__link">
+  <a href="#p49-project-inits-remaining-serial-stretches" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P48. Project init's remaining serial stretches
+        P49. Project init's remaining serial stretches
       </span>
     </span>
   </a>
@@ -3247,7 +3247,7 @@ was removed, suggesting the read lock on <code>fqn_class_index</code> (contended
 by 32 workers doing <code>find_or_load_class</code> concurrently) is closer to the
 real ceiling than the hashing was.</p>
 <hr />
-<h2 id="p48-project-inits-remaining-serial-stretches">P48. Project init's remaining serial stretches<a class="headerlink" href="#p48-project-inits-remaining-serial-stretches" title="Permanent link">&para;</a></h2>
+<h2 id="p49-project-inits-remaining-serial-stretches">P49. Project init's remaining serial stretches<a class="headerlink" href="#p49-project-inits-remaining-serial-stretches" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p><code>init_single_project</code> is down from 0.60 s at 3.2 of 32 cores to 0.21 s
 at 6.2 (mmap contention, per-package collection, and the batch scanners'
@@ -3280,19 +3280,9 @@ large Laravel project (32-core machine, release build, warm page cache,
 <td>3.9</td>
 </tr>
 <tr>
-<td><code>classify_class_origin</code> + <code>fqn_uri_index</code> fill</td>
-<td>0.019 s</td>
-<td>1.6</td>
-</tr>
-<tr>
 <td>workspace walk (<code>ignore</code> crate)</td>
 <td>0.018 s</td>
 <td>1.1</td>
-</tr>
-<tr>
-<td><code>vendor_package_roots</code></td>
-<td>0.006 s</td>
-<td>1.0</td>
 </tr>
 </tbody>
 </table>
@@ -3304,18 +3294,6 @@ large Laravel project (32-core machine, release build, warm page cache,
   roots (or its subdirectories) into separate work items would even it
   out, but the concatenation has to stay in <code>installed.json</code> order for
   duplicate FQNs to resolve to the same file.</li>
-<li><strong>Class origins are derived twice.</strong> The vendor scan knows which
-  package each file came from, and records it for functions and constants
-  (<code>WorkspaceScanResult::function_origins</code> / <code>constant_origins</code>), but not
-  for classes. Init then re-derives every vendor class's origin by
-  prefix-matching its path against ~400 package roots, single-threaded.
-  Carrying class origins out of the scan the way the other two already
-  are would delete the step. The Composer-classmap path (<code>strategy =
-  "composer"</code>) has no origin for its entries, so the prefix match has to
-  stay as the fallback there.</li>
-<li><strong><code>vendor_package_roots</code> re-reads and re-parses <code>installed.json</code></strong>
-  moments after <code>scan_vendor_packages_with_skip</code> parsed the same file,
-  and canonicalizes every package path a second time.</li>
 <li><strong>The workspace walk is single-threaded.</strong> <code>ignore::WalkBuilder</code> has
   <code>build_parallel</code>, but the walk order feeds the duplicate-FQN
   tie-break, so a parallel walk needs its results sorted to stay
