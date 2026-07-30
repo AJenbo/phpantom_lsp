@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b1-staticthis-return-types-are-rejected-where-a-stringable-object-is-accepted" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. <code>static</code>/<code>$this</code> return types are rejected where a <code>Stringable</code> object is accepted
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b1-staticthis-return-types-are-rejected-where-a-stringable-object-is-accepted" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. <code>static</code>/<code>$this</code> return types are rejected where a <code>Stringable</code> object is accepted
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,34 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h2 id="b1-staticthis-return-types-are-rejected-where-a-stringable-object-is-accepted">B1. <code>static</code>/<code>$this</code> return types are rejected where a <code>Stringable</code> object is accepted<a class="headerlink" href="#b1-staticthis-return-types-are-rejected-where-a-stringable-object-is-accepted" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p><code>type_mismatch_argument</code> flags passing a <code>static(Foo)</code> or <code>$this(Foo)</code>
-typed value to a <code>string</code> parameter even when <code>Foo</code> implements
-<code>Stringable</code>, which PHP accepts (it calls <code>__toString()</code>). Minimal
-reproduction:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Node implements Stringable {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    private function __get($name): static {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public function __toString(): string { return &#39;&#39;; }</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">$n = new Node();</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">throw new \Exception($n-&gt;Body-&gt;Msg);</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">// Argument 1 ($message) expects string, got static(Node)</span>
-</code></pre></div>
-<p>The cause is <code>PhpType::is_object_like</code> in <code>src/php_type/mod.rs</code>: it
-answers <code>true</code> for <code>Named</code>, <code>Generic</code>, <code>ObjectShape</code> and <code>Nullable</code>, but
-<code>false</code> for <code>TypeKind::StaticType</code> and <code>TypeKind::ThisType</code>. The
-<code>Stringable</code> branch in
-<code>src/diagnostics/type_errors/compatibility.rs::is_type_compatible</code> is
-gated on <code>is_object_like()</code>, so it never runs for those two kinds and the
-check falls through to a mismatch. <code>base_name()</code> right next to it <em>does</em>
-handle both kinds, which is what makes the diagnostic message name the
-bound class correctly while the compatibility check ignores it.</p>
-<p>Every other consumer of <code>is_object_like</code> is affected the same way, so fix
-it there rather than in the diagnostic. Real-world hit: any use of
-<code>SimpleXMLElement</code>, whose stubbed <code>__get</code> returns <code>static</code>, so
-<code>(string) $xml-&gt;Body-&gt;Message</code> style code reports a false positive on
-every argument passed to a <code>string</code> parameter.</p>
+<p>No outstanding items.</p>
 
 
 
