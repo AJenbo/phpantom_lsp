@@ -257,6 +257,10 @@ struct PackageFiles {
     /// Files from `autoload.files` and `autoload.classmap`, plus the full
     /// package tree when a `files` entry registers its own autoloader.
     plain: Vec<(PathBuf, crate::ClassCompletionOrigin)>,
+    /// The package's own root (path, origin, package name), resolved
+    /// once here so `vendor_package_roots` doesn't need to re-read and
+    /// re-parse `installed.json` to get the same information.
+    root: Option<(PathBuf, crate::ClassCompletionOrigin, String)>,
 }
 
 /// Walk one `installed.json` entry and return the PHP files it exposes.
@@ -272,9 +276,8 @@ fn collect_package_files(
     explicit_deps: &HashSet<String>,
 ) -> PackageFiles {
     let mut out = PackageFiles::default();
-    let origin = package
-        .get("name")
-        .and_then(|n| n.as_str())
+    let pkg_name = package.get("name").and_then(|n| n.as_str());
+    let origin = pkg_name
         .map(|name| classify_package_origin(name, explicit_deps))
         .unwrap_or(crate::ClassCompletionOrigin::VendorTransitive);
     // Locate the package on disk.  Composer 2's installed.json
@@ -287,7 +290,7 @@ fn collect_package_files(
     let pkg_path = if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str())
     {
         composer_dir.join(install_path)
-    } else if let Some(pkg_name) = package.get("name").and_then(|n| n.as_str()) {
+    } else if let Some(pkg_name) = pkg_name {
         vendor_path.join(pkg_name)
     } else {
         return out;
@@ -307,6 +310,12 @@ fn collect_package_files(
     if !pkg_path.is_dir() {
         return out;
     }
+
+    out.root = Some((
+        pkg_path.clone(),
+        origin,
+        pkg_name.unwrap_or("unknown/unknown").to_string(),
+    ));
 
     // Extract autoload section
     let Some(autoload) = package.get("autoload") else {
@@ -459,7 +468,10 @@ pub fn scan_vendor_packages_with_skip(
                                 skip_paths,
                                 explicit_deps,
                             );
-                            if !files.psr4.is_empty() || !files.plain.is_empty() {
+                            if !files.psr4.is_empty()
+                                || !files.plain.is_empty()
+                                || files.root.is_some()
+                            {
                                 out.push((i, files));
                             }
                         }
@@ -482,10 +494,17 @@ pub fn scan_vendor_packages_with_skip(
 
     let mut psr4_files: Vec<(PathBuf, String, crate::ClassCompletionOrigin)> = Vec::new();
     let mut plain_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
+    let mut package_roots: Vec<(PathBuf, crate::ClassCompletionOrigin, String)> = Vec::new();
     for (_, files) in collected {
         psr4_files.extend(files.psr4);
         plain_files.extend(files.plain);
+        if let Some(root) = files.root {
+            package_roots.push(root);
+        }
     }
+    // Match `vendor_package_roots`'s ordering: longest path first, so a
+    // nested package's root wins a prefix match before its parent's.
+    package_roots.sort_by_key(|(p, _, _)| std::cmp::Reverse(p.components().count()));
 
     // Phase 2: scan all collected files in parallel. Each file's origin is
     // already known from the package it was collected under (phase 1), so
@@ -500,7 +519,9 @@ pub fn scan_vendor_packages_with_skip(
 
     progress_add_total(progress, all_files.len());
 
-    scan_files_parallel_full(&all_files, progress)
+    let mut result = scan_files_parallel_full(&all_files, progress);
+    result.package_roots = package_roots;
+    result
 }
 
 /// Scan all `.php` files under the workspace root using the PSR-4
@@ -688,18 +709,26 @@ fn scan_files_parallel_full(
                 let scan = super::find_symbols(&content);
                 for fqcn in scan.classes {
                     let class_short_name = fqcn_short_name(&fqcn).to_owned();
+                    let mut origin_wins = false;
                     result
                         .classmap
-                        .entry(fqcn)
+                        .entry(fqcn.clone())
                         .and_modify(|existing| {
                             let existing_stem =
                                 existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                             let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                             if existing_stem != class_short_name && new_stem == class_short_name {
                                 *existing = path.clone();
+                                origin_wins = true;
                             }
                         })
-                        .or_insert_with(|| path.clone());
+                        .or_insert_with(|| {
+                            origin_wins = true;
+                            path.clone()
+                        });
+                    if origin_wins {
+                        result.class_origins.insert(fqcn, *origin);
+                    }
                 }
                 for fqn in scan.functions {
                     result
@@ -780,9 +809,10 @@ fn scan_files_parallel_full(
         for (scan, path, origin) in batch {
             for fqcn in scan.classes {
                 let class_short_name = fqcn_short_name(&fqcn).to_owned();
+                let mut origin_wins = false;
                 result
                     .classmap
-                    .entry(fqcn)
+                    .entry(fqcn.clone())
                     .and_modify(|existing| {
                         // When two files declare the same FQN, prefer the one
                         // whose filename matches the class's short name (PSR-4
@@ -795,9 +825,16 @@ fn scan_files_parallel_full(
                         let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                         if existing_stem != class_short_name && new_stem == class_short_name {
                             *existing = path.clone();
+                            origin_wins = true;
                         }
                     })
-                    .or_insert_with(|| path.clone());
+                    .or_insert_with(|| {
+                        origin_wins = true;
+                        path.clone()
+                    });
+                if origin_wins {
+                    result.class_origins.insert(fqcn, origin);
+                }
             }
             for fqn in scan.functions {
                 result

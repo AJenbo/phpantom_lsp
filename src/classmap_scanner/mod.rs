@@ -162,6 +162,10 @@ pub struct ScanResult {
 pub struct WorkspaceScanResult {
     /// FQN → file path for classes, interfaces, traits, and enums.
     pub classmap: HashMap<String, PathBuf>,
+    /// FQN → completion origin tier for classes, interfaces, traits, and
+    /// enums. Populated from the package a file was collected under, so
+    /// no second pass over the classmap is needed to classify origins.
+    pub(crate) class_origins: HashMap<String, crate::ClassCompletionOrigin>,
     /// FQN → file path for standalone functions.
     pub function_index: HashMap<String, PathBuf>,
     /// FQN → completion origin tier for standalone functions.
@@ -170,6 +174,11 @@ pub struct WorkspaceScanResult {
     pub constant_index: HashMap<String, PathBuf>,
     /// Constant name → completion origin tier.
     pub(crate) constant_origins: HashMap<String, crate::ClassCompletionOrigin>,
+    /// Vendor package roots discovered while parsing `installed.json`
+    /// during this scan (path, origin, package name), sorted
+    /// longest-path-first for prefix-match origin lookups. Empty for
+    /// scans that never touch a vendor tree.
+    pub(crate) package_roots: Vec<(PathBuf, crate::ClassCompletionOrigin, String)>,
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

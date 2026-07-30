@@ -1049,7 +1049,7 @@ real ceiling than the hashing was.
 
 ---
 
-## P48. Project init's remaining serial stretches
+## P49. Project init's remaining serial stretches
 
 **Impact: Low-Medium · Effort: Medium**
 
@@ -1065,9 +1065,7 @@ large Laravel project (32-core machine, release build, warm page cache,
 | vendor package collection (`collect_package_files`) | 0.060 s | 6.8 |
 | vendor file scan (`scan_files_parallel_full`) | 0.033 s | 20.5 |
 | `scan_autoload_files` | 0.038 s | 3.9 |
-| `classify_class_origin` + `fqn_uri_index` fill | 0.019 s | 1.6 |
 | workspace walk (`ignore` crate) | 0.018 s | 1.1 |
-| `vendor_package_roots` | 0.006 s | 1.0 |
 
 Each is small on its own; together they are most of what is left:
 
@@ -1077,18 +1075,6 @@ Each is small on its own; together they are most of what is left:
   roots (or its subdirectories) into separate work items would even it
   out, but the concatenation has to stay in `installed.json` order for
   duplicate FQNs to resolve to the same file.
-- **Class origins are derived twice.** The vendor scan knows which
-  package each file came from, and records it for functions and constants
-  (`WorkspaceScanResult::function_origins` / `constant_origins`), but not
-  for classes. Init then re-derives every vendor class's origin by
-  prefix-matching its path against ~400 package roots, single-threaded.
-  Carrying class origins out of the scan the way the other two already
-  are would delete the step. The Composer-classmap path (`strategy =
-  "composer"`) has no origin for its entries, so the prefix match has to
-  stay as the fallback there.
-- **`vendor_package_roots` re-reads and re-parses `installed.json`**
-  moments after `scan_vendor_packages_with_skip` parsed the same file,
-  and canonicalizes every package path a second time.
 - **The workspace walk is single-threaded.** `ignore::WalkBuilder` has
   `build_parallel`, but the walk order feeds the duplicate-FQN
   tie-break, so a parallel walk needs its results sorted to stay

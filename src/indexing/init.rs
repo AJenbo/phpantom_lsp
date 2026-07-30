@@ -4,7 +4,7 @@
 //! `impl Backend` methods build the initial symbol indexes for the three
 //! workspace shapes (single Composer project, monorepo, and no-Composer).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use tower_lsp::lsp_types::*;
@@ -81,10 +81,12 @@ impl Backend {
             .map(crate::composer::explicit_dependency_names)
             .unwrap_or_default();
 
-        let (classmap, source_label) = match strategy {
+        let (classmap, source_label, class_origins, package_roots) = match strategy {
             IndexingStrategy::None => {
                 let cm = composer::parse_autoload_classmap(root, &vendor_dir);
-                (cm, "composer")
+                let roots =
+                    classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
+                (cm, "composer", HashMap::new(), roots)
             }
             IndexingStrategy::SelfScan | IndexingStrategy::Full => {
                 // "self" strategy: scan every PHP file under the
@@ -110,25 +112,58 @@ impl Backend {
                 if let Some(p) = progress {
                     p.begin_phase(0.3, 1.0, "Scanning vendor packages");
                 }
-                let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
+                let mut vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
                     root,
                     &vendor_dir,
                     &HashSet::new(),
                     &explicit_deps,
                     progress,
                 );
+                let package_roots = std::mem::take(&mut vendor_scan.package_roots);
+
+                // Origins ride alongside the winning path: only record
+                // one for a vendor entry when it actually wins the merge
+                // (the workspace scan didn't already provide this FQN),
+                // so a symbol's recorded origin always matches the file
+                // it resolves to.
                 for (fqcn, path) in vendor_scan.classmap {
-                    scan.classmap.entry(fqcn).or_insert(path);
+                    if let std::collections::hash_map::Entry::Vacant(e) =
+                        scan.classmap.entry(fqcn.clone())
+                    {
+                        e.insert(path);
+                        if let Some(&origin) = vendor_scan.class_origins.get(&fqcn) {
+                            scan.class_origins.insert(fqcn, origin);
+                        }
+                    }
                 }
                 for (fqn, path) in vendor_scan.function_index {
-                    scan.function_index.entry(fqn).or_insert(path);
+                    if let std::collections::hash_map::Entry::Vacant(e) =
+                        scan.function_index.entry(fqn.clone())
+                    {
+                        e.insert(path);
+                        if let Some(&origin) = vendor_scan.function_origins.get(&fqn) {
+                            scan.function_origins.insert(fqn, origin);
+                        }
+                    }
                 }
                 for (name, path) in vendor_scan.constant_index {
-                    scan.constant_index.entry(name).or_insert(path);
+                    if let std::collections::hash_map::Entry::Vacant(e) =
+                        scan.constant_index.entry(name.clone())
+                    {
+                        e.insert(path);
+                        if let Some(&origin) = vendor_scan.constant_origins.get(&name) {
+                            scan.constant_origins.insert(name, origin);
+                        }
+                    }
                 }
 
                 self.populate_autoload_indices(&scan);
-                (scan.classmap, "self-scan")
+                (
+                    scan.classmap,
+                    "self-scan",
+                    scan.class_origins,
+                    package_roots,
+                )
             }
             IndexingStrategy::Composer => {
                 // ── Merged classmap + self-scan pipeline ─────────────
@@ -142,16 +177,26 @@ impl Backend {
                     progress,
                 );
                 self.populate_autoload_indices(&scan);
+                let mut class_origins = scan.class_origins;
                 let mut merged = composer_cm;
                 for (fqcn, path) in scan.classmap {
-                    merged.entry(fqcn).or_insert(path);
+                    match merged.entry(fqcn.clone()) {
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(path);
+                        }
+                        std::collections::hash_map::Entry::Occupied(_) => {
+                            // The composer classmap already provides this
+                            // FQN and wins the merge below, so classify
+                            // its origin from the path prefix like the
+                            // rest of the composer-only entries instead
+                            // of keeping the scan's (losing) origin.
+                            class_origins.remove(&fqcn);
+                        }
+                    }
                 }
-                (merged, "composer+scan")
+                (merged, "composer+scan", class_origins, scan.package_roots)
             }
         };
-
-        let vendor_package_roots =
-            classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
 
         let class_entries: Vec<(String, PathBuf)> = classmap.into_iter().collect();
         let symbol_count = class_entries.len();
@@ -160,14 +205,17 @@ impl Backend {
             let mut origins = self.symbols.fqn_origin_index.write();
             origins.clear();
             for (fqn, path) in class_entries {
-                let origin = classify_class_origin(&path, &vendor_path, &vendor_package_roots);
+                let origin = class_origins
+                    .get(&fqn)
+                    .copied()
+                    .unwrap_or_else(|| classify_class_origin(&path, &vendor_path, &package_roots));
                 origins.insert(fqn.clone(), origin);
                 idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
             }
         }
         // Cache the package roots so path-based origin lookups
         // (functions, constants) can classify lazily parsed symbols.
-        *self.workspace.vendor_package_origin_roots.write() = vendor_package_roots;
+        *self.workspace.vendor_package_origin_roots.write() = package_roots;
 
         // ── Drupal: scan web-root directories (gitignore bypassed) ──
         // Drupal's .gitignore excludes web/core, web/modules/contrib,

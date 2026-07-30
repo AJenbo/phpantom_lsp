@@ -87,15 +87,17 @@ impl Backend {
             // Rebuild vendor classmap, tracking dependency provenance so
             // completion ranking stays accurate after a composer change.
             let explicit_deps = composer::explicit_dependency_names(&pkg);
-            let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
+            let mut vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
                 root,
                 &vendor_dir,
                 &HashSet::new(),
                 &explicit_deps,
                 None,
             );
-            let vendor_package_roots =
-                classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
+            // Package roots came out of the same `installed.json` parse
+            // `scan_vendor_packages_with_skip` already did; no need to
+            // re-read and re-parse the file a second time here.
+            let vendor_package_roots = std::mem::take(&mut vendor_scan.package_roots);
             {
                 let vendor_uri_prefixes = vendor_uri_prefixes_for_path(&vendor_path);
 
@@ -108,7 +110,14 @@ impl Backend {
                         .any(|prefix| v.starts_with(prefix.as_str()))
                 });
                 for (fqn, path) in vendor_scan.classmap {
-                    let origin = classify_class_origin(&path, &vendor_path, &vendor_package_roots);
+                    let origin =
+                        vendor_scan
+                            .class_origins
+                            .get(&fqn)
+                            .copied()
+                            .unwrap_or_else(|| {
+                                classify_class_origin(&path, &vendor_path, &vendor_package_roots)
+                            });
                     origins.insert(fqn.clone(), origin);
                     idx.insert(fqn, crate::util::path_to_uri(&path));
                 }
@@ -527,7 +536,7 @@ impl Backend {
             p.begin_phase(0.2, 1.0, "Scanning vendor packages");
         }
         let explicit_deps = crate::composer::explicit_dependency_names(package);
-        let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
+        let mut vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
             project_root,
             vendor_dir,
             skip_paths,
@@ -537,17 +546,43 @@ impl Backend {
 
         let mut result = WorkspaceScanResult {
             classmap,
+            package_roots: std::mem::take(&mut vendor_scan.package_roots),
             ..Default::default()
         };
 
+        // Origins ride alongside the winning path: only record one for a
+        // vendor entry when it actually wins the merge (i.e. the project
+        // scan didn't already provide this FQN), so a symbol's recorded
+        // origin always matches the file it resolves to.
         for (fqcn, path) in vendor_scan.classmap {
-            result.classmap.entry(fqcn).or_insert(path);
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                result.classmap.entry(fqcn.clone())
+            {
+                e.insert(path);
+                if let Some(&origin) = vendor_scan.class_origins.get(&fqcn) {
+                    result.class_origins.insert(fqcn, origin);
+                }
+            }
         }
         for (fqn, path) in vendor_scan.function_index {
-            result.function_index.entry(fqn).or_insert(path);
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                result.function_index.entry(fqn.clone())
+            {
+                e.insert(path);
+                if let Some(&origin) = vendor_scan.function_origins.get(&fqn) {
+                    result.function_origins.insert(fqn, origin);
+                }
+            }
         }
         for (name, path) in vendor_scan.constant_index {
-            result.constant_index.entry(name).or_insert(path);
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                result.constant_index.entry(name.clone())
+            {
+                e.insert(path);
+                if let Some(&origin) = vendor_scan.constant_origins.get(&name) {
+                    result.constant_origins.insert(name, origin);
+                }
+            }
         }
 
         result
