@@ -326,12 +326,14 @@ impl Backend {
             return;
         }
 
-        let data = match std::fs::read(phar_path) {
+        // Map the archive rather than copying it onto the heap: the scan
+        // below only touches the pages of the `.php` entries it reads, and
+        // the map is dropped when this function returns.
+        let data = match classmap_scanner::read_for_scan(phar_path) {
             Ok(d) => d,
             Err(_) => return,
         };
-
-        let archive = match phar::PharArchive::parse(data) {
+        let archive = match phar::PharArchive::parse(phar_path, &data) {
             Some(a) => a,
             None => {
                 tracing::warn!("failed to parse phar archive: {}", phar_path.display());
@@ -364,6 +366,7 @@ impl Backend {
                     .map(|_| {
                         let next_block = &next_block;
                         let archive = &archive;
+                        let data = &data;
                         let php_files = &php_files;
                         s.spawn(move || {
                             let mut out: Vec<PharScannedBlock> = Vec::new();
@@ -376,7 +379,10 @@ impl Backend {
                                 let end = (start + PHAR_SCAN_BLOCK_FILES).min(php_files.len());
                                 let mut local: Vec<PharClass> = Vec::new();
                                 for internal_path in &php_files[start..end] {
-                                    let Some(content) = archive.read_file(internal_path) else {
+                                    let Some(range) = archive.file_range(internal_path) else {
+                                        continue;
+                                    };
+                                    let Some(content) = data.get(range) else {
                                         continue;
                                     };
                                     for fqn in classmap_scanner::find_classes(content) {

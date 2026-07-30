@@ -550,10 +550,13 @@ impl Backend {
                 uri: uri.clone(),
             };
             return (|| {
-                let archives = self.phar_archives.read();
-                let archive = archives.get(phar_path)?;
-                let bytes = archive.read_file(internal_path)?;
-                let content = std::str::from_utf8(bytes).ok()?;
+                // Read the entry before parsing so the archive map is not
+                // locked for the duration of a parse.
+                let bytes = {
+                    let archives = self.phar_archives.read();
+                    archives.get(phar_path)?.read_file(internal_path)?
+                };
+                let content = std::str::from_utf8(&bytes).ok()?;
                 self.parse_and_cache_content(content, &uri)
             })();
         }

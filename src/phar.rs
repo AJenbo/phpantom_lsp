@@ -8,8 +8,18 @@
 //! Only uncompressed phars are supported (compressed file entries are
 //! silently skipped).  This covers the most common case — PHPStan's
 //! phar contains only uncompressed files.
+//!
+//! Only the manifest is held in memory.  A tool phar runs to tens of
+//! megabytes (PHPStan's is 26 MB), so the class scan reads it through a
+//! memory map that is dropped afterwards, and the rare later request for
+//! one file's source reads just that file's byte range back off disk.
 
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use memchr::memmem;
 
 /// The marker that ends the phar stub.
 const HALT_COMPILER_MARKER: &[u8] = b"__HALT_COMPILER(); ?>";
@@ -19,25 +29,36 @@ const COMPRESSION_MASK: u32 = 0xF000;
 
 /// A parsed phar archive with random-access file extraction.
 pub(crate) struct PharArchive {
-    /// Raw bytes of the entire phar file.
-    data: Vec<u8>,
-    /// Map of internal file path → (offset into `data`, uncompressed size).
-    files: HashMap<String, (usize, usize)>,
+    /// Where the archive lives, so file contents can be read on demand.
+    path: PathBuf,
+    /// Length and modification time the archive had when its manifest was
+    /// parsed.  A lazy read checks them first: the recorded offsets mean
+    /// nothing once the archive has been replaced (a `composer update`
+    /// swaps a tool phar wholesale) and returning bytes from the middle of
+    /// a different archive would surface as nonsense classes.
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    /// Map of internal file path → (offset into the archive, uncompressed
+    /// size).
+    files: HashMap<Arc<str>, (usize, usize)>,
     /// Internal file paths in manifest order.  Iteration must be
     /// deterministic: consumers register discovered classes
     /// first-wins, so a randomized `HashMap` order would make it
     /// nondeterministic which file resolves a class name that is
     /// declared in several files of the archive (e.g. the enum and
     /// legacy-class variants of a symfony polyfill).
-    paths: Vec<String>,
+    paths: Vec<Arc<str>>,
 }
 
 impl PharArchive {
-    /// Parse a phar archive from raw bytes.
-    /// Returns `None` if the format is invalid or unsupported.
-    pub fn parse(data: Vec<u8>) -> Option<Self> {
+    /// Parse a phar archive's manifest from the archive's bytes.
+    ///
+    /// Only the manifest is retained; `data` is not kept, so the caller is
+    /// free to map the archive, scan it, and drop the mapping.  Returns
+    /// `None` if the format is invalid or unsupported.
+    pub fn parse(path: &Path, data: &[u8]) -> Option<Self> {
         // 1. Find the stub end marker.
-        let marker_pos = find_marker(&data)?;
+        let marker_pos = memmem::find(data, HALT_COMPILER_MARKER)?;
 
         // The manifest starts after the marker + a line ending (\r\n or \n).
         let after_marker = marker_pos + HALT_COMPILER_MARKER.len();
@@ -52,25 +73,25 @@ impl PharArchive {
         let mut cursor = manifest_start;
 
         // 2. Parse the manifest header.
-        let manifest_length = read_u32(&data, &mut cursor)? as usize;
+        let manifest_length = read_u32(data, &mut cursor)? as usize;
         let manifest_end = manifest_start + 4 + manifest_length;
         if manifest_end > data.len() {
             return None;
         }
 
-        let file_count = read_u32(&data, &mut cursor)? as usize;
-        let _api_version = read_u16(&data, &mut cursor)?;
-        let _global_flags = read_u32(&data, &mut cursor)?;
+        let file_count = read_u32(data, &mut cursor)? as usize;
+        let _api_version = read_u16(data, &mut cursor)?;
+        let _global_flags = read_u32(data, &mut cursor)?;
 
         // Alias: 4-byte length + alias bytes.
-        let alias_len = read_u32(&data, &mut cursor)? as usize;
+        let alias_len = read_u32(data, &mut cursor)? as usize;
         if cursor + alias_len > data.len() {
             return None;
         }
         cursor += alias_len; // skip alias bytes
 
         // Metadata: 4-byte length + metadata bytes.
-        let metadata_len = read_u32(&data, &mut cursor)? as usize;
+        let metadata_len = read_u32(data, &mut cursor)? as usize;
         if cursor + metadata_len > data.len() {
             return None;
         }
@@ -79,7 +100,7 @@ impl PharArchive {
         // 3. Parse each file entry and build the index.
         //    We collect entries first, then compute offsets into the data area.
         struct RawEntry {
-            filename: String,
+            filename: Arc<str>,
             uncompressed_size: usize,
             compressed_size: usize,
             flags: u32,
@@ -88,22 +109,25 @@ impl PharArchive {
         let mut entries = Vec::with_capacity(file_count);
 
         for _ in 0..file_count {
-            let filename_len = read_u32(&data, &mut cursor)? as usize;
+            let filename_len = read_u32(data, &mut cursor)? as usize;
             if cursor + filename_len > data.len() {
                 return None;
             }
-            let filename =
-                String::from_utf8_lossy(&data[cursor..cursor + filename_len]).into_owned();
+            // A tool phar holds tens of thousands of entries, and the name
+            // is needed both as a map key and in the manifest-order list;
+            // sharing one allocation keeps this off the startup path.
+            let filename: Arc<str> =
+                Arc::from(String::from_utf8_lossy(&data[cursor..cursor + filename_len]).as_ref());
             cursor += filename_len;
 
-            let uncompressed_size = read_u32(&data, &mut cursor)? as usize;
-            let _timestamp = read_u32(&data, &mut cursor)?;
-            let compressed_size = read_u32(&data, &mut cursor)? as usize;
-            let _crc32 = read_u32(&data, &mut cursor)?;
-            let flags = read_u32(&data, &mut cursor)?;
+            let uncompressed_size = read_u32(data, &mut cursor)? as usize;
+            let _timestamp = read_u32(data, &mut cursor)?;
+            let compressed_size = read_u32(data, &mut cursor)? as usize;
+            let _crc32 = read_u32(data, &mut cursor)?;
+            let flags = read_u32(data, &mut cursor)?;
 
             // Per-file metadata.
-            let file_metadata_len = read_u32(&data, &mut cursor)? as usize;
+            let file_metadata_len = read_u32(data, &mut cursor)? as usize;
             if cursor + file_metadata_len > data.len() {
                 return None;
             }
@@ -125,53 +149,68 @@ impl PharArchive {
         let mut paths = Vec::with_capacity(file_count);
         let mut offset = data_area_start;
 
-        for entry in &entries {
+        for entry in entries {
             // Only index uncompressed files (compression bits 12–15 clear).
             if entry.flags & COMPRESSION_MASK == 0 {
                 if offset + entry.compressed_size > data.len() {
                     return None;
                 }
                 if files
-                    .insert(entry.filename.clone(), (offset, entry.uncompressed_size))
+                    .insert(
+                        Arc::clone(&entry.filename),
+                        (offset, entry.uncompressed_size),
+                    )
                     .is_none()
                 {
-                    paths.push(entry.filename.clone());
+                    paths.push(entry.filename);
                 }
             }
             offset += entry.compressed_size;
         }
 
-        Some(Self { data, files, paths })
+        let metadata = std::fs::metadata(path).ok();
+        Some(Self {
+            path: path.to_owned(),
+            len: data.len() as u64,
+            modified: metadata.and_then(|m| m.modified().ok()),
+            files,
+            paths,
+        })
     }
 
-    /// Extract the content of a file inside the phar.
-    pub fn read_file(&self, internal_path: &str) -> Option<&[u8]> {
+    /// The byte range one file inside the phar occupies.
+    ///
+    /// Used by the initial class scan, which already has the whole archive
+    /// mapped and can slice it directly.
+    pub fn file_range(&self, internal_path: &str) -> Option<std::ops::Range<usize>> {
         let &(offset, size) = self.files.get(internal_path)?;
-        self.data.get(offset..offset + size)
+        Some(offset..offset + size)
+    }
+
+    /// Read the content of a file inside the phar from disk.
+    ///
+    /// Returns `None` when the archive has been replaced since it was
+    /// parsed, since the recorded offsets no longer describe it.
+    pub fn read_file(&self, internal_path: &str) -> Option<Vec<u8>> {
+        let range = self.file_range(internal_path)?;
+        let mut file = std::fs::File::open(&self.path).ok()?;
+        let metadata = file.metadata().ok()?;
+        if metadata.len() != self.len || metadata.modified().ok() != self.modified {
+            return None;
+        }
+        file.seek(SeekFrom::Start(range.start as u64)).ok()?;
+        let mut buf = vec![0u8; range.len()];
+        file.read_exact(&mut buf).ok()?;
+        Some(buf)
     }
 
     /// Iterate over all file paths in the archive, in manifest order.
     pub fn file_paths(&self) -> impl Iterator<Item = &str> {
-        self.paths.iter().map(String::as_str)
+        self.paths.iter().map(Arc::as_ref)
     }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Find the byte offset where `__HALT_COMPILER(); ?>` begins.
-fn find_marker(data: &[u8]) -> Option<usize> {
-    let marker = HALT_COMPILER_MARKER;
-    let len = marker.len();
-    if data.len() < len {
-        return None;
-    }
-    for i in 0..=data.len() - len {
-        if &data[i..i + len] == marker {
-            return Some(i);
-        }
-    }
-    None
-}
 
 /// Read a little-endian `u32` from `data` at `*cursor`, advancing the cursor.
 fn read_u32(data: &[u8], cursor: &mut usize) -> Option<u32> {
@@ -257,6 +296,18 @@ mod tests {
         buf
     }
 
+    /// Write phar bytes to a temporary file and parse them, returning the
+    /// archive together with the directory keeping the file alive.
+    ///
+    /// `read_file` reads from disk, so the file has to outlive the archive.
+    fn parse_test_phar(bytes: &[u8]) -> Option<(tempfile::TempDir, PharArchive)> {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("test.phar");
+        std::fs::write(&path, bytes).expect("write phar");
+        let archive = PharArchive::parse(&path, bytes)?;
+        Some((dir, archive))
+    }
+
     #[test]
     fn parse_minimal_phar() {
         let phar_bytes = build_test_phar(&[
@@ -264,7 +315,7 @@ mod tests {
             ("src/Bar.php", b"<?php class Bar {}"),
         ]);
 
-        let archive = PharArchive::parse(phar_bytes).expect("should parse valid phar");
+        let (_dir, archive) = parse_test_phar(&phar_bytes).expect("should parse valid phar");
 
         assert_eq!(archive.files.len(), 2);
         assert!(archive.files.contains_key("src/Foo.php"));
@@ -279,15 +330,15 @@ mod tests {
         let phar_bytes =
             build_test_phar(&[("src/Foo.php", foo_content), ("src/Bar.php", bar_content)]);
 
-        let archive = PharArchive::parse(phar_bytes).expect("should parse");
+        let (_dir, archive) = parse_test_phar(&phar_bytes).expect("should parse");
 
         assert_eq!(
-            archive.read_file("src/Foo.php"),
-            Some(foo_content.as_slice())
+            archive.read_file("src/Foo.php").as_deref(),
+            Some(&foo_content[..])
         );
         assert_eq!(
-            archive.read_file("src/Bar.php"),
-            Some(bar_content.as_slice())
+            archive.read_file("src/Bar.php").as_deref(),
+            Some(&bar_content[..])
         );
         assert_eq!(archive.read_file("src/Missing.php"), None);
     }
@@ -300,7 +351,7 @@ mod tests {
             ("c.php", b"<?php // c"),
         ]);
 
-        let archive = PharArchive::parse(phar_bytes).expect("should parse");
+        let (_dir, archive) = parse_test_phar(&phar_bytes).expect("should parse");
 
         let mut paths: Vec<&str> = archive.file_paths().collect();
         paths.sort();
@@ -316,7 +367,7 @@ mod tests {
             ("mid.php", b"<?php // m"),
         ]);
 
-        let archive = PharArchive::parse(phar_bytes).expect("should parse");
+        let (_dir, archive) = parse_test_phar(&phar_bytes).expect("should parse");
 
         let paths: Vec<&str> = archive.file_paths().collect();
         assert_eq!(paths, vec!["zeta.php", "alpha.php", "mid.php"]);
@@ -324,8 +375,8 @@ mod tests {
 
     #[test]
     fn parse_returns_none_for_garbage() {
-        assert!(PharArchive::parse(vec![0, 1, 2, 3]).is_none());
-        assert!(PharArchive::parse(Vec::new()).is_none());
+        assert!(parse_test_phar(&[0, 1, 2, 3]).is_none());
+        assert!(parse_test_phar(&[]).is_none());
     }
 
     #[test]
@@ -359,8 +410,26 @@ mod tests {
         buf.extend_from_slice(&manifest_body);
         buf.extend_from_slice(foo_content);
 
-        let archive = PharArchive::parse(buf).expect("should parse with CRLF");
-        assert_eq!(archive.read_file("Foo.php"), Some(foo_content.as_slice()));
+        let (_dir, archive) = parse_test_phar(&buf).expect("should parse with CRLF");
+        assert_eq!(
+            archive.read_file("Foo.php").as_deref(),
+            Some(&foo_content[..])
+        );
+    }
+
+    #[test]
+    fn read_file_refuses_a_replaced_archive() {
+        let phar_bytes = build_test_phar(&[("src/Foo.php", b"<?php class Foo {}")]);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("test.phar");
+        std::fs::write(&path, &phar_bytes).expect("write phar");
+        let archive = PharArchive::parse(&path, &phar_bytes).expect("should parse");
+
+        // A `composer update` swaps the whole archive, which leaves the
+        // recorded offsets describing a file that no longer exists.
+        std::fs::write(&path, b"replaced with something else entirely").expect("replace phar");
+
+        assert_eq!(archive.read_file("src/Foo.php"), None);
     }
 
     #[test]
@@ -406,10 +475,13 @@ mod tests {
         buf.extend_from_slice(good_content);
         buf.extend_from_slice(compressed_content);
 
-        let archive = PharArchive::parse(buf).expect("should parse");
+        let (_dir, archive) = parse_test_phar(&buf).expect("should parse");
 
         // Good.php should be readable.
-        assert_eq!(archive.read_file("Good.php"), Some(good_content.as_slice()));
+        assert_eq!(
+            archive.read_file("Good.php").as_deref(),
+            Some(&good_content[..])
+        );
         // Compressed.php should be skipped.
         assert!(archive.read_file("Compressed.php").is_none());
         // Only one file path should be listed.

@@ -1049,49 +1049,6 @@ real ceiling than the hashing was.
 
 ---
 
-## P49. Project init's remaining serial stretches
-
-**Impact: Low-Medium · Effort: Medium**
-
-`init_single_project` is down from 0.60 s at 3.2 of 32 cores to 0.21 s
-at 6.2 (mmap contention, per-package collection, and the batch scanners'
-static chunking are fixed), so the diagnostic pass is once again the
-largest share of wall clock. What is left inside init, measured on a
-large Laravel project (32-core machine, release build, warm page cache,
-`utime + stime` from `/proc/self/stat` at each boundary):
-
-| Step | Wall | Avg cores |
-| --- | --- | --- |
-| vendor package collection (`collect_package_files`) | 0.060 s | 6.8 |
-| vendor file scan (`scan_files_parallel_full`) | 0.033 s | 20.5 |
-| `scan_autoload_files` | 0.038 s | 3.9 |
-| workspace walk (`ignore` crate) | 0.018 s | 1.1 |
-
-Each is small on its own; together they are most of what is left:
-
-- **Vendor collection is per-package parallel, but one package is the
-  straggler.** `laravel/framework`'s PSR-4 tree is a single work item, so
-  the tail of the walk runs on one core. Splitting a package's PSR-4
-  roots (or its subdirectories) into separate work items would even it
-  out, but the concatenation has to stay in `installed.json` order for
-  duplicate FQNs to resolve to the same file.
-- **The workspace walk is single-threaded.** `ignore::WalkBuilder` has
-  `build_parallel`, but the walk order feeds the duplicate-FQN
-  tie-break, so a parallel walk needs its results sorted to stay
-  deterministic.
-- **Reading and manifest-parsing a bundled `.phar` is serial.** With
-  phpstan installed this is 17 ms of the 24 ms `require_once` sweep; the
-  class scan inside the archive is already parallel.
-
-Reproduce with the CPU-sampling loop in the Appendix, or by reading
-`utime + stime` from `/proc/self/stat` at each phase boundary and
-dividing by the phase's wall time. Per-phase numbers for the run as a
-whole (same project): init 0.21 s at 6.2 cores, `discover_user_files`
-0.02 s at 1.1, Phase 1 index 0.02 s at 21.5, Phase 1.5 eager populate
-0.05 s at 4.4, Phase 2 diagnostics 0.47 s at 20.9.
-
----
-
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues were addressed by eager class

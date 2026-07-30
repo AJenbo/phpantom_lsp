@@ -631,3 +631,87 @@ fn scan_drupal_directories_ignores_non_php_files() {
         "should not index .yml or .txt files"
     );
 }
+
+#[test]
+fn psr4_prefixes_sharing_a_directory_both_resolve() {
+    // A package can point two namespace prefixes at the same directory
+    // (Laravel does something close to this with `Illuminate\Support`).
+    // The parallel walk visits such a directory once, so the file has to
+    // be handed to both mappings or one prefix loses its classes.
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        src.join("Thing.php"),
+        "<?php\nnamespace One;\nclass Thing {}",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("Other.php"),
+        "<?php\nnamespace Two;\nclass Other {}",
+    )
+    .unwrap();
+
+    let classmap = scan_psr4_directories(
+        &[
+            ("One\\".to_string(), src.clone()),
+            ("Two\\".to_string(), src),
+        ],
+        &[],
+        &[],
+    );
+    assert!(classmap.contains_key("One\\Thing"));
+    assert!(classmap.contains_key("Two\\Other"));
+}
+
+#[test]
+fn psr4_nested_mapping_does_not_shadow_its_parent() {
+    // Laravel maps both `src/Illuminate` and `src/Illuminate/Collections`,
+    // so the nested directory is reached by two walks.  Each mapping must
+    // still see the files below it under its own namespace prefix.
+    let dir = tempfile::tempdir().unwrap();
+    let outer = dir.path().join("src");
+    let inner = outer.join("Nested");
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::write(
+        inner.join("Item.php"),
+        "<?php\nnamespace Outer\\Nested;\nclass Item {}",
+    )
+    .unwrap();
+    std::fs::write(
+        inner.join("Other.php"),
+        "<?php\nnamespace Inner;\nclass Other {}",
+    )
+    .unwrap();
+
+    let classmap = scan_psr4_directories(
+        &[
+            ("Outer\\".to_string(), outer),
+            ("Inner\\".to_string(), inner),
+        ],
+        &[],
+        &[],
+    );
+    assert!(classmap.contains_key("Outer\\Nested\\Item"));
+    assert!(classmap.contains_key("Inner\\Other"));
+}
+
+#[test]
+fn scan_directories_follows_a_symlinked_root() {
+    // A monorepo or path repository can expose a source directory through
+    // a symlink; the walk has to descend into the root it was given even
+    // though it does not follow symlinks found inside the tree.
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("Linked.php"), "<?php\nclass Linked {}").unwrap();
+
+    let link = dir.path().join("link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+    let classmap = scan_directories(&[link], &[]);
+    assert!(classmap.contains_key("Linked"));
+}
