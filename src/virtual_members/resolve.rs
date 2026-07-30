@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::atom::atom;
 use crate::inheritance::{
@@ -73,6 +74,19 @@ impl Drop for InFlightGuard<'_> {
 /// (all files parsed into `uri_classes_index`) and again incrementally when files
 /// change (see ER4 in `docs/todo/eager-resolution.md`).
 ///
+/// The list is consumed by a pool of scoped workers on
+/// [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE) stacks, so
+/// callers do not need to arrange either the parallelism or the stack
+/// size themselves; the call blocks until the whole list is populated.
+/// Workers pull indices off a shared counter, so the list is still
+/// consumed dependency-first overall and a class's dependencies are
+/// normally cached by the time it is claimed.  Immediate neighbours can
+/// race: a worker that claims a class whose parent another worker is
+/// still resolving resolves that parent itself, since the in-flight set
+/// is keyed per thread.  That duplicates a bounded amount of work (under
+/// 6 % of resolutions even with far more workers than are used here) and
+/// leaves one of the two identical results in the cache.
+///
 /// # Arguments
 ///
 /// * `sorted_fqns` — class FQNs in topological (dependency-first) order,
@@ -85,36 +99,82 @@ impl Drop for InFlightGuard<'_> {
 pub fn populate_from_sorted(
     sorted_fqns: &[String],
     cache: &ResolvedClassCache,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + Sync),
 ) {
-    for fqn in sorted_fqns {
-        // Skip classes already in the cache (e.g. from a previous
-        // incremental population run).
-        let cache_key: ResolvedClassCacheKey = (atom(fqn), Vec::new());
-        {
-            let map = cache.read();
-            if map.contains_key(&cache_key) {
-                continue;
-            }
+    let cap = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(MAX_POPULATE_WORKERS);
+    let workers = (sorted_fqns.len() / MIN_CLASSES_PER_WORKER).clamp(1, cap);
+
+    let next = AtomicUsize::new(0);
+    // Large stacks: class resolution walks parsed ASTs and can nest when
+    // the toposort misses dependencies (stubs, on-demand vendor loads).
+    std::thread::scope(|s| {
+        for _ in 0..workers {
+            let next = &next;
+            std::thread::Builder::new()
+                .name("eager-populate".into())
+                .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                .spawn_scoped(s, move || {
+                    while let Some(fqn) = sorted_fqns.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        populate_one(fqn, cache, class_loader);
+                    }
+                })
+                .expect("failed to spawn eager-populate worker");
         }
+    });
+}
 
-        // Load the raw (un-merged) class.  If the class_loader cannot
-        // find it (e.g. it was removed between toposort and now), skip.
-        let raw_class = match class_loader(fqn) {
-            Some(c) => c,
-            None => continue,
-        };
+/// Classes per worker below which fanning the population out costs more
+/// than it saves.
+///
+/// Population averages a fraction of a millisecond per class, so a
+/// worker needs a few dozen classes before its spawn cost disappears
+/// into the work it does.  Incremental re-population after an edit
+/// usually evicts a handful of classes and so stays on one worker.
+const MIN_CLASSES_PER_WORKER: usize = 64;
 
-        // resolve_class_fully_inner will:
-        // 1. Check cache (miss for this class, but hits for deps)
-        // 2. Run resolve_class_with_inheritance (parent chain walk —
-        //    parents are raw, but the walk is bounded by MAX_INHERITANCE_DEPTH)
-        // 3. Run apply_virtual_members — providers call resolve_class_fully
-        //    for related classes, which hit the cache (already populated)
-        // 4. Merge interfaces — also hit cache for resolved interfaces
-        // 5. Store result in cache
-        resolve_class_fully_inner(&raw_class, class_loader, Some(cache));
+/// Ceiling on the population worker pool, independent of core count.
+///
+/// Every resolution reads the shared [`ResolvedClassCache`] and takes its
+/// write lock to insert the finished class and to intern transformed
+/// members, so throughput is bounded by that one lock rather than by
+/// cores.  Measured on large Laravel projects on a 32-core machine, wall
+/// time falls steeply to roughly this many workers and then flattens;
+/// past it the extra threads only contend, and at one worker per core
+/// some projects regress to worse than four workers.  Duplicated work is
+/// not the limit (it stays under 6 % of resolutions even at 32 workers).
+const MAX_POPULATE_WORKERS: usize = 8;
+
+/// Resolve one class into the cache, skipping it when already cached or
+/// no longer loadable.
+fn populate_one(
+    fqn: &str,
+    cache: &ResolvedClassCache,
+    class_loader: &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + Sync),
+) {
+    // Skip classes already in the cache (e.g. from a previous
+    // incremental population run).
+    let cache_key: ResolvedClassCacheKey = (atom(fqn), Vec::new());
+    if cache.read().contains_key(&cache_key) {
+        return;
     }
+
+    // Load the raw (un-merged) class.  If the class_loader cannot find
+    // it (e.g. it was removed between toposort and now), skip.
+    let Some(raw_class) = class_loader(fqn) else {
+        return;
+    };
+
+    // resolve_class_fully_inner will:
+    // 1. Check cache (miss for this class, but hits for deps)
+    // 2. Run resolve_class_with_inheritance (parent chain walk —
+    //    parents are raw, but the walk is bounded by MAX_INHERITANCE_DEPTH)
+    // 3. Run apply_virtual_members — providers call resolve_class_fully
+    //    for related classes, which hit the cache (already populated)
+    // 4. Merge interfaces — also hit cache for resolved interfaces
+    // 5. Store result in cache
+    resolve_class_fully_inner(&raw_class, class_loader, Some(cache));
 }
 
 // ─── Full class resolution ──────────────────────────────────────────────────

@@ -816,36 +816,91 @@ waiting on the triggers above.
 
 ---
 
-## P34. Eager class population is single-threaded
+## P47. The resolved-class cache lock caps concurrent class resolution
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Effort: Medium-High**
 
-`populate_from_sorted` (`src/virtual_members/resolve.rs`) resolves the
-toposorted class list in a serial loop on one dedicated thread, in both
-the `analyze` Phase 1.5 and the LSP server's post-index
-`eager_populate_resolved_classes`. On a large Laravel project this is
-~1 s of single-core work in a release build and scales linearly with
-class count; on very large workspaces it is a visible single-threaded
-stretch between the (parallel) index and the (parallel) diagnostics
-pass.
+`ResolvedClassCache` is a single `RwLock<ResolvedCacheInner>`, and every
+resolution takes its write lock several times: twice per
+`resolve_class_fully_inner` call to mark and clear the cycle-break
+in-flight marker, once to insert the finished class, and once per
+transformed member that `intern_transformed_method` /
+`intern_transformed_property` has to build (the read side of interning
+takes the read lock even on a hit). Member interning dominates the
+volume by far, since a merge produces one lookup per inherited or
+synthesized member.
 
-Resolution is already safe to run concurrently: the cycle-break
-in-flight set is keyed by `(thread, FQN)`, and two threads resolving
-the same class merely duplicate work, with one result winning the
-cache write. Two directions:
+Measured with the eager-population worker pool
+(`populate_from_sorted`) swept from 1 to 32 workers on a 16-core / 32-thread
+SMT machine (Ryzen 9 5950X), release build, large Laravel projects: wall
+time falls steeply to ~8 workers, flattens through 16, and then
+*regresses* past that. On one project 2.1k classes went 0.62 s
+(1 worker) → 0.16 s (8) → 0.27 s (32), i.e. 32 workers were worse than
+4. Duplicated resolution is not the cause: the count of full resolutions
+rises only 5.9 % from 1 to 32 workers.
 
-1. **Work-stealing over the sorted list.** N workers pull indices from
-   an atomic counter over the existing toposorted vector. Most
-   dependencies are already cached by the time a dependent is pulled;
-   occasional duplicated resolution near list neighbours is bounded and
-   correct. Smallest change.
-2. **Topological generations.** Have the toposort emit levels
-   (classes whose dependencies are all in earlier levels) and fan each
-   level out across a scoped thread pool with a barrier between levels.
-   No duplicated work, slightly more coordination.
+Two confounds on this hardware make the raw sweep numbers hard to read
+at face value. The 16→32 leg is SMT: past 16 threads two workers share
+a physical core's execution resources rather than getting one each,
+which degrades throughput on its own and independently amplifies any
+lock contention (a spinning waiter now trashes the lock-holder's cache
+lines on the same core instead of a separate one). More importantly,
+the 5950X is dual-CCD — cores 0-7 and 8-15 (and their SMT siblings
+16-23/24-31) sit behind two separate L3 caches (`lscpu -e=CPU,CORE,CACHE`
+shows the split), and cache-line traffic for anything shared, including
+this lock, crosses the Infinity Fabric between them at much higher
+latency than a same-CCD hop. An unpinned process asking for ≤8 threads
+tends to get packed onto one CCD by the scheduler; past 8 it necessarily
+spills onto the second. Confirmed directly with `taskset`: 8 workers
+pinned to `0-7` (one CCD, no SMT) averaged 1.79 s wall for the same
+whole-project run that split 4+4 across both CCDs (`0,1,2,3,8,9,10,11`,
+still 8 distinct physical cores, still no SMT) averaged 2.02-2.17 s —
+15-20 % slower from CCD-crossing alone, with identical core count and
+no hyperthreading involved. So the knee at 8 in the original unpinned
+sweep is at least partly a topology artifact of this machine, not
+solely "how much lock contention exists at that many workers" — the
+same experiment on a single-CCD or single-die machine would likely
+plateau at a different worker count. `MAX_POPULATE_WORKERS` is pinned
+to 8 regardless: it is the largest value that stayed reliably within
+one CCD's worth of cores in testing, so it also happens to dodge the
+cross-CCD lock-traffic penalty as a side effect, not just diminishing
+per-lock-acquisition returns.
 
-Both need the workers on `PARSE_WORKER_STACK_SIZE` stacks, matching the
-current single populate thread.
+Implication for the fix: fixing the lock removes the *within-CCD*
+contention this section measured, and should let population usefully
+raise `MAX_POPULATE_WORKERS` above 8. But raising it past one CCD's
+core count re-introduces cross-CCD traffic for whatever of the lock
+(sharded or not) is still shared — a plain `Vec<Mutex<Shard>>` does not
+avoid that on its own. Re-run the `taskset` same-CCD-vs-split comparison
+above after any lock-splitting change before raising the cap past 8, to
+check how much of the remaining ceiling is the lock versus the CCD
+boundary.
+
+The same lock is on the diagnostic pass's hot path (see P35), so
+splitting it should also help there. Directions, cheapest first:
+
+1. **Take the in-flight set off the shared lock.** It is already keyed
+   `(ThreadId, FQN)` purely to emulate a thread-local, so making it an
+   actual thread-local `HashSet<Atom>` removes two write locks per
+   resolution with no semantic change. Measured on its own this did
+   *not* move the sweep, so it is a prerequisite rather than the fix,
+   but it is nearly free.
+2. **Shard the interning tables.** `substituted_methods` /
+   `substituted_properties` are keyed by origin pointer and a
+   fingerprint hash, so they shard cleanly (e.g. by low bits of the
+   key) into independent locks without changing what gets shared. This
+   is where the volume is.
+3. **Separate the interning tables from the class map entirely.** The
+   two have different access patterns (interning is
+   write-heavy-then-read-heavy per merge; the class map is one insert
+   per class) and only share a lock for convenience. Note the member
+   sharing they provide is load-bearing for memory, so any change must
+   keep cross-class sharing intact rather than falling back to
+   per-thread tables.
+
+Before implementing, confirm the attribution by counting lock
+acquisitions per site during a population run: the sweep above proves
+*a* lock is the ceiling but not which acquirer dominates.
 
 ---
 

@@ -202,27 +202,14 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         let uri_classes_index = backend.symbols.uri_classes_index.read();
         crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
     };
-    // Run on a dedicated large-stack thread: `resolve_class_fully_inner`
-    // can nest deeply when the toposort misses dependencies (stubs,
-    // dynamically loaded classes), and this runs on a Tokio worker whose
-    // stack is the 2 MB default rather than the main thread's 8 MB.
-    std::thread::scope(|s| {
-        let backend = &backend;
-        let sorted_fqns = &sorted_fqns;
-        std::thread::Builder::new()
-            .name("eager-populate".into())
-            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-            .spawn_scoped(s, move || {
-                let class_loader =
-                    |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
-                crate::virtual_members::populate_from_sorted(
-                    sorted_fqns,
-                    &backend.resolved_class_cache,
-                    &class_loader,
-                );
-            })
-            .expect("failed to spawn eager-population thread");
-    });
+    // `populate_from_sorted` fans the list out over its own large-stack
+    // workers, so this needs no wrapper thread of its own.
+    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
+    crate::virtual_members::populate_from_sorted(
+        &sorted_fqns,
+        &backend.resolved_class_cache,
+        &class_loader,
+    );
     // ── Phase 2: Collect diagnostics (parallel) ─────────────────────
     // Call individual collectors directly (instead of the grouped
     // collect_slow_diagnostics) so we can time each one independently.

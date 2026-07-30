@@ -43,25 +43,15 @@ impl Backend {
                 let uri_classes_index = backend.symbols.uri_classes_index.read();
                 crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
             };
-            // Dedicated large-stack thread: class resolution walks
-            // parsed ASTs and can nest when the toposort misses
-            // dependencies (stubs, on-demand vendor loads).
-            std::thread::scope(|s| {
-                let backend = &backend;
-                let sorted_fqns = &sorted_fqns;
-                std::thread::Builder::new()
-                    .name("eager-populate".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        let class_loader = |name: &str| backend.find_or_load_class(name);
-                        crate::virtual_members::populate_from_sorted(
-                            sorted_fqns,
-                            &backend.resolved_class_cache,
-                            &class_loader,
-                        );
-                    })
-                    .expect("failed to spawn eager-populate thread");
-            });
+            // `populate_from_sorted` fans the list out over its own
+            // large-stack workers, so this needs no wrapper thread of
+            // its own.
+            let class_loader = |name: &str| backend.find_or_load_class(name);
+            crate::virtual_members::populate_from_sorted(
+                &sorted_fqns,
+                &backend.resolved_class_cache,
+                &class_loader,
+            );
         })
         .await;
     }
