@@ -17,7 +17,7 @@ use mago_database::file::FileId;
 use mago_phpdoc_syntax::cst::r#type as type_ast;
 use mago_phpdoc_syntax::cst::{
     AssertPattern, Element, MethodTagValue, PropertyTagValue, Tag, TagValue,
-    TemplateTagValue as CstTemplateTagValue, TemplateTagValueVariance, Text, Variable,
+    TemplateTagValue as CstTemplateTagValue, TemplateTagValueVariance, Text, TextSegment, Variable,
 };
 use mago_span::{HasSpan, Position, Span};
 use mago_syntax::cst::*;
@@ -175,10 +175,6 @@ pub(super) fn extract_docblock_symbols(
     base_offset: u32,
     spans: &mut Vec<SymbolSpan>,
 ) -> DocblockSymbols {
-    // Inline `{@see ...}` references sit in free text rather than in a tag
-    // value of their own, so they are found by scanning the raw docblock.
-    extract_inline_see_symbols(docblock, base_offset, spans);
-
     let mut found = DocblockSymbols::default();
     let mut sink = DocblockSink {
         spans,
@@ -191,9 +187,17 @@ pub(super) fn extract_docblock_symbols(
 
     with_docblock_cst(docblock, docblock_span(docblock, base_offset), |document| {
         for (index, element) in document.elements.iter().enumerate() {
-            let Element::Tag(tag) = element else { continue };
-            if let Some(keyword) = emit_tag_symbols(tag, docblock, base_offset, &mut sink) {
-                recoveries.push((index, keyword));
+            match element {
+                Element::Tag(tag) => {
+                    if let Some(keyword) = emit_tag_symbols(tag, docblock, base_offset, &mut sink) {
+                        recoveries.push((index, keyword));
+                    }
+                }
+                // Free text ahead of the first tag, e.g. `Wraps {@see Foo}.`
+                Element::Text(text) => {
+                    scan_text_for_inline_see(text, docblock, base_offset, sink.spans);
+                }
+                Element::Code(_) => {}
             }
         }
     });
@@ -281,6 +285,13 @@ fn emit_tag_symbols(
         _ => {}
     }
 
+    // A `{@see ...}` can turn up in the free-text description of any tag
+    // shape that has one (`@param Type $x see {@see Foo}`, `@deprecated in
+    // favour of {@see Bar}`, ...), not just in a `@see` tag's own value.
+    if let Some(description) = tag_description(&tag.value) {
+        scan_text_for_inline_see(&description, docblock, base_offset, sink.spans);
+    }
+
     None
 }
 
@@ -334,6 +345,9 @@ fn recover_static_method_tags(
             let Element::Tag(tag) = element else { continue };
             if let TagValue::Method(value) = &tag.value {
                 emit_method_tag_symbols(value, true, sink);
+                if let Some(description) = value.description {
+                    scan_text_for_inline_see(&description, docblock, base_offset, sink.spans);
+                }
             }
         }
     });
@@ -785,33 +799,102 @@ fn emit_generic_params(params: &type_ast::GenericParameters<'_>, sink: &mut Docb
 
 // ─── @see tag symbol extraction ─────────────────────────────────────────────
 
-/// Scan raw docblock text for inline `{@see ...}` references.
+/// Walk a `Text` node's segments for inline `{@see ...}` references.
 ///
-/// The CST does model these (as a `TextSegment::InlineTag`), but they can turn
-/// up in any prose: the free text before the first tag, and the description of
-/// every tag that has one.  Scanning the raw string reaches all of them in one
-/// pass, without a `Text` visitor threaded through each tag shape.
-fn extract_inline_see_symbols(docblock: &str, base_offset: u32, spans: &mut Vec<SymbolSpan>) {
-    let mut search_from = 0;
-    while let Some(open) = docblock[search_from..].find("{@see ") {
-        let abs_open = search_from + open;
-        let after_tag = abs_open + 6; // length of "{@see "
-        if let Some(close) = docblock[after_tag..].find('}') {
-            let reference = docblock[after_tag..after_tag + close].trim();
-            if !reference.is_empty() {
-                // The reference token starts after `{@see `.
-                let ref_start = after_tag
-                    + (docblock[after_tag..after_tag + close].len()
-                        - docblock[after_tag..after_tag + close].trim_start().len());
-                let first_token = reference.split_whitespace().next().unwrap_or("");
-                if !first_token.is_empty() {
-                    emit_see_reference(first_token, base_offset + ref_start as u32, spans);
-                }
-            }
-            search_from = after_tag + close + 1;
-        } else {
-            break;
+/// Inline tags can turn up in any prose: the free text before the first tag,
+/// and the description of every tag shape that has one.  Every one of those
+/// is a [`Text`] node, so a single recursive walk over its segments reaches
+/// all of them without re-deriving tag structure from raw bytes; a nested
+/// `{@see}` (e.g. inside a `{@deprecated ...}` aside) is found by recursing
+/// into the inline tag's own description in turn.
+fn scan_text_for_inline_see(
+    text: &Text<'_>,
+    docblock: &str,
+    base_offset: u32,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for segment in text.segments {
+        let TextSegment::InlineTag(inline) = segment else {
+            continue;
+        };
+
+        if tag_kind(inline.tag) == TagKind::See
+            && let TagValue::Generic(value) = &inline.tag.value
+        {
+            emit_see_tag_symbol(&value.value, docblock, base_offset, spans);
         }
+
+        if let Some(nested) = tag_description(&inline.tag.value) {
+            scan_text_for_inline_see(&nested, docblock, base_offset, spans);
+        }
+    }
+}
+
+/// The free-text `description` a tag carries, if any; for `@see`/`@link`/and
+/// other tags the grammar keeps as raw prose (`TagValue::Generic`/`Invalid`),
+/// their whole value stands in for a description.
+///
+/// Every tag shape that has one keeps it as a `Text` (directly, or behind an
+/// `Option` for tags where a description is optional); this is the shared
+/// accessor [`scan_text_for_inline_see`] walks to find a `{@see ...}` nested
+/// in another tag's prose.
+fn tag_description<'a>(value: &TagValue<'a>) -> Option<Text<'a>> {
+    match value {
+        TagValue::Param(v) => v.description,
+        TagValue::TypelessParam(v) => v.description,
+        TagValue::ParamOut(v) => v.description,
+        TagValue::ParamClosureThis(v) => v.description,
+        TagValue::ParamImmediatelyInvokedCallable(v) => v.description,
+        TagValue::ParamLaterInvokedCallable(v) => v.description,
+        TagValue::Return(v) | TagValue::RealReturn(v) => v.description,
+        TagValue::Var(v) => v.description,
+        TagValue::Throws(v) => v.description,
+        TagValue::Mixin(v) => v.description,
+        TagValue::SelfOut(v) => v.description,
+        TagValue::Template(v) => v.description,
+        TagValue::Extends(v) => v.description,
+        TagValue::Implements(v) => v.description,
+        TagValue::Use(v) => v.description,
+        TagValue::RequireExtends(v) => v.description,
+        TagValue::RequireImplements(v) => v.description,
+        TagValue::Sealed(v) => v.description,
+        TagValue::Inheritors(v) => v.description,
+        TagValue::Method(v) => v.description,
+        TagValue::Property(v) | TagValue::PropertyRead(v) | TagValue::PropertyWrite(v) => {
+            v.description
+        }
+        TagValue::Assert(v) | TagValue::AssertIfTrue(v) | TagValue::AssertIfFalse(v) => {
+            v.description
+        }
+        TagValue::PureUnlessCallableIsImpure(v) => v.description,
+        TagValue::Deprecated(v) => Some(v.description),
+        TagValue::Final(v) => Some(v.description),
+        TagValue::Internal(v) => Some(v.description),
+        TagValue::Api(v) => Some(v.description),
+        TagValue::Experimental(v) => Some(v.description),
+        TagValue::Pure(v) => Some(v.description),
+        TagValue::Impure(v) => Some(v.description),
+        TagValue::Readonly(v) => Some(v.description),
+        TagValue::MustUse(v) => Some(v.description),
+        TagValue::NoNamedArguments(v) => Some(v.description),
+        TagValue::NotDeprecated(v) => Some(v.description),
+        TagValue::EnumInterface(v) => Some(v.description),
+        TagValue::ConsistentConstructor(v) => Some(v.description),
+        TagValue::ConsistentTemplates(v) => Some(v.description),
+        TagValue::SealProperties(v) => Some(v.description),
+        TagValue::NoSealProperties(v) => Some(v.description),
+        TagValue::SealMethods(v) => Some(v.description),
+        TagValue::NoSealMethods(v) => Some(v.description),
+        TagValue::MutationFree(v) => Some(v.description),
+        TagValue::ExternalMutationFree(v) => Some(v.description),
+        TagValue::SuspendsFiber(v) => Some(v.description),
+        TagValue::IgnoreNullableReturn(v) => Some(v.description),
+        TagValue::IgnoreFalsableReturn(v) => Some(v.description),
+        TagValue::InheritDoc(v) => Some(v.description),
+        TagValue::Trace(v) => Some(v.description),
+        TagValue::Generic(v) => Some(v.value),
+        TagValue::Invalid(v) => Some(v.value),
+        TagValue::Where(_) | TagValue::TypeAlias(_) | TagValue::TypeAliasImport(_) => None,
     }
 }
 

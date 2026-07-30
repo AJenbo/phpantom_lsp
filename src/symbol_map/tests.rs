@@ -3587,6 +3587,63 @@ fn see_tag_inline_member_reference() {
 }
 
 #[test]
+fn see_tag_nested_inline_form() {
+    // A `{@see ...}` nested inside another inline tag's own text. A raw
+    // string scan for the next `}` after `{@see ` would stop at the inner
+    // tag's closing brace and never discover `Bar` as its own reference; the
+    // CST walk recurses into the outer tag's description and finds it.
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * See {@see Baz, also {@see Bar}} for details.\n",
+        " */\n",
+        "class Foo {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let bar_offset = php.find("Bar").unwrap() as u32;
+    let hit = map.lookup(bar_offset);
+    assert!(hit.is_some(), "Should find Bar from the nested inline @see");
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "Bar");
+    } else {
+        panic!(
+            "Expected ClassReference for nested inline @see Bar, got {:?}",
+            hit.unwrap().kind
+        );
+    }
+}
+
+#[test]
+fn see_tag_inline_in_tag_description() {
+    // A `{@see ...}` in the free-text description of an unrelated tag (not
+    // in the free text before the first tag, and not a `@see` tag itself).
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @throws RuntimeException When it fails, {@see Recovery} may help.\n",
+        " */\n",
+        "class Foo {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let offset = php.find("Recovery").unwrap() as u32;
+    let hit = map.lookup(offset);
+    assert!(
+        hit.is_some(),
+        "Should find Recovery from inline @see in a @throws description"
+    );
+    if let SymbolKind::ClassReference { ref name, .. } = hit.unwrap().kind {
+        assert_eq!(name, "Recovery");
+    } else {
+        panic!(
+            "Expected ClassReference for Recovery, got {:?}",
+            hit.unwrap().kind
+        );
+    }
+}
+
+#[test]
 fn see_tag_scalar_type_not_navigable() {
     let php = concat!(
         "<?php\n",

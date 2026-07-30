@@ -678,28 +678,6 @@ body-return inference, since fixed by memoization).
 
 ---
 
-## P47. Inline `{@see}` references are still found by scanning raw text
-
-**Impact: Low · Effort: Low-Medium**
-
-`extract_inline_see_symbols` in `src/symbol_map/docblock.rs` is the last
-place the symbol map reads a docblock as a string: it searches for the
-literal `{@see ` and takes everything up to the next `}`. The rest of
-the module now walks the PHPDoc CST, where an inline tag is a
-`TextSegment::InlineTag` carrying a full `Tag` with its own spans.
-
-The reason the scan survived is reach rather than capability. Inline
-tags turn up in any prose, so a CST-based version has to visit the free
-text before the first tag *and* the description of every tag shape that
-has one, which means a `Text` visitor threaded through the tag match in
-`emit_tag_symbols`. The string scan reaches all of them in one pass.
-
-Doing it properly would pick up `{@link}` and the other inline tags for
-free, and stop the scan tripping over a `}` that belongs to a nested
-type rather than the inline tag.
-
----
-
 ## P46. `mago-phpdoc-syntax` cannot parse `@method static (…) name()`
 
 **Impact: Low · Effort: Low (upstream)**
