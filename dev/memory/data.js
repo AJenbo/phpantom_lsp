@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785403735315,
+  "lastUpdate": 1785420891952,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22381,6 +22381,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 67.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "93c9b2680fa96d626e5d72492e062e93fb07f862",
+          "message": "The `analyze` and `fix` CLI subcommands no longer build the cross-file\nreference index",
+          "timestamp": "2026-07-30T15:58:16+02:00",
+          "tree_id": "cf3484642eaa2ffc70d4afedfe20572691c75b6a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/93c9b2680fa96d626e5d72492e062e93fb07f862"
+        },
+        "date": 1785420888500,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75,
             "unit": "MiB"
           }
         ]
