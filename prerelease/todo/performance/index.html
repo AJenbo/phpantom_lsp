@@ -1549,10 +1549,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run" class="md-nav__link">
+  <a href="#p48-project-inits-remaining-serial-stretches" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P43. <code>init_single_project</code> is the longest single-threaded stretch of a run
+        P48. Project init's remaining serial stretches
       </span>
     </span>
   </a>
@@ -2262,10 +2262,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run" class="md-nav__link">
+  <a href="#p48-project-inits-remaining-serial-stretches" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P43. <code>init_single_project</code> is the longest single-threaded stretch of a run
+        P48. Project init's remaining serial stretches
       </span>
     </span>
   </a>
@@ -3247,58 +3247,89 @@ was removed, suggesting the read lock on <code>fqn_class_index</code> (contended
 by 32 workers doing <code>find_or_load_class</code> concurrently) is closer to the
 real ceiling than the hashing was.</p>
 <hr />
-<h2 id="p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run">P43. <code>init_single_project</code> is the longest single-threaded stretch of a run<a class="headerlink" href="#p43-init_single_project-is-the-longest-single-threaded-stretch-of-a-run" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p>With the diagnostic pass now reaching ~22 of 32 cores (P35), project
-init is the least parallel phase left and the largest remaining share
-of wall clock. Per-phase timing of <code>analyze</code> on a large Laravel
-project (32-core machine, release build, warm page cache):</p>
+<h2 id="p48-project-inits-remaining-serial-stretches">P48. Project init's remaining serial stretches<a class="headerlink" href="#p48-project-inits-remaining-serial-stretches" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><code>init_single_project</code> is down from 0.60 s at 3.2 of 32 cores to 0.21 s
+at 6.2 (mmap contention, per-package collection, and the batch scanners'
+static chunking are fixed), so the diagnostic pass is once again the
+largest share of wall clock. What is left inside init, measured on a
+large Laravel project (32-core machine, release build, warm page cache,
+<code>utime + stime</code> from <code>/proc/self/stat</code> at each boundary):</p>
 <table>
 <thead>
 <tr>
-<th>Phase</th>
+<th>Step</th>
 <th>Wall</th>
 <th>Avg cores</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>init_single_project</code></td>
-<td>1.09 s</td>
-<td>2.3</td>
+<td>vendor package collection (<code>collect_package_files</code>)</td>
+<td>0.060 s</td>
+<td>6.8</td>
 </tr>
 <tr>
-<td><code>discover_user_files</code></td>
-<td>0.03 s</td>
-<td>0.8</td>
+<td>vendor file scan (<code>scan_files_parallel_full</code>)</td>
+<td>0.033 s</td>
+<td>20.5</td>
 </tr>
 <tr>
-<td>Phase 1 index</td>
-<td>0.10 s</td>
-<td>7.1</td>
+<td><code>scan_autoload_files</code></td>
+<td>0.038 s</td>
+<td>3.9</td>
 </tr>
 <tr>
-<td>Phase 1.5 eager populate</td>
-<td>0.22 s</td>
+<td><code>classify_class_origin</code> + <code>fqn_uri_index</code> fill</td>
+<td>0.019 s</td>
+<td>1.6</td>
+</tr>
+<tr>
+<td>workspace walk (<code>ignore</code> crate)</td>
+<td>0.018 s</td>
+<td>1.1</td>
+</tr>
+<tr>
+<td><code>vendor_package_roots</code></td>
+<td>0.006 s</td>
 <td>1.0</td>
-</tr>
-<tr>
-<td>Phase 2 diagnostics</td>
-<td>1.31 s</td>
-<td>22.6</td>
 </tr>
 </tbody>
 </table>
-<p>Init is ~40% of the run at barely two cores. It covers composer
-reading, autoload/classmap scanning, stub setup, and the vendor
-package scan, and it gates everything after it, so the same stretch is
-in front of the LSP's time-to-usable as well as the CLI's. Worth a
-per-phase breakdown inside init before choosing a fix — P34 (eager
-population is single-threaded, the 1.0-core row above) is an
-already-filed piece of the same window.</p>
+<p>Each is small on its own; together they are most of what is left:</p>
+<ul>
+<li><strong>Vendor collection is per-package parallel, but one package is the
+  straggler.</strong> <code>laravel/framework</code>'s PSR-4 tree is a single work item, so
+  the tail of the walk runs on one core. Splitting a package's PSR-4
+  roots (or its subdirectories) into separate work items would even it
+  out, but the concatenation has to stay in <code>installed.json</code> order for
+  duplicate FQNs to resolve to the same file.</li>
+<li><strong>Class origins are derived twice.</strong> The vendor scan knows which
+  package each file came from, and records it for functions and constants
+  (<code>WorkspaceScanResult::function_origins</code> / <code>constant_origins</code>), but not
+  for classes. Init then re-derives every vendor class's origin by
+  prefix-matching its path against ~400 package roots, single-threaded.
+  Carrying class origins out of the scan the way the other two already
+  are would delete the step. The Composer-classmap path (<code>strategy =
+  "composer"</code>) has no origin for its entries, so the prefix match has to
+  stay as the fallback there.</li>
+<li><strong><code>vendor_package_roots</code> re-reads and re-parses <code>installed.json</code></strong>
+  moments after <code>scan_vendor_packages_with_skip</code> parsed the same file,
+  and canonicalizes every package path a second time.</li>
+<li><strong>The workspace walk is single-threaded.</strong> <code>ignore::WalkBuilder</code> has
+  <code>build_parallel</code>, but the walk order feeds the duplicate-FQN
+  tie-break, so a parallel walk needs its results sorted to stay
+  deterministic.</li>
+<li><strong>Reading and manifest-parsing a bundled <code>.phar</code> is serial.</strong> With
+  phpstan installed this is 17 ms of the 24 ms <code>require_once</code> sweep; the
+  class scan inside the archive is already parallel.</li>
+</ul>
 <p>Reproduce with the CPU-sampling loop in the Appendix, or by reading
 <code>utime + stime</code> from <code>/proc/self/stat</code> at each phase boundary and
-dividing by the phase's wall time.</p>
+dividing by the phase's wall time. Per-phase numbers for the run as a
+whole (same project): init 0.21 s at 6.2 cores, <code>discover_user_files</code>
+0.02 s at 1.1, Phase 1 index 0.02 s at 21.5, Phase 1.5 eager populate
+0.05 s at 4.4, Phase 2 diagnostics 0.47 s at 20.9.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues were addressed by eager class
