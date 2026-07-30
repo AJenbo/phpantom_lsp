@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785426471203,
+  "lastUpdate": 1785432211949,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22517,6 +22517,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ce58861932f66100e25ba020b3ea4979798262f4",
+          "message": "Class origin classification no longer re-scans the whole classmap after\nthe fact",
+          "timestamp": "2026-07-30T19:07:07+02:00",
+          "tree_id": "104f16d55538a509724ee2bdf4ef68725f4e21f6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ce58861932f66100e25ba020b3ea4979798262f4"
+        },
+        "date": 1785432207996,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.4,
             "unit": "MiB"
           }
         ]
