@@ -1494,17 +1494,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p28-process_assert_narrowing-clones-the-top-level-scope-once-per-variable-for-every-statement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P28. <code>process_assert_narrowing</code> clones the top-level scope once per variable for every statement
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2196,17 +2185,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p28-process_assert_narrowing-clones-the-top-level-scope-once-per-variable-for-every-statement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P28. <code>process_assert_narrowing</code> clones the top-level scope once per variable for every statement
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2871,21 +2849,6 @@ return type was <code>object</code>/<code>?object</code> at that point (the base
 already resolved there) and emit the synthetic <code>stdClass</code> from the
 same pass. Do not pass <code>""</code> for the argument text on a second call;
 reuse the resolution already performed.</p>
-<hr />
-<h2 id="p28-process_assert_narrowing-clones-the-top-level-scope-once-per-variable-for-every-statement">P28. <code>process_assert_narrowing</code> clones the top-level scope once per variable for every statement<a class="headerlink" href="#p28-process_assert_narrowing-clones-the-top-level-scope-once-per-variable-for-every-statement" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p>The forward walker's assert-narrowing step runs for every statement
-and clones <code>ctx.top_level_scope</code> once per variable currently in
-scope, even when the statement is not a call expression and can
-therefore never be an <code>assert()</code> / custom type-guard call. On
-methods with many locals and many statements the clones add up to a
-measurable share of the walk.</p>
-<p>Add an early-out that skips the per-variable loop when the statement
-cannot be an assertion (not a call expression). This was confirmed
-as an independently worthwhile micro-fix while investigating the
-PclZip return-type-inference hang, but was reverted at the time
-because it did not address that hang's dominant cost (uncached
-body-return inference, since fixed by memoization).</p>
 <hr />
 <h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
