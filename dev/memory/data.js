@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785442077033,
+  "lastUpdate": 1785443301142,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22585,6 +22585,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ae8c211d52a256d9fabc8e9aaf61ffef05bdd7e8",
+          "message": "Faster `assert()`/type-guard narrowing during the forward walk",
+          "timestamp": "2026-07-30T22:12:24+02:00",
+          "tree_id": "a5e51b898d1ce3cea81e6a262bdbd27a72187fb8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ae8c211d52a256d9fabc8e9aaf61ffef05bdd7e8"
+        },
+        "date": 1785443298215,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.4,
             "unit": "MiB"
           }
         ]
