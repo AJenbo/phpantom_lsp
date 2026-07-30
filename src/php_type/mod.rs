@@ -1166,6 +1166,7 @@ impl PhpType {
             TypeKind::Named(s) => s.eq_ignore_ascii_case("object") || !is_scalar_name(s),
             TypeKind::Generic(g) => !is_scalar_name(&g.name),
             TypeKind::ObjectShape(_) => true,
+            TypeKind::StaticType(s) | TypeKind::ThisType(s) => !is_scalar_name(s),
             TypeKind::Nullable(inner) => inner.is_object_like(),
             _ => false,
         }

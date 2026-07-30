@@ -1426,6 +1426,28 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_static_return_stringable_to_string() {
+    let php = r#"<?php
+class Node implements Stringable {
+    public function __get($name): static {
+        return $this;
+    }
+    public function __toString(): string { return ''; }
+}
+
+function test(): void {
+    $n = new Node();
+    throw new \Exception($n->Body);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag static(Stringable) object passed to string, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: PHP type juggling
 // ═══════════════════════════════════════════════════════════════════════════
