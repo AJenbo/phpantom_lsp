@@ -1505,17 +1505,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p47-inline-see-references-are-still-found-by-scanning-raw-text" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P47. Inline <code>{@see}</code> references are still found by scanning raw text
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1531,17 +1520,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p32-vendor-package-scan-reads-every-file-twice-for-origin-classification" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P32. Vendor package scan reads every file twice for origin classification
       </span>
     </span>
   </a>
@@ -2251,17 +2229,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p47-inline-see-references-are-still-found-by-scanning-raw-text" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P47. Inline <code>{@see}</code> references are still found by scanning raw text
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2277,17 +2244,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p32-vendor-package-scan-reads-every-file-twice-for-origin-classification" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P32. Vendor package scan reads every file twice for origin classification
       </span>
     </span>
   </a>
@@ -2975,22 +2931,6 @@ PclZip return-type-inference hang, but was reverted at the time
 because it did not address that hang's dominant cost (uncached
 body-return inference, since fixed by memoization).</p>
 <hr />
-<h2 id="p47-inline-see-references-are-still-found-by-scanning-raw-text">P47. Inline <code>{@see}</code> references are still found by scanning raw text<a class="headerlink" href="#p47-inline-see-references-are-still-found-by-scanning-raw-text" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p><code>extract_inline_see_symbols</code> in <code>src/symbol_map/docblock.rs</code> is the last
-place the symbol map reads a docblock as a string: it searches for the
-literal <code>{@see</code> and takes everything up to the next <code>}</code>. The rest of
-the module now walks the PHPDoc CST, where an inline tag is a
-<code>TextSegment::InlineTag</code> carrying a full <code>Tag</code> with its own spans.</p>
-<p>The reason the scan survived is reach rather than capability. Inline
-tags turn up in any prose, so a CST-based version has to visit the free
-text before the first tag <em>and</em> the description of every tag shape that
-has one, which means a <code>Text</code> visitor threaded through the tag match in
-<code>emit_tag_symbols</code>. The string scan reaches all of them in one pass.</p>
-<p>Doing it properly would pick up <code>{@link}</code> and the other inline tags for
-free, and stop the scan tripping over a <code>}</code> that belongs to a nested
-type rather than the inline tag.</p>
-<hr />
 <h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
 <p>The PHPDoc grammar reads <code>static</code> followed by <code>(</code> as a method literally
@@ -3111,26 +3051,6 @@ the current extraction plus wall-clock time. Only proceed to a
 broader migration if the prototype reproduces current behavior and
 shows a real win; otherwise record the findings here and keep
 waiting on the triggers above.</p>
-<hr />
-<h2 id="p32-vendor-package-scan-reads-every-file-twice-for-origin-classification">P32. Vendor package scan reads every file twice for origin classification<a class="headerlink" href="#p32-vendor-package-scan-reads-every-file-twice-for-origin-classification" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p><code>scan_vendor_packages_with_skip</code> (<code>src/classmap_scanner.rs</code>) scans the
-collected vendor files twice on every startup:</p>
-<ol>
-<li><code>scan_files_parallel_full(&amp;all_files, …)</code> reads and byte-scans every
-   file in parallel to build the classmap/function/constant indices.</li>
-<li>A sequential origin-classification pass then <strong>re-reads and
-   re-scans the same files</strong> — <code>read_for_scan</code> + <code>scan_content</code> per
-   PSR-4 file, and a full <code>scan_file_full</code> per plain file — solely to
-   map each discovered symbol to its package's completion-origin tier.</li>
-</ol>
-<p>That doubles the I/O and scan cost of the vendor scan, and the second
-pass is single-threaded. The origin is known per <em>file</em> before either
-pass runs (it comes from the package entry the file was collected
-under), so the classification can be produced during the parallel scan:
-thread the per-file origin through <code>scan_files_parallel_full</code> (e.g.
-scan <code>(PathBuf, origin)</code> pairs and emit origins alongside symbols)
-and delete the second pass entirely.</p>
 <hr />
 <h2 id="p34-eager-class-population-is-single-threaded">P34. Eager class population is single-threaded<a class="headerlink" href="#p34-eager-class-population-is-single-threaded" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
@@ -3360,10 +3280,9 @@ project (32-core machine, release build, warm page cache):</p>
 reading, autoload/classmap scanning, stub setup, and the vendor
 package scan, and it gates everything after it, so the same stretch is
 in front of the LSP's time-to-usable as well as the CLI's. Worth a
-per-phase breakdown inside init before choosing a fix — P32 (vendor
-scan reads every file twice) and P34 (eager population is
-single-threaded, the 1.0-core row above) are both already-filed pieces
-of the same window.</p>
+per-phase breakdown inside init before choosing a fix — P34 (eager
+population is single-threaded, the 1.0-core row above) is an
+already-filed piece of the same window.</p>
 <p>Reproduce with the CPU-sampling loop in the Appendix, or by reading
 <code>utime + stime</code> from <code>/proc/self/stat</code> at each phase boundary and
 dividing by the phase's wall time.</p>
