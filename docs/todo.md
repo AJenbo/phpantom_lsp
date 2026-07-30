@@ -214,7 +214,6 @@ unlikely to move the needle for most users.
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Medium      |
 | P23 | [`workspace/symbol` lowercases every symbol name per request](todo/performance.md#p23-workspacesymbol-allocates-a-lowercase-copy-of-every-symbol-name-per-request)          | Low-Medium  | Low         |
 | P28 | [`process_assert_narrowing` clones the scope per variable for every statement](todo/performance.md#p28-process_assert_narrowing-clones-the-top-level-scope-once-per-variable-for-every-statement) | Low-Medium  | Low         |
-| P42 | [Reference index is built during the headless `analyze` pipeline but never queried there](todo/performance.md#p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there) | Low-Medium  | Low         |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X3  | Completion item detail on demand (`completionItem/resolve`)                                                                                                                 | Medium      | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium      |

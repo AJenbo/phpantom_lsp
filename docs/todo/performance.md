@@ -1049,28 +1049,6 @@ real ceiling than the hashing was.
 
 ---
 
-## P42. Reference index is built during the headless `analyze` pipeline but never queried there
-
-**Impact: Low-Medium · Effort: Low**
-
-`reindex_references_for_symbol_maps_batch` (`src/reference_index.rs`)
-runs on every `update_ast`, including from the parallel index workers
-in `src/analyse/run.rs` that back the headless `analyze` CLI
-subcommand. That pipeline never calls
-`reference_candidate_uris_for_keys` or any other reader of
-`reference_index` (it has no find-references, rename, or inlay-hints
-request to serve), so every span the workers walk to build index
-entries there is wasted CPU and short-lived allocation.
-
-Skip the build in that mode: add a per-`Backend` flag (not a
-process-global static or thread-local, so test isolation between
-`Backend` instances is preserved) that `Backend::new_headless` sets
-and `reindex_references_for_symbol_maps_batch` checks before doing any
-work, so the skip applies uniformly to every caller of `update_ast` in
-headless mode rather than special-casing the `analyze` call site.
-
----
-
 ## P43. `init_single_project` is the longest single-threaded stretch of a run
 
 **Impact: Medium-High · Effort: Medium**

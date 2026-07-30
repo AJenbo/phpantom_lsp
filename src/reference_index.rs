@@ -125,7 +125,7 @@ impl Backend {
         &self,
         items: Vec<(String, Arc<SymbolMap>)>,
     ) {
-        if items.is_empty() {
+        if items.is_empty() || self.skip_reference_index {
             return;
         }
 
@@ -495,6 +495,19 @@ mod tests {
     fn batch_reindex_empty_input_is_noop() {
         let backend = Backend::new_test();
         backend.reindex_references_for_symbol_maps_batch(Vec::new());
+        assert!(backend.reference_index.read().is_empty());
+    }
+
+    #[test]
+    fn headless_backend_skips_reference_indexing() {
+        let backend = Backend::new_headless();
+        let uri = "file:///project/src/Foo.php".to_string();
+
+        backend.reindex_references_for_symbol_maps_batch(vec![(
+            uri,
+            class_declaration_symbol_map("App\\Foo"),
+        )]);
+
         assert!(backend.reference_index.read().is_empty());
     }
 

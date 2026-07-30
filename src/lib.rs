@@ -446,6 +446,13 @@ pub struct Backend {
     /// candidate files, then run their existing semantic checks for aliases,
     /// inheritance, Laravel declarations, and `self/static/parent`.
     pub(crate) reference_index: reference_index::ReferenceIndex,
+    /// Skip building [`reference_index`] from `update_ast`.
+    ///
+    /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
+    /// subcommands, which parse every file but never issue a
+    /// find-references, rename, or inlay-hints request, so populating
+    /// the index would be pure wasted CPU and short-lived allocation.
+    pub(crate) skip_reference_index: bool,
     /// Per-file parse errors from the Mago parser.
     ///
     /// Each entry is `(message, start_byte_offset, end_byte_offset)`.
@@ -849,6 +856,7 @@ impl Backend {
             open_files: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new(),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
@@ -936,6 +944,7 @@ impl Backend {
             open_files: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new(),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
@@ -1021,7 +1030,10 @@ impl Backend {
     /// where there is no LSP client but the backend still needs access to
     /// the PHP standard library stubs.
     pub fn new_headless() -> Self {
-        Self::defaults()
+        Self {
+            skip_reference_index: true,
+            ..Self::defaults()
+        }
     }
 
     /// Create a `Backend` without an LSP client (for unit / integration tests).
@@ -1556,6 +1568,7 @@ impl Backend {
             open_files: Arc::clone(&self.open_files),
             symbol_maps: Arc::clone(&self.symbol_maps),
             reference_index: Arc::clone(&self.reference_index),
+            skip_reference_index: self.skip_reference_index,
             symbols: self.symbols.clone(),
             parse_errors: Arc::clone(&self.parse_errors),
             did_change_parse_locks: Arc::clone(&self.did_change_parse_locks),
