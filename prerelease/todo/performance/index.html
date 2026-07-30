@@ -1548,17 +1548,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#p49-project-inits-remaining-serial-stretches" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P49. Project init's remaining serial stretches
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2255,17 +2244,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P35. Diagnostic passes reach only a fraction of available cores
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p49-project-inits-remaining-serial-stretches" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P49. Project init's remaining serial stretches
       </span>
     </span>
   </a>
@@ -3246,68 +3224,6 @@ rose from 3.78% to 4.36% of samples once the hashing/allocation cost
 was removed, suggesting the read lock on <code>fqn_class_index</code> (contended
 by 32 workers doing <code>find_or_load_class</code> concurrently) is closer to the
 real ceiling than the hashing was.</p>
-<hr />
-<h2 id="p49-project-inits-remaining-serial-stretches">P49. Project init's remaining serial stretches<a class="headerlink" href="#p49-project-inits-remaining-serial-stretches" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p><code>init_single_project</code> is down from 0.60 s at 3.2 of 32 cores to 0.21 s
-at 6.2 (mmap contention, per-package collection, and the batch scanners'
-static chunking are fixed), so the diagnostic pass is once again the
-largest share of wall clock. What is left inside init, measured on a
-large Laravel project (32-core machine, release build, warm page cache,
-<code>utime + stime</code> from <code>/proc/self/stat</code> at each boundary):</p>
-<table>
-<thead>
-<tr>
-<th>Step</th>
-<th>Wall</th>
-<th>Avg cores</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>vendor package collection (<code>collect_package_files</code>)</td>
-<td>0.060 s</td>
-<td>6.8</td>
-</tr>
-<tr>
-<td>vendor file scan (<code>scan_files_parallel_full</code>)</td>
-<td>0.033 s</td>
-<td>20.5</td>
-</tr>
-<tr>
-<td><code>scan_autoload_files</code></td>
-<td>0.038 s</td>
-<td>3.9</td>
-</tr>
-<tr>
-<td>workspace walk (<code>ignore</code> crate)</td>
-<td>0.018 s</td>
-<td>1.1</td>
-</tr>
-</tbody>
-</table>
-<p>Each is small on its own; together they are most of what is left:</p>
-<ul>
-<li><strong>Vendor collection is per-package parallel, but one package is the
-  straggler.</strong> <code>laravel/framework</code>'s PSR-4 tree is a single work item, so
-  the tail of the walk runs on one core. Splitting a package's PSR-4
-  roots (or its subdirectories) into separate work items would even it
-  out, but the concatenation has to stay in <code>installed.json</code> order for
-  duplicate FQNs to resolve to the same file.</li>
-<li><strong>The workspace walk is single-threaded.</strong> <code>ignore::WalkBuilder</code> has
-  <code>build_parallel</code>, but the walk order feeds the duplicate-FQN
-  tie-break, so a parallel walk needs its results sorted to stay
-  deterministic.</li>
-<li><strong>Reading and manifest-parsing a bundled <code>.phar</code> is serial.</strong> With
-  phpstan installed this is 17 ms of the 24 ms <code>require_once</code> sweep; the
-  class scan inside the archive is already parallel.</li>
-</ul>
-<p>Reproduce with the CPU-sampling loop in the Appendix, or by reading
-<code>utime + stime</code> from <code>/proc/self/stat</code> at each phase boundary and
-dividing by the phase's wall time. Per-phase numbers for the run as a
-whole (same project): init 0.21 s at 6.2 cores, <code>discover_user_files</code>
-0.02 s at 1.1, Phase 1 index 0.02 s at 21.5, Phase 1.5 eager populate
-0.05 s at 4.4, Phase 2 diagnostics 0.47 s at 20.9.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues were addressed by eager class
