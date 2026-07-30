@@ -403,48 +403,20 @@ pub fn scan_vendor_packages_with_skip(
         }
     }
 
-    // Phase 2: scan all collected files in parallel
-    let mut all_files: Vec<PathBuf> = psr4_files.iter().map(|(path, _, _)| path.clone()).collect();
-    all_files.extend(plain_files.iter().map(|(path, _)| path.clone()));
+    // Phase 2: scan all collected files in parallel. Each file's origin is
+    // already known from the package it was collected under (phase 1), so
+    // it travels alongside the path and gets attached to the functions and
+    // constants discovered in the same read, instead of re-reading every
+    // file in a second sequential pass just to classify it.
+    let mut all_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = psr4_files
+        .into_iter()
+        .map(|(path, _, origin)| (path, origin))
+        .collect();
+    all_files.extend(plain_files);
 
-    // The origin classification pass below re-reads every file, so it
-    // counts as its own work units.
-    progress_add_total(
-        progress,
-        all_files.len() + psr4_files.len() + plain_files.len(),
-    );
+    progress_add_total(progress, all_files.len());
 
-    let mut result = scan_files_parallel_full(&all_files, progress);
-    let mut class_origins = HashMap::new();
-    let mut function_origins = HashMap::new();
-    let mut constant_origins = HashMap::new();
-    for (path, expected_fqn, origin) in psr4_files {
-        progress_add_done(progress);
-        if let Ok(content) = read_for_scan(&path) {
-            for fqn in scan_content(&content) {
-                if fqn == expected_fqn {
-                    class_origins.entry(fqn).or_insert(origin);
-                }
-            }
-        }
-    }
-    for (path, origin) in plain_files {
-        progress_add_done(progress);
-        let symbols = super::scan_file_full(&path);
-        for fqn in symbols.classes {
-            class_origins.entry(fqn).or_insert(origin);
-        }
-        for fqn in symbols.functions {
-            function_origins.entry(fqn).or_insert(origin);
-        }
-        for name in symbols.constants {
-            constant_origins.entry(name).or_insert(origin);
-        }
-    }
-    result.class_origins = class_origins;
-    result.function_origins = function_origins;
-    result.constant_origins = constant_origins;
-    result
+    scan_files_parallel_full(&all_files, progress)
 }
 
 /// Scan all `.php` files under the workspace root using the PSR-4
@@ -609,8 +581,14 @@ fn scan_files_parallel_psr4(
 
 /// Scan a batch of files for all symbols (classes, functions, constants)
 /// in parallel and return a [`WorkspaceScanResult`].
+///
+/// Each file carries its own completion-origin tier, which is attached to
+/// any function or constant discovered in it. This lets callers that know
+/// a file's package provenance up front (e.g. vendor package scanning)
+/// classify symbols in the same read/scan pass instead of re-reading every
+/// file afterwards just to determine its origin.
 fn scan_files_parallel_full(
-    files: &[PathBuf],
+    files: &[(PathBuf, crate::ClassCompletionOrigin)],
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     if files.is_empty() {
@@ -620,7 +598,7 @@ fn scan_files_parallel_full(
     // Small batches: sequential
     if files.len() <= 4 {
         let mut result = WorkspaceScanResult::default();
-        for path in files {
+        for (path, origin) in files {
             progress_add_done(progress);
             if let Ok(content) = read_for_scan(path) {
                 let scan = super::find_symbols(&content);
@@ -642,14 +620,16 @@ fn scan_files_parallel_full(
                 for fqn in scan.functions {
                     result
                         .function_index
-                        .entry(fqn)
+                        .entry(fqn.clone())
                         .or_insert_with(|| path.clone());
+                    result.function_origins.entry(fqn).or_insert(*origin);
                 }
                 for name in scan.constants {
                     result
                         .constant_index
-                        .entry(name)
+                        .entry(name.clone())
                         .or_insert_with(|| path.clone());
+                    result.constant_origins.entry(name).or_insert(*origin);
                 }
             }
         }
@@ -659,42 +639,44 @@ fn scan_files_parallel_full(
     let n_threads = thread_count().min(files.len());
     let chunk_size = files.len().div_ceil(n_threads);
 
-    let results: Vec<Vec<(ScanResult, PathBuf)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = files
-            .chunks(chunk_size)
-            .map(|chunk| {
-                s.spawn(move || {
-                    let mut local: Vec<(ScanResult, PathBuf)> = Vec::new();
-                    for path in chunk {
-                        progress_add_done(progress);
-                        if let Ok(content) = read_for_scan(path) {
-                            let scan = super::find_symbols(&content);
-                            if !scan.classes.is_empty()
-                                || !scan.functions.is_empty()
-                                || !scan.constants.is_empty()
-                            {
-                                local.push((scan, path.clone()));
+    let results: Vec<Vec<(ScanResult, PathBuf, crate::ClassCompletionOrigin)>> =
+        std::thread::scope(|s| {
+            let handles: Vec<_> = files
+                .chunks(chunk_size)
+                .map(|chunk| {
+                    s.spawn(move || {
+                        let mut local: Vec<(ScanResult, PathBuf, crate::ClassCompletionOrigin)> =
+                            Vec::new();
+                        for (path, origin) in chunk {
+                            progress_add_done(progress);
+                            if let Ok(content) = read_for_scan(path) {
+                                let scan = super::find_symbols(&content);
+                                if !scan.classes.is_empty()
+                                    || !scan.functions.is_empty()
+                                    || !scan.constants.is_empty()
+                                {
+                                    local.push((scan, path.clone(), *origin));
+                                }
                             }
                         }
-                    }
-                    local
+                        local
+                    })
                 })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join().unwrap_or_else(|_| {
-                    tracing::error!("PHPantom: thread panic in scan_files_parallel_full");
-                    Vec::new()
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        tracing::error!("PHPantom: thread panic in scan_files_parallel_full");
+                        Vec::new()
+                    })
                 })
-            })
-            .collect()
-    });
+                .collect()
+        });
 
     let mut result = WorkspaceScanResult::default();
     for batch in results {
-        for (scan, path) in batch {
+        for (scan, path, origin) in batch {
             for fqcn in scan.classes {
                 let class_short_name = fqcn_short_name(&fqcn).to_owned();
                 result
@@ -719,14 +701,16 @@ fn scan_files_parallel_full(
             for fqn in scan.functions {
                 result
                     .function_index
-                    .entry(fqn)
+                    .entry(fqn.clone())
                     .or_insert_with(|| path.clone());
+                result.function_origins.entry(fqn).or_insert(origin);
             }
             for name in scan.constants {
                 result
                     .constant_index
-                    .entry(name)
+                    .entry(name.clone())
                     .or_insert_with(|| path.clone());
+                result.constant_origins.entry(name).or_insert(origin);
             }
         }
     }
@@ -778,11 +762,11 @@ pub fn scan_workspace_fallback_full(
         })
         .build();
 
-    let mut php_files: Vec<PathBuf> = Vec::new();
+    let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
     for entry in walker.flatten() {
         let path = entry.path();
         if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
-            php_files.push(path.to_path_buf());
+            php_files.push((path.to_path_buf(), crate::ClassCompletionOrigin::Project));
         }
     }
 
@@ -822,7 +806,7 @@ pub fn scan_drupal_directories(
         "sites",
     ];
 
-    let mut php_files: Vec<PathBuf> = Vec::new();
+    let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
 
     for rel in &drupal_dirs {
         let dir = web_root.join(rel);
@@ -855,7 +839,7 @@ pub fn scan_drupal_directories(
         for entry in walker.flatten() {
             let path = entry.path();
             if path.is_file() && is_drupal_php_file(path) {
-                php_files.push(path.to_path_buf());
+                php_files.push((path.to_path_buf(), crate::ClassCompletionOrigin::Project));
             }
         }
     }

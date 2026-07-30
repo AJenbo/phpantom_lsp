@@ -816,30 +816,6 @@ waiting on the triggers above.
 
 ---
 
-## P32. Vendor package scan reads every file twice for origin classification
-
-**Impact: Medium · Effort: Low-Medium**
-
-`scan_vendor_packages_with_skip` (`src/classmap_scanner.rs`) scans the
-collected vendor files twice on every startup:
-
-1. `scan_files_parallel_full(&all_files, …)` reads and byte-scans every
-   file in parallel to build the classmap/function/constant indices.
-2. A sequential origin-classification pass then **re-reads and
-   re-scans the same files** — `read_for_scan` + `scan_content` per
-   PSR-4 file, and a full `scan_file_full` per plain file — solely to
-   map each discovered symbol to its package's completion-origin tier.
-
-That doubles the I/O and scan cost of the vendor scan, and the second
-pass is single-threaded. The origin is known per *file* before either
-pass runs (it comes from the package entry the file was collected
-under), so the classification can be produced during the parallel scan:
-thread the per-file origin through `scan_files_parallel_full` (e.g.
-scan `(PathBuf, origin)` pairs and emit origins alongside symbols)
-and delete the second pass entirely.
-
----
-
 ## P34. Eager class population is single-threaded
 
 **Impact: Medium · Effort: Medium**
@@ -1061,10 +1037,9 @@ Init is ~40% of the run at barely two cores. It covers composer
 reading, autoload/classmap scanning, stub setup, and the vendor
 package scan, and it gates everything after it, so the same stretch is
 in front of the LSP's time-to-usable as well as the CLI's. Worth a
-per-phase breakdown inside init before choosing a fix — P32 (vendor
-scan reads every file twice) and P34 (eager population is
-single-threaded, the 1.0-core row above) are both already-filed pieces
-of the same window.
+per-phase breakdown inside init before choosing a fix — P34 (eager
+population is single-threaded, the 1.0-core row above) is an
+already-filed piece of the same window.
 
 Reproduce with the CPU-sampling loop in the Appendix, or by reading
 `utime + stime` from `/proc/self/stat` at each phase boundary and

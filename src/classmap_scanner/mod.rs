@@ -152,8 +152,6 @@ pub struct ScanResult {
 pub struct WorkspaceScanResult {
     /// FQN → file path for classes, interfaces, traits, and enums.
     pub classmap: HashMap<String, PathBuf>,
-    /// FQN → completion origin tier.
-    pub(crate) class_origins: HashMap<String, crate::ClassCompletionOrigin>,
     /// FQN → file path for standalone functions.
     pub function_index: HashMap<String, PathBuf>,
     /// FQN → completion origin tier for standalone functions.
