@@ -266,6 +266,8 @@ class Demo
      *  4. Ctrl+Click "auth.failed" to jump to lang/en/auth.php.
      *  5. Ctrl+Click "theme.dashboard" to jump to a view under the custom
      *     path registered in config/view.php (resources/theme/views).
+     *  6. Type a quote inside route('bakeries.show', [ … ]) to complete the
+     *     route's URI parameter names.
      */
     public function laravelNavigation(): void
     {
@@ -285,6 +287,12 @@ class Demo
         // Route registered from a provider via Route::…->group(base_path(…)),
         // with the route file under app/Modules instead of the routes/ dir.
         route('reviews.update');
+
+        // Route parameters — the keys of the second argument are the
+        // {parameters} of the route's URI (here bakeries/{bakery}, whose
+        // prefix comes from the enclosing Route::prefix('bakeries') group).
+        route('bakeries.show', ['bakery' => 1]);
+        route('bakeries.cancel', ['bakery' => 1]);
 
         // Translation Keys
         __('messages.welcome');

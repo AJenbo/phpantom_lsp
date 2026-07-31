@@ -287,6 +287,19 @@ impl Backend {
                 return Ok(Some(response));
             }
 
+            // ── Route parameter completion ──────────────────────────
+            // The keys of `route('users.show', ['|' => 1])` are the URI
+            // parameters of the named route.
+            if is_laravel
+                && matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                )
+                && let Some(response) = self.try_route_param_completion(&content, position)
+            {
+                return Ok(Some(response));
+            }
+
             // ── Artisan command parameter completion ────────────────
             // `$this->argument('|')` / `$this->option('|')` against the
             // enclosing command's own signature, and array keys of

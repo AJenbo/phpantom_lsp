@@ -128,7 +128,7 @@ pub(crate) use model_extraction::{
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
-pub(crate) use route_names::enumerate_all_route_names;
+pub(crate) use route_names::{RouteEntry, enumerate_all_routes, route_uri_parameters};
 pub(crate) use trans_keys::collect_trans_declarations;
 pub(crate) use validated_shape::rules_for_receiver;
 pub(crate) use validation_rules::{RulesArray, safe_call_receiver_variable, safe_source_variable};

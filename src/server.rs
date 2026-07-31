@@ -2517,7 +2517,7 @@ impl Backend {
             cache.config_trees = None;
             cache.view_names = None;
             cache.trans_keys = None;
-            cache.route_names = None;
+            cache.routes = None;
         }
 
         tracing::info!(

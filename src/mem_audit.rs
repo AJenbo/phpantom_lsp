@@ -1427,11 +1427,19 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let mut laravel_keys = Sz::default();
     {
         let c = backend.laravel_string_key_cache.read();
-        for v in [&c.route_names, &c.config_keys, &c.view_names, &c.trans_keys]
+        for v in [&c.config_keys, &c.view_names, &c.trans_keys]
             .into_iter()
             .flatten()
         {
             laravel_keys += vs(v);
+        }
+        if let Some(routes) = &c.routes {
+            laravel_keys
+                .add(routes.capacity() * size_of::<crate::virtual_members::laravel::RouteEntry>());
+            for route in routes.iter() {
+                laravel_keys.add(route.name.capacity());
+                laravel_keys.add(route.uri.capacity());
+            }
         }
         if let Some(trees) = &c.config_trees {
             // ConfigNode is recursive; count the spine only.
