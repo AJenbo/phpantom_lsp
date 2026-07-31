@@ -2478,6 +2478,18 @@ pub(crate) fn process_assert_narrowing<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // Every narrowing path below only fires for a (possibly parenthesized)
+    // call expression, so a non-call statement can never be an assert() /
+    // custom type-guard call. Bail out before the scope clone below, which
+    // otherwise runs once per in-scope variable for every statement.
+    let unwrapped = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    if !matches!(unwrapped, Expression::Call(_)) {
+        return;
+    }
+
     // ── Handle assert($x instanceof Foo) for variables NOT yet in scope ──
     // When a foreach binds a variable but the iterable element type is
     // unknown, the variable won't be in the scope map.  A subsequent

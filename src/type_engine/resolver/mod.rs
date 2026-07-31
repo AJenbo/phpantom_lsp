@@ -376,10 +376,20 @@ fn resolve_target_classes_expr_inner(
             // Use the raw return type hint only when at least one
             // resolved class has template parameters — non-generic
             // classes don't benefit from it.
-            if let Some(h) = hint
-                && classes.iter().any(|c| !c.template_params.is_empty())
-            {
-                return ResolvedType::from_classes_with_hint(classes, h);
+            if let Some(h) = hint {
+                if classes.iter().any(|c| !c.template_params.is_empty()) {
+                    return ResolvedType::from_classes_with_hint(classes, h);
+                }
+                // `object`/`?object` is the "any object" escape hatch: no
+                // concrete class matches it, but the base chain and method
+                // lookup above have already determined that.  Surface it as
+                // a type-string-only candidate instead of dropping it, so
+                // callers that need to detect a bare `object` return (e.g.
+                // `resolve_subject_outcome`'s stdClass synthesis) don't have
+                // to re-resolve the callee's base chain a second time.
+                if classes.is_empty() && h.is_object() {
+                    return vec![ResolvedType::from_type_string(h)];
+                }
             }
 
             classes.into_iter().map(ResolvedType::from_arc).collect()
@@ -861,22 +871,10 @@ pub(crate) fn resolve_subject_outcome(
         if let Some(scalar) = resolve_call_scalar_return(callee, access_kind, ctx) {
             return SubjectOutcome::Scalar(scalar);
         }
-        // A call returning `object` (or `?object`) yields no concrete
-        // class, but `object` is the "any object" escape hatch: member
-        // access is always valid at runtime.  Resolve it to a synthetic
-        // `stdClass` so downstream verification treats it like the plain
-        // `object` property/parameter case, instead of reporting the
-        // subject type as unresolved.  `is_object()` unwraps nullability,
-        // so `?object` is handled here too.
-        if let Some(raw_type) = resolve_call_raw_return_type(callee, "", ctx)
-            && raw_type.is_object()
-        {
-            let synthetic = Arc::new(ClassInfo {
-                name: crate::atom::atom("stdClass"),
-                ..ClassInfo::default()
-            });
-            return SubjectOutcome::Resolved(vec![synthetic]);
-        }
+        // Note: a call returning `object`/`?object` is already caught by
+        // the "stdClass / object" check above — `resolve_target_classes`
+        // surfaces it as a type-string-only candidate instead of an empty
+        // result, so `resolved` would not have been empty in that case.
         // Try unresolvable class detection for function calls.
         if let SubjectExpr::FunctionCall(fn_name) = callee.as_ref()
             && let Some(fl) = ctx.function_loader
