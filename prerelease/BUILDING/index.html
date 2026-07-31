@@ -1563,7 +1563,12 @@ they need no special steps.</p>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/laravel/app/Demo.php
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
 </code></pre></div>
-<p>All eight must pass with zero warnings and zero failures.</p>
+<p>All eight must pass with zero warnings and zero failures, except the
+final <code>analyze</code> run: <code>app/Demo.php</code> intentionally calls
+<code>Artisan::call('does:not-exist')</code> to demonstrate the
+<code>invalid_laravel_command</code> diagnostic, so it must report exactly
+<code>[ERROR] Found 1 error</code> on that line. Any other count, or an error on
+a different line, is a regression.</p>
 <h3 id="manual-lsp-testing">Manual LSP Testing<a class="headerlink" href="#manual-lsp-testing" title="Permanent link">&para;</a></h3>
 <p>The included <code>test_lsp.sh</code> script sends JSON-RPC messages to the server over stdin/stdout, exercising the full LSP protocol flow (initialize, open file, hover, completion, shutdown):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>./test_lsp.sh

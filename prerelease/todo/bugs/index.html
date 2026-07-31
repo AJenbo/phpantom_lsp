@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,48 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b117-per-file-callable-target-caches-are-keyed-by-call-expression-text-alone" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B117. Per-file callable-target caches are keyed by call-expression text alone
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b118-phpantom_lsp-analyze-on-exampleslaravel-reports-one-error-but-ci-requires-none" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B118. <code>phpantom_lsp analyze</code> on <code>examples/laravel</code> reports one error, but CI requires none
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1293,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1309,36 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b117-per-file-callable-target-caches-are-keyed-by-call-expression-text-alone" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B117. Per-file callable-target caches are keyed by call-expression text alone
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b118-phpantom_lsp-analyze-on-exampleslaravel-reports-one-error-but-ci-requires-none" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B118. <code>phpantom_lsp analyze</code> on <code>examples/laravel</code> reports one error, but CI requires none
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1368,54 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h2 id="b117-per-file-callable-target-caches-are-keyed-by-call-expression-text-alone">B117. Per-file callable-target caches are keyed by call-expression text alone<a class="headerlink" href="#b117-per-file-callable-target-caches-are-keyed-by-call-expression-text-alone" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>Both argument diagnostic passes memoize <code>resolve_callable_target</code>
-in a per-file <code>HashMap&lt;String, Option&lt;ResolvedCallableTarget&gt;&gt;</code>
-keyed only on the call expression, then resolve the entry using
-whichever call site happened to be reached first. Callable-target
-resolution is position-dependent (it picks the enclosing class via
-<code>find_class_at_offset</code> and resolves receiver variables against the
-scope at the cursor), so any expression whose meaning varies within
-the file gets the wrong target at every site after the first:</p>
-<ul>
-<li><code>argument_count.rs</code> caches <em>every</em> expression, including
-  variable-based calls. Two methods that both call
-  <code>$parser-&gt;parse(…)</code> on different types share one cached
-  signature, so the argument count is checked against the wrong
-  method.</li>
-<li><code>type_errors/mod.rs</code> deliberately skips variable-based calls
-  (<code>expr.starts_with('$')</code>), but <code>self::</code>, <code>static::</code>, and
-  <code>parent::</code> do not start with <code>$</code> and are equally
-  position-dependent. In a file declaring two classes that each
-  have a zero-argument <code>self::make()</code>, the second class resolves
-  to the first class's method.</li>
-</ul>
-<p>Both are latent today because the wrong target usually has a
-compatible signature, and a wrong resolution can produce either a
-false positive or a silently missed diagnostic.</p>
-<p>The cache key must cover what resolution actually depends on.
-Restricting the cache to position-independent expressions (plain
-function calls and <code>Fqn::method</code> where the class part is not
-<code>self</code>/<code>static</code>/<code>parent</code>) is the smallest sound fix; keying on
-<code>(expr, enclosing_class_start_offset)</code> keeps more hits for the
-keyword forms. Note that per-site resolution is no longer
-expensive now that the offset round trip is gone, so dropping the
-unsound entries costs little.</p>
-<hr />
-<h2 id="b118-phpantom_lsp-analyze-on-exampleslaravel-reports-one-error-but-ci-requires-none">B118. <code>phpantom_lsp analyze</code> on <code>examples/laravel</code> reports one error, but CI requires none<a class="headerlink" href="#b118-phpantom_lsp-analyze-on-exampleslaravel-reports-one-error-but-ci-requires-none" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low</strong></p>
-<p><code>docs/CONTRIBUTING.md</code> lists
-<code>phpantom_lsp analyze --project-root examples/laravel --no-colour</code>
-as a required check and states it "must report <code>[OK] No errors</code>",
-but <code>examples/laravel/app/Demo.php</code> intentionally contains
-<code>Artisan::call('does:not-exist')</code> to demonstrate the
-<code>invalid_laravel_command</code> diagnostic, so the command reports
-<code>Found 1 error</code>. Either the demo needs a form that shows the
-diagnostic without failing the check (the way <code>examples/demo.php</code>
-keeps its intentional diagnostics out of the analyze gate), or the
-documented expectation needs to name the diagnostics the Laravel
-example is expected to produce.</p>
+<p>No outstanding items.</p>
 
 
 
