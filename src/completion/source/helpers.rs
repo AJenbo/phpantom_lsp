@@ -65,6 +65,121 @@ pub(crate) fn find_open_quote(content: &str, cursor_offset: usize) -> Option<(us
     None
 }
 
+/// A call whose argument array holds the key the cursor is typing.
+///
+/// Recovered from `foo('name', ['key|' => …])`-shaped source text by
+/// [`enclosing_array_key_call`].
+pub(crate) struct ArrayKeyCall<'a> {
+    /// The call's first argument, which must be a string literal — the name
+    /// the keys belong to (an Artisan command, a route, …).
+    pub name: String,
+    /// The called function or member name, lowercased.
+    pub callee: String,
+    /// The source text before the callee, trimmed of trailing whitespace.
+    /// Ends with `::` for a static call and `->` / `?->` for an instance
+    /// call; callers inspect it to identify the receiver.
+    pub before_callee: &'a str,
+}
+
+/// Given the offset of the opening quote of an array key being typed, resolve
+/// the enclosing `foo('name', [ '|' => … ])` call.
+///
+/// Scans backwards for the `[` that opens the array, then for the preceding
+/// `(` that opens the call's argument list, and splits out the first string
+/// argument and the callee.  Returns `None` when the surrounding text is not
+/// that shape.
+pub(crate) fn enclosing_array_key_call(
+    content: &str,
+    quote_pos: usize,
+) -> Option<ArrayKeyCall<'_>> {
+    let bytes = content.as_bytes();
+
+    // Walk back to the `[` that opens the array, balancing nested brackets.
+    let mut i = quote_pos;
+    let mut depth = 0i32;
+    let bracket_open = loop {
+        if i == 0 {
+            return None;
+        }
+        i -= 1;
+        match bytes[i] {
+            b']' => depth += 1,
+            b'[' => {
+                if depth == 0 {
+                    break i;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    };
+
+    // Before the `[` we expect `... ('name', ` — find the `,` then the
+    // preceding string literal (the name) and the `(` and callee.
+    let before_bracket = content[..bracket_open].trim_end();
+    let before_bracket = before_bracket.strip_suffix(',')?.trim_end();
+    let (name, before_name) = trailing_string_literal(before_bracket)?;
+    let before_paren = before_name.trim_end().strip_suffix('(')?.trim_end();
+    let (callee, before_callee) = split_trailing_ident(before_paren);
+    if callee.is_empty() {
+        return None;
+    }
+
+    Some(ArrayKeyCall {
+        name,
+        callee: callee.to_ascii_lowercase(),
+        before_callee: before_callee.trim_end(),
+    })
+}
+
+/// Split off a trailing PHP identifier (`[A-Za-z0-9_]+`) from `s`, returning
+/// `(identifier, remainder_before_it)`.
+pub(crate) fn split_trailing_ident(s: &str) -> (&str, &str) {
+    let bytes = s.as_bytes();
+    let mut start = bytes.len();
+    while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+        start -= 1;
+    }
+    (&s[start..], &s[..start])
+}
+
+/// Split off a trailing class-name token (identifier plus `\` separators).
+pub(crate) fn trailing_class_name(s: &str) -> &str {
+    let s = s.trim_end();
+    let bytes = s.as_bytes();
+    let mut start = bytes.len();
+    while start > 0
+        && (bytes[start - 1].is_ascii_alphanumeric()
+            || bytes[start - 1] == b'_'
+            || bytes[start - 1] == b'\\')
+    {
+        start -= 1;
+    }
+    &s[start..]
+}
+
+/// If `s` ends with a single- or double-quoted string literal, return its
+/// inner value and the text before the opening quote.
+fn trailing_string_literal(s: &str) -> Option<(String, &str)> {
+    let s = s.trim_end();
+    let bytes = s.as_bytes();
+    let close = *bytes.last()?;
+    if close != b'\'' && close != b'"' {
+        return None;
+    }
+    // Find the matching opening quote (no escape handling needed for the
+    // command and route names this runs on, which never contain quotes).
+    let mut i = bytes.len() - 1;
+    while i > 0 {
+        i -= 1;
+        if bytes[i] == close {
+            let value = s[i + 1..bytes.len() - 1].to_string();
+            return Some((value, &s[..i]));
+        }
+    }
+    None
+}
+
 /// Extract the return type annotation from a closure or arrow-function
 /// literal, given its own source text (e.g. the closure's span text, or
 /// the text between a call's parentheses for one argument).

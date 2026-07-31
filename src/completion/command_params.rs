@@ -132,7 +132,7 @@ fn detect_context(content: &str, position: Position) -> Option<DetectedContext> 
     // ── Own argument / option: `->argument('|')` / `->option('|')` ─────────
     if let Some(before_paren) = before_quote.strip_suffix('(') {
         let before_paren = before_paren.trim_end();
-        let (name, rest) = split_trailing_ident(before_paren);
+        let (name, rest) = crate::completion::source::helpers::split_trailing_ident(before_paren);
         if !name.is_empty() {
             let is_method = rest.trim_end().ends_with("->") || rest.trim_end().ends_with("?->");
             if is_method {
@@ -177,115 +177,26 @@ fn detect_context(content: &str, position: Position) -> Option<DetectedContext> 
 /// Given the position of an array-key opening quote, resolve the command name
 /// of the enclosing `Artisan::call('name', [...])`-style call.
 ///
-/// Scans backwards for the `[` that opens the parameter array, then for the
-/// preceding `(` that opens the call's argument list, extracts the first
-/// string argument (the command name), and confirms the call is a recognised
+/// Returns `None` when the enclosing call is not a recognised
 /// command-running call.
 fn command_name_for_array_key(content: &str, quote_pos: usize) -> Option<String> {
-    let bytes = content.as_bytes();
+    let call = crate::completion::source::helpers::enclosing_array_key_call(content, quote_pos)?;
+    let before_callee = call.before_callee;
 
-    // Walk back to the `[` that opens the array, balancing nested brackets.
-    let mut i = quote_pos;
-    let mut depth = 0i32;
-    let bracket_open = loop {
-        if i == 0 {
-            return None;
-        }
-        i -= 1;
-        match bytes[i] {
-            b']' => depth += 1,
-            b'[' => {
-                if depth == 0 {
-                    break i;
-                }
-                depth -= 1;
-            }
-            b'\n' if depth == 0 => {
-                // Allow the array to span lines; only bail on stray brackets.
-            }
-            _ => {}
-        }
-    };
-
-    // Before the `[` we expect `... ('command', ` — find the `,` then the
-    // preceding string literal (the command name) and the `(` and call name.
-    let before_bracket = content[..bracket_open].trim_end();
-    let before_bracket = before_bracket.strip_suffix(',')?.trim_end();
-
-    // The command name is a trailing string literal.
-    let (command_name, before_name) = trailing_string_literal(before_bracket)?;
-    let before_name = before_name.trim_end();
-    let before_paren = before_name.strip_suffix('(')?.trim_end();
-
-    let (method, before_method) = split_trailing_ident(before_paren);
-    let method = method.to_ascii_lowercase();
-    let before_method = before_method.trim_end();
-
-    let is_static = before_method.ends_with("::");
-    let is_instance = before_method.ends_with("->") || before_method.ends_with("?->");
-
-    let recognised = if is_static {
-        let subject = trailing_class_name(&before_method[..before_method.len() - 2]);
+    let recognised = if let Some(receiver) = before_callee.strip_suffix("::") {
+        let subject = crate::completion::source::helpers::trailing_class_name(receiver);
         let subject = subject.rsplit('\\').next().unwrap_or(subject);
         matches!(
-            (subject.to_ascii_lowercase().as_str(), method.as_str()),
+            (subject.to_ascii_lowercase().as_str(), call.callee.as_str()),
             ("artisan", "call" | "queue") | ("schedule", "command")
         )
-    } else if is_instance {
-        matches!(method.as_str(), "call" | "callsilently")
+    } else if before_callee.ends_with("->") {
+        matches!(call.callee.as_str(), "call" | "callsilently")
     } else {
         false
     };
 
-    recognised.then_some(command_name)
-}
-
-/// Split off a trailing PHP identifier (`[A-Za-z0-9_]+`) from `s`, returning
-/// `(identifier, remainder_before_it)`.
-fn split_trailing_ident(s: &str) -> (&str, &str) {
-    let bytes = s.as_bytes();
-    let mut start = bytes.len();
-    while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
-        start -= 1;
-    }
-    (&s[start..], &s[..start])
-}
-
-/// Split off a trailing class-name token (identifier plus `\` separators).
-fn trailing_class_name(s: &str) -> &str {
-    let s = s.trim_end();
-    let bytes = s.as_bytes();
-    let mut start = bytes.len();
-    while start > 0
-        && (bytes[start - 1].is_ascii_alphanumeric()
-            || bytes[start - 1] == b'_'
-            || bytes[start - 1] == b'\\')
-    {
-        start -= 1;
-    }
-    &s[start..]
-}
-
-/// If `s` ends with a single- or double-quoted string literal, return its
-/// inner value and the text before the opening quote.
-fn trailing_string_literal(s: &str) -> Option<(String, &str)> {
-    let s = s.trim_end();
-    let bytes = s.as_bytes();
-    let close = *bytes.last()?;
-    if close != b'\'' && close != b'"' {
-        return None;
-    }
-    // Find the matching opening quote (no escape handling needed for command
-    // names, which never contain quotes).
-    let mut i = bytes.len() - 1;
-    while i > 0 {
-        i -= 1;
-        if bytes[i] == close {
-            let value = s[i + 1..bytes.len() - 1].to_string();
-            return Some((value, &s[..i]));
-        }
-    }
-    None
+    recognised.then_some(call.name)
 }
 
 #[cfg(test)]
