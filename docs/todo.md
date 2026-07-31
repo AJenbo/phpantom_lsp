@@ -168,13 +168,13 @@ unlikely to move the needle for most users.
 | L38 | [Typed `validated()` array shapes from rules](todo/laravel.md#l38-typed-validated-array-shapes-from-rules)                                                                  | Medium-High | Medium-High |
 | L26 | [Gate ability and policy strings](todo/laravel.md#l26-gate-ability-and-policy-strings)                                                                                      | Medium-High | Medium-High |
 | L16 | [Hover for Laravel string keys](todo/laravel.md)                                                                                          | Medium      | Low-Medium  |
-| L23 | [Route parameter name completion](todo/laravel.md#l23-route-parameter-name-completion)                                                                                      | Medium      | Low-Medium  |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Low-Medium  |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Low-Medium  |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium      |
 | L36 | [Container binding registrations from service providers](todo/laravel.md#l36-container-binding-registrations-from-service-providers)                                        | Medium      | Medium      |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |
+| L40 | [Resource route URIs](todo/laravel.md#l40-resource-route-uris)                                                                                                              | Low-Medium  | Low-Medium  |
 | L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names)                                                                                  | Low-Medium  | Medium      |
 | L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Low         |
 | L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Low         |
