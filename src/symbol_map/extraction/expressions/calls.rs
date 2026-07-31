@@ -194,6 +194,19 @@ pub(super) fn extract_call_expr<'a>(
                         _ => {}
                     }
                 }
+                // `$query->whereHasMorph('commentable', ['post'], …)` resolves
+                // each type through the morph map, so a literal there is an
+                // alias.  Keyed on the method name alone: every method in the
+                // family is Eloquent-specific enough that a same-named method
+                // elsewhere is vanishingly unlikely.
+                if is_morph_types_query_method(&member_name) {
+                    try_emit_morph_type_spans(
+                        &method_call.argument_list,
+                        1,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
                 // Emit call site for method call: `$subject->method(...)`
                 emit_call_site(
                     format!("{}->{}", subject_text, member_name),
@@ -363,6 +376,48 @@ pub(super) fn extract_call_expr<'a>(
                     try_emit_laravel_string_span(
                         crate::symbol_map::LaravelStringKind::Command,
                         &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // Eloquent morph aliases: the keys of a
+                // `Relation::morphMap(['post' => Post::class])` registration,
+                // and the argument of `Relation::getMorphedModel('post')` /
+                // `Model::getActualClassNameForMorph('post')`.
+                if clean_subject.eq_ignore_ascii_case("Relation")
+                    || clean_subject
+                        .eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Relations\\Relation")
+                {
+                    if is_morph_map_registration_method(&member_name) {
+                        try_emit_morph_map_key_spans(
+                            &static_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    } else if member_name.eq_ignore_ascii_case("getMorphedModel") {
+                        try_emit_morph_type_spans(
+                            &static_call.argument_list,
+                            0,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
+                }
+                if member_name.eq_ignore_ascii_case("getActualClassNameForMorph") {
+                    try_emit_morph_type_spans(
+                        &static_call.argument_list,
+                        0,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // A model forwards static calls to its query builder, so
+                // `Comment::whereHasMorph('commentable', ['post'])` is the same
+                // call site as the instance form.
+                if is_morph_types_query_method(&member_name) {
+                    try_emit_morph_type_spans(
+                        &static_call.argument_list,
+                        1,
                         ctx.content,
                         &mut ctx.spans,
                     );

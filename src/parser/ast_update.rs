@@ -142,6 +142,10 @@ impl Backend {
         // files.  Cheap no-op for files that are not (and were not) commands.
         self.refresh_laravel_command_index(uri);
 
+        // Keep the Eloquent morph map coherent with edits to the provider that
+        // registers it.  Cheap no-op for files without a `morphMap(` call.
+        self.refresh_laravel_morph_map(uri, content);
+
         match result {
             Some(changed) => changed,
             None => {

@@ -177,6 +177,7 @@
 mod argument_count;
 pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
+pub(crate) mod cross_file;
 mod deprecated;
 mod external;
 pub(crate) mod helpers;
@@ -262,6 +263,7 @@ impl Backend {
         let _callable_guard = crate::type_engine::call_resolution::with_callable_target_cache();
         let _body_infer_guard = self.activate_body_return_inferrer();
         let _auth_user_guard = self.activate_auth_user_resolver();
+        let _validation_rules_guard = self.activate_validation_rules_resolver();
 
         // ── Phase 2: forward-walked diagnostic scope cache ──────
         // Walk every function/method body in the file once with the
@@ -418,6 +420,7 @@ impl Backend {
         let mut has_view = false;
         let mut has_trans = false;
         let mut has_command = false;
+        let mut has_morph_alias = false;
         let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
             let maps = self.symbol_maps.read();
             let Some(symbol_map) = maps.get(uri) else {
@@ -434,6 +437,7 @@ impl Backend {
                             LaravelStringKind::View => has_view = true,
                             LaravelStringKind::Trans => has_trans = true,
                             LaravelStringKind::Command => has_command = true,
+                            LaravelStringKind::MorphAlias => has_morph_alias = true,
                         }
                         Some((kind.clone(), key.clone(), span.start, span.end))
                     } else {
@@ -444,7 +448,8 @@ impl Backend {
             // `maps` read lock is dropped here.
         };
 
-        if !has_route && !has_config && !has_view && !has_trans && !has_command {
+        if !has_route && !has_config && !has_view && !has_trans && !has_command && !has_morph_alias
+        {
             return;
         }
 
@@ -482,6 +487,18 @@ impl Backend {
                 .collect()
         } else {
             HashSet::new()
+        };
+        // A morph alias is only checkable when the project calls
+        // `Relation::enforceMorphMap()` / `requireMorphMap()`.  Without that,
+        // an unmapped model still morphs under its class name, so the set of
+        // valid `*_type` values is open and an unknown alias proves nothing.
+        let morph_aliases: Option<HashSet<String>> = if has_morph_alias {
+            let index = self.laravel_morph_map.read();
+            index
+                .is_enforced()
+                .then(|| index.all_aliases().into_iter().collect())
+        } else {
+            None
         };
 
         for (kind, key, start, end) in &key_spans {
@@ -528,6 +545,16 @@ impl Backend {
                         command_names.contains(key),
                         "command",
                         "invalid_laravel_command",
+                    )
+                }
+                LaravelStringKind::MorphAlias => {
+                    let Some(aliases) = &morph_aliases else {
+                        continue;
+                    };
+                    (
+                        aliases.contains(key),
+                        "morph type",
+                        "invalid_laravel_morph_alias",
                     )
                 }
             };
@@ -885,17 +912,22 @@ impl Backend {
         self.schedule_mago_analyze(uri);
     }
 
-    /// Invalidate diagnostics for all open files after a cross-file change.
+    /// Invalidate diagnostics for the open files a save can affect.
     ///
-    /// Called when a class signature changes in one file, because
-    /// diagnostics in other open files (unknown member, unknown class,
-    /// deprecated usage) may depend on the changed class.  The edited
-    /// file itself is excluded (it is already scheduled by the caller).
+    /// Diagnostics in other open files (unknown member, unknown class,
+    /// deprecated usage, argument checks) can depend on the saved file, so
+    /// they have to be recomputed — but only for the files that reference
+    /// something the save changed.  [`open_files_affected_by_save`] works
+    /// out which those are, and falls back to every open file when it
+    /// cannot tell.  The saved file itself is excluded (it is already
+    /// scheduled by the caller).
     ///
-    /// **Push mode:** Queues all open files for the background worker.
+    /// **Push mode:** Queues those files for the background worker.
     ///
     /// **Pull mode:** Invalidates cached full diagnostics and sends
     /// `workspace/diagnostic/refresh` so the editor re-pulls.
+    ///
+    /// [`open_files_affected_by_save`]: Backend::open_files_affected_by_save
     pub(crate) fn schedule_diagnostics_for_open_files(&self, exclude_uri: &str) {
         if !self.init_complete.load(Ordering::Acquire) {
             return;
@@ -903,13 +935,7 @@ impl Backend {
 
         let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
 
-        let uris: Vec<String> = self
-            .open_files
-            .read()
-            .keys()
-            .filter(|u| u.as_str() != exclude_uri)
-            .cloned()
-            .collect();
+        let uris = self.open_files_affected_by_save(exclude_uri);
         if uris.is_empty() {
             return;
         }

@@ -33,7 +33,39 @@ pub(crate) fn resolve_laravel_string_key(
         LaravelStringKind::Command => resolve_command_definition(backend, key)
             .into_iter()
             .collect(),
+        LaravelStringKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
     }
+}
+
+/// Resolve a morph alias to its `Relation::morphMap()` registration and to the
+/// model it maps to.
+///
+/// The registration comes first, matching every other string kind (a config key
+/// jumps to the config file, a view name to the template).  The mapped model
+/// follows so that go-to-definition also offers the class the alias stands for.
+fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec<Location> {
+    use tower_lsp::lsp_types::Url;
+
+    let Some((fqn, uri, offset)) = backend
+        .laravel_morph_map
+        .read()
+        .get(alias)
+        .map(|target| (target.fqn.clone(), target.uri.clone(), target.offset))
+    else {
+        return Vec::new();
+    };
+
+    let mut locations = Vec::new();
+    if let Ok(parsed_uri) = Url::parse(&uri)
+        && let Some(content) = backend.get_file_content(&uri)
+    {
+        let position = crate::text_position::offset_to_position(&content, offset as usize);
+        locations.push(crate::definition::point_location(parsed_uri, position));
+    }
+    if let Some(location) = backend.class_declaration_location(&fqn) {
+        locations.push(location);
+    }
+    locations
 }
 
 /// Resolve an Artisan command name to the declaration site inside its
@@ -67,7 +99,8 @@ pub(crate) fn find_laravel_string_key_references(
         LaravelStringKind::View
         | LaravelStringKind::Route
         | LaravelStringKind::Trans
-        | LaravelStringKind::Command => find_string_key_usages(kind, key, backend, snapshot),
+        | LaravelStringKind::Command
+        | LaravelStringKind::MorphAlias => find_string_key_usages(kind, key, backend, snapshot),
     };
 
     if include_declaration && kind != &LaravelStringKind::Config {

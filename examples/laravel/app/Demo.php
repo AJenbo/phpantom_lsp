@@ -13,6 +13,7 @@ use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -374,6 +375,22 @@ class Demo
     }
 
 
+    // ── Eloquent Morph Aliases ──────────────────────────────────────────────
+
+    public function morphAliases(): void
+    {
+        // `blog_post` and `bakery` are registered by DemoServiceProvider's
+        // `Relation::morphMap()` call.  Hover shows the model each alias maps
+        // to, go-to-definition offers the registration and the model, and
+        // find-references links every usage of the alias.
+        Review::whereHasMorph('reviewable', ['blog_post', 'bakery'])->get();
+
+        // The same alias resolves in Relation::getMorphedModel(), where
+        // completion also offers the registered aliases.
+        Relation::getMorphedModel('blog_post');   // → App\Models\BlogPost
+    }
+
+
     // ── Laravel Config (definition & references) ────────────────────────
 
     public function laravelConfig(): void
@@ -462,6 +479,51 @@ class Demo
 
         $request->input('headline');      // → from the validate() call above
         $request->filled('published_at'); // → from the validate() call above
+    }
+
+
+    // ── Typed validated() array shapes from rules ───────────────────────
+
+    public function validatedArrayShape(StoreBakeryRequest $request): void
+    {
+        // validated() is declared `array`, but the rules array says exactly
+        // which keys it holds and what each one is, so it resolves to:
+        //   array{
+        //     name: string,
+        //     apricot?: bool,
+        //     dough_temp?: ?int|float,
+        //     notes?: list<array{body: string}>,
+        //     owner: array{email: string},
+        //   }
+        $data = $request->validated();
+
+        $data['name'];                    // → string
+        $data['apricot'];                 // → bool ('apricot' is optional)
+        $data['notes'];                   // → list<array{body: string}>
+        $data['owner']['email'];          // → string
+
+        // A key argument returns that member's type rather than the array.
+        $request->validated('name');      // → string
+
+        // safe() narrows the same shape.
+        $subset = $request->safe()->only(['name', 'apricot']);
+        $subset['name'];                  // → string, and 'notes' is gone
+    }
+
+
+    public function validatedShapeFromInlineRules(Request $request): void
+    {
+        // The rules passed to validate() type its return value directly, so
+        // no FormRequest class is needed.
+        $data = $request->validate([
+            'headline' => 'required|string',
+            'rank' => 'required|integer',
+            'featured' => 'boolean',
+        ]);
+
+        $data['headline'];                // → string
+        $data['rank'];                    // → int
+        $data['featured'];                // → bool (optional key)
     }
 
 

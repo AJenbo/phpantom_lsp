@@ -70,6 +70,14 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     let mut paren_depth = 0;
     let mut in_string: Option<char> = None;
     let mut is_escaped = false;
+    // Whether `mode == Mode::Php` because we're inside a `{{-- ... --}}`
+    // comment (emitted as `/* ... */`) rather than a real echo/expression.
+    // Comment text is neither PHP nor Blade, so nothing in it but the `--}}`
+    // terminator carries meaning: an apostrophe must not start a string
+    // literal (the scanner would hunt for a matching closing quote), and a
+    // commented-out `}}`/`!!}` or an `@endphp` in prose must not end the
+    // comment. Any of those desyncs the rest of the file.
+    let mut in_comment = false;
     // Whether the HTML scanner is currently between the `<` and `>` of a
     // tag, and (when inside a tag) whether it is inside a quoted attribute
     // value. Both persist across lines so multi-line tags are tracked
@@ -132,7 +140,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                 }
             }
 
-            if mode != Mode::Html {
+            if mode != Mode::Html && !in_comment {
                 if let Some(quote) = in_string {
                     if is_escaped {
                         is_escaped = false;
@@ -189,6 +197,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         " echo e(".to_string()
                     };
                     match_len = if is_comment || is_raw { 4 } else { 2 };
+                    in_comment = is_comment;
                     next_mode = Mode::Php;
                 } else if remaining.starts_with(&['<', '?', 'p', 'h', 'p']) {
                     // Raw <?php tag embedded directly in the template (not via @php).
@@ -421,15 +430,25 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         next_mode = Mode::BoundAttr(Some(quote));
                     }
                 }
+            } else if mode == Mode::Php && in_comment {
+                // Inside a comment the only meaningful token is the `--}}`
+                // terminator, which Blade requires to be contiguous. Comment
+                // text is neither PHP nor Blade, so a commented-out echo's
+                // `}}`/`!!}` and an `@endphp` written in prose must not end
+                // it — treating either as the terminator would leave the
+                // emitted `/*` open and desync the rest of the file.
+                if remaining.starts_with(&['}', '}'])
+                    && char_idx >= 2
+                    && line_chars[char_idx - 2..].starts_with(&['-', '-'])
+                {
+                    replacement = " */ ".to_string();
+                    match_len = 2;
+                    in_comment = false;
+                    next_mode = Mode::Html;
+                }
             } else if mode == Mode::Php {
                 if remaining.starts_with(&['}', '}']) || remaining.starts_with(&['!', '!', '}']) {
-                    let is_comment_end =
-                        char_idx >= 2 && line_chars[char_idx - 2..].starts_with(&['-', '-']);
-                    replacement = if is_comment_end {
-                        " */ ".to_string()
-                    } else {
-                        "); ".to_string()
-                    };
+                    replacement = "); ".to_string();
                     match_len = if remaining.starts_with(&['!', '!', '}']) {
                         3
                     } else {
@@ -648,6 +667,13 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
         virtual_php.push('\n');
         adjustments.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         source_map.adjustments.push(adjustments);
+    }
+
+    // An unterminated `{{--` leaves the emitted `/*` open, which would
+    // swallow the wrapper's closing brace and make the whole file
+    // unparseable. Close it so only the comment itself is lost.
+    if in_comment {
+        virtual_php.push_str(" */\n");
     }
 
     // Close the wrapper function.
@@ -1575,6 +1601,119 @@ mod tests {
         assert!(
             !php.contains("after"),
             "content after @inject(...) should be masked as HTML: {}",
+            php
+        );
+    }
+
+    /// An apostrophe inside a `{{-- ... --}}` comment must not be mistaken
+    /// for the start of a PHP string literal — that previously made the
+    /// scanner hunt for a matching closing quote instead of the comment's
+    /// `--}}` terminator, desyncing the rest of the file.
+    #[test]
+    fn test_preprocess_comment_with_apostrophe_does_not_desync() {
+        let content = "{{-- user's note --}}\n<p>{{ $after }}</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("/*  user's note"),
+            "comment should translate to a block comment: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $after )"),
+            "content after the comment should still translate normally: {}",
+            php
+        );
+    }
+
+    /// A double quote inside a `{{-- ... --}}` comment must not be mistaken
+    /// for the start of a PHP string literal either — same root cause as
+    /// the apostrophe case above.
+    #[test]
+    fn test_preprocess_comment_with_double_quote_does_not_desync() {
+        let content = "{{-- say \"hi\" --}}\n<p>{{ $after }}</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("/*  say \"hi\""),
+            "comment should translate to a block comment: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $after )"),
+            "content after the comment should still translate normally: {}",
+            php
+        );
+    }
+
+    /// The text of the first `/* ... */` block comment in the virtual PHP.
+    /// Panics if there is no closed block comment, which is itself the bug
+    /// the callers are guarding against.
+    fn comment_body(php: &str) -> &str {
+        let start = php.find("/* ").expect("a block comment should be emitted");
+        let rest = &php[start + 3..];
+        let end = rest.find("*/").expect("the comment should be closed");
+        &rest[..end]
+    }
+
+    /// Commenting out an echo is the usual reason to write a Blade comment,
+    /// so the `}}` / `!!}` of the commented-out echo must not be taken for
+    /// the comment's terminator: only a contiguous `--}}` ends a comment.
+    #[test]
+    fn test_preprocess_comment_containing_echo_does_not_desync() {
+        for content in [
+            "{{-- {{ $old }} --}}\n<p>{{ $after }}</p>\n",
+            "{{-- {!! $old !!} --}}\n<p>{{ $after }}</p>\n",
+        ] {
+            let (php, _) = preprocess(content);
+            assert!(
+                comment_body(&php).contains("$old"),
+                "the commented-out echo should stay inside the block comment: {}",
+                php
+            );
+            assert!(
+                php.contains("echo e( $after )"),
+                "content after the comment should still translate normally: {}",
+                php
+            );
+        }
+    }
+
+    /// `@endphp` mentioned in comment prose is text, not the end of an
+    /// `@php` block, so it must not terminate the comment either.
+    #[test]
+    fn test_preprocess_comment_mentioning_endphp_does_not_desync() {
+        let content = "{{-- use @php/@endphp instead --}}\n<p>{{ $after }}</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            comment_body(&php).contains("@endphp instead"),
+            "the mentioned directive should stay inside the block comment: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $after )"),
+            "content after the comment should still translate normally: {}",
+            php
+        );
+    }
+
+    /// An unterminated `{{--` must still emit a closed `/* ... */`, or the
+    /// open comment swallows the wrapper function's closing brace and makes
+    /// the whole virtual file unparseable.
+    #[test]
+    fn test_preprocess_unterminated_comment_is_closed() {
+        let content = "<p>{{ $before }}</p>\n{{-- forgot to close\nstill comment\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo e( $before )"),
+            "content before the comment should translate normally: {}",
+            php
+        );
+        let comment_start = php.find("/* ").expect("comment should be emitted");
+        let comment_end = php[comment_start..]
+            .find("*/")
+            .expect("unterminated comment should still be closed");
+        assert!(
+            php[comment_start + comment_end..].contains('}'),
+            "the wrapper function's closing brace must not be inside the comment: {}",
             php
         );
     }

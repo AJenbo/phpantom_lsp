@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\CollectedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 #[CollectedBy(ReviewCollection::class)]
 class Review extends Model
@@ -14,4 +15,12 @@ class Review extends Model
 
     /** @return HasMany<Review, $this> */
     public function replies(): mixed { return $this->hasMany(Review::class); }
+
+    /**
+     * A review belongs to whatever it reviews.  The `reviewable_type` column
+     * holds the morph alias DemoServiceProvider registers for each model.
+     *
+     * @return MorphTo<Model, $this>
+     */
+    public function reviewable(): mixed { return $this->morphTo(); }
 }

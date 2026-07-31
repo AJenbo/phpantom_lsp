@@ -2,9 +2,12 @@
 
 namespace App\Providers;
 
+use App\Models\Bakery;
+use App\Models\BlogPost;
 use App\Support\CarbonMixin;
 use App\Support\CollectionMixin;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Collection;
 use Illuminate\Support\ServiceProvider;
 
@@ -12,6 +15,15 @@ class DemoServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
+        // The morph map replaces the model FQCN with a short alias in every
+        // polymorphic `*_type` column.  PHPantom reads the registration from
+        // here, so the alias strings elsewhere in the project hover with the
+        // model they stand for and go-to-definition jumps to it.
+        Relation::morphMap([
+            'blog_post' => BlogPost::class,
+            'bakery'    => Bakery::class,
+        ]);
+
         // A macro registered here becomes a real method on Collection:
         // it autocompletes, hovers with this signature, and type-checks.
         Collection::macro('sumField', function (string $field): float {

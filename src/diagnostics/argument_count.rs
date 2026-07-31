@@ -30,7 +30,7 @@ use crate::Backend;
 use crate::parser::with_parse_cache;
 use crate::types::ResolvedCallableTarget;
 
-use super::helpers::make_diagnostic;
+use super::helpers::{is_position_independent_call_expression, make_diagnostic};
 
 /// Diagnostic code used for argument-count diagnostics.
 pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
@@ -246,8 +246,15 @@ impl Backend {
         let _parse_guard = with_parse_cache(content);
 
         // Call-expression resolution cache: avoids re-resolving the
-        // same call expression (e.g. `$purchaseFile->save`) at every
-        // call site that uses it.
+        // same call expression (e.g. `Fqn::method`) at every call site
+        // that uses it.
+        //
+        // Only expressions that are guaranteed to resolve to the same
+        // target everywhere in the file are cached (see
+        // `is_position_independent_call_expression`). Variable-based
+        // calls (`$purchaseFile->save`) and `self::`/`static::`/
+        // `parent::` calls are resolved fresh every time because their
+        // target depends on the call site's position.
         let mut call_cache: HashMap<String, Option<ResolvedCallableTarget>> = HashMap::new();
 
         // ── Walk every call site ────────────────────────────────────
@@ -261,17 +268,26 @@ impl Backend {
             let expr = &call_site.call_expression;
 
             // Look up or populate the call expression cache.
-            let resolved = call_cache
-                .entry(expr.clone())
-                .or_insert_with(|| {
-                    self.resolve_callable_target_at_offset(
-                        expr,
-                        content,
-                        call_site.args_start,
-                        &file_ctx,
-                    )
-                })
-                .clone();
+            let resolved = if is_position_independent_call_expression(expr) {
+                call_cache
+                    .entry(expr.clone())
+                    .or_insert_with(|| {
+                        self.resolve_callable_target_at_offset(
+                            expr,
+                            content,
+                            call_site.args_start,
+                            &file_ctx,
+                        )
+                    })
+                    .clone()
+            } else {
+                self.resolve_callable_target_at_offset(
+                    expr,
+                    content,
+                    call_site.args_start,
+                    &file_ctx,
+                )
+            };
 
             // Resolve the call expression to a callable target.
             let resolved = match resolved {

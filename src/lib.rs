@@ -596,6 +596,14 @@ pub struct Backend {
     /// Fast gate for [`laravel_commands`](Self::laravel_commands): `true` only
     /// when the index holds at least one command.
     pub(crate) laravel_has_commands: Arc<std::sync::atomic::AtomicBool>,
+    /// Eloquent morph map (`Relation::morphMap()` /
+    /// `Relation::enforceMorphMap()`) recovered from service-provider source,
+    /// keyed by morph alias.  Built during `initialized` for Laravel projects
+    /// and refreshed when a registering file changes.  Powers
+    /// go-to-definition, hover, and find-references on the alias strings that
+    /// appear in `*_type` columns and morph query arguments.  Empty for
+    /// non-Laravel projects.  See [`virtual_members::laravel::morph_map`].
+    pub(crate) laravel_morph_map: Arc<RwLock<virtual_members::laravel::LaravelMorphMapIndex>>,
     /// Laravel macro seed files (service providers plus the app's provider
     /// registration files), mapped to the class references each contributed
     /// at the last macro-index build.  An edit that changes a seed's
@@ -893,6 +901,9 @@ impl Backend {
                 virtual_members::laravel::LaravelCommandIndex::default(),
             )),
             laravel_has_commands: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_morph_map: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelMorphMapIndex::default(),
+            )),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -979,6 +990,9 @@ impl Backend {
                 virtual_members::laravel::LaravelCommandIndex::default(),
             )),
             laravel_has_commands: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            laravel_morph_map: Arc::new(RwLock::new(
+                virtual_members::laravel::LaravelMorphMapIndex::default(),
+            )),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1596,6 +1610,7 @@ impl Backend {
             laravel_pivots_dirty: Arc::clone(&self.laravel_pivots_dirty),
             laravel_commands: Arc::clone(&self.laravel_commands),
             laravel_has_commands: Arc::clone(&self.laravel_has_commands),
+            laravel_morph_map: Arc::clone(&self.laravel_morph_map),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),

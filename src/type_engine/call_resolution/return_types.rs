@@ -143,6 +143,34 @@ fn resolve_auth_user_at_call(
     }
 }
 
+/// The array shape a Laravel `validated()` / `validate()` /
+/// `safe()->only()` call returns, given the rules in scope at the call site.
+///
+/// Returns `None` for every other call, leaving the declared return type
+/// alone.
+fn resolve_validated_shape_at_call(
+    base: &SubjectExpr,
+    method_name: &str,
+    text_args: &str,
+    owners: &[ResolvedType],
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    use crate::virtual_members::laravel::validated_shape;
+
+    let call = validated_shape::shape_bearing_method(method_name)?;
+    let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
+
+    validated_shape::resolve_shape_at_call(
+        receiver,
+        call,
+        &split_text_args(text_args),
+        &|| validated_shape::safe_source_class(base, ctx),
+        ctx.content,
+        ctx.cursor_offset,
+        ctx.class_loader,
+    )
+}
+
 /// Recover the guard name from a `user()` call site.
 ///
 /// The guard name may be an explicit argument to `user()` itself
@@ -290,6 +318,23 @@ impl Backend {
                         resolve_auth_user_at_call(base, text_args, &lhs_resolved, ctx)
                 {
                     return classes;
+                }
+
+                // Laravel validated input: `validated()`, `validate([…])`
+                // and `safe()->only([…])` return the array shape the
+                // validation rules in scope describe.  An array shape has
+                // no class, so it travels as the type hint alone.
+                if let Some(shape) = resolve_validated_shape_at_call(
+                    base,
+                    method_name,
+                    text_args,
+                    &lhs_resolved,
+                    ctx,
+                ) {
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(shape);
+                    }
+                    return Vec::new();
                 }
 
                 // Capture the raw return type hint while we iterate

@@ -962,4 +962,69 @@ function test(): void {
             "Expected both $a and $b reported missing, got: {diags:?}",
         );
     }
+
+    #[test]
+    fn variable_call_target_not_shared_across_different_receiver_types() {
+        // Two unrelated classes each expose a `parse` method with a
+        // different required arity, and two functions each assign a
+        // same-named local variable a different one of those classes.
+        // Caching the resolved target by the expression text
+        // `$parser->parse` alone (ignoring what type `$parser` holds at
+        // each call site) would make the second call reuse the first's
+        // resolved target and miss its own too-few-args error.
+        let php = r#"<?php
+class ParserA {
+    public function parse(int $a): void {}
+}
+class ParserB {
+    public function parse(int $a, int $b): void {}
+}
+function testA(): void {
+    $parser = new ParserA();
+    $parser->parse(1);
+}
+function testB(): void {
+    $parser = new ParserB();
+    $parser->parse(1);
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Expected 2 arguments") && d.message.contains("got 1")),
+            "Expected too-few-args diagnostic for ParserB::parse via $parser, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn self_call_target_not_shared_across_classes() {
+        // Two classes each declare a zero-arg-looking `self::make` call
+        // with a different required arity. `self::make` resolution
+        // depends on the enclosing class at the call site, so caching
+        // the target by expression text alone (ignoring which class the
+        // call appears in) would make the second class reuse the
+        // first's resolved target and miss its own too-few-args error.
+        let php = r#"<?php
+class First {
+    public static function make(int $a): void {}
+    public function run(): void {
+        self::make(1);
+    }
+}
+class Second {
+    public static function make(int $a, int $b): void {}
+    public function run(): void {
+        self::make(1);
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Expected 2 arguments") && d.message.contains("got 1")),
+            "Expected too-few-args diagnostic for Second::make via self::, got: {diags:?}",
+        );
+    }
 }

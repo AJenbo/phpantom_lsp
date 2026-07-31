@@ -186,6 +186,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         // trans(), and route() string keys resolve the same way they do in
         // the LSP (which builds these in its `initialized` handler).
         backend.build_provider_resources();
+        // Discover the Eloquent morph map so alias strings are validated the
+        // same way here as in the LSP.
+        backend.build_laravel_morph_map_index();
     }
 
     // ── Phase 1.5: Eager class population ───────────────────────────
@@ -275,6 +278,8 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             crate::type_engine::call_resolution::with_callable_target_cache();
                         let _body_infer_guard = backend.activate_body_return_inferrer();
                         let _auth_user_guard = backend.activate_auth_user_resolver();
+                        let _validation_rules_guard =
+                            backend.activate_validation_rules_resolver();
 
                         // ── Forward-walked diagnostic scope cache ───
                         // Walk every function/method body once with the

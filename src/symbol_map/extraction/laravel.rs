@@ -95,6 +95,116 @@ pub(super) fn try_emit_laravel_string_span(
     });
 }
 
+/// The morph-map API on `Illuminate\Database\Eloquent\Relations\Relation`
+/// whose first argument holds the alias → model map.
+pub(super) fn is_morph_map_registration_method(member_name: &str) -> bool {
+    member_name.eq_ignore_ascii_case("morphMap")
+        || member_name.eq_ignore_ascii_case("enforceMorphMap")
+}
+
+/// Whether `member_name` is a query-builder method whose second argument is a
+/// list of morph types (`whereHasMorph($relation, ['post', 'video'], …)`).
+///
+/// Laravel maps each entry through `Relation::getMorphedModel()`, so a plain
+/// string there is a morph alias.
+pub(super) fn is_morph_types_query_method(member_name: &str) -> bool {
+    matches!(
+        member_name.to_ascii_lowercase().as_str(),
+        "hasmorph"
+            | "orhasmorph"
+            | "doesnthavemorph"
+            | "ordoesnthavemorph"
+            | "wherehasmorph"
+            | "orwherehasmorph"
+            | "wheredoesnthavemorph"
+            | "orwheredoesnthavemorph"
+            | "wheremorphrelation"
+            | "orwheremorphrelation"
+            | "wheremorphdoesnthaverelation"
+            | "orwheremorphdoesnthaverelation"
+    )
+}
+
+/// Push a [`crate::symbol_map::LaravelStringKind::MorphAlias`] span for every
+/// alias key of a `Relation::morphMap(['post' => Post::class, …])` argument.
+pub(super) fn try_emit_morph_map_key_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let elements = match first_arg.value() {
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        _ => return,
+    };
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(kv) = element {
+            push_morph_alias_span(kv.key, content, spans);
+        }
+    }
+}
+
+/// Push a morph-alias span for the `$types` argument at `arg_index`, which
+/// Laravel accepts as either a single string or an array of strings.
+pub(super) fn try_emit_morph_type_spans(
+    argument_list: &ArgumentList<'_>,
+    arg_index: usize,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(arg) = argument_list.arguments.iter().nth(arg_index) else {
+        return;
+    };
+    match arg.value() {
+        Expression::Array(array) => {
+            for element in array.elements.iter() {
+                if let ArrayElement::Value(value) = element {
+                    push_morph_alias_span(value.value, content, spans);
+                }
+            }
+        }
+        Expression::LegacyArray(array) => {
+            for element in array.elements.iter() {
+                if let ArrayElement::Value(value) = element {
+                    push_morph_alias_span(value.value, content, spans);
+                }
+            }
+        }
+        expr => push_morph_alias_span(expr, content, spans),
+    }
+}
+
+/// Push a morph-alias span for a single string-literal expression, skipping the
+/// spellings that are not aliases.
+fn push_morph_alias_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let alias = &content[inner_start as usize..inner_end as usize];
+    // `'*'` is the wildcard the `whereHasMorph()` family accepts, and a value
+    // containing a namespace separator is a class name rather than an alias
+    // (both APIs take either form).
+    if alias.is_empty() || alias == "*" || alias.contains('\\') {
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::LaravelStringKey {
+            kind: crate::symbol_map::LaravelStringKind::MorphAlias,
+            key: alias.to_string(),
+        },
+    });
+}
+
 /// If the first argument of `argument_list` is a plain, non-empty string
 /// literal, push a [`SymbolKind::CommandOwnParam`] span covering the string
 /// content.  Used for `$this->argument('user')` / `$this->option('queue')`

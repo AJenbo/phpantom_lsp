@@ -2108,6 +2108,18 @@ impl ClassInfo {
     /// - `class_docblock` (adding/removing `@method`/`@property` tags)
     /// - `laravel` metadata (affects virtual member providers)
     pub fn signature_eq(&self, other: &ClassInfo) -> bool {
+        self.class_level_signature_eq(other) && self.members_signature_eq(other)
+    }
+
+    /// The class-level half of [`signature_eq`](Self::signature_eq):
+    /// everything except the declared methods, properties, and constants.
+    ///
+    /// A change here (a new parent, a different `@mixin`, an edited
+    /// class docblock, changed Laravel metadata) can alter *any* member's
+    /// resolution, so callers that want to know which members an edit
+    /// affected must treat the whole member surface as affected when this
+    /// returns `false`.
+    pub fn class_level_signature_eq(&self, other: &ClassInfo) -> bool {
         // ── Class-level metadata ────────────────────────────────────
         if self.kind != other.kind
             || self.name != other.name
@@ -2139,6 +2151,13 @@ impl ClassInfo {
             return false;
         }
 
+        true
+    }
+
+    /// The member half of [`signature_eq`](Self::signature_eq): the
+    /// declared methods, properties, and constants, compared as
+    /// name-keyed sets so reordering members in source is not a change.
+    pub fn members_signature_eq(&self, other: &ClassInfo) -> bool {
         // ── Methods (compared as a name-keyed set) ──────────────────
         if self.methods.len() != other.methods.len() {
             return false;

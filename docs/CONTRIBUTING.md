@@ -22,7 +22,7 @@ php -l examples/laravel/app/Demo.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 ```
 
-Note that clippy runs twice, once for library code and once including test code. The `php -l` check ensures `examples/demo.php` remains valid PHP. The `php -d zend.assertions=1` run executes `runDemoAssertions()` to verify that scaffolding stubs actually return what their docblocks claim. The final `php -l` and `phpantom_lsp analyze` runs check `examples/laravel/` for syntax errors and diagnostic regressions. The analyze run must report `[OK] No errors`.
+Note that clippy runs twice, once for library code and once including test code. The `php -l` check ensures `examples/demo.php` remains valid PHP. The `php -d zend.assertions=1` run executes `runDemoAssertions()` to verify that scaffolding stubs actually return what their docblocks claim. The final `php -l` and `phpantom_lsp analyze` runs check `examples/laravel/` for syntax errors and diagnostic regressions. `app/Demo.php` intentionally calls `Artisan::call('does:not-exist')` to demonstrate the `invalid_laravel_command` diagnostic, so the analyze run must report exactly `[ERROR] Found 1 error` on that line, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
 
 ## Code Style
 

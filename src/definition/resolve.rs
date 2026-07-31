@@ -967,6 +967,24 @@ impl Backend {
         self.find_definition_in_uri_classes_index_cross_file(fqn, &target_uri_string)
     }
 
+    /// Resolve a class FQN to the [`Location`] of its declaration.
+    ///
+    /// Loads the class if it is not yet in the FQN → URI index, so a target
+    /// discovered from a framework index (rather than from source the user has
+    /// opened) still resolves.  Used by go-to-definition on symbols that name a
+    /// class indirectly, such as an Eloquent morph alias.
+    pub(crate) fn class_declaration_location(&self, fqn: &str) -> Option<Location> {
+        let indexed = self.symbols.fqn_uri_index.read().get(fqn).cloned();
+        let target_uri = match indexed {
+            Some(uri) => uri,
+            None => {
+                self.find_or_load_class(fqn);
+                self.symbols.fqn_uri_index.read().get(fqn).cloned()?
+            }
+        };
+        self.find_definition_in_uri_classes_index_cross_file(fqn, &target_uri)
+    }
+
     /// Like [`find_definition_in_uri_classes_index`] but for cross-file jumps where
     /// we know the target file's URI (not the current file).
     ///

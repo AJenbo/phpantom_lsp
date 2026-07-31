@@ -428,9 +428,10 @@ impl Backend {
         })
     }
 
-    /// The `/`-separated path of `uri` relative to the workspace root,
-    /// for matching `[[diagnostics.ignore]]` path globs.
-    fn workspace_relative_path(&self, uri: &str) -> Option<String> {
+    /// The `/`-separated path of `uri` relative to the workspace root, for
+    /// matching `[[diagnostics.ignore]]` path globs and for naming a file in
+    /// hover text.
+    pub(crate) fn workspace_relative_path(&self, uri: &str) -> Option<String> {
         let path = uri
             .parse::<tower_lsp::lsp_types::Url>()
             .ok()?

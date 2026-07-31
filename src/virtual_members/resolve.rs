@@ -27,7 +27,10 @@ use crate::util::short_name;
 use crate::virtual_members::laravel::patches::apply_laravel_patches;
 
 use super::laravel;
-use super::{ResolvedClassCache, ResolvedClassCacheKey, apply_virtual_members, default_providers};
+use super::{
+    ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, apply_virtual_members,
+    default_providers,
+};
 
 // ─── Cycle breaking ─────────────────────────────────────────────────────────
 //
@@ -249,6 +252,56 @@ pub fn resolve_class_fully_maybe_cached(
             elapsed
         );
     }
+    result
+}
+
+/// Reserved generic-args marker for [`resolve_class_base_cached`]'s cache
+/// key. Contains a NUL byte, which `PhpType::to_string()` never produces,
+/// so it can never collide with a real `(FQN, generic_args)` key.
+const BASE_RESOLUTION_MARKER: &str = "\0base";
+
+/// Resolve a class's base inheritance only (own members + traits +
+/// parent chain), skipping the walk on repeat lookups of the same class
+/// via the active [`ResolvedClassCache`].
+///
+/// This is the *pre-virtual-member-provider* stage of
+/// [`resolve_class_fully_inner`]: unlike [`resolve_class_fully`], it does
+/// not run virtual member providers, so scope methods (`scopeX` /
+/// `#[Scope]`) are still present in their raw, undecorated form — the
+/// Laravel provider replaces them with their public-facing scope method,
+/// which would make them invisible to callers that need to recognize the
+/// original scope declaration (e.g. Eloquent scope-method synthesis).
+///
+/// Stored under the same key space as the fully-resolved cache
+/// (`(FQN, generic_args)`), tagged with [`BASE_RESOLUTION_MARKER`] so it
+/// can never collide with a real generic instantiation. Sharing the key
+/// space means base-resolution entries ride along with the fully-resolved
+/// cache's existing FQN-keyed eviction (`evict_fqn`/`remove_all_variants`),
+/// which already removes every generic-arg variant of an invalidated FQN
+/// transitively through `reverse_deps` — a separate cache would have to
+/// duplicate that invalidation graph to stay correct.
+///
+/// Falls back to an uncached call to [`resolve_class_with_inheritance`]
+/// when no cache is active on this thread.
+pub(crate) fn resolve_class_base_cached(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Arc<ClassInfo> {
+    let Some(cache) = active_resolved_class_cache() else {
+        return Arc::new(resolve_class_with_inheritance(class, class_loader));
+    };
+
+    let key: ResolvedClassCacheKey = (class.fqn(), vec![BASE_RESOLUTION_MARKER.to_string()]);
+
+    {
+        let map = cache.read();
+        if let Some(cached) = map.get(&key) {
+            return Arc::clone(cached);
+        }
+    }
+
+    let result = Arc::new(resolve_class_with_inheritance(class, class_loader));
+    cache.write().insert(key, Arc::clone(&result));
     result
 }
 

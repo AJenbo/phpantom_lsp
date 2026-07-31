@@ -88,6 +88,7 @@ impl Backend {
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
         let _body_infer_guard = self.activate_body_return_inferrer();
         let _auth_user_guard = self.activate_auth_user_resolver();
+        let _validation_rules_guard = self.activate_validation_rules_resolver();
         let offset = crate::text_position::position_to_offset(content, position);
 
         // Try the exact cursor offset first.
@@ -600,6 +601,21 @@ impl Backend {
                     "Artisan command".to_string()
                 };
                 ("Command", detail)
+            }
+            LaravelStringKind::MorphAlias => {
+                let index = self.laravel_morph_map.read();
+                let detail = match index.get(key) {
+                    Some(target) => {
+                        let mut detail = format!("Maps to `{}`", target.fqn);
+                        if let Some(rel) = self.workspace_relative_path(&target.uri) {
+                            detail.push_str(&format!("\n\nRegistered in `{}`", rel));
+                        }
+                        detail
+                    }
+                    None if index.is_enforced() => "Not registered in the morph map".to_string(),
+                    None => "Morph alias".to_string(),
+                };
+                ("Morph type", detail)
             }
         };
 

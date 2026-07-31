@@ -28,6 +28,7 @@ within the same impact tier.
 | Facade → concrete resolution via booting | Requires booting (`getFacadeRoot()`). When `getFacadeAccessor()` returns a `::class` reference, static resolution is possible without booting. See "Facade completion" section below. |
 | Contract → concrete resolution | Fully out of scope, including core framework contracts. Calling a concrete-only method on a contract-typed value is unsound per the declared types — the diagnostic is intended, exactly as `fn (A $a) => $a->bMethod()` is not a false positive just because `B extends A` at every call site. Where the *framework's own* docblock is needlessly wide, fix the docblock upstream or via stub patches. |
 | Manager → driver resolution | Requires instantiating the manager at runtime. |
+| Narrowing a `MorphTo` relation to concrete models | `$comment->commentable` resolves to the generic `Illuminate\Database\Eloquent\Model`, which is what the relation declares. The morph map (now indexed, see L41/L42) is global rather than per-relation, so the only type it could supply is a union of *every* mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with `@return MorphTo<Post\|Video, $this>` where the target set is actually known. |
 
 ---
 
@@ -440,6 +441,60 @@ provider already knows the model type; it would need to emit
 different return types for `create()`/`make()` based on whether
 the chain includes a count-setting call.
 
+#### L41. Morph aliases in `*_type` column comparisons
+
+**Impact: Low-Medium · Effort: Medium**
+
+The morph-map index (`virtual_members/laravel/morph_map.rs`) recognizes
+alias strings in the positions Eloquent resolves through the map by
+name: the `morphMap()` keys themselves, `Relation::getMorphedModel()`,
+`Model::getActualClassNameForMorph()`, and the `$types` argument of the
+`whereHasMorph()` family. It does **not** recognize an alias compared
+against a morph type *column*, which is how much real code reads it:
+
+```php
+$query->where('commentable_type', 'post');
+if ($comment->commentable_type === 'post') { … }
+```
+
+Both are alias literals, but recognizing them means knowing that the
+column named on the other side is a polymorphic type column. The
+information is available: a `morphTo()` relation declares its type
+column (defaulting to `<relation>_type`), and the relation methods of
+the model being queried are already parsed. The work is to collect the
+morph type columns of a model, then match a string literal that appears
+opposite one in a `where()` / comparison against the alias index.
+
+Once a literal is recognized it inherits hover, go-to-definition,
+find-references, and the enforced-map diagnostic for free, since those
+dispatch on the `LaravelStringKind::MorphAlias` span kind.
+
+#### L42. Morph alias completion in array positions
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+Morph aliases complete inside `Relation::getMorphedModel('|')` and
+`Model::getActualClassNameForMorph('|')`, but not in the two array
+positions where they are most often written:
+
+```php
+Relation::morphMap(['|' => Post::class]);
+$query->whereHasMorph('commentable', ['|']);
+```
+
+The blocker is not the alias index but
+`detect_laravel_string_key_context` in
+`completion/laravel_string_keys.rs`, which recognizes only a string
+that is the *first* argument of a call — it scans backwards from the
+cursor and requires `(` immediately before the opening quote. Neither
+an array key nor an element of a later argument matches that shape.
+
+**Where to change:** teach the detector to walk back past an enclosing
+`[` (and the argument commas before it) so it can report both the call
+being made and which argument position and array slot the cursor sits
+in. Every string kind benefits: the same limitation is why a config key
+inside `Config::set(['a.b' => …])` does not complete either.
+
 ---
 
 ## Model columns from committed schema artifacts
@@ -849,37 +904,26 @@ binding `bind(Gateway::class, StripeGateway::class)` does **not**
 retype `app(Gateway::class)` to the concrete — the contract is the
 interface.
 
-#### L38. Typed `validated()` array shapes from rules
+#### L40. Backing type for enum validation rules
 
-**Impact: Medium-High · Effort: Medium-High**
+**Impact: Low · Effort: Low-Medium**
 
-No mainstream tool types `$request->validated()` beyond `array` — this
-is a leapfrog opportunity, not catch-up. The rules array is a static
-type contract; translate it into an array shape:
+`validated()` array shapes type a field from its validation rules, but
+an enum rule (`new Enum(Role::class)`, `Rule::enum(Role::class)`)
+currently degrades to `mixed`: the rule is an object expression, not a
+rule name the token table knows.
 
-- `'name' => 'required|string|max:255'` → `name: string`
-- `'age' => 'nullable|integer'` → `age: int|null`
-- `'active' => 'boolean'` → `active: bool`
-- `'role' => [new Enum(Role::class)]` / enum-cast columns → `role: string`
-  (the raw validated value; the enum object only exists after `enum()`)
-- `'items' => 'array'`, `'items.*.id' => 'integer'` →
-  `items: list<array{id: int}>`
-- fields without `required` (and without `nullable`) are optional keys
-  (`name?:`), since absent input never reaches the validated array
+The validated array holds the raw input, not the enum case, so the
+right type is the enum's backing type — `string` for a string-backed
+enum, `int` for an int-backed one. Both are recoverable: the class name
+is written in the rule expression, and the backing type is on the
+`ClassInfo`. A pure (non-backed) enum has no raw scalar form and should
+stay `mixed`.
 
-Apply the shape to `$request->validated()` (no-argument form),
-`$request->validate([...])` return values, and `$validator->validated()`
-where the rules are visible. `validated('key')` returns the shape's
-member type. `safe()` returns a `ValidatedInput` whose `only()`/
-`except()` results narrow the same shape. Fall back to plain `array`
-the moment any rule key or rule string is non-literal — a partial
-shape that claims completeness would produce false unknown-key
-diagnostics. Array-shape machinery (shapes, optional keys, `list<>`)
-already exists in the type engine, and
-`virtual_members/laravel/validation_rules.rs` already recovers the
-literal `(key, rule)` pairs and locates the rules array in scope for a
-cursor; the work is the rules-to-shape translation and wiring it as a
-conditional return.
+Guessing `string` for every enum rule is the thing to avoid: an
+int-backed enum would then be typed as a string, which is worse than
+`mixed` because it can produce a false diagnostic rather than merely
+missing one.
 
 #### L39. Unused view and translation key detection
 

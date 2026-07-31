@@ -15,6 +15,9 @@
 <body>
     <h1>{{ __('messages.welcome') }}</h1>
 
+    {{-- Comment contents are inert: an apostrophe ('), a commented-out
+         {{ $echo }}, and a mention of @endphp all stay inside the comment --}}
+
     {{-- Variable completion: $user-> triggers member suggestions --}}
     @if($user)
         <p>Hello, {{ $user->name }}!</p>

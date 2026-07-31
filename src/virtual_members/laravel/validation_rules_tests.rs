@@ -1,7 +1,7 @@
 use super::*;
 
-fn keys(rules: &[ValidationRule]) -> Vec<&str> {
-    rules.iter().map(|r| r.key.as_str()).collect()
+fn keys(rules: &RulesArray) -> Vec<&str> {
+    rules.entries.iter().map(|r| r.key.as_str()).collect()
 }
 
 #[test]
@@ -19,8 +19,8 @@ class StoreUserRequest extends FormRequest {
 ";
     let rules = rules_from_class_source(content, "StoreUserRequest");
     assert_eq!(keys(&rules), vec!["name", "age"]);
-    assert_eq!(rules[0].rules, "required|string|max:255");
-    assert_eq!(rules[1].rules, "nullable|integer");
+    assert_eq!(rules.entries[0].rules, "required|string|max:255");
+    assert_eq!(rules.entries[1].rules, "nullable|integer");
 }
 
 #[test]
@@ -69,7 +69,7 @@ class StoreUserRequest extends FormRequest {
 }
 ";
     let rules = rules_from_class_source(content, "StoreUserRequest");
-    assert_eq!(rules[0].rules, "required|new Enum(Role::class)");
+    assert_eq!(rules.entries[0].rules, "required|new Enum(Role::class)");
 }
 
 #[test]
@@ -80,7 +80,10 @@ class StoreUserRequest extends FormRequest {
 }
 ";
     let rules = rules_from_class_source(content, "StoreUserRequest");
-    assert_eq!(&content[rules[0].key_start..rules[0].key_start + 4], "name");
+    assert_eq!(
+        &content[rules.entries[0].key_start..rules.entries[0].key_start + 4],
+        "name"
+    );
 }
 
 #[test]
@@ -207,6 +210,27 @@ class UserController {
     let cursor = content.find("input('").unwrap() + 7;
     let rules = inline_validate_rules(content, cursor).unwrap();
     assert_eq!(keys(&rules), vec!["second"]);
+}
+
+#[test]
+fn an_unreadable_nearer_call_does_not_hand_back_the_earlier_one() {
+    // The second call is the one in force.  Its keys cannot be read, so the
+    // answer is "an incomplete set", never the first call's keys — those
+    // would describe a different request and, as a shape, claim to be
+    // complete.
+    let content = "<?php
+class UserController {
+    public function store(Request $request) {
+        $request->validate(['first' => 'required']);
+        $request->validate([$dynamic => 'required']);
+        $request->input('');
+    }
+}
+";
+    let cursor = content.find("input('").unwrap() + 7;
+    let rules = inline_validate_rules(content, cursor).unwrap();
+    assert!(keys(&rules).is_empty());
+    assert!(!rules.keys_complete);
 }
 
 #[test]

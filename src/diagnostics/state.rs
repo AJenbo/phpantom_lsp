@@ -38,6 +38,10 @@ pub(crate) struct DiagnosticState {
     pub(crate) workspace_diags: Arc<Mutex<WorkspaceDiagnostics>>,
     /// Prevents duplicate background workspace diagnostics passes.
     pub(crate) workspace_diag_pass_started: Arc<AtomicBool>,
+    /// What each open file declared when it was last opened or saved, used
+    /// to work out which other open files a save can affect.  See
+    /// [`crate::diagnostics::cross_file`].
+    pub(crate) decl_baselines: Arc<Mutex<crate::diagnostics::cross_file::DeclarationBaselines>>,
 }
 
 impl DiagnosticState {
@@ -53,6 +57,7 @@ impl DiagnosticState {
             suppressed: Arc::new(Mutex::new(Vec::new())),
             workspace_diags: Arc::new(Mutex::new(WorkspaceDiagnostics::default())),
             workspace_diag_pass_started: Arc::new(AtomicBool::new(false)),
+            decl_baselines: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
