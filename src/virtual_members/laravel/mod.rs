@@ -91,6 +91,7 @@ mod factory;
 mod helpers;
 mod macros;
 mod model_extraction;
+pub(crate) mod morph_map;
 pub(crate) mod patches;
 mod pivots;
 mod provider_resources;
@@ -123,6 +124,7 @@ pub(crate) use macros::{
 pub(crate) use model_extraction::{
     extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
 };
+pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::enumerate_all_route_names;
@@ -322,6 +324,24 @@ fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {
         columns.push(col);
     }
     columns
+}
+
+/// The table a model maps to: its declared `$table`, or Eloquent's snake-case
+/// plural of the class's short name.
+///
+/// Returns `None` when the model overrides `getTable()`, since the table is
+/// then computed at runtime.  Used by the morph-map scanner to derive the
+/// aliases of a `Relation::morphMap([Post::class, …])` list registration, which
+/// Laravel keys by table name.
+pub(crate) fn model_table_name(class: &ClassInfo) -> Option<String> {
+    let laravel = class.laravel()?;
+    if let Some(table) = laravel.table_name.clone() {
+        return Some(table);
+    }
+    if laravel.has_get_table_method {
+        return None;
+    }
+    Some(default_table_name(&class.name))
 }
 
 fn model_connection_and_table(

@@ -601,6 +601,21 @@ impl Backend {
                 };
                 ("Command", detail)
             }
+            LaravelStringKind::MorphAlias => {
+                let index = self.laravel_morph_map.read();
+                let detail = match index.get(key) {
+                    Some(target) => {
+                        let mut detail = format!("Maps to `{}`", target.fqn);
+                        if let Some(rel) = self.workspace_relative_path(&target.uri) {
+                            detail.push_str(&format!("\n\nRegistered in `{}`", rel));
+                        }
+                        detail
+                    }
+                    None if index.is_enforced() => "Not registered in the morph map".to_string(),
+                    None => "Morph alias".to_string(),
+                };
+                ("Morph type", detail)
+            }
         };
 
         Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))

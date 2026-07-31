@@ -419,6 +419,7 @@ impl Backend {
         let mut has_view = false;
         let mut has_trans = false;
         let mut has_command = false;
+        let mut has_morph_alias = false;
         let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
             let maps = self.symbol_maps.read();
             let Some(symbol_map) = maps.get(uri) else {
@@ -435,6 +436,7 @@ impl Backend {
                             LaravelStringKind::View => has_view = true,
                             LaravelStringKind::Trans => has_trans = true,
                             LaravelStringKind::Command => has_command = true,
+                            LaravelStringKind::MorphAlias => has_morph_alias = true,
                         }
                         Some((kind.clone(), key.clone(), span.start, span.end))
                     } else {
@@ -445,7 +447,8 @@ impl Backend {
             // `maps` read lock is dropped here.
         };
 
-        if !has_route && !has_config && !has_view && !has_trans && !has_command {
+        if !has_route && !has_config && !has_view && !has_trans && !has_command && !has_morph_alias
+        {
             return;
         }
 
@@ -480,6 +483,18 @@ impl Backend {
                 .collect()
         } else {
             HashSet::new()
+        };
+        // A morph alias is only checkable when the project calls
+        // `Relation::enforceMorphMap()` / `requireMorphMap()`.  Without that,
+        // an unmapped model still morphs under its class name, so the set of
+        // valid `*_type` values is open and an unknown alias proves nothing.
+        let morph_aliases: Option<HashSet<String>> = if has_morph_alias {
+            let index = self.laravel_morph_map.read();
+            index
+                .is_enforced()
+                .then(|| index.all_aliases().into_iter().collect())
+        } else {
+            None
         };
 
         for (kind, key, start, end) in &key_spans {
@@ -526,6 +541,16 @@ impl Backend {
                         command_names.contains(key),
                         "command",
                         "invalid_laravel_command",
+                    )
+                }
+                LaravelStringKind::MorphAlias => {
+                    let Some(aliases) = &morph_aliases else {
+                        continue;
+                    };
+                    (
+                        aliases.contains(key),
+                        "morph type",
+                        "invalid_laravel_morph_alias",
                     )
                 }
             };

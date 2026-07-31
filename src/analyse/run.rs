@@ -186,6 +186,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         // trans(), and route() string keys resolve the same way they do in
         // the LSP (which builds these in its `initialized` handler).
         backend.build_provider_resources();
+        // Discover the Eloquent morph map so alias strings are validated the
+        // same way here as in the LSP.
+        backend.build_laravel_morph_map_index();
     }
 
     // ── Phase 1.5: Eager class population ───────────────────────────

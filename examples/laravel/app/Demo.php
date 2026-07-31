@@ -13,6 +13,7 @@ use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -363,6 +364,22 @@ class Demo
         BlogAuthor::where('');           // offers: name, email, active, genre, …
         BlogPost::orderBy('');           // offers: title, published, author_id, …
         Bakery::select('');              // offers: flour, apricot, kitchen_id, …
+    }
+
+
+    // ── Eloquent Morph Aliases ──────────────────────────────────────────────
+
+    public function morphAliases(): void
+    {
+        // `blog_post` and `bakery` are registered by DemoServiceProvider's
+        // `Relation::morphMap()` call.  Hover shows the model each alias maps
+        // to, go-to-definition offers the registration and the model, and
+        // find-references links every usage of the alias.
+        Review::whereHasMorph('reviewable', ['blog_post', 'bakery'])->get();
+
+        // The same alias resolves in Relation::getMorphedModel(), where
+        // completion also offers the registered aliases.
+        Relation::getMorphedModel('blog_post');   // → App\Models\BlogPost
     }
 
 

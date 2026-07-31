@@ -210,6 +210,9 @@ fn detect_laravel_string_key_context(
             // Artisan command names.
             ("artisan", "call" | "queue") => (Some(LaravelStringKind::Command), None),
             ("schedule", "command") => (Some(LaravelStringKind::Command), None),
+            // Eloquent morph aliases.
+            ("relation", "getmorphedmodel") => (Some(LaravelStringKind::MorphAlias), None),
+            ("model", "getactualclassnameformorph") => (Some(LaravelStringKind::MorphAlias), None),
             _ => (None, None),
         }
     } else if is_instance_method {
@@ -617,6 +620,11 @@ impl Backend {
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
             LaravelStringKind::Command => self.laravel_commands.read().all_names(),
+            LaravelStringKind::MorphAlias => {
+                let mut aliases = self.laravel_morph_map.read().all_aliases();
+                aliases.sort();
+                aliases
+            }
         };
 
         // For config-backed attributes like #[Database('mysql')], filter
@@ -668,6 +676,7 @@ impl Backend {
                     LaravelStringKind::View => CompletionItemKind::FILE,
                     LaravelStringKind::Trans => CompletionItemKind::TEXT,
                     LaravelStringKind::Command => CompletionItemKind::VALUE,
+                    LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
                 };
                 CompletionItem {
                     label: name.clone(),

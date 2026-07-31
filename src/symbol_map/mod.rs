@@ -368,6 +368,12 @@ pub(crate) enum LaravelStringKind {
     /// `Schedule::command('app:sync')`, or `$this->call('app:sync')`
     /// inside a console command.
     Command,
+    /// An Eloquent morph alias: the short name a `Relation::morphMap()`
+    /// registration substitutes for a model FQCN in a `*_type` column.
+    /// Emitted for the registration's own keys, for
+    /// `Relation::getMorphedModel('post')`, and for the `$types` argument of
+    /// the `whereHasMorph()` family.
+    MorphAlias,
 }
 
 // ─── Template parameter definition site structures ──────────────────────────

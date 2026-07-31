@@ -107,7 +107,8 @@ unlikely to move the needle for most users.
 | D3  | [Deprecated rendering — chain subject resolution](todo/diagnostics.md#d3-deprecated-rendering-chain-subject-resolution)                                                    | Low-Medium  | Medium      |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
-|     | **[Bug Fixes](todo/bugs.md)** — no outstanding items                                                                                                                        |             |             |
+|     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
+| B1  | [`analyze` flags framework Artisan commands as unknown](todo/bugs.md#b1-analyze-flags-framework-artisan-commands-as-unknown)                                                 | Medium      | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
@@ -173,6 +174,8 @@ unlikely to move the needle for most users.
 | L36 | [Container binding registrations from service providers](todo/laravel.md#l36-container-binding-registrations-from-service-providers)                                        | Medium      | Medium      |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |
+| L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Low-Medium  |
+| L41 | [Morph aliases in `*_type` column comparisons](todo/laravel.md#l41-morph-aliases-in-_type-column-comparisons)                                                               | Low-Medium  | Medium      |
 | L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names)                                                                                  | Low-Medium  | Medium      |
 | L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Low         |
 | L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Low         |
