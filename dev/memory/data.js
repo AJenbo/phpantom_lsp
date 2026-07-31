@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785486216920,
+  "lastUpdate": 1785512848049,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22687,6 +22687,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c749daa482a32ebb23c26a1215a4cc556ba02611",
+          "message": "Argument-count and argument-type diagnostics no longer mix up calls that\nshare the same text but resolve differently",
+          "timestamp": "2026-07-31T17:32:10+02:00",
+          "tree_id": "4e08bb2c210fb7d722771a3d1246984fd4cf6b89",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c749daa482a32ebb23c26a1215a4cc556ba02611"
+        },
+        "date": 1785512844526,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.2,
             "unit": "MiB"
           }
         ]
