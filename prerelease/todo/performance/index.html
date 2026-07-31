@@ -1110,34 +1110,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p11-uncached-base-resolution-in-build_scope_methods_for_builder" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P11. Uncached base-resolution in <code>build_scope_methods_for_builder</code>
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P11. Uncached base-resolution in build_scope_methods_for_builder">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1283,7 +1255,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#fix_2" class="md-nav__link">
+  <a href="#fix_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Fix
@@ -1322,7 +1294,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#fix_3" class="md-nav__link">
+  <a href="#fix_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Fix
@@ -1411,7 +1383,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#fix_4" class="md-nav__link">
+  <a href="#fix_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Fix
@@ -1734,34 +1706,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p11-uncached-base-resolution-in-build_scope_methods_for_builder" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P11. Uncached base-resolution in <code>build_scope_methods_for_builder</code>
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P11. Uncached base-resolution in build_scope_methods_for_builder">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1907,7 +1851,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#fix_2" class="md-nav__link">
+  <a href="#fix_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Fix
@@ -1946,7 +1890,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#fix_3" class="md-nav__link">
+  <a href="#fix_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Fix
@@ -2035,7 +1979,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#fix_4" class="md-nav__link">
+  <a href="#fix_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Fix
@@ -2177,25 +2121,6 @@ narrows how often this cost is paid.</p>
 <p>Thread spawning overhead is only worthwhile when the candidate set
 is large. Skip parallelism when the candidate count is below a
 threshold (e.g. 8 files).</p>
-<hr />
-<h2 id="p11-uncached-base-resolution-in-build_scope_methods_for_builder">P11. Uncached base-resolution in <code>build_scope_methods_for_builder</code><a class="headerlink" href="#p11-uncached-base-resolution-in-build_scope_methods_for_builder" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p><code>build_scope_methods_for_builder</code> calls
-<code>resolve_class_with_inheritance</code> (base resolution) for the model
-class. This is not covered by the thread-local resolved-class
-cache, which stores fully-resolved classes (after virtual member
-injection), not base-resolved ones.</p>
-<p>Every time an Eloquent <code>Builder&lt;Model&gt;</code> is resolved with scope
-injection, the model is base-resolved from scratch. With many
-Builder instantiations in a single file this adds up.</p>
-<h3 id="fix_1">Fix<a class="headerlink" href="#fix_1" title="Permanent link">&para;</a></h3>
-<p>Either introduce a separate base-resolution cache (keyed by FQN),
-or restructure so <code>build_scope_methods_for_builder</code> accepts the
-already-resolved model class from the caller (which may already
-have it from the resolved-class cache). The caller
-(<code>inject_scopes_and_model_methods</code>) already has the resolved-class
-cache in scope — it passes it to <code>inject_model_virtual_methods</code>
-but not to this function.</p>
 <hr />
 <h2 id="p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps">P15. Two-phase stub index construction (eliminate <code>RwLock</code> on stub maps)<a class="headerlink" href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
@@ -2429,7 +2354,7 @@ are on-demand request handlers. Nothing on the didChange or
 completion hot path requires this data to be computed eagerly, so
 lazy per-file-version resolution remains viable; it just has more
 consumers to invalidate correctly than when this was filed.</p>
-<h3 id="fix_2">Fix<a class="headerlink" href="#fix_2" title="Permanent link">&para;</a></h3>
+<h3 id="fix_1">Fix<a class="headerlink" href="#fix_1" title="Permanent link">&para;</a></h3>
 <p>Defer name resolution out of <code>update_ast_inner</code>. Options:</p>
 <ul>
 <li><strong>Lazy resolution:</strong> compute <code>OwnedResolvedNames</code> on first access
@@ -2463,7 +2388,7 @@ parameters. PHPantom could add a similar flag to its type
 representations to short-circuit template substitution on simple
 types. Most types in a typical codebase are concrete (no generics),
 so this fast-path would apply to the majority of checks.</p>
-<h3 id="fix_3">Fix<a class="headerlink" href="#fix_3" title="Permanent link">&para;</a></h3>
+<h3 id="fix_2">Fix<a class="headerlink" href="#fix_2" title="Permanent link">&para;</a></h3>
 <ol>
 <li>
 <p>Add a thread-local or per-request
@@ -2626,7 +2551,7 @@ edited class at all. (This used to fire on every signature-changing
 edit; it is now save-gated, which caps the frequency but not the
 O(open files) fan-out.) During the burst the diagnostic worker
 saturates blocking threads that completion/hover also need.</p>
-<h3 id="fix_4">Fix<a class="headerlink" href="#fix_4" title="Permanent link">&para;</a></h3>
+<h3 id="fix_3">Fix<a class="headerlink" href="#fix_3" title="Permanent link">&para;</a></h3>
 <p>Queue only files that can observe the change. The resolved-class
 cache already maintains a dependency index for transitive
 eviction (<code>evict_fqn</code>), and ER4 tracks which members changed.
