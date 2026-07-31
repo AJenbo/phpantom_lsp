@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785513255679,
+  "lastUpdate": 1785520108212,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22755,6 +22755,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e722043846d4062241fc67bdfc40b347531cde03",
+          "message": "Faster Eloquent scope-method resolution",
+          "timestamp": "2026-07-31T19:31:58+02:00",
+          "tree_id": "5a656d5bde9f1c6b185ba1e9a9f962eb6977ffae",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e722043846d4062241fc67bdfc40b347531cde03"
+        },
+        "date": 1785520105244,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.2,
             "unit": "MiB"
           }
         ]
