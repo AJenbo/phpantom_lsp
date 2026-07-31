@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785520108212,
+  "lastUpdate": 1785523265835,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12341,6 +12341,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "93f701c535ddfdf26bd761b66af1de4f14313923",
+          "message": "Saving a file no longer re-analyses every other open tab",
+          "timestamp": "2026-07-31T20:23:39+02:00",
+          "tree_id": "cf0cba30acfc0d32117ccef1f72da133e5fe5dac",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/93f701c535ddfdf26bd761b66af1de4f14313923"
+        },
+        "date": 1785523261408,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.7,
             "unit": "MiB"
           }
         ]
