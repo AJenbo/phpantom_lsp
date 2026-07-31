@@ -321,7 +321,10 @@ pub use virtual_members::resolve_class_fully;
 ///   `collect_unknown_member_diagnostics` (includes unresolved-member-access logic)
 #[derive(Default)]
 pub(crate) struct LaravelStringKeyCache {
-    pub route_names: Option<Vec<String>>,
+    /// Named routes with the URI each was registered with.  Shared behind an
+    /// `Arc` because both the name list and the parameter names of one route
+    /// are read from it, and cloning the whole table per read would be waste.
+    pub routes: Option<std::sync::Arc<Vec<crate::virtual_members::laravel::RouteEntry>>>,
     pub config_keys: Option<Vec<String>>,
     pub view_names: Option<Vec<String>>,
     pub trans_keys: Option<Vec<String>>,
@@ -348,7 +351,7 @@ pub(crate) struct LaravelStringKeyCache {
 /// view names wait out an unrelated route-name build.
 #[derive(Default)]
 pub(crate) struct LaravelStringKeyBuildLocks {
-    pub route_names: parking_lot::Mutex<()>,
+    pub routes: parking_lot::Mutex<()>,
     pub config_keys: parking_lot::Mutex<()>,
     pub view_names: parking_lot::Mutex<()>,
     pub trans_keys: parking_lot::Mutex<()>,
@@ -358,7 +361,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
 impl LaravelStringKeyCache {
     fn invalidate_for_uri(&mut self, uri: &str) {
         if uri.contains("/routes/") {
-            self.route_names = None;
+            self.routes = None;
         }
         if uri.contains("/config/") {
             self.config_keys = None;

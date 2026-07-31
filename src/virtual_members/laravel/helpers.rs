@@ -205,12 +205,14 @@ pub(crate) fn accessor_method_candidates(property_name: &str) -> Vec<String> {
     ]
 }
 
-/// Extract the `'as' => 'prefix.'` name prefix from a `Route::group([…], fn(){})` argument list.
+/// Extract a string-keyed option (e.g. `'as' => 'admin.'`) from a
+/// `Route::group([…], fn(){})` argument list.
 ///
 /// The array may be in any position; all non-array arguments are skipped.
-pub(crate) fn extract_as_prefix_from_args<'a>(
+fn extract_group_option_from_args<'a>(
     args: impl Iterator<Item = &'a Expression<'a>>,
     content: &str,
+    option: &str,
 ) -> String {
     for arg in args {
         let elements: Vec<&ArrayElement<'_>> = match arg {
@@ -225,7 +227,7 @@ pub(crate) fn extract_as_prefix_from_args<'a>(
             let Some((key, _, _)) = extract_string_literal(kv.key, content) else {
                 continue;
             };
-            if key == "as"
+            if key == option
                 && let Some((val, _, _)) = extract_string_literal(kv.value, content)
             {
                 return val.to_string();
@@ -235,29 +237,71 @@ pub(crate) fn extract_as_prefix_from_args<'a>(
     String::new()
 }
 
-/// Collect all `->name('...')` values from the call chain that precedes `->group()`.
+/// Extract the `'as' => 'prefix.'` name prefix from a `Route::group([…], fn(){})` argument list.
+pub(crate) fn extract_as_prefix_from_args<'a>(
+    args: impl Iterator<Item = &'a Expression<'a>>,
+    content: &str,
+) -> String {
+    extract_group_option_from_args(args, content, "as")
+}
+
+/// Extract the `'prefix' => 'admin'` URI prefix from a `Route::group([…], fn(){})`
+/// argument list.
+pub(crate) fn extract_uri_prefix_from_args<'a>(
+    args: impl Iterator<Item = &'a Expression<'a>>,
+    content: &str,
+) -> String {
+    extract_group_option_from_args(args, content, "prefix")
+}
+
+/// Join two URI segments the way Laravel's route prefixing does: both sides
+/// lose their surrounding slashes and are joined with a single `/`.
 ///
-/// Handles both instance method chains (`->name('prefix.')`) and the static
-/// entry point (`Route::name('prefix.')`).
-pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {
+/// An empty side is dropped, so `join_uri_segments("admin", "")` is `"admin"`.
+pub(crate) fn join_uri_segments(left: &str, right: &str) -> String {
+    let left = left.trim_matches('/');
+    let right = right.trim_matches('/');
+    if left.is_empty() {
+        right.to_string()
+    } else if right.is_empty() {
+        left.to_string()
+    } else {
+        format!("{left}/{right}")
+    }
+}
+
+/// The first argument of a call, when it is a plain string literal.
+pub(crate) fn first_string_arg<'c>(args: &ArgumentList<'_>, content: &'c str) -> Option<&'c str> {
+    args.arguments
+        .iter()
+        .next()
+        .and_then(|a| extract_string_literal(a.value(), content))
+        .map(|(value, _, _)| value)
+}
+
+/// Collect the value a call chain accumulates for one group modifier.
+///
+/// Walking `Route::name('admin.')->middleware(…)` with `method = b"name"`
+/// yields `"admin."`; the same walk with `method = b"prefix"` recovers the URI
+/// prefix of `Route::prefix('admin')->…`.  Values found on nested chain links
+/// are combined outermost-first by `join`.
+fn chain_modifier_value(
+    expr: &Expression<'_>,
+    content: &str,
+    method: &[u8],
+    join: &dyn Fn(&str, &str) -> String,
+) -> String {
     match expr {
         Expression::Call(Call::Method(mc)) => {
             let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
-                return chain_name_prefix(mc.object, content);
+                return chain_modifier_value(mc.object, content, method, join);
             };
-            if ident.value.eq_ignore_ascii_case(b"name") {
-                let arg_name = mc
-                    .argument_list
-                    .arguments
-                    .iter()
-                    .next()
-                    .and_then(|a| extract_string_literal(a.value(), content))
-                    .map(|(n, _, _)| n)
-                    .unwrap_or("");
-                let parent = chain_name_prefix(mc.object, content);
-                format!("{parent}{arg_name}")
+            let parent = chain_modifier_value(mc.object, content, method, join);
+            if ident.value.eq_ignore_ascii_case(method) {
+                let own = first_string_arg(&mc.argument_list, content).unwrap_or("");
+                join(&parent, own)
             } else {
-                chain_name_prefix(mc.object, content)
+                parent
             }
         }
         // Route::name('prefix.') — static entry point of the chain.
@@ -265,20 +309,32 @@ pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> Str
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
                 return String::new();
             };
-            if ident.value.eq_ignore_ascii_case(b"name") {
-                sc.argument_list
-                    .arguments
-                    .iter()
-                    .next()
-                    .and_then(|a| extract_string_literal(a.value(), content))
-                    .map(|(n, _, _)| n.to_string())
-                    .unwrap_or_default()
+            if ident.value.eq_ignore_ascii_case(method) {
+                first_string_arg(&sc.argument_list, content)
+                    .unwrap_or("")
+                    .to_string()
             } else {
                 String::new()
             }
         }
         _ => String::new(),
     }
+}
+
+/// Collect all `->name('...')` values from the call chain that precedes `->group()`.
+///
+/// Handles both instance method chains (`->name('prefix.')`) and the static
+/// entry point (`Route::name('prefix.')`).
+pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {
+    chain_modifier_value(expr, content, b"name", &|parent, own| {
+        format!("{parent}{own}")
+    })
+}
+
+/// Collect all `->prefix('...')` URI segments from the call chain that
+/// precedes `->group()`, joined into a single prefix.
+pub(crate) fn chain_uri_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {
+    chain_modifier_value(expr, content, b"prefix", &join_uri_segments)
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

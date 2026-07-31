@@ -452,7 +452,10 @@ impl Backend {
         // enumerations.  Safe to call now that the `symbol_maps` read
         // lock has been released.
         let route_keys: HashSet<String> = if has_route {
-            self.cached_route_names().into_iter().collect()
+            self.cached_routes()
+                .iter()
+                .map(|route| route.name.clone())
+                .collect()
         } else {
             HashSet::new()
         };

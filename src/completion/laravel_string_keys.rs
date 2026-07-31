@@ -422,13 +422,23 @@ impl Backend {
         value
     }
 
-    pub(crate) fn cached_route_names(&self) -> Vec<String> {
+    /// Every named route in the project, with the URI it was registered with.
+    pub(crate) fn cached_routes(
+        &self,
+    ) -> std::sync::Arc<Vec<crate::virtual_members::laravel::RouteEntry>> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.route_names,
-            |cache| cache.route_names.clone(),
-            |cache, names| cache.route_names = Some(names),
-            || crate::virtual_members::laravel::enumerate_all_route_names(self),
+            &self.laravel_string_key_build_locks.routes,
+            |cache| cache.routes.clone(),
+            |cache, routes| cache.routes = Some(routes),
+            || std::sync::Arc::new(crate::virtual_members::laravel::enumerate_all_routes(self)),
         )
+    }
+
+    pub(crate) fn cached_route_names(&self) -> Vec<String> {
+        self.cached_routes()
+            .iter()
+            .map(|route| route.name.clone())
+            .collect()
     }
 
     pub(crate) fn cached_config_keys(&self) -> Vec<String> {
@@ -1023,7 +1033,7 @@ final class UserPermissionController extends BaseController\n\
         let builds = AtomicUsize::new(0);
         let build_lock = parking_lot::Mutex::new(());
 
-        let results: Vec<Vec<String>> = std::thread::scope(|scope| {
+        let results: Vec<_> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..16)
                 .map(|_| {
                     let backend = &backend;
@@ -1032,8 +1042,8 @@ final class UserPermissionController extends BaseController\n\
                     scope.spawn(move || {
                         backend.cached_laravel_enumeration(
                             build_lock,
-                            |cache| cache.route_names.clone(),
-                            |cache, names| cache.route_names = Some(names),
+                            |cache| cache.view_names.clone(),
+                            |cache, names| cache.view_names = Some(names),
                             || {
                                 builds.fetch_add(1, Ordering::SeqCst);
                                 // Long enough that an unguarded
