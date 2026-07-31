@@ -162,8 +162,10 @@ pub fn build_scope_methods_for_builder(
     // #[Scope] methods into their public-facing form (replacing the
     // original), which makes them invisible to `is_scope_method`.
     // Using the pre-provider resolution preserves the raw methods.
+    // Cached so that resolving many Builder instantiations of the same
+    // model in one file doesn't re-walk its inheritance chain each time.
     let resolved_model =
-        crate::inheritance::resolve_class_with_inheritance(&model_class, class_loader);
+        crate::virtual_members::resolve_class_base_cached(&model_class, class_loader);
     // Build a substitution map so that `static`, `$this`, and `self`
     // in scope return types resolve to the concrete model name.
     // The default scope return type is `\...\Builder<static>` where

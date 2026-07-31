@@ -56,32 +56,6 @@ threshold (e.g. 8 files).
 
 ---
 
-## P11. Uncached base-resolution in `build_scope_methods_for_builder`
-
-**Impact: Low-Medium · Effort: Low**
-
-`build_scope_methods_for_builder` calls
-`resolve_class_with_inheritance` (base resolution) for the model
-class. This is not covered by the thread-local resolved-class
-cache, which stores fully-resolved classes (after virtual member
-injection), not base-resolved ones.
-
-Every time an Eloquent `Builder<Model>` is resolved with scope
-injection, the model is base-resolved from scratch. With many
-Builder instantiations in a single file this adds up.
-
-### Fix
-
-Either introduce a separate base-resolution cache (keyed by FQN),
-or restructure so `build_scope_methods_for_builder` accepts the
-already-resolved model class from the caller (which may already
-have it from the resolved-class cache). The caller
-(`inject_scopes_and_model_methods`) already has the resolved-class
-cache in scope — it passes it to `inject_model_virtual_methods`
-but not to this function.
-
----
-
 ## P15. Two-phase stub index construction (eliminate `RwLock` on stub maps)
 
 **Impact: Low · Effort: Medium**
