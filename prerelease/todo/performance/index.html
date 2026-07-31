@@ -1455,17 +1455,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P25. <code>type_mismatch_argument</code> / <code>argument_count_mismatch</code> slow on large single files
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2118,17 +2107,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P25. <code>type_mismatch_argument</code> / <code>argument_count_mismatch</code> slow on large single files
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2743,34 +2721,6 @@ makes this nearly free.</p>
 workspace-symbol index; this fix is independent and worth taking
 regardless since it is a few lines.</p>
 <hr />
-<h2 id="p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files">P25. <code>type_mismatch_argument</code> / <code>argument_count_mismatch</code> slow on large single files<a class="headerlink" href="#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>On very large PHP files with thousands of call sites, the
-<code>type_mismatch_argument</code> and <code>argument_count_mismatch</code> diagnostic
-passes dominate the per-file time. On PDepend's
-<code>src/Source/Language/PHP/AbstractPHPParser.php</code> a single file spent
-~11.7s in <code>type_mismatch_argument</code> and ~2.9s in
-<code>argument_count_mismatch</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>⚠ slow file (15.6s): src/Source/Language/PHP/AbstractPHPParser.php
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  scope=1.9s, fast=0.0s, unknown_class=0.0s, unknown_member=0.1s,
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  unknown_function=0.0s, argument_count_mismatch=2.9s,
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  type_mismatch_argument=11.6s, deprecated_usage=0.1s,
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  unknown_variable=0.8s, invalid_class_kind=0.0s
-</code></pre></div>
-<p>Both passes walk every call site and call
-<code>resolve_callable_target_with_args</code> / <code>resolve_callable_target</code>
-per site. Variable-based calls and calls with argument text are
-resolved fresh at every site (only zero-arg static/function calls
-are cached), so a file with thousands of <code>$obj-&gt;method($args)</code>
-call sites re-resolves the receiver type once per site. Look at
-memoizing receiver-type resolution per (expression, offset) within
-a file, or sharing the forward-walk scope snapshot across both
-passes so the receiver type is computed once.</p>
-<p>A per-request callable-target cache now memoizes the
-class::method → target lookup, but it sits downstream of
-receiver-type resolution — the per-site receiver re-resolution
-this item describes is still unaddressed.</p>
-<hr />
 <h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
 <p>The PHPDoc grammar reads <code>static</code> followed by <code>(</code> as a method literally
@@ -2779,10 +2729,10 @@ named <code>static</code> whose parameter list follows, because
 two are indistinguishable once whitespace is discarded. A parenthesised
 return type after the <code>static</code> modifier therefore fails to parse and the
 whole tag is dropped:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/**</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x"> * @method static (string|int)[] getArray()</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x"> * @method static (callable(): string) getCallable()</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x"> */</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * @method static (string|int)[] getArray()</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> * @method static (callable(): string) getCallable()</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x"> */</span>
 </code></pre></div>
 <p>Both forms appear in Psalm's own magic-method test suite. Two places
 work around it: <code>recover_static_method_tag</code> in
