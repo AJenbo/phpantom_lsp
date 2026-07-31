@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785443301142,
+  "lastUpdate": 1785483041288,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22619,6 +22619,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "38047658bd3ee84ce986b95afda16dbe58c7c94c",
+          "message": "Faster diagnostics on method/function calls that resolve to no concrete\nclass",
+          "timestamp": "2026-07-31T09:14:30+02:00",
+          "tree_id": "c81af222d31cd2441954ff6bfc94ea4d5b7eac29",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/38047658bd3ee84ce986b95afda16dbe58c7c94c"
+        },
+        "date": 1785483038061,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.2,
             "unit": "MiB"
           }
         ]
