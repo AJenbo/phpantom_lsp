@@ -1200,6 +1200,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#l41-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L41. Morph aliases in <code>*_type</code> column comparisons
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l42-morph-alias-completion-in-array-positions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L42. Morph alias completion in array positions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1904,6 +1926,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#l41-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L41. Morph aliases in <code>*_type</code> column comparisons
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l42-morph-alias-completion-in-array-positions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L42. Morph alias completion in array positions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2242,6 +2286,10 @@ within the same impact tier.</p>
 <tr>
 <td>Manager → driver resolution</td>
 <td>Requires instantiating the manager at runtime.</td>
+</tr>
+<tr>
+<td>Narrowing a <code>MorphTo</code> relation to concrete models</td>
+<td><code>$comment-&gt;commentable</code> resolves to the generic <code>Illuminate\Database\Eloquent\Model</code>, which is what the relation declares. The morph map (now indexed, see L41/L42) is global rather than per-relation, so the only type it could supply is a union of <em>every</em> mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with <code>@return MorphTo&lt;Post\|Video, $this&gt;</code> where the target set is actually known.</td>
 </tr>
 </tbody>
 </table>
@@ -2617,6 +2665,46 @@ pipeline, which is non-trivial. Possible approaches:</p>
 provider already knows the model type; it would need to emit
 different return types for <code>create()</code>/<code>make()</code> based on whether
 the chain includes a count-setting call.</p>
+<h4 id="l41-morph-aliases-in-_type-column-comparisons">L41. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l41-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p>The morph-map index (<code>virtual_members/laravel/morph_map.rs</code>) recognizes
+alias strings in the positions Eloquent resolves through the map by
+name: the <code>morphMap()</code> keys themselves, <code>Relation::getMorphedModel()</code>,
+<code>Model::getActualClassNameForMorph()</code>, and the <code>$types</code> argument of the
+<code>whereHasMorph()</code> family. It does <strong>not</strong> recognize an alias compared
+against a morph type <em>column</em>, which is how much real code reads it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$query-&gt;where(&#39;commentable_type&#39;, &#39;post&#39;);</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">if ($comment-&gt;commentable_type === &#39;post&#39;) { … }</span>
+</code></pre></div>
+<p>Both are alias literals, but recognizing them means knowing that the
+column named on the other side is a polymorphic type column. The
+information is available: a <code>morphTo()</code> relation declares its type
+column (defaulting to <code>&lt;relation&gt;_type</code>), and the relation methods of
+the model being queried are already parsed. The work is to collect the
+morph type columns of a model, then match a string literal that appears
+opposite one in a <code>where()</code> / comparison against the alias index.</p>
+<p>Once a literal is recognized it inherits hover, go-to-definition,
+find-references, and the enforced-map diagnostic for free, since those
+dispatch on the <code>LaravelStringKind::MorphAlias</code> span kind.</p>
+<h4 id="l42-morph-alias-completion-in-array-positions">L42. Morph alias completion in array positions<a class="headerlink" href="#l42-morph-alias-completion-in-array-positions" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p>Morph aliases complete inside <code>Relation::getMorphedModel('|')</code> and
+<code>Model::getActualClassNameForMorph('|')</code>, but not in the two array
+positions where they are most often written:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">Relation::morphMap([&#39;|&#39; =&gt; Post::class]);</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$query-&gt;whereHasMorph(&#39;commentable&#39;, [&#39;|&#39;]);</span>
+</code></pre></div>
+<p>The blocker is not the alias index but
+<code>detect_laravel_string_key_context</code> in
+<code>completion/laravel_string_keys.rs</code>, which recognizes only a string
+that is the <em>first</em> argument of a call — it scans backwards from the
+cursor and requires <code>(</code> immediately before the opening quote. Neither
+an array key nor an element of a later argument matches that shape.</p>
+<p><strong>Where to change:</strong> teach the detector to walk back past an enclosing
+<code>[</code> (and the argument commas before it) so it can report both the call
+being made and which argument position and array slot the cursor sits
+in. Every string kind benefits: the same limitation is why a config key
+inside <code>Config::set(['a.b' =&gt; …])</code> does not complete either.</p>
 <hr />
 <h2 id="model-columns-from-committed-schema-artifacts">Model columns from committed schema artifacts<a class="headerlink" href="#model-columns-from-committed-schema-artifacts" title="Permanent link">&para;</a></h2>
 <p>Our column inference from code (casts, accessors, <code>@property</code>,

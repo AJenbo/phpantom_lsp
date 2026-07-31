@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,37 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b1-analyze-flags-framework-artisan-commands-as-unknown" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. <code>analyze</code> flags framework Artisan commands as unknown
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1282,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1298,25 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b1-analyze-flags-framework-artisan-commands-as-unknown" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. <code>analyze</code> flags framework Artisan commands as unknown
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1274,7 +1346,33 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>No outstanding items.</p>
+<h4 id="b1-analyze-flags-framework-artisan-commands-as-unknown">B1. <code>analyze</code> flags framework Artisan commands as unknown<a class="headerlink" href="#b1-analyze-flags-framework-artisan-commands-as-unknown" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><code>phpantom_lsp analyze</code> reports <code>Unknown command: 'queue:work'</code> for a
+command the framework itself ships. Reproduce by adding
+<code>Artisan::call('queue:work');</code> to <code>examples/laravel/app/Demo.php</code> and
+running a <strong>release</strong> build of
+<code>analyze --project-root examples/laravel</code> (a debug build runs a reduced
+collector list that excludes the Laravel string-key checks, so the
+false positive is invisible there).</p>
+<p>The cause is which files populate the command index. The LSP's
+<code>initialized</code> handler calls <code>build_laravel_command_index</code>, which scans
+the whole FQN → URI index — vendor packages included. The headless
+pipeline in <code>analyse/run.rs</code> never calls it, and instead gets entries
+only from <code>refresh_laravel_command_index</code>, which <code>update_ast</code> fires per
+parsed file. <code>analyze</code> parses user files, so the index ends up holding
+the project's own commands and nothing else. Since it is then non-empty,
+the "index is empty, discovery must have failed" guard in
+<code>collect_invalid_laravel_string_key_diagnostics</code> does not fire, and every
+vendor command name is reported as unknown.</p>
+<p><code>build_laravel_macro_index</code> is missing from the same block, with the same
+shape of consequence: only macros registered in parsed user files are
+recovered, so a macro registered by a vendor package's service provider
+can produce a false-positive unknown member.</p>
+<p><strong>Where to change:</strong> call <code>build_laravel_command_index</code> and
+<code>build_laravel_macro_index</code> from the Laravel block in <code>analyse/run.rs</code>,
+next to <code>build_laravel_date_class</code>, <code>build_provider_resources</code>, and
+<code>build_laravel_morph_map_index</code>.</p>
 
 
 
