@@ -57,6 +57,13 @@ fn applies_nested_group_uri_prefixes() {
 }
 
 #[test]
+fn applies_chain_uri_prefix_without_a_group() {
+    let content =
+        "<?php\nRoute::prefix('{tenant}')->get('/users/{user}', 'show')->name('users.show');\n";
+    assert_eq!(uri_of(content, "users.show"), "{tenant}/users/{user}");
+}
+
+#[test]
 fn applies_array_group_uri_prefix() {
     let content = "<?php\nRoute::group(['prefix' => 'admin', 'as' => 'admin.'], function () {\n    Route::patch('/posts/{post}', 'update')->name('posts.update');\n});\n";
     assert_eq!(uri_of(content, "admin.posts.update"), "admin/posts/{post}");

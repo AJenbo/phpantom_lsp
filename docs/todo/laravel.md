@@ -687,7 +687,7 @@ pattern set. Gaps by kind:
   class. No new data needed. Provider-registered binding names stay out
   of scope (see the table at the top).
 
-#### L40. Resource route URIs
+#### L43. Resource route URIs
 
 **Impact: Low-Medium · Effort: Low-Medium**
 

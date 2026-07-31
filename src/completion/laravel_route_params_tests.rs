@@ -28,8 +28,20 @@ fn detects_to_route_and_signed_route() {
     for source in [
         "<?php\nto_route('users.show', ['']);\n",
         "<?php\nURL::signedRoute('users.show', ['']);\n",
-        "<?php\nURL::temporarySignedRoute('users.show', ['']);\n",
         "<?php\nredirect()->route('users.show', ['']);\n",
+    ] {
+        let ctx = ctx_at(source, "['").unwrap_or_else(|| panic!("should detect in {source}"));
+        assert_eq!(ctx.route_name, "users.show");
+    }
+}
+
+#[test]
+fn detects_parameters_after_an_intervening_argument() {
+    // `temporarySignedRoute()` takes the expiration between the name and the
+    // parameters, so the array is the third argument.
+    for source in [
+        "<?php\nURL::temporarySignedRoute('users.show', now()->addMinutes(30), ['']);\n",
+        "<?php\nredirect()->temporarySignedRoute('users.show', $expiration, ['']);\n",
     ] {
         let ctx = ctx_at(source, "['").unwrap_or_else(|| panic!("should detect in {source}"));
         assert_eq!(ctx.route_name, "users.show");
@@ -54,6 +66,14 @@ fn ignores_the_route_name_argument_itself() {
 fn ignores_unrelated_calls() {
     let content = "<?php\nconfig('app.name', ['de']);\n";
     assert!(ctx_at(content, "['de").is_none());
+}
+
+#[test]
+fn ignores_an_array_of_its_own() {
+    // The array belongs to no call, so the `route()` on the line above must
+    // not be picked up as its name.
+    let content = "<?php\nroute('users.show');\n$parameters = ['us'];\n";
+    assert!(ctx_at(content, "['us").is_none());
 }
 
 #[test]

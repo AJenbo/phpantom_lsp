@@ -47,16 +47,8 @@ pub(crate) fn find_open_quote(content: &str, cursor_offset: usize) -> Option<(us
     while i > 0 {
         i -= 1;
         let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                return Some((i, ch as char));
-            }
+        if (ch == b'\'' || ch == b'"') && !is_escaped(bytes, i) {
+            return Some((i, ch as char));
         }
         if ch == b'\n' {
             return None;
@@ -84,43 +76,21 @@ pub(crate) struct ArrayKeyCall<'a> {
 /// Given the offset of the opening quote of an array key being typed, resolve
 /// the enclosing `foo('name', [ '|' => … ])` call.
 ///
-/// Scans backwards for the `[` that opens the array, then for the preceding
-/// `(` that opens the call's argument list, and splits out the first string
-/// argument and the callee.  Returns `None` when the surrounding text is not
-/// that shape.
+/// Scans backwards for the `[` that opens the array, then for the `(` that
+/// opens the call's argument list, and reads the callee and the call's first
+/// argument.  The array need not follow the name directly, so the parameters
+/// of `temporarySignedRoute('users.show', $expiration, ['|' => 1])` are found
+/// as well.  Returns `None` when the surrounding text is not that shape.
 pub(crate) fn enclosing_array_key_call(
     content: &str,
     quote_pos: usize,
 ) -> Option<ArrayKeyCall<'_>> {
     let bytes = content.as_bytes();
+    let bracket_open = scan_back_to_opener(bytes, quote_pos, b'[')?;
+    let paren_open = scan_back_to_opener(bytes, bracket_open, b'(')?;
 
-    // Walk back to the `[` that opens the array, balancing nested brackets.
-    let mut i = quote_pos;
-    let mut depth = 0i32;
-    let bracket_open = loop {
-        if i == 0 {
-            return None;
-        }
-        i -= 1;
-        match bytes[i] {
-            b']' => depth += 1,
-            b'[' => {
-                if depth == 0 {
-                    break i;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-    };
-
-    // Before the `[` we expect `... ('name', ` — find the `,` then the
-    // preceding string literal (the name) and the `(` and callee.
-    let before_bracket = content[..bracket_open].trim_end();
-    let before_bracket = before_bracket.strip_suffix(',')?.trim_end();
-    let (name, before_name) = trailing_string_literal(before_bracket)?;
-    let before_paren = before_name.trim_end().strip_suffix('(')?.trim_end();
-    let (callee, before_callee) = split_trailing_ident(before_paren);
+    let name = first_string_argument(content, paren_open)?;
+    let (callee, before_callee) = split_trailing_ident(content[..paren_open].trim_end());
     if callee.is_empty() {
         return None;
     }
@@ -130,6 +100,82 @@ pub(crate) fn enclosing_array_key_call(
         callee: callee.to_ascii_lowercase(),
         before_callee: before_callee.trim_end(),
     })
+}
+
+/// Walk backwards from `from` to the `opener` byte that opens the construct
+/// the cursor sits in, skipping over anything nested inside balanced
+/// brackets, parentheses, braces, or a string literal.
+///
+/// Returns `None` at the start of the file, at a statement boundary, and at
+/// the opener of a *different* construct — so the scan stays inside the
+/// expression the cursor is in instead of latching onto a bracket in an
+/// earlier statement.
+fn scan_back_to_opener(bytes: &[u8], from: usize, opener: u8) -> Option<usize> {
+    let (mut brackets, mut parens, mut braces) = (0i32, 0i32, 0i32);
+    let mut i = from;
+    while i > 0 {
+        i -= 1;
+        let byte = bytes[i];
+        let nested = brackets > 0 || parens > 0 || braces > 0;
+        if byte == opener && !nested {
+            return Some(i);
+        }
+        match byte {
+            b']' => brackets += 1,
+            b')' => parens += 1,
+            b'}' => braces += 1,
+            // An opener we are not looking for, with nothing of its own kind
+            // left to close: the scan has left the enclosing expression.
+            b'[' if brackets == 0 => return None,
+            b'(' if parens == 0 => return None,
+            b'{' if braces == 0 => return None,
+            b'[' => brackets -= 1,
+            b'(' => parens -= 1,
+            b'{' => braces -= 1,
+            b';' if !nested => return None,
+            b'\'' | b'"' if !is_escaped(bytes, i) => {
+                // A closing quote: jump to the literal's opening quote so its
+                // contents cannot unbalance the scan.
+                let mut j = i;
+                loop {
+                    if j == 0 {
+                        return None;
+                    }
+                    j -= 1;
+                    if bytes[j] == byte && !is_escaped(bytes, j) {
+                        break;
+                    }
+                }
+                i = j;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Whether the byte at `index` is preceded by an odd number of backslashes.
+fn is_escaped(bytes: &[u8], index: usize) -> bool {
+    let mut backslashes = 0;
+    let mut j = index;
+    while j > 0 && bytes[j - 1] == b'\\' {
+        backslashes += 1;
+        j -= 1;
+    }
+    backslashes % 2 == 1
+}
+
+/// The value of a call's first argument when it is a plain string literal,
+/// given the offset of the `(` that opens the argument list.
+fn first_string_argument(content: &str, paren_open: usize) -> Option<String> {
+    let rest = content.get(paren_open + 1..)?.trim_start();
+    let quote = rest.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let inner = &rest[1..];
+    let end = inner.find(quote)?;
+    Some(inner[..end].to_string())
 }
 
 /// Split off a trailing PHP identifier (`[A-Za-z0-9_]+`) from `s`, returning
@@ -156,28 +202,6 @@ pub(crate) fn trailing_class_name(s: &str) -> &str {
         start -= 1;
     }
     &s[start..]
-}
-
-/// If `s` ends with a single- or double-quoted string literal, return its
-/// inner value and the text before the opening quote.
-fn trailing_string_literal(s: &str) -> Option<(String, &str)> {
-    let s = s.trim_end();
-    let bytes = s.as_bytes();
-    let close = *bytes.last()?;
-    if close != b'\'' && close != b'"' {
-        return None;
-    }
-    // Find the matching opening quote (no escape handling needed for the
-    // command and route names this runs on, which never contain quotes).
-    let mut i = bytes.len() - 1;
-    while i > 0 {
-        i -= 1;
-        if bytes[i] == close {
-            let value = s[i + 1..bytes.len() - 1].to_string();
-            return Some((value, &s[..i]));
-        }
-    }
-    None
 }
 
 /// Extract the return type annotation from a closure or arrow-function

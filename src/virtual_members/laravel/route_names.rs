@@ -403,7 +403,7 @@ fn scan_group_body<'a>(
 }
 
 /// A named route recovered from the project's route files.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug)]
 pub(crate) struct RouteEntry {
     /// Fully-qualified route name, with group name prefixes applied
     /// (e.g. `admin.users.index`).
@@ -657,9 +657,14 @@ fn collect_names_from_expr<'a>(
                     let full = format!("{}{name_val}", group.name);
                     // Only collect leaf names (non-prefix names that don't end with '.').
                     if !full.is_empty() && !full.ends_with('.') {
+                        // A `->prefix()` on the route's own chain
+                        // (`Route::prefix('admin')->get(…)`) prefixes the URI
+                        // just as an enclosing group's does.
+                        let uri_prefix =
+                            join_uri_segments(group.uri, &chain_uri_prefix(mc.object, content));
                         out.push(RouteEntry {
                             name: full,
-                            uri: route_uri(group.uri, chain_uri(mc.object, content)),
+                            uri: route_uri(&uri_prefix, chain_uri(mc.object, content)),
                         });
                     }
                 }
