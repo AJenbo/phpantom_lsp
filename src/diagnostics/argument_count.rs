@@ -264,11 +264,12 @@ impl Backend {
             let resolved = call_cache
                 .entry(expr.clone())
                 .or_insert_with(|| {
-                    let position = crate::text_position::offset_to_position(
+                    self.resolve_callable_target_at_offset(
+                        expr,
                         content,
-                        call_site.args_start as usize,
-                    );
-                    self.resolve_callable_target(expr, content, position, &file_ctx)
+                        call_site.args_start,
+                        &file_ctx,
+                    )
                 })
                 .clone();
 

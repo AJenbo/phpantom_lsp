@@ -82,7 +82,13 @@ impl Backend {
                 continue;
             }
 
-            self.emit_parameter_hints(call_site, content, range, &ctx, &mut hints);
+            self.emit_parameter_hints(
+                call_site,
+                content,
+                (range_start, range_end),
+                &ctx,
+                &mut hints,
+            );
         }
 
         // ── Closure / arrow function hints ──────────────────────────
@@ -408,22 +414,23 @@ impl Backend {
     }
 
     /// Emit parameter-name and by-reference hints for a single call site.
+    ///
+    /// `range` is the requested viewport as byte offsets, already
+    /// translated to virtual PHP coordinates by the caller so it can be
+    /// compared against the symbol map's argument offsets.
     fn emit_parameter_hints(
         &self,
         call_site: &CallSite,
         content: &str,
-        range: Range,
+        range: (u32, u32),
         ctx: &FileContext,
         hints: &mut Vec<InlayHint>,
     ) {
-        // Build a synthetic position from the call site's start so that
-        // resolve_callable_target has a cursor context.
-        let position = offset_to_position(content, call_site.args_start as usize);
-
-        let resolved = match self.resolve_callable_target(
+        // The call site's start offset gives the resolver its cursor context.
+        let resolved = match self.resolve_callable_target_at_offset(
             &call_site.call_expression,
             content,
-            position,
+            call_site.args_start,
             ctx,
         ) {
             Some(r) => r,
@@ -435,8 +442,7 @@ impl Backend {
             return;
         }
 
-        let range_start = position_to_offset(content, range.start);
-        let range_end = position_to_offset(content, range.end);
+        let (range_start, range_end) = range;
 
         // Build a set of parameter names consumed by named arguments so
         // positional arguments can be mapped to the remaining parameters.
@@ -616,11 +622,10 @@ impl Backend {
             // @template parameters are inferred from the sibling arguments
             // and substituted into parameter type hints (e.g. turning
             // `callable(T): T` into `callable(int): int`).
-            let position = offset_to_position(content, representative_offset.unwrap_or(0) as usize);
-            let resolved = match self.resolve_callable_target_with_args(
+            let resolved = match self.resolve_callable_target_with_args_at_offset(
                 &site.parent_call_expression,
                 content,
-                position,
+                representative_offset.unwrap_or(0),
                 ctx,
                 call_args_text,
             ) {

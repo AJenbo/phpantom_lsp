@@ -543,14 +543,10 @@ impl Backend {
             // (method-level template subs depend on per-site args);
             // only zero-arg calls can be cached.
             let resolved = if is_variable_call || call_args_text.is_some() {
-                let position = crate::text_position::offset_to_position(
-                    content,
-                    call_site.args_start as usize,
-                );
-                self.resolve_callable_target_with_args(
+                self.resolve_callable_target_with_args_at_offset(
                     expr,
                     content,
-                    position,
+                    call_site.args_start,
                     &file_ctx,
                     call_args_text,
                 )
@@ -558,11 +554,12 @@ impl Backend {
                 call_cache
                     .entry(expr.clone())
                     .or_insert_with(|| {
-                        let position = crate::text_position::offset_to_position(
+                        self.resolve_callable_target_at_offset(
+                            expr,
                             content,
-                            call_site.args_start as usize,
-                        );
-                        self.resolve_callable_target(expr, content, position, &file_ctx)
+                            call_site.args_start,
+                            &file_ctx,
+                        )
                     })
                     .clone()
             };

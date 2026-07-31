@@ -2327,3 +2327,83 @@ class Router {
     let mut out = Vec::new();
     backend.collect_slow_diagnostics(uri, php, &mut out);
 }
+
+/// Regression test for quadratic scaling of the argument diagnostics on
+/// large single files.
+///
+/// The argument-count and argument-type passes hold a byte offset for
+/// every call site.  They used to convert it to an LSP `Position` before
+/// handing it to callable-target resolution, which converted it straight
+/// back to a byte offset.  Both conversions count UTF-16 columns by
+/// scanning the file from the start, so each call site cost O(file
+/// length) and a file with thousands of calls became O(n²): PDepend's
+/// `AbstractPHPParser.php` (370 KB, 2192 call sites) spent 11 s in the
+/// type pass and 2.7 s in the count pass doing nothing but offset
+/// arithmetic.
+///
+/// The file below is padded so the quadratic term dominates: 3000 static
+/// calls spread over ~450 KB.  Static calls with arguments are used
+/// deliberately because they bypass the per-expression cache (argument
+/// text feeds method-level template substitution) and so hit the
+/// per-site resolution path that regressed.
+#[test]
+fn argument_diagnostics_scale_linearly_on_large_file() {
+    const CALLS: usize = 3000;
+    // Pad each line so the file is large enough that an O(file length)
+    // cost per call site is unmistakable against the linear baseline.
+    let padding = "x".repeat(120);
+
+    let mut php = String::with_capacity(CALLS * 180);
+    php.push_str("<?php\nclass Helper {\n    public static function take(int $a, int $b): int { return $a + $b; }\n}\n\nfunction consume(): void {\n");
+    for i in 0..CALLS {
+        php.push_str(&format!(
+            "    Helper::take({}, {}); // {}\n",
+            i,
+            i + 1,
+            padding
+        ));
+    }
+    php.push_str("}\n");
+
+    let uri = "file:///test/many_calls.php";
+    let backend = create_test_backend_with_full_stubs();
+    backend.update_ast(uri, &php);
+
+    let start = Instant::now();
+    let mut out = Vec::new();
+    backend.collect_argument_count_diagnostics(uri, &php, &mut out);
+    backend.collect_argument_type_diagnostics(uri, &php, &mut out);
+    let elapsed = start.elapsed();
+
+    eprintln!();
+    eprintln!("=== Argument diagnostics on a large single file ===");
+    eprintln!(
+        "  {} call sites over {} KB: {:>10.3?}  ({} diagnostics)",
+        CALLS,
+        php.len() / 1024,
+        elapsed,
+        out.len()
+    );
+    eprintln!();
+
+    // Every call passes two ints to `take(int, int)` — nothing to report.
+    assert!(
+        out.is_empty(),
+        "expected no argument diagnostics, got: {:?}",
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+
+    // Budget: 5 s in debug, 0.5 s in release.  Linear behaviour measures
+    // ~0.1 s and ~0.01 s respectively; restoring the per-site offset round
+    // trip takes it to 27 s and 1 s, so either budget catches it while
+    // leaving ~40x headroom for a slower machine.
+    let budget_secs = if cfg!(debug_assertions) { 5.0 } else { 0.5 };
+    assert!(
+        elapsed.as_secs_f64() < budget_secs,
+        "Argument diagnostics took {:.3?} which exceeds the {:.0} s budget. \
+         Callable-target resolution may have regressed to converting byte \
+         offsets through LSP positions per call site.",
+        elapsed,
+        budget_secs,
+    );
+}

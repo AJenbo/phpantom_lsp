@@ -485,27 +485,53 @@ impl Backend {
         position: Position,
         file_ctx: &FileContext,
     ) -> Option<ResolvedCallableTarget> {
-        self.resolve_callable_target_with_args(expr, content, position, file_ctx, None)
+        let cursor_offset = position_to_offset(content, position);
+        self.resolve_callable_target_at_offset(expr, content, cursor_offset, file_ctx)
     }
 
-    /// Like [`resolve_callable_target`](Self::resolve_callable_target)
+    /// Byte-offset variant of
+    /// [`resolve_callable_target`](Self::resolve_callable_target).
+    ///
+    /// Callers that already hold a byte offset (diagnostics walking
+    /// [`CallSite`](crate::types::CallSite) entries, inlay hints) must use
+    /// this rather than converting to a [`Position`] first: both
+    /// conversions scan the file from the start to count UTF-16 columns,
+    /// so an offset → `Position` → offset round trip is O(file length)
+    /// per call site and turns a per-file pass into O(n²).
+    pub(crate) fn resolve_callable_target_at_offset(
+        &self,
+        expr: &str,
+        content: &str,
+        cursor_offset: u32,
+        file_ctx: &FileContext,
+    ) -> Option<ResolvedCallableTarget> {
+        self.resolve_callable_target_with_args_at_offset(
+            expr,
+            content,
+            cursor_offset,
+            file_ctx,
+            None,
+        )
+    }
+
+    /// Like
+    /// [`resolve_callable_target_at_offset`](Self::resolve_callable_target_at_offset)
     /// but accepts optional raw argument text for method-level template
     /// substitution.
     ///
     /// When `call_args_text` is `Some("$user, 42")`, method-level
     /// `@template` parameters are resolved from the call-site argument
     /// types and substituted into the parameter types before returning.
-    pub(crate) fn resolve_callable_target_with_args(
+    pub(crate) fn resolve_callable_target_with_args_at_offset(
         &self,
         expr: &str,
         content: &str,
-        position: Position,
+        cursor_offset: u32,
         file_ctx: &FileContext,
         call_args_text: Option<&str>,
     ) -> Option<ResolvedCallableTarget> {
         let class_loader = self.class_loader(file_ctx);
         let function_loader_cl = self.function_loader(file_ctx);
-        let cursor_offset = position_to_offset(content, position);
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
 
         let rctx = ResolutionCtx {
@@ -587,10 +613,10 @@ impl Backend {
             SubjectExpr::Variable(var_name) => {
                 let callable_target =
                     Self::extract_callable_target_from_variable(var_name, content, cursor_offset)?;
-                self.resolve_callable_target_with_args(
+                self.resolve_callable_target_with_args_at_offset(
                     &callable_target,
                     content,
-                    position,
+                    cursor_offset,
                     file_ctx,
                     call_args_text,
                 )

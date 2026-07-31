@@ -592,42 +592,6 @@ regardless since it is a few lines.
 
 ---
 
-## P25. `type_mismatch_argument` / `argument_count_mismatch` slow on large single files
-
-**Impact: Medium · Effort: Medium**
-
-On very large PHP files with thousands of call sites, the
-`type_mismatch_argument` and `argument_count_mismatch` diagnostic
-passes dominate the per-file time. On PDepend's
-`src/Source/Language/PHP/AbstractPHPParser.php` a single file spent
-~11.7s in `type_mismatch_argument` and ~2.9s in
-`argument_count_mismatch`:
-
-```
-⚠ slow file (15.6s): src/Source/Language/PHP/AbstractPHPParser.php
-  scope=1.9s, fast=0.0s, unknown_class=0.0s, unknown_member=0.1s,
-  unknown_function=0.0s, argument_count_mismatch=2.9s,
-  type_mismatch_argument=11.6s, deprecated_usage=0.1s,
-  unknown_variable=0.8s, invalid_class_kind=0.0s
-```
-
-Both passes walk every call site and call
-`resolve_callable_target_with_args` / `resolve_callable_target`
-per site. Variable-based calls and calls with argument text are
-resolved fresh at every site (only zero-arg static/function calls
-are cached), so a file with thousands of `$obj->method($args)`
-call sites re-resolves the receiver type once per site. Look at
-memoizing receiver-type resolution per (expression, offset) within
-a file, or sharing the forward-walk scope snapshot across both
-passes so the receiver type is computed once.
-
-A per-request callable-target cache now memoizes the
-class::method → target lookup, but it sits downstream of
-receiver-type resolution — the per-site receiver re-resolution
-this item describes is still unaddressed.
-
----
-
 ## P46. `mago-phpdoc-syntax` cannot parse `@method static (…) name()`
 
 **Impact: Low · Effort: Low (upstream)**
