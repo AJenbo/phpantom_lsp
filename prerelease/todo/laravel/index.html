@@ -1301,10 +1301,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l23-route-parameter-name-completion" class="md-nav__link">
+  <a href="#l43-resource-route-uris" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L23. Route parameter name completion
+        L43. Resource route URIs
       </span>
     </span>
   </a>
@@ -2027,10 +2027,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l23-route-parameter-name-completion" class="md-nav__link">
+  <a href="#l43-resource-route-uris" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L23. Route parameter name completion
+        L43. Resource route URIs
       </span>
     </span>
   </a>
@@ -2879,18 +2879,20 @@ pattern set. Gaps by kind:</p>
   class. No new data needed. Provider-registered binding names stay out
   of scope (see the table at the top).</li>
 </ul>
-<h4 id="l23-route-parameter-name-completion">L23. Route parameter name completion<a class="headerlink" href="#l23-route-parameter-name-completion" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p><code>route('users.show', ['user' =&gt; 1])</code> — the second argument's array keys
-are the route's URI parameters. The route-name scanner already locates
-the <code>-&gt;name()</code> registration; extend it to record the URI literal from
-the same registration chain (<code>Route::get('/users/{user}/posts/{post}',
-…)</code>) and complete the <code>{param}</code> names (minus the <code>?</code> optional marker) as
-array keys in the parameters argument of <code>route()</code>, <code>to_route()</code>,
-<code>signedRoute()</code>, and <code>temporarySignedRoute()</code>. The Laravel LSP reads
-parameters off booted route objects; the URI literal in the registration
-gives us the same data statically. The recorded URI also feeds the L16
-hover (<code>[GET] /users/{user}</code> next to the route name).</p>
+<h4 id="l43-resource-route-uris">L43. Resource route URIs<a class="headerlink" href="#l43-resource-route-uris" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p><code>Route::resource()</code> / <code>apiResource()</code> registrations name no URI, so the
+routes the scanner generates for them carry no URI and their parameters
+do not complete. Laravel derives the URI from the resource name
+(<code>Route::resource('photos', …)</code> → <code>photos</code>, <code>photos/create</code>,
+<code>photos/{photo}</code>, <code>photos/{photo}/edit</code>), where the parameter is
+<code>Str::singular()</code> of the last segment — nested names singularize each
+prior segment (<code>photos.comments</code> → <code>photos/{photo}/comments/{comment}</code>)
+— and <code>-&gt;parameters(['photos' =&gt; 'grid'])</code> overrides the derived name.
+Recording those URIs completes route parameters for resource routes and
+gives the L16 hover a URI to show for them. A singularizer is needed;
+<code>pluralize_english_word</code> in <code>virtual_members/laravel/mod.rs</code> is the
+existing counterpart.</p>
 <h4 id="l24-translation-depth-json-lang-files-locales-placeholders">L24. Translation depth: JSON lang files, locales, placeholders<a class="headerlink" href="#l24-translation-depth-json-lang-files-locales-placeholders" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <p>Statically recoverable translation features the Laravel LSP has and we
