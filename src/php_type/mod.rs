@@ -320,6 +320,20 @@ impl LiteralValue {
         crate::text_scan::unquote_php_string(raw).or(Some(raw))
     }
 
+    /// Return the unquoted content when its source spelling has no escapes.
+    ///
+    /// Plain single- and double-quoted literals can be compared by content
+    /// (`'x'` and `"x"` are the same runtime value). Once a backslash occurs,
+    /// PHP applies quote-specific escape rules, so callers that do not perform
+    /// a full decoder must conservatively compare the raw source spelling.
+    pub(crate) fn plain_string_content(&self) -> Option<&str> {
+        let LiteralValue::String(raw) = self else {
+            return None;
+        };
+        let content = crate::text_scan::unquote_php_string(raw)?;
+        (!content.contains('\\')).then_some(content)
+    }
+
     pub fn parse_i64(&self) -> Option<i64> {
         match self {
             LiteralValue::Int(raw) => parse_php_int_literal(raw),
@@ -335,14 +349,86 @@ impl LiteralValue {
     }
 
     pub fn is_numeric_string(&self) -> bool {
-        // Validate the string *content* as a PHP numeric string
-        // (`is_numeric`), not as a PHP source literal.  Underscores,
-        // hex/binary/octal prefixes, and leading `0` octal are only
-        // meaningful in source code; the runtime string `'0xFF'` or
-        // `'1_000'` is not numeric.
-        self.string_content()
-            .is_some_and(|content| content.parse::<i64>().is_ok() || content.parse::<f64>().is_ok())
+        self.string_content().is_some_and(is_php_numeric_string)
     }
+}
+
+/// Match PHP 8's `NUM_STRING` grammar without accepting Rust-only float
+/// spellings such as `NaN`/`inf`.
+///
+/// PHP allows surrounding ASCII whitespace, a sign, decimal forms such as
+/// `.5`/`5.`, and an optional exponent. Source-literal features such as
+/// underscores and hexadecimal prefixes are not part of runtime numeric
+/// strings.
+fn is_php_numeric_string(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    let mut start = 0;
+    let mut end = bytes.len();
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    if start == end {
+        return false;
+    }
+
+    let bytes = &bytes[start..end];
+    let mut index = 0;
+    if matches!(bytes[index], b'+' | b'-') {
+        index += 1;
+        if index == bytes.len() {
+            return false;
+        }
+    }
+
+    let integer_start = index;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    let integer_digits = index - integer_start;
+
+    let mut fractional_digits = 0;
+    if index < bytes.len() && bytes[index] == b'.' {
+        index += 1;
+        let fraction_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        fractional_digits = index - fraction_start;
+    }
+    if integer_digits == 0 && fractional_digits == 0 {
+        return false;
+    }
+
+    if index < bytes.len() && matches!(bytes[index], b'e' | b'E') {
+        index += 1;
+        if index < bytes.len() && matches!(bytes[index], b'+' | b'-') {
+            index += 1;
+        }
+        let exponent_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if index == exponent_start {
+            return false;
+        }
+    }
+
+    index == bytes.len()
+}
+
+/// Whether PHP stores this string as an integer array key.
+///
+/// Only canonical decimal spellings are coerced: `"8"` and `"-8"` become
+/// integer keys, while `"+8"`, `"08"`, decimal fractions, and values outside
+/// the platform integer range remain strings.
+pub(crate) fn is_decimal_int_array_key(content: &str) -> bool {
+    !content.starts_with('+')
+        && content
+            .parse::<i64>()
+            .is_ok_and(|parsed| parsed.to_string() == content)
 }
 
 impl fmt::Display for LiteralValue {
@@ -838,7 +924,9 @@ impl PhpType {
     /// Also returns `true` when the type is `?float` (nullable wrapper).
     pub fn is_float(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "float" | "double"),
+            TypeKind::Named(s) => {
+                matches!(s.to_ascii_lowercase().as_str(), "float" | "double" | "real")
+            }
             TypeKind::Nullable(inner) => inner.is_float(),
             _ => false,
         }
@@ -1039,26 +1127,38 @@ impl PhpType {
     }
 
     /// Returns `true` when this type is always coerced to `int` when
-    /// used as an array key (int subtypes, float, bool, null).
+    /// used as an array key (int subtypes, float, and bool).
+    ///
+    /// Null is excluded because PHP converts it to the empty string key.
     pub fn is_int_coercible_key(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => matches!(
-                s.to_ascii_lowercase().as_str(),
-                "int"
-                    | "integer"
-                    | "float"
-                    | "double"
-                    | "bool"
-                    | "boolean"
-                    | "true"
-                    | "false"
-                    | "null"
-                    | "positive-int"
-                    | "negative-int"
-                    | "non-negative-int"
-                    | "non-positive-int"
-                    | "non-zero-int"
-            ),
+            TypeKind::Named(s) => {
+                s == "number"
+                    || matches!(
+                        s.to_ascii_lowercase().as_str(),
+                        "int"
+                            | "integer"
+                            | "float"
+                            | "double"
+                            | "real"
+                            | "bool"
+                            | "boolean"
+                            | "true"
+                            | "false"
+                            | "positive-int"
+                            | "negative-int"
+                            | "non-negative-int"
+                            | "non-positive-int"
+                            | "non-zero-int"
+                    )
+            }
+            TypeKind::Literal(value) => {
+                matches!(**value, LiteralValue::Int(_) | LiteralValue::Float(_))
+            }
+            TypeKind::IntRange(_, _) => true,
+            TypeKind::Union(members) => {
+                !members.is_empty() && members.iter().all(PhpType::is_int_coercible_key)
+            }
             _ => false,
         }
     }
@@ -1495,6 +1595,74 @@ impl PhpType {
         }
     }
 
+    /// Return the key type produced by iterating this type, as an owned type.
+    ///
+    /// Unlike [`extract_key_type`](Self::extract_key_type), this joins key
+    /// domains from every union member and makes the implicit integer keys of
+    /// lists and `T[]` explicit.
+    pub fn iterable_key_type(&self) -> Option<PhpType> {
+        match self.kind() {
+            TypeKind::Array(_) => Some(PhpType::int()),
+            TypeKind::ArrayShape(entries) => {
+                let keys: Vec<PhpType> = entries
+                    .iter()
+                    .map(|entry| match entry.key.as_deref() {
+                        None => PhpType::int(),
+                        // The parser currently stores a class-constant shape
+                        // key only as its display spelling. Without resolving
+                        // the constant, its runtime array key may be int or
+                        // string (`Foo::class` is safely covered as a subset).
+                        Some(key) if key.contains("::") => {
+                            PhpType::union(vec![PhpType::int(), PhpType::string()])
+                        }
+                        // Shape keys retain escape spelling rather than a
+                        // decoded runtime value. An escaped string may decode
+                        // to a canonical decimal key (e.g. `"\x38"`), so both
+                        // legal PHP key domains must remain possible.
+                        Some(key) if key.contains('\\') => {
+                            PhpType::union(vec![PhpType::int(), PhpType::string()])
+                        }
+                        Some(key) if is_decimal_int_array_key(key) => PhpType::int(),
+                        Some(_) => PhpType::string(),
+                    })
+                    .collect();
+                match keys.len() {
+                    0 => None,
+                    1 => keys.into_iter().next(),
+                    _ => Some(PhpType::join_runtime_value_types(keys)),
+                }
+            }
+            TypeKind::ObjectShape(entries) => {
+                // Object property names, including numeric-looking ones, are
+                // yielded as strings and never use PHP array-key coercion.
+                (!entries.is_empty()).then(PhpType::string)
+            }
+            TypeKind::Generic(g) if g.args.len() >= 2 => Some(g.args[0].clone()),
+            TypeKind::Generic(g)
+                if g.args.len() == 1
+                    && matches!(
+                        g.name.to_ascii_lowercase().as_str(),
+                        "list" | "non-empty-list"
+                    ) =>
+            {
+                Some(PhpType::int())
+            }
+            TypeKind::Nullable(inner) => inner.iterable_key_type(),
+            TypeKind::Union(members) => {
+                let keys: Vec<PhpType> = members
+                    .iter()
+                    .filter_map(PhpType::iterable_key_type)
+                    .collect();
+                match keys.len() {
+                    0 => None,
+                    1 => keys.into_iter().next(),
+                    _ => Some(PhpType::join_runtime_value_types(keys)),
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Extract the element (value) type from an iterable, including
     /// scalar element types.
     ///
@@ -1528,7 +1696,17 @@ impl PhpType {
                 }
             }
             TypeKind::Nullable(inner) => inner.iterable_element_type(),
-            TypeKind::Union(members) => members.iter().find_map(|m| m.iterable_element_type()),
+            TypeKind::Union(members) => {
+                let values: Vec<PhpType> = members
+                    .iter()
+                    .filter_map(PhpType::iterable_element_type)
+                    .collect();
+                match values.len() {
+                    0 => None,
+                    1 => values.into_iter().next(),
+                    _ => Some(PhpType::join_runtime_value_types(values)),
+                }
+            }
             _ => self.extract_value_type(false).cloned(),
         }
     }

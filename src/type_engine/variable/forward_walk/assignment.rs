@@ -6,7 +6,7 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::{PhpType, ShapeEntry, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::ResolvedType;
@@ -588,9 +588,95 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
 
 /// Process increment/decrement expressions (`$a++`, `++$a`, `$a--`, `--$a`).
 ///
-/// For numeric types (int, float), the type is preserved.
+/// For numeric types (int, float), the base type is preserved.
+/// Numeric literals and refined numeric types are widened because the
+/// operation changes the value and may invalidate the refinement.
 /// For numeric strings, the result becomes `int|float`.
-/// For general strings, PHP increments alphabetically (stays string).
+/// For general strings, PHP increments alphabetically (stays string), while
+/// decrementing a known non-numeric string is a no-op and stays exact.
+/// Incrementing `null` produces `1`, while decrementing it leaves `null`
+/// unchanged.
+#[derive(Clone, Copy)]
+enum IncrementDecrementKind {
+    Increment,
+    Decrement,
+}
+
+fn type_after_increment_decrement(ty: &PhpType, operation: IncrementDecrementKind) -> PhpType {
+    match ty.kind() {
+        TypeKind::Union(members) => {
+            let mut transformed = Vec::with_capacity(members.len());
+            for member in members {
+                let member = type_after_increment_decrement(member, operation);
+                for alternative in member.union_members() {
+                    if !transformed.iter().any(|existing| existing == alternative) {
+                        transformed.push(alternative.clone());
+                    }
+                }
+            }
+            match transformed.len() {
+                0 => ty.clone(),
+                1 => transformed.into_iter().next().unwrap(),
+                _ => PhpType::union(transformed),
+            }
+        }
+        TypeKind::Nullable(inner) => {
+            let inner = type_after_increment_decrement(inner, operation);
+            match operation {
+                IncrementDecrementKind::Increment => {
+                    let mut alternatives = vec![PhpType::int()];
+                    for alternative in inner.union_members() {
+                        if !alternatives.iter().any(|existing| existing == alternative) {
+                            alternatives.push(alternative.clone());
+                        }
+                    }
+                    if alternatives.len() == 1 {
+                        alternatives.into_iter().next().unwrap()
+                    } else {
+                        PhpType::union(alternatives)
+                    }
+                }
+                IncrementDecrementKind::Decrement => {
+                    if matches!(inner.kind(), TypeKind::Union(_)) {
+                        let mut alternatives: Vec<PhpType> =
+                            inner.union_members().into_iter().cloned().collect();
+                        alternatives.push(PhpType::null());
+                        PhpType::union(alternatives)
+                    } else {
+                        PhpType::nullable(inner)
+                    }
+                }
+            }
+        }
+        _ if ty.is_null() => match operation {
+            IncrementDecrementKind::Increment => PhpType::int(),
+            IncrementDecrementKind::Decrement => PhpType::null(),
+        },
+        _ if ty.is_named_ci("numeric")
+            || ty.is_named("number")
+            || ty.is_named_ci("numeric-string")
+            || ty.is_subtype_of(&PhpType::named(atom("numeric-string"))) =>
+        {
+            PhpType::union(vec![PhpType::int(), PhpType::float()])
+        }
+        _ if ty.is_int_subtype() => PhpType::int(),
+        _ if ty.is_float_subtype() => PhpType::float(),
+        TypeKind::Literal(value) if matches!(&**value, LiteralValue::String(_)) => {
+            match operation {
+                IncrementDecrementKind::Increment => PhpType::string(),
+                IncrementDecrementKind::Decrement => ty.clone(),
+            }
+        }
+        // A broad string may be numeric at runtime. PHP converts numeric
+        // strings to int or float for both operators; non-numeric strings
+        // remain strings (apart from the deprecated increment behaviour).
+        _ if ty.is_string_subtype() => {
+            PhpType::union(vec![PhpType::int(), PhpType::float(), PhpType::string()])
+        }
+        _ => ty.clone(),
+    }
+}
+
 pub(crate) fn process_increment_decrement<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -598,15 +684,21 @@ pub(crate) fn process_increment_decrement<'b>(
 ) {
     use mago_syntax::cst::unary::{UnaryPostfixOperator, UnaryPrefixOperator};
 
-    let var_expr = match expr {
+    let (var_expr, operation) = match expr {
         Expression::UnaryPostfix(postfix) => match &postfix.operator {
-            UnaryPostfixOperator::PostIncrement(_) | UnaryPostfixOperator::PostDecrement(_) => {
-                postfix.operand
+            UnaryPostfixOperator::PostIncrement(_) => {
+                (postfix.operand, IncrementDecrementKind::Increment)
+            }
+            UnaryPostfixOperator::PostDecrement(_) => {
+                (postfix.operand, IncrementDecrementKind::Decrement)
             }
         },
         Expression::UnaryPrefix(prefix) => match &prefix.operator {
-            UnaryPrefixOperator::PreIncrement(_) | UnaryPrefixOperator::PreDecrement(_) => {
-                prefix.operand
+            UnaryPrefixOperator::PreIncrement(_) => {
+                (prefix.operand, IncrementDecrementKind::Increment)
+            }
+            UnaryPrefixOperator::PreDecrement(_) => {
+                (prefix.operand, IncrementDecrementKind::Decrement)
             }
             _ => return,
         },
@@ -623,33 +715,11 @@ pub(crate) fn process_increment_decrement<'b>(
         return;
     }
 
-    // Check if the type is numeric or a numeric-string (including
-    // literal string values like '123').  If so, increment produces
-    // int|float because PHP converts numeric strings to numbers.
     let current_type = ResolvedType::types_joined(&existing);
-    let is_numeric_like = {
-        let lower = current_type.to_string().to_ascii_lowercase();
-        lower == "numeric" || lower == "numeric-string"
-    } || current_type.is_subtype_of(&PhpType::named(atom("numeric-string")));
-    if is_numeric_like {
-        scope.set(
-            &var_name,
-            vec![ResolvedType::from_type_string(PhpType::union(vec![
-                PhpType::int(),
-                PhpType::float(),
-            ]))],
-        );
-    } else if current_type.is_string_literal() {
-        // Non-numeric string literal: PHP increments alphabetically
-        // (e.g. "a" → "b"), so the result is still a string but no
-        // longer the same literal value.  Widen to `string`.
-        scope.set(
-            &var_name,
-            vec![ResolvedType::from_type_string(PhpType::string())],
-        );
+    let transformed = type_after_increment_decrement(&current_type, operation);
+    if transformed != current_type {
+        scope.set(&var_name, vec![ResolvedType::from_type_string(transformed)]);
     }
-    // For int, float, plain string: the type stays the same
-    // (PHP preserves the type for numeric increment/decrement).
 }
 
 /// Get the byte offset of an expression (used for cursor comparisons).
@@ -1124,25 +1194,7 @@ pub(crate) fn process_assignment_expr<'b>(
             return;
         }
 
-        let mut rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-        // When the RHS is a numeric string literal (e.g. "123", '4.5'),
-        // refine the type from `string` to `numeric-string` so that
-        // downstream increment/decrement inference can detect it.
-        if let Expression::Literal(Literal::String(lit_str)) = assignment.rhs {
-            let raw = bytes_to_str(lit_str.raw).to_string();
-            let unquoted = raw
-                .strip_prefix('\'')
-                .or_else(|| raw.strip_prefix('"'))
-                .and_then(|s| s.strip_suffix('\'').or_else(|| s.strip_suffix('"')))
-                .unwrap_or(&raw);
-            if unquoted.parse::<i64>().is_ok() || unquoted.parse::<f64>().is_ok() {
-                for rt in &mut rhs_types {
-                    if rt.type_string.is_subtype_of(&PhpType::string()) {
-                        rt.type_string = PhpType::named(atom("numeric-string"));
-                    }
-                }
-            }
-        }
+        let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
         // Reassigning the variable replaces its object identity, so any
         // property/array-access key rooted at it (seeded by an earlier
         // assignment or condition narrowing) is now stale.  Drop them
@@ -1315,7 +1367,7 @@ pub(crate) fn classify_php_type(
                 || lower == "false"
             {
                 *saw_int = true;
-            } else if lower == "numeric" || lower == "number" {
+            } else if lower == "numeric" || n == "number" {
                 *saw_int = true;
                 *saw_float = true;
             } else if lower == "null" {
@@ -1323,6 +1375,14 @@ pub(crate) fn classify_php_type(
                 // so that `int|null` classifies as int-like.
             } else {
                 return None; // mixed, string, object, etc.
+            }
+            Some(())
+        }
+        TypeKind::Literal(value) => {
+            match value.as_ref() {
+                LiteralValue::Int(_) => *saw_int = true,
+                LiteralValue::Float(_) => *saw_float = true,
+                LiteralValue::String(_) => return None,
             }
             Some(())
         }
@@ -1547,7 +1607,8 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                 // - array shape → object{key: type, ...}
                 // - otherwise → stdClass
                 let operand_types = resolve_rhs_with_scope(prefix.operand, scope, ctx);
-                let inner = operand_types.first().map(|rt| &rt.type_string).cloned();
+                let inner = (!operand_types.is_empty())
+                    .then(|| ResolvedType::types_joined(&operand_types).widen_scalar_literals());
                 let obj_type = match inner.as_ref().map(PhpType::kind) {
                     Some(TypeKind::ArrayShape(entries)) => {
                         // Widen literal types to their base types:
@@ -1556,28 +1617,16 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                             .iter()
                             .map(|e| ShapeEntry {
                                 key: e.key.clone(),
-                                value_type: widen_literal(&e.value_type),
+                                value_type: e.value_type.widen_scalar_literals(),
                                 optional: e.optional,
                             })
                             .collect();
                         PhpType::object_shape(widened)
                     }
-                    Some(TypeKind::Named(s))
-                        if matches!(
-                            s.to_ascii_lowercase().as_str(),
-                            "int"
-                                | "integer"
-                                | "string"
-                                | "float"
-                                | "double"
-                                | "real"
-                                | "bool"
-                                | "boolean"
-                        ) =>
-                    {
+                    Some(_) if inner.as_ref().is_some_and(is_object_cast_scalar_type) => {
                         PhpType::object_shape(vec![ShapeEntry {
                             key: Some("scalar".to_string()),
-                            value_type: PhpType::named(*s),
+                            value_type: inner.as_ref().unwrap().clone(),
                             optional: false,
                         }])
                     }
@@ -1586,11 +1635,9 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                 Some(obj_type)
             }
             UnaryPrefixOperator::UnsetCast(..) => Some(PhpType::named(atom("null"))),
-            UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => {
-                // Unary +/- preserves int or float; conservatively
-                // return int|float.
-                Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
-            }
+            // The unified resolver preserves signed numeric literals and
+            // falls back to `int|float` for non-literal operands.
+            UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => None,
             UnaryPrefixOperator::BitwiseNot(_) => None, // handled below
             UnaryPrefixOperator::Not(_) => Some(PhpType::bool()),
             _ => None,
@@ -1649,35 +1696,12 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     // Unwrap parenthesized expressions for structural inference.
     let rhs = unwrap_parens(rhs);
 
-    // String literals (including interpolated/composite strings).
-    if matches!(
-        rhs,
-        Expression::Literal(Literal::String(_)) | Expression::CompositeString(_)
-    ) {
+    // Composite strings are not scalar literals and may not be handled by the
+    // canonical literal resolver. Exact scalar literals have no fallback here:
+    // reintroducing broad int/string/float types would silently undo its
+    // precision whenever resolution regressed or hit a recursion guard.
+    if matches!(rhs, Expression::CompositeString(_)) {
         return vec![ResolvedType::from_type_string(PhpType::string())];
-    }
-
-    // Integer literals.
-    if matches!(rhs, Expression::Literal(Literal::Integer(_))) {
-        return vec![ResolvedType::from_type_string(PhpType::int())];
-    }
-
-    // Float literals.
-    if matches!(rhs, Expression::Literal(Literal::Float(_))) {
-        return vec![ResolvedType::from_type_string(PhpType::float())];
-    }
-
-    // Boolean and null literals.
-    if matches!(
-        rhs,
-        Expression::Literal(Literal::True(_) | Literal::False(_))
-    ) {
-        return vec![ResolvedType::from_type_string(PhpType::bool())];
-    }
-    if matches!(rhs, Expression::Literal(Literal::Null(_))) {
-        return vec![ResolvedType::from_type_string(PhpType::named(
-            "null".into(),
-        ))];
     }
 
     // Binary operators — the result type depends on the operator kind.
@@ -2061,6 +2085,10 @@ pub(crate) fn process_array_key_assignment<'b>(
         // (`$str[0] = 'z'`) modifies the string in-place — the variable
         // remains a string, it does NOT become an array.
         if base_type.is_string_subtype() {
+            scope.set(
+                &base_name,
+                vec![ResolvedType::from_type_string(PhpType::string())],
+            );
             return;
         }
 
@@ -2169,7 +2197,7 @@ pub(crate) fn process_pass_by_ref<'b>(
             &mut results,
             false,
         );
-        if results.len() != before.len() {
+        if resolved_types_differ(&results, &before) {
             scope.set(&var_name, results);
         }
     }
@@ -2257,9 +2285,10 @@ pub(crate) fn seed_pass_by_ref_in_condition<'b>(
 
 /// For each variable argument in a call expression that is passed to a
 /// pass-by-reference parameter with a primitive type hint (e.g.
-/// `array &$matches`), seed the variable in scope if it isn't already
-/// there.  This complements [`process_pass_by_ref`] which handles
-/// class-typed parameters via `try_apply_pass_by_reference_type`.
+/// `array &$matches`), seed or refresh the variable in scope. Existing exact
+/// values must be invalidated because the callee may assign any value allowed
+/// by the parameter type. This complements [`process_pass_by_ref`] which
+/// handles class-typed parameters via `try_apply_pass_by_reference_type`.
 pub(crate) fn seed_pass_by_ref_primitives<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -2414,32 +2443,71 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             _ => continue,
         };
 
-        // Skip if already in scope (Phase 1 handled it).
-        if !scope.get(&var_name).is_empty() {
+        // Check if the corresponding parameter is pass-by-reference.
+        if !param.is_reference {
             continue;
         }
 
-        // Check if the corresponding parameter is pass-by-reference.
-        if param.is_reference {
-            if let Some(type_hint) = &param.type_hint {
-                scope.set(
-                    &var_name,
-                    vec![ResolvedType::from_type_string(type_hint.clone())],
-                );
+        let already_in_scope = !scope.get(&var_name).is_empty();
+        if let Some(type_hint) = &param.type_hint {
+            // A variadic parameter's stored PHPDoc type may describe the
+            // collected argument array (`string[] &$values`), while each
+            // call-site variable is one element of that collection. Native
+            // element hints such as `string &...$values` are already scalar
+            // and therefore pass through unchanged.
+            let effective_hint = if param.is_variadic {
+                type_hint
+                    .iterable_element_type()
+                    .unwrap_or_else(|| type_hint.clone())
             } else {
-                // Untyped pass-by-reference parameters (e.g. `&$matches`
-                // in `preg_match`, `&$result` in `parse_str`) are most
-                // commonly arrays.  Seed as `array` so that subsequent
-                // array accesses like `$matches[1]` don't fall through
-                // to the backward scanner.
+                type_hint.clone()
+            };
+            let primitive_hint = match effective_hint.kind() {
+                TypeKind::Union(members) | TypeKind::Intersection(members) => {
+                    !members.is_empty() && members.iter().all(PhpType::is_scalar)
+                }
+                _ => effective_hint.is_scalar(),
+            };
+            if primitive_hint {
                 scope.set(
                     &var_name,
-                    vec![ResolvedType::from_type_string(PhpType::named(atom(
-                        "array",
-                    )))],
+                    vec![ResolvedType::from_type_string(effective_hint)],
                 );
             }
+        } else if !already_in_scope {
+            // Untyped pass-by-reference parameters (e.g. `&$matches`
+            // in `preg_match`, `&$result` in `parse_str`) are most
+            // commonly arrays. Seed only new variables as `array`; an
+            // existing value has no sounder replacement without a hint.
+            scope.set(
+                &var_name,
+                vec![ResolvedType::from_type_string(PhpType::named(atom(
+                    "array",
+                )))],
+            );
         }
+    }
+}
+
+fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(name) => matches!(
+            name.to_ascii_lowercase().as_str(),
+            "int"
+                | "integer"
+                | "string"
+                | "float"
+                | "double"
+                | "real"
+                | "bool"
+                | "boolean"
+                | "true"
+                | "false"
+        ),
+        TypeKind::Union(members) => {
+            !members.is_empty() && members.iter().all(is_object_cast_scalar_type)
+        }
+        _ => false,
     }
 }
 
@@ -2681,4 +2749,37 @@ pub(crate) fn resolved_types_differ(a: &[ResolvedType], b: &[ResolvedType]) -> b
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn increment_decrement_preserves_only_values_that_cannot_change() {
+        let text = PhpType::literal_string_raw("'abc'");
+
+        assert_eq!(
+            type_after_increment_decrement(&text, IncrementDecrementKind::Increment),
+            PhpType::string()
+        );
+        assert_eq!(
+            type_after_increment_decrement(&text, IncrementDecrementKind::Decrement),
+            text
+        );
+        assert_eq!(
+            type_after_increment_decrement(
+                &PhpType::named(atom("number")),
+                IncrementDecrementKind::Increment
+            ),
+            PhpType::union(vec![PhpType::int(), PhpType::float()])
+        );
+        assert_eq!(
+            type_after_increment_decrement(
+                &PhpType::named(atom("Number")),
+                IncrementDecrementKind::Increment
+            ),
+            PhpType::named(atom("Number"))
+        );
+    }
 }

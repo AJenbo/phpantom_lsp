@@ -165,6 +165,12 @@ impl ScopeState {
                 }
             }
 
+            // Scalar literals are exact within each branch, but a broader
+            // sibling branch already covers them after control-flow rejoins.
+            // Preserve class-backed alternatives (and their completion
+            // metadata) while collapsing only redundant non-class values.
+            *entry = ResolvedType::collapse_redundant_runtime_literals(std::mem::take(entry));
+
             // Remove entries whose type is subsumed by a broader entry.
             // E.g. `string|null` ⊆ `int|string|null` → drop the former.
             if entry.len() > 1 {

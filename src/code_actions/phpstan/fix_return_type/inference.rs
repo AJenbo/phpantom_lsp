@@ -144,7 +144,7 @@ pub(crate) fn infer_return_type(
         .map(|c| ClassInfo::clone(c))
         .unwrap_or_default();
 
-    let (return_types, has_bare_return, has_return_with_value) =
+    let (mut return_types, has_bare_return, has_return_with_value) =
         with_parsed_program(content, "fix_return_type_infer", |program, _content| {
             let body_stmts = crate::code_actions::extract_function::find_enclosing_body_statements(
                 &program.statements,
@@ -219,28 +219,36 @@ pub(crate) fn infer_return_type(
         });
     }
 
-    // Deduplicate types structurally (no string round-trip).
-    let mut deduped: Vec<PhpType> = Vec::with_capacity(return_types.len());
-    for ty in &return_types {
-        if !deduped.iter().any(|existing| existing.equivalent(ty)) {
-            deduped.push(ty.clone());
-        }
-    }
-
     if has_bare_return {
-        let has_null = deduped.iter().any(|t| t.is_null());
-        if !has_null {
-            deduped.push(PhpType::null());
-        }
+        return_types.push(PhpType::null());
     }
 
-    let effective = if deduped.len() == 1 {
-        deduped.into_iter().next().unwrap()
-    } else if deduped.len() <= 3 {
-        PhpType::union(deduped)
-    } else {
+    // Keep exact literal alternatives in the effective PHPDoc type while
+    // removing only alternatives made redundant by a broad scalar branch.
+    let effective = PhpType::join_runtime_value_types(return_types);
+
+    // The existing inference guard limits unrelated return domains, not the
+    // number of exact values within one scalar domain. Otherwise four literal
+    // returns would regress from one inferable `string` domain to no code
+    // action merely because the shared resolver became more precise.
+    let mut complexity_domains: Vec<PhpType> = Vec::new();
+    for member in effective.union_members() {
+        let domain = match member.as_literal() {
+            Some(crate::php_type::LiteralValue::Int(_)) => PhpType::int(),
+            Some(crate::php_type::LiteralValue::Float(_)) => PhpType::float(),
+            Some(crate::php_type::LiteralValue::String(_)) => PhpType::string(),
+            None => member.clone(),
+        };
+        if !complexity_domains
+            .iter()
+            .any(|existing| existing.equivalent(&domain))
+        {
+            complexity_domains.push(domain);
+        }
+    }
+    if complexity_domains.len() > 3 {
         return None;
-    };
+    }
 
     // Convert effective type → native PHP type hint.
     let native = effective

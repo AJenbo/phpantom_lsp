@@ -319,6 +319,71 @@ impl ResolvedType {
         }
     }
 
+    /// Collapse scalar literals made redundant by broader runtime-value
+    /// alternatives while preserving class-backed entries and their metadata.
+    ///
+    /// Branch resolution can return class and scalar alternatives side by
+    /// side. Joining the entire vector would discard `class_info`, but leaving
+    /// every entry untouched produces unions such as `Foo|'fixed'|string`.
+    /// Normalize only the non-class alternatives, and skip unions containing
+    /// `mixed` because independent completion fallbacks must remain visible.
+    pub(crate) fn collapse_redundant_runtime_literals(
+        results: Vec<ResolvedType>,
+    ) -> Vec<ResolvedType> {
+        fn contains_scalar_literal(ty: &PhpType) -> bool {
+            match ty.kind() {
+                TypeKind::Literal(_) => true,
+                TypeKind::Union(members) => members.iter().any(contains_scalar_literal),
+                TypeKind::Nullable(inner) => contains_scalar_literal(inner),
+                _ => false,
+            }
+        }
+
+        fn contains_mixed(ty: &PhpType) -> bool {
+            if ty.is_mixed() {
+                return true;
+            }
+            match ty.kind() {
+                TypeKind::Union(members) => members.iter().any(contains_mixed),
+                TypeKind::Nullable(inner) => contains_mixed(inner),
+                _ => false,
+            }
+        }
+
+        let non_class_types: Vec<PhpType> = results
+            .iter()
+            .filter(|result| result.class_info.is_none())
+            .map(|result| result.type_string.clone())
+            .collect();
+        if non_class_types.is_empty()
+            || !non_class_types.iter().any(contains_scalar_literal)
+            || non_class_types.iter().any(contains_mixed)
+        {
+            return results;
+        }
+
+        let original = match non_class_types.len() {
+            1 => non_class_types[0].clone(),
+            _ => PhpType::union(non_class_types.clone()),
+        };
+        let normalized = PhpType::join_runtime_value_types(non_class_types);
+        if normalized == original {
+            return results;
+        }
+
+        let mut collapsed = Vec::with_capacity(results.len());
+        let mut inserted_non_class = false;
+        for result in results {
+            if result.class_info.is_some() {
+                collapsed.push(result);
+            } else if !inserted_non_class {
+                collapsed.push(ResolvedType::from_type_string(normalized.clone()));
+                inserted_non_class = true;
+            }
+        }
+        collapsed
+    }
+
     /// Combine the type strings of all entries into a single [`PhpType`].
     ///
     /// When there is exactly one entry, returns its `type_string` directly.

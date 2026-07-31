@@ -417,6 +417,12 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
     let sub_l = sub_raw.to_ascii_lowercase();
     let sup_l = sup_raw.to_ascii_lowercase();
 
+    if sub_l == "number" && sup_l == "number" && (sub_raw == "number") != (sup_raw == "number") {
+        // Lowercase `number` is the pseudo-type; any other casing is a real
+        // class identifier. Check this before case-insensitive equality.
+        return false;
+    }
+
     if sub_l == sup_l {
         return true;
     }
@@ -531,7 +537,7 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
         "uppercase-string" => matches!(sub_n, "non-empty-uppercase-string"),
 
         // ── numeric supertypes ──────────────────────────────────
-        "numeric" | "number" => matches!(
+        "numeric" => matches!(
             sub_n,
             "int"
                 | "float"
@@ -541,6 +547,16 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-negative-int"
                 | "non-zero-int"
                 | "numeric-string"
+        ),
+        "number" => matches!(
+            sub_n,
+            "int"
+                | "float"
+                | "positive-int"
+                | "negative-int"
+                | "non-positive-int"
+                | "non-negative-int"
+                | "non-zero-int"
         ),
 
         // ── scalar supertype ────────────────────────────────────
@@ -641,7 +657,7 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
 pub(crate) fn normalize_alias(name: &str) -> &str {
     match name {
         "integer" => "int",
-        "double" => "float",
+        "double" | "real" => "float",
         "boolean" => "bool",
         "no-return" | "noreturn" | "never-return" | "never-returns" => "never",
         "non-empty-mixed" => "mixed",
@@ -697,7 +713,7 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
             if matches!(lit, LiteralValue::Float(_)) {
                 return matches!(
                     sup_l.as_str(),
-                    "float" | "double" | "numeric" | "number" | "scalar"
+                    "float" | "double" | "real" | "numeric" | "number" | "scalar"
                 );
             }
             // String literal → string (and its supertypes).
@@ -727,8 +743,11 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
                     return true;
                 }
 
-                // Numeric-string: the content parses as a number.
-                if sup_l == "numeric-string" && lit.is_numeric_string() {
+                // A numeric string is also part of the broader `numeric`
+                // value domain. It is not part of `number`, which represents
+                // only int|float runtime values.
+                if matches!(sup_l.as_str(), "numeric-string" | "numeric") && lit.is_numeric_string()
+                {
                     return true;
                 }
 
@@ -741,11 +760,28 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
 }
 
 pub(crate) fn literals_equal(left: &LiteralValue, right: &LiteralValue) -> bool {
+    if left == right {
+        return true;
+    }
+
     match (left, right) {
-        (LiteralValue::Int(_), LiteralValue::Int(_)) => left.parse_i64() == right.parse_i64(),
-        (LiteralValue::Float(_), LiteralValue::Float(_)) => left.parse_f64() == right.parse_f64(),
-        (LiteralValue::String(_), LiteralValue::String(_)) => {
-            left.string_content() == right.string_content()
+        (LiteralValue::Int(left_raw), LiteralValue::Int(right_raw)) => {
+            match (left.parse_i64(), right.parse_i64()) {
+                (Some(left), Some(right)) => left == right,
+                _ => left_raw == right_raw,
+            }
+        }
+        (LiteralValue::Float(left_raw), LiteralValue::Float(right_raw)) => {
+            match (left.parse_f64(), right.parse_f64()) {
+                (Some(left), Some(right)) => left == right,
+                _ => left_raw == right_raw,
+            }
+        }
+        (LiteralValue::String(left_raw), LiteralValue::String(right_raw)) => {
+            match (left.plain_string_content(), right.plain_string_content()) {
+                (Some(left), Some(right)) => left == right,
+                _ => left_raw == right_raw,
+            }
         }
         _ => left == right,
     }

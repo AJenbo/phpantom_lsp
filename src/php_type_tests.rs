@@ -632,6 +632,64 @@ fn shape_value_type_explicit_numeric_key() {
 }
 
 #[test]
+fn iterable_key_type_normalizes_explicit_numeric_shape_keys() {
+    assert_eq!(
+        PhpType::parse("array{0: User}")
+            .iterable_key_type()
+            .unwrap(),
+        PhpType::int()
+    );
+    assert_eq!(
+        PhpType::parse("array{0: User, name: string}")
+            .iterable_key_type()
+            .unwrap()
+            .to_string(),
+        "int|string"
+    );
+    assert_eq!(
+        PhpType::parse("array{'0': User}")
+            .iterable_key_type()
+            .unwrap(),
+        PhpType::int()
+    );
+    assert_eq!(
+        PhpType::parse("array{'08': User}")
+            .iterable_key_type()
+            .unwrap(),
+        PhpType::string()
+    );
+    assert_eq!(
+        PhpType::parse(r#"array{"\x38": User}"#)
+            .iterable_key_type()
+            .unwrap()
+            .to_string(),
+        "int|string"
+    );
+}
+
+#[test]
+fn iterable_key_type_keeps_object_shape_keys_as_strings() {
+    for shape in [r#"object{'0': User}"#, r#"object{"\x38": User}"#] {
+        assert_eq!(
+            PhpType::parse(shape).iterable_key_type().unwrap(),
+            PhpType::string(),
+            "{shape}"
+        );
+    }
+}
+
+#[test]
+fn iterable_key_type_preserves_unknown_class_constant_key_domain() {
+    assert_eq!(
+        PhpType::parse("array{Foo::BAR: User}")
+            .iterable_key_type()
+            .unwrap()
+            .to_string(),
+        "int|string"
+    );
+}
+
+#[test]
 fn shape_value_type_nullable() {
     let ty = PhpType::parse("?array{name: string}");
     assert_eq!(ty.shape_value_type("name"), Some(&PhpType::string()));
@@ -917,6 +975,82 @@ fn literal_string() {
 }
 
 #[test]
+fn widen_scalar_literals_handles_direct_wrapped_and_nested_union_types() {
+    assert_eq!(
+        PhpType::literal_string_raw("'draft'").widen_scalar_literals(),
+        PhpType::string()
+    );
+    assert_eq!(
+        PhpType::literal_int("42").widen_scalar_literals(),
+        PhpType::int()
+    );
+    assert_eq!(
+        PhpType::literal_float("1.5").widen_scalar_literals(),
+        PhpType::float()
+    );
+
+    let nested = PhpType::union(vec![
+        PhpType::union(vec![
+            PhpType::literal_int("1"),
+            PhpType::literal_float("1.5"),
+        ]),
+        PhpType::literal_int("2"),
+    ]);
+    assert_eq!(
+        nested.widen_scalar_literals(),
+        PhpType::union(vec![PhpType::int(), PhpType::float()])
+    );
+
+    let nullable = PhpType::nullable(PhpType::literal_string_raw("'draft'"));
+    assert_eq!(
+        nullable.widen_scalar_literals(),
+        PhpType::nullable(PhpType::string())
+    );
+}
+
+#[test]
+fn widen_scalar_literals_does_not_rewrite_structural_payloads() {
+    let generic = PhpType::generic("Box", vec![PhpType::literal_string_raw("'draft'")]);
+    let shape = PhpType::array_shape(vec![ShapeEntry {
+        key: Some("state".to_string()),
+        value_type: PhpType::literal_string_raw("'draft'"),
+        optional: false,
+    }]);
+    let callable = PhpType::parse("callable(): 'draft'");
+
+    assert_eq!(generic.widen_scalar_literals(), generic);
+    assert_eq!(shape.widen_scalar_literals(), shape);
+    assert_eq!(callable.widen_scalar_literals(), callable);
+
+    let union = PhpType::union(vec![
+        generic.clone(),
+        PhpType::literal_string_raw("'outside'"),
+    ]);
+    assert_eq!(
+        union.widen_scalar_literals(),
+        PhpType::union(vec![generic, PhpType::string()])
+    );
+}
+
+#[test]
+fn int_coercible_array_keys_include_numeric_literals_but_not_null() {
+    assert!(PhpType::literal_int("1").is_int_coercible_key());
+    assert!(PhpType::literal_float("1.5").is_int_coercible_key());
+    assert!(PhpType::parse("int<1, 10>").is_int_coercible_key());
+    assert!(
+        PhpType::union(vec![
+            PhpType::literal_int("1"),
+            PhpType::literal_float("1.5"),
+        ])
+        .is_int_coercible_key()
+    );
+    assert!(!PhpType::null().is_int_coercible_key());
+    assert!(!PhpType::nullable(PhpType::int()).is_int_coercible_key());
+    assert!(PhpType::named(atom("number")).is_int_coercible_key());
+    assert!(!PhpType::named(atom("Number")).is_int_coercible_key());
+}
+
+#[test]
 fn parse_model_property_generic() {
     let ty = PhpType::parse("model-property<Process>");
     assert_eq!(
@@ -997,6 +1131,18 @@ fn iterable_element_type_delegates_for_generics() {
     assert_eq!(
         ty.iterable_element_type().unwrap(),
         PhpType::named(atom("User"))
+    );
+}
+
+#[test]
+fn iterable_element_type_joins_every_union_member() {
+    let ty = PhpType::union(vec![
+        PhpType::parse("list<int>"),
+        PhpType::parse("array<string, float>"),
+    ]);
+    assert_eq!(
+        ty.iterable_element_type().unwrap(),
+        PhpType::union(vec![PhpType::int(), PhpType::float()])
     );
 }
 
@@ -2626,6 +2772,30 @@ mod subtype_tests {
         }
     }
 
+    #[test]
+    fn literal_numeric_string_follows_php_8_grammar() {
+        for raw in [
+            "' 42 '",
+            "'+.5'",
+            "'5.'",
+            "'-1.5e+2'",
+            "'1e309'",
+            "'\t7\r\n'",
+        ] {
+            assert!(
+                PhpType::literal_string_raw(raw).is_subtype_of(&PhpType::parse("numeric-string")),
+                "{raw} should be a PHP numeric-string"
+            );
+        }
+
+        for raw in ["'INF'", "'-inf'", "'NaN'", "'.'", "'1e'", "'+'"] {
+            assert!(
+                !PhpType::literal_string_raw(raw).is_subtype_of(&PhpType::parse("numeric-string")),
+                "{raw} should not be a PHP numeric-string"
+            );
+        }
+    }
+
     // ── IntRange subtyping ──────────────────────────────────────────
 
     #[test]
@@ -3098,6 +3268,264 @@ mod simplification_tests {
             !matches!(s.kind(), TypeKind::Union(_)),
             "should be unwrapped: {s:?}"
         );
+    }
+
+    #[test]
+    fn dedup_preserves_case_sensitive_payloads_and_number_class_names() {
+        let literal_union = PhpType::union(vec![
+            PhpType::literal_string_raw("'A'"),
+            PhpType::literal_string_raw("'a'"),
+        ]);
+        assert_eq!(literal_union.simplified().to_string(), "'A'|'a'");
+
+        let upper = PhpType::generic("Box", vec![PhpType::literal_string_raw("'A'")]);
+        let lower = PhpType::generic("box", vec![PhpType::literal_string_raw("'a'")]);
+        let generic_union = PhpType::union(vec![upper.clone(), lower.clone()]);
+        assert_eq!(
+            generic_union.simplified(),
+            PhpType::union(vec![upper, lower])
+        );
+
+        let number_class = PhpType::union(vec![
+            PhpType::named(atom("number")),
+            PhpType::named(atom("Number")),
+        ]);
+        assert_eq!(number_class.simplified(), number_class);
+
+        let static_class_bounds = PhpType::union(vec![
+            PhpType::static_type(atom("number")),
+            PhpType::static_type(atom("Number")),
+        ]);
+        assert_eq!(
+            static_class_bounds.simplified(),
+            PhpType::static_type(atom("number"))
+        );
+
+        let generic_class_names = PhpType::union(vec![
+            PhpType::generic("number", vec![PhpType::int()]),
+            PhpType::generic("Number", vec![PhpType::int()]),
+        ]);
+        assert_eq!(
+            generic_class_names.simplified(),
+            PhpType::generic("number", vec![PhpType::int()])
+        );
+    }
+
+    #[test]
+    fn simplification_keeps_one_representative_for_mutual_scalar_aliases() {
+        assert_eq!(
+            PhpType::union(vec![PhpType::int(), PhpType::named(atom("integer"))]).simplified(),
+            PhpType::int()
+        );
+        assert_eq!(
+            PhpType::union(vec![PhpType::float(), PhpType::named(atom("double"))]).simplified(),
+            PhpType::float()
+        );
+    }
+
+    #[test]
+    fn dedup_recognizes_equivalent_literal_spellings() {
+        assert_eq!(
+            PhpType::union(vec![PhpType::literal_int("1"), PhpType::literal_int("0x1"),])
+                .simplified(),
+            PhpType::literal_int("1")
+        );
+        assert_eq!(
+            PhpType::union(vec![
+                PhpType::literal_float("1.0"),
+                PhpType::literal_float("1e0"),
+            ])
+            .simplified(),
+            PhpType::literal_float("1.0")
+        );
+        assert_eq!(
+            PhpType::union(vec![
+                PhpType::literal_string_raw("'x'"),
+                PhpType::literal_string_raw("\"x\""),
+            ])
+            .simplified(),
+            PhpType::literal_string_raw("'x'")
+        );
+    }
+
+    #[test]
+    fn dedup_does_not_equate_escaped_single_and_double_quoted_strings() {
+        let escaped = PhpType::union(vec![
+            PhpType::literal_string_raw(r"'\n'"),
+            PhpType::literal_string_raw(r#""\n""#),
+        ])
+        .simplified();
+
+        assert_eq!(escaped.union_members().len(), 2);
+    }
+
+    #[test]
+    fn broad_scalar_absorbs_only_its_matching_literal_kind() {
+        assert_eq!(
+            PhpType::union(vec![
+                PhpType::string(),
+                PhpType::literal_string_raw("'foo'")
+            ])
+            .simplified(),
+            PhpType::string()
+        );
+        assert_eq!(
+            PhpType::union(vec![PhpType::int(), PhpType::literal_int("1")]).simplified(),
+            PhpType::int()
+        );
+        assert_eq!(
+            PhpType::union(vec![PhpType::float(), PhpType::literal_float("1.5")]).simplified(),
+            PhpType::float()
+        );
+        assert_eq!(
+            PhpType::union(vec![PhpType::float(), PhpType::literal_int("1")])
+                .simplified()
+                .to_string(),
+            "float|1"
+        );
+    }
+
+    #[test]
+    fn runtime_value_join_separates_value_sets_from_parameter_coercion() {
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![PhpType::int(), PhpType::float()]).to_string(),
+            "int|float"
+        );
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![PhpType::float(), PhpType::literal_int("1"),])
+                .to_string(),
+            "float|1"
+        );
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::literal_int("1"),
+                PhpType::int(),
+                PhpType::float(),
+            ])
+            .to_string(),
+            "int|float"
+        );
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::int(),
+                PhpType::named(atom("integer")),
+            ]),
+            PhpType::int()
+        );
+    }
+
+    #[test]
+    fn runtime_value_join_absorbs_real_value_subsets() {
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![PhpType::numeric(), PhpType::literal_int("1"),]),
+            PhpType::numeric()
+        );
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::named(atom("scalar")),
+                PhpType::literal_string_raw("'x'"),
+            ]),
+            PhpType::named(atom("scalar"))
+        );
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::named(atom("array-key")),
+                PhpType::literal_int("1"),
+            ]),
+            PhpType::named(atom("array-key"))
+        );
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::parse("int<1, 10>"),
+                PhpType::literal_int("5"),
+            ]),
+            PhpType::parse("int<1, 10>")
+        );
+
+        let number_and_class = PhpType::join_runtime_value_types(vec![
+            PhpType::named(atom("number")),
+            PhpType::named(atom("Number")),
+        ]);
+        assert_eq!(number_and_class.to_string(), "number|Number");
+
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::named(atom("real")),
+                PhpType::literal_float("1.5"),
+            ]),
+            PhpType::named(atom("real"))
+        );
+        assert_eq!(
+            PhpType::union(vec![
+                PhpType::named(atom("real")),
+                PhpType::literal_float("1.5"),
+            ])
+            .simplified(),
+            PhpType::named(atom("real"))
+        );
+        assert!(PhpType::literal_float("1.5").is_subtype_of(&PhpType::named(atom("real"))));
+    }
+
+    #[test]
+    fn review_regression_runtime_join_preserves_structured_coercion_domains() {
+        let joined = PhpType::join_runtime_value_types(vec![
+            PhpType::literal_string_raw("'tag'"),
+            PhpType::parse("array<int>"),
+            PhpType::parse("array<float>"),
+            PhpType::parse("callable(): int"),
+            PhpType::parse("callable(): float"),
+        ]);
+
+        let members = joined.union_members();
+        assert_eq!(members.len(), 5);
+        for expected in [
+            PhpType::literal_string_raw("'tag'"),
+            PhpType::parse("array<int>"),
+            PhpType::parse("array<float>"),
+            PhpType::parse("callable(): int"),
+            PhpType::parse("callable(): float"),
+        ] {
+            assert!(
+                members.contains(&&expected),
+                "runtime join dropped structured alternative {expected}: {joined}"
+            );
+        }
+    }
+
+    #[test]
+    fn review_regression_runtime_join_absorbs_only_numeric_string_literals_into_numeric() {
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::numeric(),
+                PhpType::literal_string_raw("'1'"),
+            ]),
+            PhpType::numeric()
+        );
+        assert_eq!(
+            PhpType::join_runtime_value_types(vec![
+                PhpType::numeric(),
+                PhpType::literal_string_raw("'x'"),
+            ])
+            .to_string(),
+            "numeric|'x'"
+        );
+    }
+
+    #[test]
+    fn review_regression_semantic_dedup_keeps_unparseable_numeric_literals_distinct() {
+        let overflow = PhpType::union(vec![
+            PhpType::literal_int("9223372036854775808"),
+            PhpType::literal_int("9223372036854775809"),
+        ])
+        .simplified();
+        assert_eq!(overflow.union_members().len(), 2);
+
+        let malformed = PhpType::union(vec![
+            PhpType::literal_float("not-a-float"),
+            PhpType::literal_float("still-not-a-float"),
+        ])
+        .simplified();
+        assert_eq!(malformed.union_members().len(), 2);
     }
 
     #[test]
