@@ -1422,10 +1422,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l38-typed-validated-array-shapes-from-rules" class="md-nav__link">
+  <a href="#l40-backing-type-for-enum-validation-rules" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L38. Typed <code>validated()</code> array shapes from rules
+        L40. Backing type for enum validation rules
       </span>
     </span>
   </a>
@@ -2148,10 +2148,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l38-typed-validated-array-shapes-from-rules" class="md-nav__link">
+  <a href="#l40-backing-type-for-enum-validation-rules" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L38. Typed <code>validated()</code> array shapes from rules
+        L40. Backing type for enum validation rules
       </span>
     </span>
   </a>
@@ -3062,35 +3062,22 @@ unknown names since the set is inherently open.</p>
 binding <code>bind(Gateway::class, StripeGateway::class)</code> does <strong>not</strong>
 retype <code>app(Gateway::class)</code> to the concrete — the contract is the
 interface.</p>
-<h4 id="l38-typed-validated-array-shapes-from-rules">L38. Typed <code>validated()</code> array shapes from rules<a class="headerlink" href="#l38-typed-validated-array-shapes-from-rules" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
-<p>No mainstream tool types <code>$request-&gt;validated()</code> beyond <code>array</code> — this
-is a leapfrog opportunity, not catch-up. The rules array is a static
-type contract; translate it into an array shape:</p>
-<ul>
-<li><code>'name' =&gt; 'required|string|max:255'</code> → <code>name: string</code></li>
-<li><code>'age' =&gt; 'nullable|integer'</code> → <code>age: int|null</code></li>
-<li><code>'active' =&gt; 'boolean'</code> → <code>active: bool</code></li>
-<li><code>'role' =&gt; [new Enum(Role::class)]</code> / enum-cast columns → <code>role: string</code>
-  (the raw validated value; the enum object only exists after <code>enum()</code>)</li>
-<li><code>'items' =&gt; 'array'</code>, <code>'items.*.id' =&gt; 'integer'</code> →
-  <code>items: list&lt;array{id: int}&gt;</code></li>
-<li>fields without <code>required</code> (and without <code>nullable</code>) are optional keys
-  (<code>name?:</code>), since absent input never reaches the validated array</li>
-</ul>
-<p>Apply the shape to <code>$request-&gt;validated()</code> (no-argument form),
-<code>$request-&gt;validate([...])</code> return values, and <code>$validator-&gt;validated()</code>
-where the rules are visible. <code>validated('key')</code> returns the shape's
-member type. <code>safe()</code> returns a <code>ValidatedInput</code> whose <code>only()</code>/
-<code>except()</code> results narrow the same shape. Fall back to plain <code>array</code>
-the moment any rule key or rule string is non-literal — a partial
-shape that claims completeness would produce false unknown-key
-diagnostics. Array-shape machinery (shapes, optional keys, <code>list&lt;&gt;</code>)
-already exists in the type engine, and
-<code>virtual_members/laravel/validation_rules.rs</code> already recovers the
-literal <code>(key, rule)</code> pairs and locates the rules array in scope for a
-cursor; the work is the rules-to-shape translation and wiring it as a
-conditional return.</p>
+<h4 id="l40-backing-type-for-enum-validation-rules">L40. Backing type for enum validation rules<a class="headerlink" href="#l40-backing-type-for-enum-validation-rules" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><code>validated()</code> array shapes type a field from its validation rules, but
+an enum rule (<code>new Enum(Role::class)</code>, <code>Rule::enum(Role::class)</code>)
+currently degrades to <code>mixed</code>: the rule is an object expression, not a
+rule name the token table knows.</p>
+<p>The validated array holds the raw input, not the enum case, so the
+right type is the enum's backing type — <code>string</code> for a string-backed
+enum, <code>int</code> for an int-backed one. Both are recoverable: the class name
+is written in the rule expression, and the backing type is on the
+<code>ClassInfo</code>. A pure (non-backed) enum has no raw scalar form and should
+stay <code>mixed</code>.</p>
+<p>Guessing <code>string</code> for every enum rule is the thing to avoid: an
+int-backed enum would then be typed as a string, which is worse than
+<code>mixed</code> because it can produce a false diagnostic rather than merely
+missing one.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
 <p>The reverse of L14: keys that are <em>declared</em> but never referenced. The
