@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785523265835,
+  "lastUpdate": 1785529069384,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12375,6 +12375,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "017b566ce0ef7ae10ab5ca4c2064835700e518e0",
+          "message": "Eloquent morph map aliases",
+          "timestamp": "2026-07-31T22:01:42+02:00",
+          "tree_id": "0f72df9867b10bcaa4f12bae9e03ca460c4b7bdf",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/017b566ce0ef7ae10ab5ca4c2064835700e518e0"
+        },
+        "date": 1785529065035,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.1,
             "unit": "MiB"
           }
         ]
