@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785483041288,
+  "lastUpdate": 1785486216920,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22653,6 +22653,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "52f7d45a3aad12294b496ebb4994fd1ff7e7584b",
+          "message": "Argument checking no longer slows down quadratically with file size",
+          "timestamp": "2026-07-31T10:08:35+02:00",
+          "tree_id": "377846a760d6b67295774edad8c00bce2b23d882",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/52f7d45a3aad12294b496ebb4994fd1ff7e7584b"
+        },
+        "date": 1785486213496,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.9,
             "unit": "MiB"
           }
         ]
