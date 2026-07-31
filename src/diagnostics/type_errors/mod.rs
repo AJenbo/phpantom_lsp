@@ -33,7 +33,9 @@ use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::{ClassInfo, ResolvedCallableTarget};
 
-use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
+use super::helpers::{
+    find_innermost_enclosing_class, is_position_independent_call_expression, make_diagnostic,
+};
 
 /// Diagnostic code used for argument type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_ARGUMENT_CODE: &str = "type_mismatch_argument";
@@ -487,12 +489,15 @@ impl Backend {
         // call site that uses it.
         //
         // Only expressions that are guaranteed to resolve to the same
-        // target everywhere in the file are cached.  Variable-based
+        // target everywhere in the file are cached (see
+        // `is_position_independent_call_expression`).  Variable-based
         // calls (`$listener->handle`, `$repo->save`) are NOT cached
         // because the same variable name can hold different types in
-        // different methods or after reassignment.  Static calls
-        // (`Foo::bar`) and plain function calls (`array_map`) are
-        // safe to cache.
+        // different methods or after reassignment, and neither are
+        // `self::`/`static::`/`parent::` calls, whose target depends on
+        // the enclosing class at the call site.  Calls through a
+        // literal class name (`Foo::bar`) and plain function calls
+        // (`array_map`) are safe to cache.
         let mut call_cache: HashMap<String, Option<ResolvedCallableTarget>> = HashMap::new();
 
         // ── Walk every call site ────────────────────────────────────
@@ -506,11 +511,11 @@ impl Backend {
             let expr = &call_site.call_expression;
 
             // Look up or populate the call expression cache.
-            // Variable-based calls are resolved fresh every time
-            // because the receiver variable may hold different types
-            // at different call sites (e.g. `$listener->handle` in
-            // two different test methods with different assignments).
-            let is_variable_call = expr.starts_with('$');
+            // Variable-based and `self::`/`static::`/`parent::` calls
+            // are resolved fresh every time because their target
+            // depends on the call site's position (the receiver
+            // variable's assigned type, or the enclosing class).
+            let is_position_dependent_call = !is_position_independent_call_expression(expr);
 
             // Extract the raw argument text from the source so that
             // method-level @template parameters can be resolved from
@@ -536,13 +541,13 @@ impl Backend {
             // Method-level template substitution uses the per-site
             // argument text extracted above.
             //
-            // Variable-based calls are always resolved per-site
-            // because the receiver variable may hold different types
-            // at different call sites.  Static/function calls are
-            // also resolved per-site when argument text is available
-            // (method-level template subs depend on per-site args);
-            // only zero-arg calls can be cached.
-            let resolved = if is_variable_call || call_args_text.is_some() {
+            // Position-dependent calls are always resolved per-site
+            // because their target may differ at different call sites.
+            // Position-independent calls are also resolved per-site
+            // when argument text is available (method-level template
+            // subs depend on per-site args); only zero-arg calls can
+            // be cached.
+            let resolved = if is_position_dependent_call || call_args_text.is_some() {
                 self.resolve_callable_target_with_args_at_offset(
                     expr,
                     content,

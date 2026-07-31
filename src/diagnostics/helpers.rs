@@ -774,6 +774,33 @@ pub(crate) fn find_innermost_enclosing_class(
         .map(|(c, _)| c.as_ref())
 }
 
+/// Returns `true` when a call expression's `resolve_callable_target*`
+/// result is guaranteed to be the same at every call site in a file, so
+/// it is safe to memoize by expression text alone in a per-file cache.
+///
+/// Excludes:
+/// - Variable-based calls (`$subject->method`) — the receiver
+///   variable's type comes from the assignments visible at the cursor
+///   and can differ between call sites that share the same text (e.g.
+///   two methods that each assign a different type to `$parser`).
+/// - `self::`, `static::`, `parent::`, `new self`, `new static`, and
+///   `new parent` — resolved via the enclosing class at the cursor
+///   offset (`find_class_at_offset`), which differs between call sites
+///   in different classes within the same file.
+///
+/// Plain function calls and calls through a literal class name
+/// (`Fqn::method`, `new Fqn`) resolve identically regardless of where
+/// in the file they appear, so those remain safe to cache by text.
+pub(crate) fn is_position_independent_call_expression(expr: &str) -> bool {
+    if expr.starts_with('$') {
+        return false;
+    }
+    if expr.starts_with("self::") || expr.starts_with("static::") || expr.starts_with("parent::") {
+        return false;
+    }
+    !matches!(expr, "new self" | "new static" | "new parent")
+}
+
 /// Build a standard diagnostic with the common fields pre-filled.
 ///
 /// Most diagnostic collectors build `Diagnostic` values with `source`

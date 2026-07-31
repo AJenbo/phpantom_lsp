@@ -69,7 +69,12 @@ php -l examples/laravel/app/Demo.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 ```
 
-All eight must pass with zero warnings and zero failures.
+All eight must pass with zero warnings and zero failures, except the
+final `analyze` run: `app/Demo.php` intentionally calls
+`Artisan::call('does:not-exist')` to demonstrate the
+`invalid_laravel_command` diagnostic, so it must report exactly
+`[ERROR] Found 1 error` on that line. Any other count, or an error on
+a different line, is a regression.
 
 ### Manual LSP Testing
 
