@@ -56,9 +56,9 @@ pub(crate) struct ValidationRule {
 #[derive(Debug, Clone)]
 pub(crate) struct RulesArray {
     /// The field entries, in declaration order.
-    pub rules: Vec<ValidationRule>,
+    pub entries: Vec<ValidationRule>,
     /// `false` when a key was not a string literal (`$field => 'required'`),
-    /// which means entries are missing from [`Self::rules`].
+    /// which means entries are missing from [`Self::entries`].
     ///
     /// Callers that turn the rules into an array shape must bail on this: a
     /// shape that omits keys the request really accepts would report valid
@@ -69,14 +69,14 @@ pub(crate) struct RulesArray {
 impl RulesArray {
     fn new() -> Self {
         Self {
-            rules: Vec::new(),
+            entries: Vec::new(),
             keys_complete: true,
         }
     }
 
     /// Whether no entries were recovered at all.
     pub fn is_empty(&self) -> bool {
-        self.rules.is_empty()
+        self.entries.is_empty()
     }
 }
 
@@ -157,7 +157,7 @@ fn collect_rules_from_elements<'a>(
             out.keys_complete = false;
             continue;
         }
-        out.rules.push(ValidationRule {
+        out.entries.push(ValidationRule {
             key: key.to_string(),
             rules: render_rule_value(kv.value, content),
             key_start,
@@ -343,7 +343,11 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Rule
         }
         let mut rules = RulesArray::new();
         collect_rules_from_expr(arg, content, &mut rules);
-        if !rules.is_empty() {
+        // An array whose keys could not all be read is still the nearest
+        // rules array, so it is recorded even when nothing was recovered
+        // from it.  Dropping it would hand the cursor an earlier, unrelated
+        // `validate()` call and describe the request with the wrong keys.
+        if !rules.is_empty() || !rules.keys_complete {
             best = Some((end, rules));
         }
     });

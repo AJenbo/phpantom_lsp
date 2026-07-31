@@ -474,6 +474,44 @@ async fn a_request_with_no_visible_rules_stays_plain_array() {
 }
 
 #[tokio::test]
+async fn an_unreadable_nearer_validate_call_does_not_reuse_an_earlier_shape() {
+    // The rules in force are the second call's, and they cannot be read.
+    // Describing `$data` with the first call's keys would be a shape that
+    // claims to be complete while naming the wrong request's fields.
+    let source = controller(
+        "    public function store(Request $request) {
+        $request->validate(['slug' => 'required|string']);
+        $request->validate([$extra => 'required|string']);
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "the rules in force are unreadable, so no shape may be claimed: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn only_on_an_unrelated_receiver_keeps_its_own_return_type() {
+    // `only()` and `except()` are ordinary `Collection` methods.  Narrowing
+    // applies to the `ValidatedInput` that `safe()` returns and nothing else,
+    // even in a file where a `safe()` call is in scope.
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $safe = $request->safe();
+        $bag = collect(['title' => 1]);
+        $subset§ = $bag->only(['title']);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "a Collection receiver must not pick up the request's shape: {hover}"
+    );
+}
+
+#[tokio::test]
 async fn a_computed_rule_key_falls_back_to_plain_array() {
     let source = controller(
         "    public function store(Request $request) {

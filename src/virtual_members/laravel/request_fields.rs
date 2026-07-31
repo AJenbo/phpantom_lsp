@@ -257,7 +257,7 @@ pub(crate) fn request_fields_at_position(
         cursor_offset as usize,
     )?;
 
-    let fields = rule_fields(&rules.rules.rules);
+    let fields = rule_fields(&rules.rules.entries);
     if fields.is_empty() {
         return None;
     }
@@ -307,7 +307,7 @@ pub(crate) fn resolve_request_field_definition(
     // `input('address.city')` lands on that key rather than on `address`.
     let key_start = rules
         .rules
-        .rules
+        .entries
         .iter()
         .find(|rule| rule.key == value)
         .map(|rule| rule.key_start)

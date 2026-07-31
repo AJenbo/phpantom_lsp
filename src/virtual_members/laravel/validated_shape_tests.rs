@@ -144,6 +144,21 @@ fn a_bare_wildcard_lists_its_scalar() {
 }
 
 #[test]
+fn a_nullable_parent_keeps_its_null_alongside_the_child_shape() {
+    // The child rules describe what a present `items` holds; `nullable` on
+    // `items` itself still says the value may be null.
+    assert_eq!(
+        shape_of(
+            "[
+                'items' => 'required|nullable|array',
+                'items.*.id' => 'required|integer',
+            ]"
+        ),
+        "array{items: ?list<array{id: int}>}"
+    );
+}
+
+#[test]
 fn dotted_keys_build_a_nested_shape() {
     assert_eq!(
         shape_of(

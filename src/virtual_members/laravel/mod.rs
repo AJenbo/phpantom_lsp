@@ -129,9 +129,7 @@ pub(crate) use request_fields::{request_fields_at_position, resolve_request_fiel
 pub(crate) use route_names::enumerate_all_route_names;
 pub(crate) use trans_keys::collect_trans_declarations;
 pub(crate) use validated_shape::rules_for_receiver;
-pub(crate) use validation_rules::{
-    RulesArray, is_validated_input, safe_call_receiver_variable, safe_source_variable,
-};
+pub(crate) use validation_rules::{RulesArray, safe_call_receiver_variable, safe_source_variable};
 
 pub(crate) use builder_injection::{try_inject_builder_scopes, try_inject_mixin_builder_scopes};
 pub(crate) use string_keys::{find_laravel_string_key_references, resolve_laravel_string_key};

@@ -61,7 +61,7 @@ fn rules_to_shape(rules: &RulesArray) -> Option<PhpType> {
     }
 
     let mut root = Node::default();
-    for rule in &rules.rules {
+    for rule in &rules.entries {
         root.insert(&rule.key, RuleSpec::parse(rule));
     }
     root.shape()
@@ -162,13 +162,16 @@ pub(crate) fn shape_bearing_method(method: &str) -> Option<ShapeCall> {
 /// - `validate([…])` → the shape of the rules passed at the call site
 /// - `safe()->only([…])` / `safe()->except([…])` → the narrowed shape
 ///
-/// `safe_source` is the request a `ValidatedInput` receiver was narrowed
-/// from; callers recover it from whichever expression form they hold.
+/// `safe_source` recovers the request a `ValidatedInput` receiver was narrowed
+/// from, in whichever expression form the caller holds.  It is a closure
+/// because tracing that hop parses the file, and `only`/`except` are common
+/// names on `Collection` and `Arr` too: only the arm that reaches a real
+/// `ValidatedInput` may pay for it.
 pub(crate) fn resolve_shape_at_call(
     receiver: &ClassInfo,
     call: ShapeCall,
     args: &[&str],
-    safe_source: Option<&ClassInfo>,
+    safe_source: &dyn Fn() -> Option<Arc<ClassInfo>>,
     content: &str,
     offset: u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -193,7 +196,8 @@ pub(crate) fn resolve_shape_at_call(
         // Narrowing applies to a `ValidatedInput` only.  `$request->only()`
         // reads raw input, which the rules do not describe.
         ShapeCall::Only | ShapeCall::Except if is_validated_input(receiver) => {
-            let rules = lookup_rules(safe_source?, content, offset)?;
+            let source = safe_source()?;
+            let rules = lookup_rules(&source, content, offset)?;
             let shape = rules_to_shape(&rules)?;
             let keys = key_list(args);
             narrow_shape(&shape, &keys, call == ShapeCall::Only)
@@ -447,15 +451,22 @@ impl Node {
     fn value_type(&self) -> PhpType {
         // A wildcard child means the rules describe the array's *elements*,
         // which is exactly a `list<…>`.
-        if let Some(wildcard) = &self.wildcard {
-            return PhpType::list(wildcard.value_type());
-        }
-        if let Some(shape) = self.shape() {
-            return shape;
-        }
-        match &self.spec {
-            Some(spec) => spec.scalar_type(),
-            None => PhpType::mixed(),
+        let structured = match &self.wildcard {
+            Some(wildcard) => Some(PhpType::list(wildcard.value_type())),
+            None => self.shape(),
+        };
+        match structured {
+            // The dotted child rules say what a *present* value holds; the
+            // node's own rules still decide whether it may be null, so
+            // `'items' => 'nullable|array'` keeps its null.
+            Some(ty) if self.spec.as_ref().is_some_and(|spec| spec.nullable) => {
+                PhpType::nullable(ty)
+            }
+            Some(ty) => ty,
+            None => match &self.spec {
+                Some(spec) => spec.scalar_type(),
+                None => PhpType::mixed(),
+            },
         }
     }
 

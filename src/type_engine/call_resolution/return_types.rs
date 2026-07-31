@@ -155,21 +155,16 @@ fn resolve_validated_shape_at_call(
     owners: &[ResolvedType],
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    use crate::virtual_members::laravel::validated_shape::{self, ShapeCall};
+    use crate::virtual_members::laravel::validated_shape;
 
     let call = validated_shape::shape_bearing_method(method_name)?;
     let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
-    // Tracing the `safe()` hop resolves another expression, so only do it for
-    // the narrowing calls that need it.
-    let safe_source = matches!(call, ShapeCall::Only | ShapeCall::Except)
-        .then(|| validated_shape::safe_source_class(base, ctx))
-        .flatten();
 
     validated_shape::resolve_shape_at_call(
         receiver,
         call,
         &split_text_args(text_args),
-        safe_source.as_deref(),
+        &|| validated_shape::safe_source_class(base, ctx),
         ctx.content,
         ctx.cursor_offset,
         ctx.class_loader,

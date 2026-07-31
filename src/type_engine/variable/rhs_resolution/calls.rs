@@ -1209,11 +1209,15 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
 
     // Laravel validated input: the rules that guard this request describe the
     // array it hands back, so `$data = $request->validated()` gets a shape
-    // rather than plain `array`.  Classifying the call and tracing a `safe()`
-    // hop do not depend on the receiver, so both happen once rather than once
-    // per owner.
-    let shape_call = validated_shape::shape_bearing_method(&method_name)
-        .filter(|_| validated_shape::rules_resolver_active());
+    // rather than plain `array`.  Classifying the call does not depend on the
+    // receiver, so it happens once rather than once per owner.
+    //
+    // `validate([…])` reads its rules from its own argument, so it works
+    // wherever it is written; every other form asks the scope for them and is
+    // a no-op without an active resolver.
+    let shape_call = validated_shape::shape_bearing_method(&method_name).filter(|call| {
+        *call == validated_shape::ShapeCall::Validate || validated_shape::rules_resolver_active()
+    });
 
     for owner in &owner_classes {
         if let Some(result) =
@@ -2101,18 +2105,11 @@ fn try_resolve_validated_shape(
     arg_refs: &[&str],
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    // Tracing a `safe()` hop parses the file, and `only`/`except` are common
-    // names on Collection and Arr too, so it waits until the receiver is
-    // actually the wrapper `safe()` returns.
-    let safe_source = crate::virtual_members::laravel::is_validated_input(owner)
-        .then(|| safe_source_owner(object, ctx))
-        .flatten();
-
     validated_shape::resolve_shape_at_call(
         owner,
         call,
         arg_refs,
-        safe_source.as_deref(),
+        &|| safe_source_owner(object, ctx),
         ctx.content,
         object.span().end.offset,
         ctx.as_resolution_ctx().class_loader,
