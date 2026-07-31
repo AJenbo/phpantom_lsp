@@ -1466,34 +1466,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P27. <code>object</code>/<code>?object</code> call-return check re-resolves the subject a second time
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P27. object&#x2f;?object call-return check re-resolves the subject a second time">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2157,34 +2129,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P27. <code>object</code>/<code>?object</code> call-return check re-resolves the subject a second time
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P27. object&#x2f;?object call-return check re-resolves the subject a second time">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2826,29 +2770,6 @@ passes so the receiver type is computed once.</p>
 class::method → target lookup, but it sits downstream of
 receiver-type resolution — the per-site receiver re-resolution
 this item describes is still unaddressed.</p>
-<hr />
-<h2 id="p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time">P27. <code>object</code>/<code>?object</code> call-return check re-resolves the subject a second time<a class="headerlink" href="#p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p><code>resolve_subject_outcome</code> resolves the whole subject up front (the
-<code>resolve_target_classes(subject, …)</code> call at the top). When that
-yields no concrete class, the <code>object</code>/<code>?object</code> escape-hatch branch
-then calls <code>resolve_call_raw_return_type(callee, "", ctx)</code> purely to
-peek at <code>is_object()</code>, and that helper re-resolves the callee's base
-chain from scratch. So every method/function call whose result has
-no concrete class pays a second full return-type resolution.</p>
-<p>This is exactly the shape of the <code>diagnostics/fixture/lots_of_missing_methods</code>
-benchmark (many calls whose results have missing members), and it
-regressed that fixture by ~29% (54ms → 70ms) when the branch was
-added, with a matching drift on hover and go-to-definition, which
-share this path.</p>
-<h3 id="fix_6">Fix<a class="headerlink" href="#fix_6" title="Permanent link">&para;</a></h3>
-<p>Fold the <code>object</code> detection into the primary resolution pass instead
-of running a separate re-resolution: when <code>resolve_target_classes</code>
-is about to return empty for a call subject, check whether the raw
-return type was <code>object</code>/<code>?object</code> at that point (the base chain is
-already resolved there) and emit the synthetic <code>stdClass</code> from the
-same pass. Do not pass <code>""</code> for the argument text on a second call;
-reuse the resolution already performed.</p>
 <hr />
 <h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
