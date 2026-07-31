@@ -561,37 +561,6 @@ the blast radius of an edit.
 
 ---
 
-## P23. `workspace/symbol` allocates a lowercase copy of every symbol name per request
-
-**Impact: Low-Medium · Effort: Low**
-
-`match_tier` (`src/workspace_symbols.rs:64-72`) calls
-`name.to_lowercase()` on every candidate symbol, and each symbol
-is tested against up to two or three name forms (FQN, short name,
-display name — call sites at lines 144, 232, 318, 401, 471). A
-`workspace/symbol` request walks every class, method, property,
-constant, and function in `uri_classes_index` and
-`global_functions`, so each keystroke in the editor's symbol
-picker performs O(total symbols × name length) heap allocations
-just for case folding, then throws them away.
-
-### Fix
-
-Match case-insensitively without allocating: a byte-wise
-`eq_ignore_ascii_case`-style prefix/substring scan (PHP
-identifiers are ASCII; a non-ASCII fallback can keep the old
-path), or store a pre-lowercased name alongside each symbol if
-the tiering logic needs real substring search. Note B25
-(case-insensitive index keys) will make lowercased names
-available on the index side anyway — implementing that first
-makes this nearly free.
-
-Related: full background indexing already populates a dedicated
-workspace-symbol index; this fix is independent and worth taking
-regardless since it is a few lines.
-
----
-
 ## P46. `mago-phpdoc-syntax` cannot parse `@method static (…) name()`
 
 **Impact: Low · Effort: Low (upstream)**

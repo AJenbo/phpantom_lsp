@@ -61,22 +61,65 @@ struct RankedSymbol {
 ///
 /// `query_lower` must already be lowercased.  Returns `None` when
 /// there is no match at all.
+///
+/// PHP identifiers are ASCII, so the common case is matched byte-wise
+/// with `eq_ignore_ascii_case` and never allocates.  Non-ASCII names
+/// (e.g. a class in a file using non-ASCII identifiers) fall back to
+/// the allocating `to_lowercase()` path.
 fn match_tier(name: &str, query_lower: &str) -> Option<MatchTier> {
     if query_lower.is_empty() {
         // Empty query matches everything at the lowest tier so that
         // alphabetical ordering is the only tiebreaker.
         return Some(MatchTier::Substring);
     }
-    let name_lower = name.to_lowercase();
-    if name_lower == query_lower {
-        Some(MatchTier::Exact)
-    } else if name_lower.starts_with(query_lower) {
-        Some(MatchTier::Prefix)
-    } else if name_lower.contains(query_lower) {
-        Some(MatchTier::Substring)
+
+    if name.is_ascii() {
+        if ascii_eq_ignore_case(name, query_lower) {
+            Some(MatchTier::Exact)
+        } else if ascii_starts_with_ignore_case(name, query_lower) {
+            Some(MatchTier::Prefix)
+        } else if ascii_contains_ignore_case(name, query_lower) {
+            Some(MatchTier::Substring)
+        } else {
+            None
+        }
     } else {
-        None
+        let name_lower = name.to_lowercase();
+        if name_lower == query_lower {
+            Some(MatchTier::Exact)
+        } else if name_lower.starts_with(query_lower) {
+            Some(MatchTier::Prefix)
+        } else if name_lower.contains(query_lower) {
+            Some(MatchTier::Substring)
+        } else {
+            None
+        }
     }
+}
+
+/// Case-insensitive equality for ASCII strings, without allocating.
+fn ascii_eq_ignore_case(s: &str, lower: &str) -> bool {
+    s.as_bytes().eq_ignore_ascii_case(lower.as_bytes())
+}
+
+/// Case-insensitive prefix check for ASCII strings, without allocating.
+fn ascii_starts_with_ignore_case(s: &str, prefix_lower: &str) -> bool {
+    s.len() >= prefix_lower.len()
+        && s.as_bytes()[..prefix_lower.len()].eq_ignore_ascii_case(prefix_lower.as_bytes())
+}
+
+/// Case-insensitive substring check for ASCII strings, without allocating.
+fn ascii_contains_ignore_case(s: &str, needle_lower: &str) -> bool {
+    let s = s.as_bytes();
+    let needle = needle_lower.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    if s.len() < needle.len() {
+        return false;
+    }
+    s.windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
 /// Extract the short name from a symbol name for relevance ranking.
@@ -605,5 +648,36 @@ mod tests {
     fn tier_ordering() {
         assert!(MatchTier::Exact < MatchTier::Prefix);
         assert!(MatchTier::Prefix < MatchTier::Substring);
+    }
+
+    #[test]
+    fn match_tier_non_ascii_name_falls_back() {
+        // Non-ASCII names (e.g. Turkish "İ") don't lowercase byte-for-byte,
+        // so they must go through the `to_lowercase()` fallback path.
+        assert_eq!(match_tier("Naïve", "naïve"), Some(MatchTier::Exact));
+        assert_eq!(match_tier("NaïveBar", "naïve"), Some(MatchTier::Prefix));
+        assert_eq!(
+            match_tier("MyNaïveBar", "naïve"),
+            Some(MatchTier::Substring)
+        );
+    }
+
+    #[test]
+    fn ascii_eq_ignore_case_matches() {
+        assert!(ascii_eq_ignore_case("Foo", "foo"));
+        assert!(!ascii_eq_ignore_case("FooBar", "foo"));
+    }
+
+    #[test]
+    fn ascii_starts_with_ignore_case_matches() {
+        assert!(ascii_starts_with_ignore_case("FooBar", "foo"));
+        assert!(!ascii_starts_with_ignore_case("Foo", "foobar"));
+    }
+
+    #[test]
+    fn ascii_contains_ignore_case_matches() {
+        assert!(ascii_contains_ignore_case("MyFooBar", "foo"));
+        assert!(!ascii_contains_ignore_case("MyBar", "foo"));
+        assert!(ascii_contains_ignore_case("Anything", ""));
     }
 }
