@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785528753359,
+  "lastUpdate": 1785529718249,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -70079,6 +70079,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.549,
             "range": "± 0.054",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "krist7599555@gmail.com",
+            "name": "Krist Ponpairin",
+            "username": "krist7599555"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "75bd24d79065a662b7423039850707c963cab4cf",
+          "message": "fix: Blade comments no longer desync on a quote character\n\n`{{-- ... --}}` comments were preprocessed by temporarily switching\ninto Mode::Php so the closing `--}}` could be recognized and the\ncomment emitted as `/* ... */`. That mode also runs generic PHP\nstring-literal tracking, so an apostrophe or double quote inside the\ncomment text was mistaken for the start of a real string literal. The\nscanner then skipped past the comment's actual `--}}` terminator\nhunting for a matching closing quote, corrupting everything after it\nand producing bogus \"undefined variable\"/\"unexpected token\" errors far\nbelow the comment.\n\nTrack whether Mode::Php represents a comment (mirroring the existing\nin_php_directive_block flag) and skip string tracking while inside\none, since comment text is not PHP code and quotes in it carry no\nsyntactic meaning.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_014r1i5jrXLRGn2KPPBt1cy4",
+          "timestamp": "2026-07-31T22:17:16+02:00",
+          "tree_id": "5f458d4828accf8ba42e8bd2b5156eb1e3a982da",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/75bd24d79065a662b7423039850707c963cab4cf"
+        },
+        "date": 1785529715374,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4.098,
+            "range": "± 0.144",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.039,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.094,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.138,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.231,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.277,
+            "range": "± 0.016",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.194,
+            "range": "± 0.023",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.319,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.098,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.053,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.047,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.052,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 6.528,
+            "range": "± 0.112",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.181,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.314,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.055,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.042,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.114,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.09,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.07,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.193,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.08,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.925,
+            "range": "± 0.139",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.093,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.037,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.035,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 56.311,
+            "range": "± 0.426",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.557,
+            "range": "± 0.064",
             "unit": "ms"
           }
         ]
