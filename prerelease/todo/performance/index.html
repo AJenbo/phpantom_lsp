@@ -1371,34 +1371,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P22. Signature change re-queues slow diagnostics for every open file
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P22. Signature change re-queues slow diagnostics for every open file">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1967,34 +1939,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P22. Signature change re-queues slow diagnostics for every open file
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P22. Signature change re-queues slow diagnostics for every open file">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2535,36 +2479,6 @@ diagnostic layer.</p>
 - Psalm: <code>FileDiffer</code> and <code>FileStatementsDiffer</code> in
   <code>Psalm\Internal\Diff</code>
 - Psalm: <code>Analyzer::shiftFileOffsets()</code> for the offset-shifting logic</p>
-<hr />
-<h2 id="p22-signature-change-re-queues-slow-diagnostics-for-every-open-file">P22. Signature change re-queues slow diagnostics for every open file<a class="headerlink" href="#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p>When a file is saved, <code>schedule_diagnostics_for_open_files</code>
-(<code>src/diagnostics/mod.rs</code>, called from <code>did_save</code> in
-<code>src/server.rs</code>) queues <strong>all</strong> open files (minus the saved one)
-for a full slow-diagnostic pass — unknown classes, unknown
-members, argument checks. The per-file cost of that pass is the
-most expensive thing the server does (see the Appendix: tens of
-seconds on pathological files, hundreds of ms on ordinary ones).</p>
-<p>A user with 20 tabs open therefore pays 20 full-file analysis
-passes per save, regardless of whether those files reference the
-edited class at all. (This used to fire on every signature-changing
-edit; it is now save-gated, which caps the frequency but not the
-O(open files) fan-out.) During the burst the diagnostic worker
-saturates blocking threads that completion/hover also need.</p>
-<h3 id="fix_3">Fix<a class="headerlink" href="#fix_3" title="Permanent link">&para;</a></h3>
-<p>Queue only files that can observe the change. The resolved-class
-cache already maintains a dependency index for transitive
-eviction (<code>evict_fqn</code>), and ER4 tracks which members changed.
-Build a reverse map (FQN → open files that reference it) — either
-from each file's <code>resolved_names</code> (which byte-offset FQN lookups
-already exist for) or by recording, during each diagnostic pass,
-which FQNs the pass touched. On signature change, queue only the
-dependent files. Falls back to all-open-files when the dependency
-data is missing (e.g. right after startup).</p>
-<p>Synergy: P21 (offset-shifting) reduces the cost of re-diagnosing
-the <em>edited</em> file; this item reduces the <em>count</em> of other files
-re-diagnosed. Together they make the slow pass proportional to
-the blast radius of an edit.</p>
 <hr />
 <h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
