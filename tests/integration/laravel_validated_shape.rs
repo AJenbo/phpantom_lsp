@@ -1,0 +1,529 @@
+//! Integration tests for typing `validated()` from validation rules.
+//!
+//! The rules array names every key a validated request can carry and says
+//! what each one is, so `$request->validated()` resolves to an `array{…}`
+//! shape rather than plain `array`.  These tests drive it through hover and
+//! completion, the two surfaces a user actually sees it on.
+
+use crate::common::create_psr4_workspace;
+use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
+
+// ─── Shared stubs ───────────────────────────────────────────────────────────
+
+const COMPOSER_JSON: &str = r#"{
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "App\\Http\\Requests\\": "src/Http/Requests/",
+            "Illuminate\\Http\\": "vendor/illuminate/Http/",
+            "Illuminate\\Foundation\\Http\\": "vendor/illuminate/Foundation/Http/",
+            "Illuminate\\Support\\": "vendor/illuminate/Support/",
+            "Illuminate\\Support\\Facades\\": "vendor/illuminate/Support/Facades/",
+            "Illuminate\\Validation\\": "vendor/illuminate/Validation/",
+            "Illuminate\\Contracts\\Validation\\": "vendor/illuminate/Contracts/Validation/"
+        }
+    }
+}"#;
+
+const REQUEST_PHP: &str = "\
+<?php
+namespace Illuminate\\Http;
+use Illuminate\\Support\\ValidatedInput;
+class Request {
+    public function input($key = null, $default = null) { return null; }
+    public function all(): array { return []; }
+    public function only($keys): array { return []; }
+    public function validate(array $rules): array { return []; }
+    public function validated($key = null, $default = null) { return []; }
+    public function safe(): ValidatedInput { return new ValidatedInput(); }
+}
+";
+
+const UPLOADED_FILE_PHP: &str = "\
+<?php
+namespace Illuminate\\Http;
+class UploadedFile {
+    public function store($path): string { return ''; }
+}
+";
+
+const FORM_REQUEST_PHP: &str = "\
+<?php
+namespace Illuminate\\Foundation\\Http;
+use Illuminate\\Http\\Request;
+class FormRequest extends Request {
+    public function rules(): array { return []; }
+}
+";
+
+const VALIDATED_INPUT_PHP: &str = "\
+<?php
+namespace Illuminate\\Support;
+class ValidatedInput {
+    public function only($keys): array { return []; }
+    public function except($keys): array { return []; }
+}
+";
+
+const VALIDATOR_CONTRACT_PHP: &str = "\
+<?php
+namespace Illuminate\\Contracts\\Validation;
+interface Validator {
+    public function validated(): array;
+}
+";
+
+const VALIDATOR_PHP: &str = "\
+<?php
+namespace Illuminate\\Validation;
+use Illuminate\\Contracts\\Validation\\Validator as ValidatorContract;
+class Validator implements ValidatorContract {
+    public function validated(): array { return []; }
+}
+";
+
+const VALIDATOR_FACADE_PHP: &str = "\
+<?php
+namespace Illuminate\\Support\\Facades;
+use Illuminate\\Validation\\Validator;
+class Validator {
+    public static function make(array $data, array $rules): \\Illuminate\\Validation\\Validator {
+        return new \\Illuminate\\Validation\\Validator();
+    }
+}
+";
+
+const STORE_POST_REQUEST_PHP: &str = "\
+<?php
+namespace App\\Http\\Requests;
+use Illuminate\\Foundation\\Http\\FormRequest;
+class StorePostRequest extends FormRequest {
+    public function rules(): array {
+        return [
+            'title' => 'required|string|max:255',
+            'views' => 'required|integer',
+            'summary' => 'nullable|string',
+            'draft' => 'boolean',
+            'cover' => 'required|image',
+            'tags' => 'required|array',
+            'tags.*' => 'string',
+            'author.email' => 'required|email',
+        ];
+    }
+}
+";
+
+/// A project's own validator, to prove the receiver test is a subtype walk
+/// rather than a match on the framework's two FQNs.
+const APP_VALIDATOR_PHP: &str = "\
+<?php
+namespace App;
+use Illuminate\\Validation\\Validator;
+class AppValidator extends Validator {}
+";
+
+fn base_files() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("vendor/illuminate/Http/Request.php", REQUEST_PHP),
+        ("vendor/illuminate/Http/UploadedFile.php", UPLOADED_FILE_PHP),
+        (
+            "vendor/illuminate/Foundation/Http/FormRequest.php",
+            FORM_REQUEST_PHP,
+        ),
+        (
+            "vendor/illuminate/Support/ValidatedInput.php",
+            VALIDATED_INPUT_PHP,
+        ),
+        ("vendor/illuminate/Validation/Validator.php", VALIDATOR_PHP),
+        (
+            "vendor/illuminate/Contracts/Validation/Validator.php",
+            VALIDATOR_CONTRACT_PHP,
+        ),
+        (
+            "vendor/illuminate/Support/Facades/Validator.php",
+            VALIDATOR_FACADE_PHP,
+        ),
+        (
+            "src/Http/Requests/StorePostRequest.php",
+            STORE_POST_REQUEST_PHP,
+        ),
+        ("src/AppValidator.php", APP_VALIDATOR_PHP),
+    ]
+}
+
+// ─── Harness ────────────────────────────────────────────────────────────────
+
+/// Open `content` (cursor marked `§`) and return the hover text there.
+async fn hover_text(content: &str) -> String {
+    let (backend, _dir, uri, position) = open_at_cursor(content).await;
+
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+
+    match hover.map(|h| h.contents) {
+        Some(HoverContents::Markup(markup)) => markup.value,
+        Some(HoverContents::Scalar(MarkedString::String(s))) => s,
+        Some(HoverContents::Scalar(MarkedString::LanguageString(ls))) => ls.value,
+        _ => String::new(),
+    }
+}
+
+/// Open `content` (cursor marked `§`) and return the completion labels there.
+async fn complete_labels(content: &str) -> Vec<String> {
+    let (backend, _dir, uri, position) = open_at_cursor(content).await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        _ => Vec::new(),
+    };
+    items.into_iter().map(|i| i.label).collect()
+}
+
+async fn open_at_cursor(
+    content: &str,
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, Position) {
+    let offset = content.find('§').expect("test source needs a § cursor");
+    let stripped = content.replace('§', "");
+    let before = &content[..offset];
+    let line = before.matches('\n').count() as u32;
+    let character = before.rsplit('\n').next().unwrap_or("").chars().count() as u32;
+
+    let mut files = base_files();
+    files.push(("src/PostController.php", stripped.as_str()));
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+
+    let uri = Url::from_file_path(dir.path().join("src/PostController.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: stripped.clone(),
+            },
+        })
+        .await;
+
+    (backend, dir, uri, Position { line, character })
+}
+
+/// Wrap a controller body in the namespace and imports every test needs.
+fn controller(body: &str) -> String {
+    format!(
+        "<?php
+namespace App;
+use App\\Http\\Requests\\StorePostRequest;
+use Illuminate\\Http\\Request;
+use Illuminate\\Support\\Facades\\Validator;
+class PostController {{
+{body}
+}}
+"
+    )
+}
+
+// ─── `validated()` shapes ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn form_request_validated_hovers_as_an_array_shape() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("array{"),
+        "expected an array shape, got: {hover}"
+    );
+    assert!(
+        hover.contains("title: string"),
+        "expected `title: string`, got: {hover}"
+    );
+    assert!(
+        hover.contains("views: int"),
+        "expected `views: int`, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn optionality_follows_required_and_nullable() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    // `draft` is neither required nor nullable, so it may be absent.
+    assert!(
+        hover.contains("draft?: bool"),
+        "expected `draft?: bool`, got: {hover}"
+    );
+    // `summary` is nullable but not required: it may be absent, and when
+    // present it may be null.
+    assert!(
+        hover.contains("summary?: ?string"),
+        "expected `summary?: ?string`, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn wildcard_rules_become_a_list() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("tags: list<string>"),
+        "expected `tags: list<string>`, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn shape_keys_complete_on_array_access() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $data = $request->validated();
+        $data['§'];
+    }",
+    );
+    let labels = complete_labels(&source).await;
+    assert!(
+        labels.contains(&"title".to_string()) && labels.contains(&"views".to_string()),
+        "expected the shape's keys to complete, got: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_file_rule_resolves_to_uploaded_file_members() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $data = $request->validated();
+        $data['cover']->§
+    }",
+    );
+    let labels = complete_labels(&source).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("store")),
+        "expected UploadedFile members on an `image` rule, got: {labels:?}"
+    );
+}
+
+// ─── Call-site rules ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn validate_returns_the_shape_of_its_own_argument() {
+    let source = controller(
+        "    public function store(Request $request) {
+        $data§ = $request->validate([
+            'slug' => 'required|string',
+            'rank' => 'required|integer',
+        ]);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("slug: string") && hover.contains("rank: int"),
+        "expected the argument's shape, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn validator_validated_uses_the_rules_it_was_made_with() {
+    let source = controller(
+        "    public function store(Request $request) {
+        $validator = Validator::make($request->all(), ['nickname' => 'required|string']);
+        $clean§ = $validator->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("nickname: string"),
+        "expected the Validator::make rules, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn validated_with_a_key_returns_that_members_type() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $views§ = $request->validated('views');
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("int"),
+        "expected the `views` member type, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn safe_only_narrows_the_shape() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $subset§ = $request->safe()->only(['title', 'views']);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("title: string") && hover.contains("views: int"),
+        "expected the narrowed shape, got: {hover}"
+    );
+    assert!(
+        !hover.contains("draft"),
+        "`only()` should drop unlisted keys, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn safe_except_drops_the_listed_keys() {
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $subset§ = $request->safe()->except(['title']);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("title:"),
+        "`except()` should drop the listed key, got: {hover}"
+    );
+    assert!(
+        hover.contains("views: int"),
+        "`except()` should keep the rest, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn safe_narrowing_survives_being_parked_in_a_variable() {
+    // The chained and two-step forms name the same request, so hover must
+    // give the same shape for both.
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $safe = $request->safe();
+        $subset§ = $safe->only([\'title\']);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("title: string"),
+        "expected the narrowed shape through a `safe()` variable, got: {hover}"
+    );
+    assert!(
+        !hover.contains("views"),
+        "`only()` should drop unlisted keys, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn a_custom_validator_subclass_is_recognised() {
+    // The receiver test is a subtype walk, so a project's own validator
+    // resolves its rules just like the framework's does.
+    let source = controller(
+        "    public function store(Request $request) {
+        $validator = Validator::make($request->all(), [\'nickname\' => \'required|string\']);
+        $custom = new \\App\\AppValidator();
+        $clean§ = $custom->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("nickname: string"),
+        "expected a validator subclass to resolve the rules, got: {hover}"
+    );
+}
+
+// ─── Falling back ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_request_with_no_visible_rules_stays_plain_array() {
+    let source = controller(
+        "    public function store(Request $request) {
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "no rules are visible, so no shape may be claimed: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_nearer_validate_call_does_not_reuse_an_earlier_shape() {
+    // The rules in force are the second call's, and they cannot be read.
+    // Describing `$data` with the first call's keys would be a shape that
+    // claims to be complete while naming the wrong request's fields.
+    let source = controller(
+        "    public function store(Request $request) {
+        $request->validate(['slug' => 'required|string']);
+        $request->validate([$extra => 'required|string']);
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "the rules in force are unreadable, so no shape may be claimed: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn only_on_an_unrelated_receiver_keeps_its_own_return_type() {
+    // `only()` and `except()` are ordinary `Collection` methods.  Narrowing
+    // applies to the `ValidatedInput` that `safe()` returns and nothing else,
+    // even in a file where a `safe()` call is in scope.
+    let source = controller(
+        "    public function store(StorePostRequest $request) {
+        $safe = $request->safe();
+        $bag = collect(['title' => 1]);
+        $subset§ = $bag->only(['title']);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "a Collection receiver must not pick up the request's shape: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn a_computed_rule_key_falls_back_to_plain_array() {
+    let source = controller(
+        "    public function store(Request $request) {
+        $data§ = $request->validate([
+            'slug' => 'required|string',
+            $extra => 'required',
+        ]);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "an incomplete key set must not become a shape: {hover}"
+    );
+}

@@ -130,6 +130,7 @@ mod laravel_morph_map;
 mod laravel_references;
 mod laravel_request_keys;
 mod laravel_route_controller;
+mod laravel_validated_shape;
 mod linked_editing;
 mod lsp_concurrency;
 mod parser;

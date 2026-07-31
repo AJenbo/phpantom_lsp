@@ -371,6 +371,49 @@ check(
         && method_exists(\Illuminate\Support\ValidatedInput::class, 'except')
 );
 
+// ─── Validated arrays only carry keys the rules named ───────────────────────
+
+// Demo::validatedArrayShape() reads StoreBakeryRequest's rules as an array
+// shape.  Two claims it makes are worth pinning to the real validator: that
+// the result carries only keys the rules named, and — the reason `apricot`
+// and `dough_temp` are *optional* keys rather than nullable ones — that a
+// field which is merely allowed is absent when it was not sent.
+//
+// Built directly rather than through the facade, which needs a booted
+// container.
+$translator = new \Illuminate\Translation\Translator(
+    new \Illuminate\Translation\ArrayLoader(),
+    'en'
+);
+$validated = (new \Illuminate\Validation\Validator(
+    $translator,
+    [
+        'name' => 'Sourdough',
+        'owner' => ['email' => 'baker@example.com'],
+        'unlisted' => 'ignored',
+    ],
+    (new \App\Http\Requests\StoreBakeryRequest())->rules()
+))->validated();
+check(
+    'validated() drops input the rules do not name',
+    ! array_key_exists('unlisted', $validated)
+);
+check(
+    'validated() keeps the fields that were supplied',
+    ($validated['name'] ?? null) === 'Sourdough'
+);
+check(
+    'an unsent optional field is absent from validated()',
+    ! array_key_exists('apricot', $validated)
+);
+// `dough_temp` is `nullable|numeric`.  `nullable` permits a null value; it
+// does not make the key appear, which is why the shape marks it optional
+// (`dough_temp?: ?int|float`) rather than merely nullable.
+check(
+    'an unsent nullable field is absent, not present-and-null',
+    ! array_key_exists('dough_temp', $validated)
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
