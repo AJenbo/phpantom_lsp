@@ -1427,34 +1427,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p23-workspacesymbol-allocates-a-lowercase-copy-of-every-symbol-name-per-request" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P23. <code>workspace/symbol</code> allocates a lowercase copy of every symbol name per request
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P23. workspace&#x2f;symbol allocates a lowercase copy of every symbol name per request">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2079,34 +2051,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p23-workspacesymbol-allocates-a-lowercase-copy-of-every-symbol-name-per-request" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P23. <code>workspace/symbol</code> allocates a lowercase copy of every symbol name per request
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P23. workspace&#x2f;symbol allocates a lowercase copy of every symbol name per request">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2696,30 +2640,6 @@ data is missing (e.g. right after startup).</p>
 the <em>edited</em> file; this item reduces the <em>count</em> of other files
 re-diagnosed. Together they make the slow pass proportional to
 the blast radius of an edit.</p>
-<hr />
-<h2 id="p23-workspacesymbol-allocates-a-lowercase-copy-of-every-symbol-name-per-request">P23. <code>workspace/symbol</code> allocates a lowercase copy of every symbol name per request<a class="headerlink" href="#p23-workspacesymbol-allocates-a-lowercase-copy-of-every-symbol-name-per-request" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p><code>match_tier</code> (<code>src/workspace_symbols.rs:64-72</code>) calls
-<code>name.to_lowercase()</code> on every candidate symbol, and each symbol
-is tested against up to two or three name forms (FQN, short name,
-display name — call sites at lines 144, 232, 318, 401, 471). A
-<code>workspace/symbol</code> request walks every class, method, property,
-constant, and function in <code>uri_classes_index</code> and
-<code>global_functions</code>, so each keystroke in the editor's symbol
-picker performs O(total symbols × name length) heap allocations
-just for case folding, then throws them away.</p>
-<h3 id="fix_5">Fix<a class="headerlink" href="#fix_5" title="Permanent link">&para;</a></h3>
-<p>Match case-insensitively without allocating: a byte-wise
-<code>eq_ignore_ascii_case</code>-style prefix/substring scan (PHP
-identifiers are ASCII; a non-ASCII fallback can keep the old
-path), or store a pre-lowercased name alongside each symbol if
-the tiering logic needs real substring search. Note B25
-(case-insensitive index keys) will make lowercased names
-available on the index side anyway — implementing that first
-makes this nearly free.</p>
-<p>Related: full background indexing already populates a dedicated
-workspace-symbol index; this fix is independent and worth taking
-regardless since it is a few lines.</p>
 <hr />
 <h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
