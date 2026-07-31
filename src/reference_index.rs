@@ -121,6 +121,35 @@ impl Backend {
         Some(uris)
     }
 
+    /// Narrow `uris` to the files that reference one of `keys`.
+    ///
+    /// A file the index does not track at all is kept: the index skips
+    /// vendor files and stubs, and only records a file once it has been
+    /// parsed, so an absent entry means "references unknown" rather than
+    /// "references nothing".  Returns `false` without touching `uris` when
+    /// the index cannot answer yet (the workspace is still being indexed).
+    pub(crate) fn retain_reference_candidates(
+        &self,
+        keys: &[ReferenceIndexKey],
+        uris: &mut Vec<String>,
+    ) -> bool {
+        if !self.workspace_indexed.load(Ordering::Acquire) {
+            return false;
+        }
+
+        let index = self.reference_index.read();
+        let mut candidates = HashSet::new();
+        for key in keys {
+            if let Some(entries) = index.get(key) {
+                candidates.extend(entries.keys().map(Arc::as_ref));
+            }
+        }
+        uris.retain(|uri| {
+            candidates.contains(uri.as_str()) || !index.uri_keys.contains_key(uri.as_str())
+        });
+        true
+    }
+
     pub(crate) fn reindex_references_for_symbol_maps_batch(
         &self,
         items: Vec<(String, Arc<SymbolMap>)>,

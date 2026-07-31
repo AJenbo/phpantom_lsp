@@ -177,6 +177,7 @@
 mod argument_count;
 pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
+pub(crate) mod cross_file;
 mod deprecated;
 mod external;
 pub(crate) mod helpers;
@@ -882,17 +883,22 @@ impl Backend {
         self.schedule_mago_analyze(uri);
     }
 
-    /// Invalidate diagnostics for all open files after a cross-file change.
+    /// Invalidate diagnostics for the open files a save can affect.
     ///
-    /// Called when a class signature changes in one file, because
-    /// diagnostics in other open files (unknown member, unknown class,
-    /// deprecated usage) may depend on the changed class.  The edited
-    /// file itself is excluded (it is already scheduled by the caller).
+    /// Diagnostics in other open files (unknown member, unknown class,
+    /// deprecated usage, argument checks) can depend on the saved file, so
+    /// they have to be recomputed — but only for the files that reference
+    /// something the save changed.  [`open_files_affected_by_save`] works
+    /// out which those are, and falls back to every open file when it
+    /// cannot tell.  The saved file itself is excluded (it is already
+    /// scheduled by the caller).
     ///
-    /// **Push mode:** Queues all open files for the background worker.
+    /// **Push mode:** Queues those files for the background worker.
     ///
     /// **Pull mode:** Invalidates cached full diagnostics and sends
     /// `workspace/diagnostic/refresh` so the editor re-pulls.
+    ///
+    /// [`open_files_affected_by_save`]: Backend::open_files_affected_by_save
     pub(crate) fn schedule_diagnostics_for_open_files(&self, exclude_uri: &str) {
         if !self.init_complete.load(Ordering::Acquire) {
             return;
@@ -900,13 +906,7 @@ impl Backend {
 
         let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
 
-        let uris: Vec<String> = self
-            .open_files
-            .read()
-            .keys()
-            .filter(|u| u.as_str() != exclude_uri)
-            .cloned()
-            .collect();
+        let uris = self.open_files_affected_by_save(exclude_uri);
         if uris.is_empty() {
             return;
         }

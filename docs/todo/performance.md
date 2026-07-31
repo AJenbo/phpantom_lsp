@@ -497,44 +497,6 @@ diagnostic layer.
 
 ---
 
-## P22. Signature change re-queues slow diagnostics for every open file
-
-**Impact: Medium-High · Effort: Medium**
-
-When a file is saved, `schedule_diagnostics_for_open_files`
-(`src/diagnostics/mod.rs`, called from `did_save` in
-`src/server.rs`) queues **all** open files (minus the saved one)
-for a full slow-diagnostic pass — unknown classes, unknown
-members, argument checks. The per-file cost of that pass is the
-most expensive thing the server does (see the Appendix: tens of
-seconds on pathological files, hundreds of ms on ordinary ones).
-
-A user with 20 tabs open therefore pays 20 full-file analysis
-passes per save, regardless of whether those files reference the
-edited class at all. (This used to fire on every signature-changing
-edit; it is now save-gated, which caps the frequency but not the
-O(open files) fan-out.) During the burst the diagnostic worker
-saturates blocking threads that completion/hover also need.
-
-### Fix
-
-Queue only files that can observe the change. The resolved-class
-cache already maintains a dependency index for transitive
-eviction (`evict_fqn`), and ER4 tracks which members changed.
-Build a reverse map (FQN → open files that reference it) — either
-from each file's `resolved_names` (which byte-offset FQN lookups
-already exist for) or by recording, during each diagnostic pass,
-which FQNs the pass touched. On signature change, queue only the
-dependent files. Falls back to all-open-files when the dependency
-data is missing (e.g. right after startup).
-
-Synergy: P21 (offset-shifting) reduces the cost of re-diagnosing
-the *edited* file; this item reduces the *count* of other files
-re-diagnosed. Together they make the slow pass proportional to
-the blast radius of an edit.
-
----
-
 ## P46. `mago-phpdoc-syntax` cannot parse `@method static (…) name()`
 
 **Impact: Low · Effort: Low (upstream)**

@@ -617,6 +617,10 @@ impl LanguageServer for Backend {
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
+        // Baseline for the first save: without it, that save would have to
+        // re-diagnose every open file to be safe.
+        self.capture_declaration_baseline(&uri);
+
         // Schedule diagnostics asynchronously so that the first-open
         // response is not blocked by lazy stub parsing (which can take
         // tens of seconds when many class references trigger cache-miss
@@ -750,6 +754,7 @@ impl LanguageServer for Backend {
 
         self.open_files.write().remove(&uri);
         self.did_change_parse_locks.lock().remove(&uri);
+        self.clear_declaration_baseline(&uri);
 
         // Drop coalescing state for this file so the maps don't grow unbounded
         // across an editing session.
