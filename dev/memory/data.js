@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785529069384,
+  "lastUpdate": 1785529965595,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12409,6 +12409,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "krist7599555@gmail.com",
+            "name": "Krist Ponpairin",
+            "username": "krist7599555"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "75bd24d79065a662b7423039850707c963cab4cf",
+          "message": "fix: Blade comments no longer desync on a quote character\n\n`{{-- ... --}}` comments were preprocessed by temporarily switching\ninto Mode::Php so the closing `--}}` could be recognized and the\ncomment emitted as `/* ... */`. That mode also runs generic PHP\nstring-literal tracking, so an apostrophe or double quote inside the\ncomment text was mistaken for the start of a real string literal. The\nscanner then skipped past the comment's actual `--}}` terminator\nhunting for a matching closing quote, corrupting everything after it\nand producing bogus \"undefined variable\"/\"unexpected token\" errors far\nbelow the comment.\n\nTrack whether Mode::Php represents a comment (mirroring the existing\nin_php_directive_block flag) and skip string tracking while inside\none, since comment text is not PHP code and quotes in it carry no\nsyntactic meaning.\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_014r1i5jrXLRGn2KPPBt1cy4",
+          "timestamp": "2026-07-31T22:17:16+02:00",
+          "tree_id": "5f458d4828accf8ba42e8bd2b5156eb1e3a982da",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/75bd24d79065a662b7423039850707c963cab4cf"
+        },
+        "date": 1785529962560,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.9,
             "unit": "MiB"
           }
         ]
