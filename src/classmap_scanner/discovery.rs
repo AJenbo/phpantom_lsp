@@ -938,9 +938,14 @@ pub fn scan_workspace_fallback_full(
 /// for valid PHP source: `.module`, `.install`, `.theme`, `.profile`,
 /// `.inc`, and `.engine`.  All are included by this scanner.
 ///
-/// Test directories (`tests/` and `Tests/`) are excluded by name to avoid
-/// indexing duplicate class definitions from unit-test fixtures, and
-/// `[indexing] exclude` patterns are honored like everywhere else.
+/// Test directories are indexed too: module tests extend base classes
+/// that live in `core/tests/` (`Drupal\Tests\UnitTestCase`,
+/// `Drupal\KernelTests\KernelTestBase`, …) and reference test modules
+/// under `*/tests/modules/`, so skipping them by name leaves those
+/// classes unresolvable. Projects that want a smaller index can trim it
+/// with `[indexing] exclude`, which is honored here like everywhere
+/// else; duplicate fixture classes are handled by the classmap's
+/// first-wins merge.
 pub fn scan_drupal_directories(
     web_root: &Path,
     filters: &std::sync::Arc<IndexFilters>,
@@ -979,13 +984,6 @@ pub fn scan_drupal_directories(
             .ignore(false)
             .filter_entry(move |entry| {
                 let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-                if is_dir {
-                    let name = entry.file_name().to_str().unwrap_or("");
-                    // Exclude test directories (both conventional casings)
-                    if name == "tests" || name == "Tests" {
-                        return false;
-                    }
-                }
                 !filter_excludes.is_excluded_entry(entry.path(), is_dir)
             })
             .build();
