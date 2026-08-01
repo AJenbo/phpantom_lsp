@@ -86,6 +86,17 @@ const RELATIONSHIP_METHOD_FQN_MAP: &[(&str, &str)] = &[
     ),
 ];
 
+/// Returns `true` when the method name is one of the base relationship
+/// *builder* methods defined on `HasRelationships` (e.g. `hasMany`,
+/// `belongsTo`).  These should not be turned into virtual properties
+/// because they are the builder API, not user-defined relationship
+/// methods.
+pub(crate) fn is_relationship_builder_method(name: &str) -> bool {
+    RELATIONSHIP_METHOD_FQN_MAP
+        .iter()
+        .any(|(method, _)| *method == name)
+}
+
 /// Known Eloquent relationship class short names that yield a single
 /// (nullable) related model instance when accessed as a property.
 const SINGULAR_RELATIONSHIPS: &[&str] = &["HasOne", "MorphOne", "BelongsTo", "HasOneThrough"];

@@ -156,6 +156,7 @@ pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
+    is_relationship_builder_method,
 };
 pub(crate) use relationships::{
     class_declares_pivot_relationship, extract_pivot_using, extract_with_pivot_columns,
@@ -863,6 +864,10 @@ impl VirtualMemberProvider for LaravelModelProvider {
             }
 
             // ── Relationship properties ─────────────────────────────
+            if is_relationship_builder_method(&method.name) {
+                continue;
+            }
+
             let return_type = match method.return_type.as_ref() {
                 Some(rt) => rt,
                 None => continue,
@@ -932,6 +937,9 @@ impl VirtualMemberProvider for LaravelModelProvider {
         // property with that name already exists (e.g. from an explicit
         // `@property` tag).
         for method in &class.methods {
+            if is_relationship_builder_method(&method.name) {
+                continue;
+            }
             let return_type = match method.return_type.as_ref() {
                 Some(rt) => rt,
                 None => continue,

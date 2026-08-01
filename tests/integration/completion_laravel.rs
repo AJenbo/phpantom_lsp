@@ -1024,6 +1024,89 @@ class User extends Model {
     );
 }
 
+// ─── Relationship builder methods must not become properties ────────────────
+
+#[tokio::test]
+async fn test_relationship_builder_methods_not_suggested_as_properties() {
+    let related_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Related extends Model {}
+";
+    let php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class TestModel extends Model {
+    /** @return HasMany<\\App\\Models\\Related, $this> */
+    public function children(): HasMany { return $this->hasMany(Related::class); }
+    public function test() {
+        $this->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Related.php", related_php),
+        ("src/Models/TestModel.php", php),
+    ]);
+
+    // "$this->" at line 8, character 15
+    let items = complete_at(&backend, &dir, "src/Models/TestModel.php", php, 8, 15).await;
+    let props = property_names(&items);
+
+    assert!(
+        props.contains(&"children"),
+        "User-defined relationship 'children' should appear, got: {:?}",
+        props
+    );
+
+    let builder_methods = [
+        "hasOne",
+        "hasMany",
+        "belongsTo",
+        "belongsToMany",
+        "morphOne",
+        "morphMany",
+        "morphTo",
+        "morphToMany",
+        "morphedByMany",
+        "hasManyThrough",
+        "hasOneThrough",
+    ];
+    for name in builder_methods {
+        assert!(
+            !props.contains(&name),
+            "Base relationship builder method '{}' must not appear as property, got: {:?}",
+            name,
+            props
+        );
+    }
+
+    let builder_count_names = [
+        "has_one_count",
+        "has_many_count",
+        "belongs_to_count",
+        "belongs_to_many_count",
+        "morph_one_count",
+        "morph_many_count",
+        "morph_to_count",
+        "morph_to_many_count",
+        "morphed_by_many_count",
+        "has_many_through_count",
+        "has_one_through_count",
+    ];
+    for name in builder_count_names {
+        assert!(
+            !props.contains(&name),
+            "Builder-derived count property '{}' must not appear, got: {:?}",
+            name,
+            props
+        );
+    }
+}
+
 // ─── Laravel provider beats @property tag (priority) ────────────────────────
 
 #[tokio::test]
