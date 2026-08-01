@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785611289080,
+  "lastUpdate": 1785612582721,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12783,6 +12783,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ee86788428f1136b5887004acb750b68f0d66bdf",
+          "message": "fix: @property tag overrides database-derived column type\n\nA model attribute documented with an explicit `@property` tag — on the\nmodel itself or on a trait it uses — resolved to the raw column type\nderived from the schema dump or migrations. For a timestamp column the\nschema yields `string|null`, so `@property Carbon $published_at` on a\ntrait was ignored and chaining date methods reported \"Cannot access\nmethod on type 'string'\".\n\nThe schema only knows the storage type; the tag declares what the\nattribute is at runtime, which Eloquent's casting makes true. Property\ntags collected by the PHPDoc provider from the class, its traits,\nparents, and interfaces are now marked with a `DocblockTag` source, and\nthe virtual-member merge lets such a tag replace a type that was merely\ninferred from the database (schema columns, `$attributes` defaults) even\nat equal type specificity. Types produced by real PHP code — `$casts`,\naccessors, relationship methods — still win the tie, and real declared\nproperties are never displaced. `@mixin`-borrowed tags keep their\nlowest-precedence standing.\n\nCloses #306",
+          "timestamp": "2026-08-01T21:07:37+02:00",
+          "tree_id": "78d8079c1d9ac9277d1022bffce5001916beff49",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ee86788428f1136b5887004acb750b68f0d66bdf"
+        },
+        "date": 1785612579010,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.7,
             "unit": "MiB"
           }
         ]
