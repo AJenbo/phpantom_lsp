@@ -71,7 +71,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, ConstantInfo, MethodInfo, PropertyInfo};
+use crate::types::{ClassInfo, ConstantInfo, MethodInfo, PropertyInfo, PropertySource};
 
 /// Members synthesized by a provider.
 ///
@@ -223,8 +223,29 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
             // This lets PHPDoc `@property array<string> $tags` override
             // a bare `array` from `$casts`, and a `$casts` `array`
             // override `mixed` from `$fillable`.
-            if property_type_specificity(&property)
-                > property_type_specificity(&class.properties[idx])
+            //
+            // Exception: an explicit `@property` tag overrides a type
+            // that was merely *inferred* from the database schema, even
+            // at equal specificity.  The schema knows the storage type
+            // (`published_at` is a `timestamp` → `string|null`), but the
+            // tag declares what the attribute is at runtime (`Carbon`) —
+            // user-written intent that the column type cannot see.
+            // Types derived from real PHP code ($casts, accessors,
+            // relationship methods) still win the tie.
+            let existing = &class.properties[idx];
+            let overrides_inferred = matches!(property.source, Some(PropertySource::DocblockTag))
+                && existing.is_virtual
+                && matches!(
+                    existing.source,
+                    None | Some(
+                        PropertySource::DatabaseColumn { .. }
+                            | PropertySource::AttributeDefault { .. }
+                    )
+                )
+                && property_type_specificity(&property) > 0;
+            if property_type_specificity(&property) > property_type_specificity(existing)
+                || (overrides_inferred
+                    && property_type_specificity(&property) >= property_type_specificity(existing))
             {
                 class.properties.make_mut()[idx] = Arc::new(property);
             }

@@ -27,7 +27,7 @@ use crate::inheritance::ClassRef;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     ClassInfo, ConstantInfo, MAX_INHERITANCE_DEPTH, MAX_MIXIN_DEPTH, MethodInfo, PropertyInfo,
-    Visibility,
+    PropertySource, Visibility,
 };
 use crate::util::short_name;
 
@@ -163,6 +163,25 @@ fn doc_property(
         see_refs: Vec::new(),
         is_virtual: true,
         source: None,
+    }
+}
+
+/// Like [`doc_property`], but marked [`PropertySource::DocblockTag`].
+///
+/// Used for `@property` tags read from the class itself, its traits,
+/// parents, and interfaces — declarations the user wrote *about this
+/// class*, which override schema/convention-inferred types during the
+/// virtual-member merge.  `@mixin`-borrowed tags stay unmarked: they
+/// describe the mixin class, and the provider treats them as the
+/// lowest-precedence source.
+fn doc_tag_property(
+    name: Atom,
+    type_hint: Option<&PhpType>,
+    subs: &HashMap<String, PhpType>,
+) -> PropertyInfo {
+    PropertyInfo {
+        source: Some(PropertySource::DocblockTag),
+        ..doc_property(name, type_hint, subs)
     }
 }
 
@@ -325,7 +344,7 @@ impl VirtualMemberProvider for PHPDocProvider {
 
             for (name, type_hint) in &doc.properties {
                 seen_props.insert(*name);
-                properties.push(doc_property(*name, type_hint.as_ref(), &no_subs));
+                properties.push(doc_tag_property(*name, type_hint.as_ref(), &no_subs));
             }
         }
 
@@ -352,7 +371,7 @@ impl VirtualMemberProvider for PHPDocProvider {
 
                 for (name, type_hint) in &doc.properties {
                     if seen_props.insert(*name) {
-                        properties.push(doc_property(*name, type_hint.as_ref(), &no_subs));
+                        properties.push(doc_tag_property(*name, type_hint.as_ref(), &no_subs));
                     }
                 }
             }
@@ -405,7 +424,11 @@ impl VirtualMemberProvider for PHPDocProvider {
 
                     for (name, type_hint) in &doc.properties {
                         if seen_props.insert(*name) {
-                            properties.push(doc_property(*name, type_hint.as_ref(), &level_subs));
+                            properties.push(doc_tag_property(
+                                *name,
+                                type_hint.as_ref(),
+                                &level_subs,
+                            ));
                         }
                     }
                 }
@@ -458,7 +481,7 @@ impl VirtualMemberProvider for PHPDocProvider {
 
                     for (name, type_hint) in &doc.properties {
                         if seen_props.insert(*name) {
-                            properties.push(doc_property(*name, type_hint.as_ref(), &subs));
+                            properties.push(doc_tag_property(*name, type_hint.as_ref(), &subs));
                         }
                     }
                 }

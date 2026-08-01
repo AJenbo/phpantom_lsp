@@ -798,6 +798,15 @@ pub enum PropertySource {
     /// are reached through such a relationship, so `$pivot` is attached to
     /// exactly those models and typed from the relationship's pivot generic.
     Pivot,
+    /// An explicit `@property` / `@property-read` / `@property-write` tag
+    /// declared on the class itself, a used trait, a parent class, or an
+    /// implemented interface (not a `@mixin` member).
+    ///
+    /// Marks the property as user-declared intent: when merging virtual
+    /// members it overrides types *inferred* from the database schema or
+    /// framework conventions, while still losing to types derived from
+    /// real PHP code (casts, accessors, relationship methods).
+    DocblockTag,
 }
 
 impl PropertyInfo {

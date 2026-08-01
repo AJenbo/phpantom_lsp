@@ -447,7 +447,7 @@ fn property_source(src: &PropertySource) -> Sz {
             z += vs(pivot_columns);
         }
         PropertySource::RelationshipCount { relationship } => z.add(relationship.capacity()),
-        PropertySource::Pivot => {}
+        PropertySource::Pivot | PropertySource::DocblockTag => {}
     }
     z
 }

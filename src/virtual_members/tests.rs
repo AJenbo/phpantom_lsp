@@ -654,6 +654,166 @@ fn merge_generic_virtual_beats_native_bare() {
 }
 
 #[test]
+fn merge_docblock_tag_overrides_schema_column_at_equal_specificity() {
+    // A trait/class `@property Carbon $published_at` declares the runtime
+    // attribute type; a schema-derived `string|null` for the same column
+    // only knows the storage type.  The explicit tag must win even though
+    // both score the same specificity.
+    let mut class = make_class("App\\Models\\Event");
+    class.properties.push(Arc::new(PropertyInfo {
+        source: Some(PropertySource::DatabaseColumn {
+            column: crate::types::DatabaseColumnSource {
+                connection: "primary".to_string(),
+                table: "events".to_string(),
+                column: "published_at".to_string(),
+                database_type: "TIMESTAMP".to_string(),
+                nullable: true,
+                default: None,
+                generated_expression: None,
+                generated_mode: None,
+            },
+            attribute_default: None,
+            mutator: None,
+        }),
+        ..PropertyInfo::virtual_property("published_at", Some("string|null"))
+    }));
+
+    let virtual_members = VirtualMembers {
+        methods: Vec::new(),
+        properties: vec![PropertyInfo {
+            source: Some(PropertySource::DocblockTag),
+            ..PropertyInfo::virtual_property("published_at", Some("Illuminate\\Support\\Carbon"))
+        }],
+        constants: Vec::new(),
+    };
+
+    merge_virtual_members(&mut class, virtual_members);
+
+    assert_eq!(class.properties.len(), 1);
+    assert_eq!(
+        class.properties[0].type_hint,
+        Some(PhpType::parse("Illuminate\\Support\\Carbon")),
+        "@property tag should override the schema-derived column type"
+    );
+}
+
+#[test]
+fn merge_docblock_tag_does_not_override_cast_type() {
+    // A `$casts` entry is real PHP code describing the runtime type, so
+    // an equal-specificity @property tag does not displace it.
+    let mut class = make_class("App\\Models\\Event");
+    class.properties.push(Arc::new(PropertyInfo {
+        source: Some(PropertySource::Cast {
+            cast: "immutable_datetime".to_string(),
+            column: None,
+            attribute_default: None,
+            mutator: None,
+        }),
+        ..PropertyInfo::virtual_property("published_at", Some("Carbon\\CarbonImmutable"))
+    }));
+
+    let virtual_members = VirtualMembers {
+        methods: Vec::new(),
+        properties: vec![PropertyInfo {
+            source: Some(PropertySource::DocblockTag),
+            ..PropertyInfo::virtual_property("published_at", Some("Illuminate\\Support\\Carbon"))
+        }],
+        constants: Vec::new(),
+    };
+
+    merge_virtual_members(&mut class, virtual_members);
+
+    assert_eq!(class.properties.len(), 1);
+    assert_eq!(
+        class.properties[0].type_hint,
+        Some(PhpType::parse("Carbon\\CarbonImmutable")),
+        "a $casts-derived type should not be displaced by an equal-specificity @property tag"
+    );
+}
+
+#[test]
+fn merge_docblock_tag_does_not_override_real_property() {
+    // Real declared properties always beat docblock tags.
+    let mut class = make_class("Foo");
+    class.properties.push(Arc::new(PropertyInfo {
+        is_virtual: false,
+        ..PropertyInfo::virtual_property("name", Some("string"))
+    }));
+
+    let virtual_members = VirtualMembers {
+        methods: Vec::new(),
+        properties: vec![PropertyInfo {
+            source: Some(PropertySource::DocblockTag),
+            ..PropertyInfo::virtual_property("name", Some("Stringable"))
+        }],
+        constants: Vec::new(),
+    };
+
+    merge_virtual_members(&mut class, virtual_members);
+
+    assert_eq!(class.properties.len(), 1);
+    assert_eq!(
+        class.properties[0].type_hint,
+        Some(PhpType::parse("string")),
+        "a real declared property should not be displaced by a @property tag"
+    );
+}
+
+#[test]
+fn trait_property_tag_beats_schema_column_end_to_end() {
+    // Full resolution pipeline: a model whose table schema types
+    // `published_at` as `string|null` but whose used trait declares
+    // `@property Carbon $published_at` resolves to Carbon (issue #306).
+    use crate::virtual_members::laravel::database_schema::{SchemaIndex, parse_schema_dump};
+
+    let mut publishes = make_class("App\\Models\\Concerns\\Publishes");
+    publishes.kind = ClassLikeKind::Trait;
+    publishes.set_class_docblock(Some(
+        "/**\n * @property \\Illuminate\\Support\\Carbon $published_at\n */".to_string(),
+    ));
+
+    let mut event = make_class("App\\Models\\Event");
+    event.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    event.used_traits = vec![atom("App\\Models\\Concerns\\Publishes")];
+    event.laravel_mut();
+
+    let publishes_arc = Arc::new(publishes);
+    let model_arc = Arc::new(make_class("Illuminate\\Database\\Eloquent\\Model"));
+    let carbon_arc = Arc::new(make_class("Illuminate\\Support\\Carbon"));
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "App\\Models\\Concerns\\Publishes" => Some(Arc::clone(&publishes_arc)),
+            "Illuminate\\Database\\Eloquent\\Model" => Some(Arc::clone(&model_arc)),
+            "Illuminate\\Support\\Carbon" => Some(Arc::clone(&carbon_arc)),
+            _ => None,
+        }
+    };
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE events (id bigint NOT NULL, published_at timestamp);",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_schema_index(schema);
+
+    let resolved =
+        crate::virtual_members::resolve_class_fully_cached(&event, &class_loader, &cache);
+    let prop = resolved
+        .properties
+        .iter()
+        .find(|p| p.name == "published_at")
+        .expect("published_at should exist");
+    assert_eq!(
+        prop.type_hint_str().as_deref(),
+        Some("\\Illuminate\\Support\\Carbon"),
+        "trait @property should beat the schema-derived column type"
+    );
+}
+
+#[test]
 fn merge_handles_empty_virtual_members() {
     let mut class = make_class("Foo");
     class

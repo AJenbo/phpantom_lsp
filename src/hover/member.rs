@@ -156,6 +156,9 @@ pub(super) fn format_property_source(source: &PropertySource) -> Vec<String> {
         PropertySource::Pivot => {
             vec!["source: pivot (many-to-many relationship)".to_string()]
         }
+        // The `👻 virtual` marker already says the member comes from a
+        // docblock tag; a "source:" line would be noise.
+        PropertySource::DocblockTag => Vec::new(),
     }
 }
 
