@@ -7214,6 +7214,85 @@ class Demo {
 }
 
 #[test]
+fn hover_ternary_prunes_dead_arm_for_true_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+$a = true ? 1 : 2;
+$a;
+"#;
+
+    let hover = hover_at(&backend, uri, content, 2, 1).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$a = 1"),
+        "true ? 1 : 2 should resolve to the then arm only, got: {}",
+        text
+    );
+    assert!(
+        !text.contains('2'),
+        "true ? 1 : 2 should not union in the dead else arm, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_ternary_prunes_dead_arm_for_false_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+$a = false ? 1 : 2;
+$a;
+"#;
+
+    let hover = hover_at(&backend, uri, content, 2, 1).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$a = 2"),
+        "false ? 1 : 2 should resolve to the else arm only, got: {}",
+        text
+    );
+    assert!(
+        !text.contains('1'),
+        "false ? 1 : 2 should not union in the dead then arm, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_short_ternary_prunes_dead_arm_for_literal_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+$a = 1 ?: 2;
+$b = 0 ?: 2;
+$a;
+$b;
+"#;
+
+    let hover_a = hover_at(&backend, uri, content, 3, 1).expect("expected hover on $a");
+    let text_a = hover_text(&hover_a);
+    assert!(
+        !text_a.contains('2'),
+        "1 ?: 2 should resolve to the truthy literal only, got: {}",
+        text_a
+    );
+
+    let hover_b = hover_at(&backend, uri, content, 4, 1).expect("expected hover on $b");
+    let text_b = hover_text(&hover_b);
+    assert!(
+        text_b.contains("$b = 2"),
+        "0 ?: 2 should resolve to the else arm only, got: {}",
+        text_b
+    );
+    assert!(
+        !text_b.contains('0'),
+        "0 ?: 2 should not union in the dead literal (falsy 0), got: {}",
+        text_b
+    );
+}
+
+#[test]
 fn hover_variable_assigned_via_null_coalesce_operator() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

@@ -136,6 +136,28 @@ fn simplify_branch_results(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
     ResolvedType::collapse_redundant_runtime_literals(results)
 }
 
+/// PHP's runtime truthiness for a ternary condition, when it is a literal
+/// whose truthiness is knowable at parse time.
+///
+/// Returns `None` for anything that isn't a bare scalar literal (a variable,
+/// a call, a comparison, ...), so the caller falls back to unioning both arms.
+fn static_condition_truthiness(expr: &Expression) -> Option<bool> {
+    match expr {
+        Expression::Parenthesized(inner) => static_condition_truthiness(inner.expression),
+        Expression::Literal(Literal::True(_)) => Some(true),
+        Expression::Literal(Literal::False(_)) => Some(false),
+        Expression::Literal(Literal::Null(_)) => Some(false),
+        Expression::Literal(Literal::Integer(integer)) => integer.value.map(|value| value != 0),
+        Expression::Literal(Literal::Float(float)) => Some(float.value.into_inner() != 0.0),
+        Expression::Literal(Literal::String(string)) => string.value.and_then(|bytes| {
+            std::str::from_utf8(bytes)
+                .ok()
+                .map(|value| !value.is_empty() && value != "0")
+        }),
+        _ => None,
+    }
+}
+
 /// Resolve a variable's type for use in RHS expression evaluation.
 ///
 /// When `ctx.scope_var_resolver` is set (forward-walker RHS
@@ -541,7 +563,6 @@ fn resolve_rhs_expression_inner<'b>(
             simplify_branch_results(combined)
         }
         Expression::Conditional(cond_expr) => {
-            let mut combined = Vec::new();
             let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
             // Resolve each branch with the cursor positioned inside it so
             // that instanceof / guard narrowing from the ternary condition
@@ -551,16 +572,29 @@ fn resolve_rhs_expression_inner<'b>(
             // branch would fail, and the whole ternary would collapse to
             // the else branch instead of unioning both.
             let then_ctx = ctx.with_cursor_offset(then_expr.span().start.offset);
-            ResolvedType::extend_unique(
-                &mut combined,
-                resolve_rhs_expression(then_expr, &then_ctx),
-            );
             let else_ctx = ctx.with_cursor_offset(cond_expr.r#else.span().start.offset);
-            ResolvedType::extend_unique(
-                &mut combined,
-                resolve_rhs_expression(cond_expr.r#else, &else_ctx),
-            );
-            simplify_branch_results(combined)
+            // When the condition is a literal with statically known PHP
+            // truthiness (`true`, `false`, `0`, `''`, ...), only one arm is
+            // reachable at runtime, so the dead arm must not widen the
+            // result into a union. PHPStan prunes the same way.
+            match static_condition_truthiness(cond_expr.condition) {
+                Some(true) => simplify_branch_results(resolve_rhs_expression(then_expr, &then_ctx)),
+                Some(false) => {
+                    simplify_branch_results(resolve_rhs_expression(cond_expr.r#else, &else_ctx))
+                }
+                None => {
+                    let mut combined = Vec::new();
+                    ResolvedType::extend_unique(
+                        &mut combined,
+                        resolve_rhs_expression(then_expr, &then_ctx),
+                    );
+                    ResolvedType::extend_unique(
+                        &mut combined,
+                        resolve_rhs_expression(cond_expr.r#else, &else_ctx),
+                    );
+                    simplify_branch_results(combined)
+                }
+            }
         }
         Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
             // When the LHS is syntactically non-nullable (e.g. `new Foo()`,

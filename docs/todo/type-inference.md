@@ -825,32 +825,6 @@ Everything else tagged `MAYBE` in the source, notably:
 
 ---
 
-## T33. Statically-known ternary conditions keep both branches
-**Impact: Low · Effort: Low**
-
-A ternary whose condition is statically known still unions both arms:
-`true ? 1 : 2` resolves to `1|2` where PHPStan prunes the dead arm and
-reports `1`. The same applies to `false ? 1 : 2` (should be `2`) and to
-a short ternary whose LHS is a literal. Now that scalar literals
-survive expression resolution, the imprecision is visible in hover
-output, and it blocks two verbatim upstream expectations in
-`tests/phpstan_nsrt/binary.php` (upstream `nsrt/binary.php` asserts `1`
-and `2` for these exact expressions; the ported fixture currently
-expects the widened `int`).
-
-```php
-$a = true ? 1 : 2;   // PHPantom: 1|2   PHPStan: 1
-$b = false ? 1 : 2;  // PHPantom: 1|2   PHPStan: 2
-```
-
-**Where to change:** ternary resolution in the shared RHS pipeline
-(`type_engine/variable/rhs_resolution/`). When the condition resolves
-to a type with known truthiness (a bool literal, or a scalar literal
-whose truthiness is defined), resolve only the live arm instead of
-unioning both.
-
----
-
 ## T34. Class constant references widen their literal value
 **Impact: Low · Effort: Low-Medium**
 

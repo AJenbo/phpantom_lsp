@@ -196,11 +196,8 @@ class Foo
 
 		// ── Ternary ─────────────────────────────────────────────────────
 
-		// Upstream expectations kept verbatim. PHPantom does not prune the
-		// dead arm of a statically-known ternary condition, so both arms
-		// survive and these resolve to `1|2`.
-		assertType('1', true ? 1 : 2); // SKIP
-		assertType('2', false ? 1 : 2); // SKIP
+		assertType('1', true ? 1 : 2);
+		assertType('2', false ? 1 : 2);
 
 		// ── instanceof ──────────────────────────────────────────────────
 

@@ -395,7 +395,7 @@ async fn test_completion_ternary_top_level() {
         "    public function betaMethod(): void {}\n",
         "}\n",
         "\n",
-        "$x = true ? new Alpha() : new Beta();\n",
+        "$x = mt_rand(0, 1) ? new Alpha() : new Beta();\n",
         "$x->\n",
     );
 
