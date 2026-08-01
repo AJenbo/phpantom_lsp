@@ -849,6 +849,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. A property write overrides the declared type even when it goes through <code>__set</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1338,6 +1349,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. A property write overrides the declared type even when it goes through <code>__set</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1427,6 +1449,47 @@ max reports neither.</p>
 <p><strong>Where to look:</strong> <code>type_engine/variable/forward_walk/</code> (branch merging
 and <code>seed_property_keys_into_scope</code>) and
 <code>type_engine/resolver/property_narrowing.rs</code>.</p>
+<h4 id="b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set">B3. A property write overrides the declared type even when it goes through <code>__set</code><a class="headerlink" href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><code>$obj-&gt;prop = expr</code> records the assigned type under a property-path key
+(<code>assignment.rs</code>, the <code>Expression::Access(Access::Property(_) | ...)</code>
+branch) so that a later read of the same path resolves through the
+assignment "rather than the declaring class's declared property hints".
+That is right for a real declared property, and it is what makes
+<code>stdClass</code> chains resolve. It is wrong when the write dispatches to
+<code>__set</code>, which is free to transform, reroute, or drop the value instead
+of storing it as given. <code>__get</code> then decides what a read returns, and the
+recorded write type has no authority over it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @template TData of array */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class DataBag {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    /** @param TData $data */</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function __construct(private array $data) {}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    /** @return TData[K] */</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    public function __get(string $property) { return $this-&gt;data[$property]; }</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    /** @param TData[K] $value */</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    public function __set(string $property, $value) { /* may store anything */ }</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">/** @extends DataBag&lt;array{a: int, b: string}&gt; */</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">class FooBag extends DataBag {}</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">$foo = new FooBag([&quot;a&quot; =&gt; 5, &quot;b&quot; =&gt; &quot;hello&quot;]);</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">$foo-&gt;a = 9;</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">$a = $foo-&gt;a;   // PHPantom: 9      Psalm: int (via __get&#39;s TData[K])</span>
+</code></pre></div>
+<p>The write should not be recorded when the property is undeclared on the
+subject's class <em>and</em> that class declares <code>__set</code>; the read should keep
+resolving through <code>__get</code>. Psalm and PHPStan both treat magic property
+writes as opaque for this reason.</p>
+<p>This predates literal preservation in expression resolution: the recorded
+type used to coincide with the declared type (<code>int</code> either way), so the
+override was invisible. It surfaced when the write started recording <code>9</code>.</p>
+<p><strong>Where to look:</strong> the property-assignment branch of
+<code>type_engine/variable/forward_walk/assignment.rs</code>, and the magic-member
+resolution in <code>virtual_members/</code>.</p>
+<p><strong>Test:</strong> the <code>inheritTemplateParamViaConstructor</code> case in
+<code>tests/psalm_assertions/template_class_template_extends.php</code> carries two
+<code>// SKIP</code> markers that clear when this is fixed.</p>
 
 
 
