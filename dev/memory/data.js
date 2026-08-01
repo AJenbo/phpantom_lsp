@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785613723046,
+  "lastUpdate": 1785613803559,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12851,6 +12851,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8a172e437457592ade5bf530d6ce3443082d3ade",
+          "message": "fix: exclude relationship builder methods from virtual properties",
+          "timestamp": "2026-08-01T21:33:37+02:00",
+          "tree_id": "ff224df83c622b2d169d6bb8dc7b4550f823b7e9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8a172e437457592ade5bf530d6ce3443082d3ade"
+        },
+        "date": 1785613800329,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71,
             "unit": "MiB"
           }
         ]
