@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785577662940,
+  "lastUpdate": 1785580203440,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12613,6 +12613,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "523a3669739926aae4dae85708575e367637568a",
+          "message": "A ternary with a statically-known condition no longer unions in its dead\narm",
+          "timestamp": "2026-08-01T12:12:57+02:00",
+          "tree_id": "bd79fd57f96a3274d77baa9d334a88b793da8d5b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/523a3669739926aae4dae85708575e367637568a"
+        },
+        "date": 1785580200367,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.3,
             "unit": "MiB"
           }
         ]
