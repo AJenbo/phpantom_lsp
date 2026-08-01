@@ -79,45 +79,56 @@ const TAGGED_ARG_COUNT: usize = 4;
 /// `$eloquentCollection->filter->isActive()` on the Eloquent collection
 /// instead of degrading it to the parent `Support\Collection`.
 pub(crate) fn tag_higher_order_proxy_properties(class: &mut ClassInfo, fqn: &str) {
-    if !class.properties.iter().any(|p| needs_tag(p, fqn)) {
+    if !class
+        .properties
+        .iter()
+        .any(|p| untagged_proxy(p, fqn).is_some())
+    {
         return;
     }
 
     let owner = PhpType::named(atom(fqn));
     for property in class.properties.make_mut() {
-        if !needs_tag(property, fqn) {
-            continue;
-        }
-        let property = Arc::make_mut(property);
-        let Some((name, args)) = proxy_name_and_args(property.type_hint.as_ref()) else {
+        let Some(tagged) = tagged_hint(property, fqn, &owner) else {
             continue;
         };
-        let key = args
-            .first()
-            .cloned()
-            .unwrap_or_else(|| PhpType::named(atom("array-key")));
-        let value = args.get(1).cloned().unwrap_or_else(PhpType::mixed);
-        property.type_hint = Some(PhpType::generic_atom(
-            name,
-            vec![
-                key,
-                value,
-                PhpType::literal_string_value(property.name.as_str()),
-                owner.clone(),
-            ],
-        ));
+        Arc::make_mut(property).type_hint = Some(tagged);
     }
 }
 
-/// Whether `property` is a proxy property that is missing an up-to-date tag.
-fn needs_tag(property: &PropertyInfo, owner_fqn: &str) -> bool {
-    let Some((_, args)) = proxy_name_and_args(property.type_hint.as_ref()) else {
-        return false;
-    };
-    if args.len() != TAGGED_ARG_COUNT {
-        return true;
-    }
-    literal_text(&args[2]) != Some(property.name.as_str()) || args[3].base_name() != Some(owner_fqn)
+/// The up-to-date tag for `property`, or `None` when it is not a proxy
+/// property or already carries the right tag.
+///
+/// Reading the tag and rewriting it are one step so that a property is
+/// parsed once per pass: this runs for every property of every resolved
+/// class.
+fn tagged_hint(property: &PropertyInfo, owner_fqn: &str, owner: &PhpType) -> Option<PhpType> {
+    let (name, args) = untagged_proxy(property, owner_fqn)?;
+    let key = args.first().cloned().unwrap_or_else(|| ARRAY_KEY.clone());
+    let value = args.get(1).cloned().unwrap_or_else(PhpType::mixed);
+    Some(PhpType::generic_atom(
+        name,
+        vec![
+            key,
+            value,
+            PhpType::literal_string_value(property.name.as_str()),
+            owner.clone(),
+        ],
+    ))
+}
+
+/// The proxy class name and generic arguments of a proxy property that is
+/// missing an up-to-date tag, or `None` for anything already tagged or not
+/// a proxy at all.
+fn untagged_proxy<'a>(
+    property: &'a PropertyInfo,
+    owner_fqn: &str,
+) -> Option<(Atom, &'a [PhpType])> {
+    let (name, args) = proxy_name_and_args(property.type_hint.as_ref())?;
+    let is_current = args.len() == TAGGED_ARG_COUNT
+        && literal_text(&args[2]) == Some(property.name.as_str())
+        && args[3].base_name() == Some(owner_fqn);
+    (!is_current).then_some((name, args))
 }
 
 /// Destructure a `HigherOrderCollectionProxy<…>` type hint into its

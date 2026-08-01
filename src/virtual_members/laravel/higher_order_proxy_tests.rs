@@ -351,14 +351,22 @@ fn proxy_loader(name: &str) -> Option<Arc<ClassInfo>> {
     Some(Arc::new(user))
 }
 
-fn injected_proxy(method: &str) -> ClassInfo {
-    let mut proxy = make_class(HIGHER_ORDER_COLLECTION_PROXY_FQN);
-    let args = vec![
+/// The four generic arguments the tagger writes onto a proxy property.
+fn tag_args(method: PhpType, collection: PhpType) -> Vec<PhpType> {
+    vec![
         PhpType::int(),
         PhpType::named(crate::atom::atom(USER)),
+        method,
+        collection,
+    ]
+}
+
+fn injected_proxy(method: &str) -> ClassInfo {
+    let mut proxy = make_class(HIGHER_ORDER_COLLECTION_PROXY_FQN);
+    let args = tag_args(
         PhpType::literal_string_value(method),
         PhpType::named(crate::atom::atom(SUPPORT_COLLECTION)),
-    ];
+    );
     inject_higher_order_proxy_members(&mut proxy, &args, &proxy_loader, None);
     proxy
 }
@@ -421,4 +429,116 @@ fn injection_is_a_no_op_when_the_value_type_is_unknown() {
 
     assert!(proxy.properties.is_empty());
     assert!(proxy.methods.is_empty());
+}
+
+/// A hand-written `HigherOrderCollectionProxy<…>` annotation can carry four
+/// arguments without carrying the *shapes* the tagger writes.  Neither a
+/// method name that is not a literal nor a collection that is not a plain
+/// class name says which method is proxied onto what, so the proxy is left
+/// as it was declared.
+#[test]
+fn injection_is_a_no_op_for_a_malformed_tag() {
+    let collection = PhpType::named(crate::atom::atom(SUPPORT_COLLECTION));
+
+    let mut proxy = make_class(HIGHER_ORDER_COLLECTION_PROXY_FQN);
+    let args = tag_args(PhpType::string(), collection);
+    inject_higher_order_proxy_members(&mut proxy, &args, &proxy_loader, None);
+    assert!(proxy.properties.is_empty(), "method name is not a literal");
+    assert!(proxy.methods.is_empty(), "method name is not a literal");
+
+    let mut proxy = make_class(HIGHER_ORDER_COLLECTION_PROXY_FQN);
+    let args = tag_args(
+        PhpType::literal_string_value("map"),
+        PhpType::parse("Illuminate\\Support\\Collection<int, App\\User>"),
+    );
+    inject_higher_order_proxy_members(&mut proxy, &args, &proxy_loader, None);
+    assert!(proxy.properties.is_empty(), "collection is not a bare name");
+    assert!(proxy.methods.is_empty(), "collection is not a bare name");
+}
+
+/// The value type is resolved with its own generic arguments applied, so a
+/// collection of a parameterised class proxies the *substituted* member
+/// type rather than the template parameter's name.
+#[test]
+fn injection_applies_the_value_types_generic_arguments() {
+    fn box_loader(name: &str) -> Option<Arc<ClassInfo>> {
+        if name != "App\\Box" {
+            return None;
+        }
+        let mut boxed = make_class("App\\Box");
+        boxed.template_params = vec![crate::atom::atom("T")];
+        boxed.properties = vec![Arc::new(make_property("item", Some("T")))].into();
+        boxed.methods = vec![Arc::new(make_method("unwrap", Some("T")))].into();
+        Some(Arc::new(boxed))
+    }
+
+    let mut proxy = make_class(HIGHER_ORDER_COLLECTION_PROXY_FQN);
+    let args = vec![
+        PhpType::int(),
+        PhpType::parse("App\\Box<string>"),
+        PhpType::literal_string_value("map"),
+        PhpType::named(crate::atom::atom(SUPPORT_COLLECTION)),
+    ];
+
+    inject_higher_order_proxy_members(&mut proxy, &args, &box_loader, None);
+
+    assert_eq!(
+        property_type(&proxy, "item"),
+        "Illuminate\\Support\\Collection<int, string>"
+    );
+    let unwrap = proxy
+        .methods
+        .iter()
+        .find(|m| m.name == "unwrap")
+        .expect("unwrap was not grafted");
+    assert_eq!(
+        unwrap.return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Support\\Collection<int, string>"
+    );
+}
+
+/// The proxy is annotated `@mixin Enumerable`, so it already carries members
+/// named after collection methods.  A value-type member of the same name
+/// replaces it — at runtime `__get` / `__call` fire first and never reach
+/// the mixin.
+#[test]
+fn injection_replaces_same_named_members_already_on_the_proxy() {
+    let mut proxy = make_class(HIGHER_ORDER_COLLECTION_PROXY_FQN);
+    proxy.properties = vec![Arc::new(make_property("email", Some("array")))].into();
+    proxy.methods = vec![Arc::new(make_method("isActive", Some("int")))].into();
+    let args = tag_args(
+        PhpType::literal_string_value("map"),
+        PhpType::named(crate::atom::atom(SUPPORT_COLLECTION)),
+    );
+
+    inject_higher_order_proxy_members(&mut proxy, &args, &proxy_loader, None);
+
+    assert_eq!(
+        proxy
+            .properties
+            .iter()
+            .filter(|p| p.name == "email")
+            .count(),
+        1,
+        "the grafted property should replace, not duplicate"
+    );
+    assert_eq!(
+        property_type(&proxy, "email"),
+        "Illuminate\\Support\\Collection<int, string>"
+    );
+
+    let is_active: Vec<_> = proxy
+        .methods
+        .iter()
+        .filter(|m| m.name == "isActive")
+        .collect();
+    assert_eq!(
+        is_active.len(),
+        1,
+        "the grafted method should replace, not duplicate"
+    );
+    assert_eq!(
+        is_active[0].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Support\\Collection<int, bool>"
+    );
 }

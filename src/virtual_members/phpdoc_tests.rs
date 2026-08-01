@@ -827,3 +827,195 @@ fn mixin_template_param_substituted_via_ancestor_walk() {
         "Expected getEvents from mixin TWraps→EventsApi, got: {method_names:?}"
     );
 }
+
+// ── provide: tags on a parent's used traits ─────────────────────────
+
+/// Build a trait carrying `@method` / `@property` tags.
+fn make_trait(name: &str, docblock: &str, template_params: &[&str]) -> ClassInfo {
+    let mut trait_info = make_class(name);
+    trait_info.kind = ClassLikeKind::Trait;
+    trait_info.template_params = template_params.iter().map(|p| atom(p)).collect();
+    trait_info.set_class_docblock(Some(docblock.to_string()));
+    trait_info
+}
+
+fn property_type(result: &VirtualMembers, name: &str) -> String {
+    result
+        .properties
+        .iter()
+        .find(|p| p.name == name)
+        .unwrap_or_else(|| panic!("no property `{name}`"))
+        .type_hint
+        .as_ref()
+        .map_or_else(|| "<none>".to_string(), PhpType::to_string)
+}
+
+/// A trait the parent uses but that cannot be loaded is skipped, rather
+/// than cutting the walk short and losing the tags of the traits beside it.
+#[test]
+fn unresolvable_parent_trait_does_not_hide_its_siblings() {
+    let provider = PHPDocProvider;
+
+    let mut child = make_class("Child");
+    child.parent_class = Some(atom("Base"));
+
+    let mut base = make_class("Base");
+    base.used_traits = vec![atom("Missing"), atom("Decorates")];
+    let base = Arc::new(base);
+
+    let decorates = Arc::new(make_trait(
+        "Decorates",
+        "/** @property-read string $badge */",
+        &[],
+    ));
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Base" => Some(Arc::clone(&base)),
+            "Decorates" => Some(Arc::clone(&decorates)),
+            _ => None,
+        }
+    };
+
+    let result = provider.provide(&child, &class_loader, None);
+
+    assert_eq!(property_type(&result, "badge"), "string");
+}
+
+/// A parameterised trait whose consumer declared no `@use` arguments has
+/// nothing to substitute from, so its tags keep the template parameter's
+/// name rather than being resolved against an unrelated type.
+#[test]
+fn parent_trait_without_use_generics_keeps_its_template_param() {
+    let provider = PHPDocProvider;
+
+    let mut child = make_class("Child");
+    child.parent_class = Some(atom("Base"));
+
+    let mut base = make_class("Base");
+    base.used_traits = vec![atom("Holds")];
+    let base = Arc::new(base);
+
+    let holds = Arc::new(make_trait(
+        "Holds",
+        "/** @property-read TItem $latest */",
+        &["TItem"],
+    ));
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Base" => Some(Arc::clone(&base)),
+            "Holds" => Some(Arc::clone(&holds)),
+            _ => None,
+        }
+    };
+
+    let result = provider.provide(&child, &class_loader, None);
+
+    assert_eq!(property_type(&result, "latest"), "TItem");
+}
+
+/// The consumer's `@use Holds<Badge>` resolves the trait's tags even when
+/// the subclass contributed no substitutions of its own — the common case,
+/// since a plain `extends` carries no generic arguments.
+#[test]
+fn parent_trait_use_generics_apply_without_subclass_substitutions() {
+    let provider = PHPDocProvider;
+
+    let mut child = make_class("Child");
+    child.parent_class = Some(atom("Base"));
+
+    let mut base = make_class("Base");
+    base.used_traits = vec![atom("Holds")];
+    base.use_generics = vec![(atom("Holds"), vec![PhpType::named(atom("Badge"))])];
+    let base = Arc::new(base);
+
+    let holds = Arc::new(make_trait(
+        "Holds",
+        "/** @property-read TItem $latest */",
+        &["TItem"],
+    ));
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Base" => Some(Arc::clone(&base)),
+            "Holds" => Some(Arc::clone(&holds)),
+            _ => None,
+        }
+    };
+
+    let result = provider.provide(&child, &class_loader, None);
+
+    assert_eq!(property_type(&result, "latest"), "Badge");
+}
+
+/// An `@use` that supplies fewer arguments than the trait has template
+/// parameters resolves the ones it named and leaves the rest alone.
+#[test]
+fn a_partial_use_generic_leaves_the_remaining_trait_params_alone() {
+    let provider = PHPDocProvider;
+
+    let mut child = make_class("Child");
+    child.parent_class = Some(atom("Base"));
+
+    let mut base = make_class("Base");
+    base.used_traits = vec![atom("Holds")];
+    base.use_generics = vec![(atom("Holds"), vec![PhpType::named(atom("Badge"))])];
+    let base = Arc::new(base);
+
+    let holds = Arc::new(make_trait(
+        "Holds",
+        "/**\n * @property-read TKey $cursor\n * @property-read TItem $latest\n */",
+        &["TKey", "TItem"],
+    ));
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Base" => Some(Arc::clone(&base)),
+            "Holds" => Some(Arc::clone(&holds)),
+            _ => None,
+        }
+    };
+
+    let result = provider.provide(&child, &class_loader, None);
+
+    assert_eq!(property_type(&result, "cursor"), "Badge");
+    assert_eq!(property_type(&result, "latest"), "TItem");
+}
+
+// ── provide: tags on an extended interface ──────────────────────────
+
+/// An interface's `@extends` arguments substitute into the tags declared on
+/// the interface it extends, so the implementing class sees the concrete
+/// type rather than the template parameter.
+#[test]
+fn interface_extends_generics_substitute_into_the_parents_tags() {
+    let provider = PHPDocProvider;
+
+    let mut class = make_class("Holder");
+    class.interfaces = vec![atom("BadgeBag")];
+
+    let mut bag = make_class("Bag");
+    bag.kind = ClassLikeKind::Interface;
+    bag.template_params = vec![atom("TItem")];
+    bag.set_class_docblock(Some("/** @property-read TItem $latest */".to_string()));
+    let bag = Arc::new(bag);
+
+    let mut badge_bag = make_class("BadgeBag");
+    badge_bag.kind = ClassLikeKind::Interface;
+    badge_bag.interfaces = vec![atom("Bag")];
+    badge_bag.extends_generics = vec![(atom("Bag"), vec![PhpType::named(atom("Badge"))])];
+    let badge_bag = Arc::new(badge_bag);
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Bag" => Some(Arc::clone(&bag)),
+            "BadgeBag" => Some(Arc::clone(&badge_bag)),
+            _ => None,
+        }
+    };
+
+    let result = provider.provide(&class, &class_loader, None);
+
+    assert_eq!(property_type(&result, "latest"), "Badge");
+}
