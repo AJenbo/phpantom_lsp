@@ -256,13 +256,34 @@ fn predicates_return_bool() {
 }
 
 #[test]
-fn aggregates_follow_the_framework_annotations() {
+fn aggregates_are_numbers() {
     assert_eq!(result_type("avg", "int"), "int|float|null");
     assert_eq!(result_type("average", "int"), "int|float|null");
     assert_eq!(result_type("percentage", "bool"), "?float");
+    assert_eq!(result_type("sum", "int"), "int");
     assert_eq!(result_type("sum", "float"), "float");
-    assert_eq!(result_type("min", "int"), "int");
-    assert_eq!(result_type("max", "int"), "int");
+}
+
+/// `sum` reduces from `0`, so it returns a number whatever the member is
+/// and never returns `null` — a nullable numeric column (`?float`) totals
+/// to a plain `float`, not to `?float`.
+#[test]
+fn sum_is_never_null_and_always_a_number() {
+    assert_eq!(result_type("sum", "?float"), "float");
+    assert_eq!(result_type("sum", "?int"), "int");
+    assert_eq!(result_type("sum", "int|float|null"), "int|float");
+    assert_eq!(result_type("sum", "string"), "int|float");
+    assert_eq!(result_type("sum", "mixed"), "int|float");
+}
+
+/// `min` / `max` reduce with no initial value, so an empty collection
+/// yields `null` even when the member itself is not nullable.
+#[test]
+fn min_and_max_are_nullable_for_an_empty_collection() {
+    assert_eq!(result_type("min", "int"), "?int");
+    assert_eq!(result_type("max", "int"), "?int");
+    assert_eq!(result_type("max", "?int"), "?int");
+    assert_eq!(result_type("max", "string"), "?string");
 }
 
 /// A name that is not a known proxy contributes no type information rather
@@ -398,6 +419,42 @@ fn injection_skips_non_public_static_and_magic_members() {
     assert!(proxy.properties.iter().all(|p| p.name != "secret"));
     assert!(proxy.properties.iter().all(|p| p.name != "registry"));
     assert!(proxy.methods.iter().all(|m| m.name != "__toString"));
+}
+
+/// The proxy picks up `Enumerable`'s statics (`make`, `wrap`, `empty`, …)
+/// through its `@mixin`, but has no such method at runtime — `__call`
+/// reaches the value type's instance method instead.  The graft must
+/// therefore replace the static rather than leave the class holding two
+/// methods of the same name.
+#[test]
+fn a_grafted_member_replaces_a_same_named_static() {
+    fn maker_loader(name: &str) -> Option<Arc<ClassInfo>> {
+        if name != USER {
+            return None;
+        }
+        let mut user = make_class(USER);
+        user.methods = vec![Arc::new(make_method("make", Some("bool")))].into();
+        Some(Arc::new(user))
+    }
+
+    let mut proxy = make_class(HIGHER_ORDER_COLLECTION_PROXY_FQN);
+    let mut inherited = make_method("make", Some("static"));
+    inherited.is_static = true;
+    proxy.methods = vec![Arc::new(inherited)].into();
+
+    let args = tag_args(
+        PhpType::literal_string_value("map"),
+        PhpType::named(crate::atom::atom(SUPPORT_COLLECTION)),
+    );
+    inject_higher_order_proxy_members(&mut proxy, &args, &maker_loader, None);
+
+    let makes: Vec<_> = proxy.methods.iter().filter(|m| m.name == "make").collect();
+    assert_eq!(makes.len(), 1, "the static was duplicated, not replaced");
+    assert!(!makes[0].is_static, "the graft is an instance method");
+    assert_eq!(
+        makes[0].return_type.as_ref().unwrap().to_string(),
+        "Illuminate\\Support\\Collection<int, bool>"
+    );
 }
 
 /// Without the two extra tag arguments there is nothing to resolve against,

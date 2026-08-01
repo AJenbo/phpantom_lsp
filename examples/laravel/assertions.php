@@ -505,6 +505,170 @@ check(
     ($prefixedUris['ovens.show'] ?? null) === 'bakeries/ovens/{oven}'
 );
 
+// ─── Resource registrations written as a chain link ─────────────────────────
+
+// `ResourceRegistrar` builds its action from as/uses/middleware/where/missing,
+// so a `->prefix()` on the registration's own chain is discarded while an
+// `->as()` on the same chain reaches every generated name.  Registering on the
+// router directly cannot express those, so they get their own helper.
+$chainUris = static function (callable $build): array {
+    $router = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+    $build($router)->register();
+
+    $uris = [];
+    foreach ($router->getRoutes() as $route) {
+        $uris[$route->getName()] = $route->uri();
+    }
+
+    return $uris;
+};
+
+$controller = \App\Http\Controllers\BakeryController::class;
+
+$chainPrefixed = $chainUris(
+    static fn ($router) => $router->prefix('admin')->resource('photos', $controller)
+);
+check(
+    'a chain prefix does not reach the resource URI',
+    ($chainPrefixed['photos.show'] ?? null) === 'photos/{photo}'
+);
+
+$chainNamed = $chainUris(
+    static fn ($router) => $router->as('admin')->resource('photos', $controller)
+);
+check(
+    'a chain ->as() prefixes every generated route name',
+    ($chainNamed['admin.photos.show'] ?? null) === 'photos/{photo}'
+);
+
+// The registrar appends its own separator, so the trailing dot people write
+// out of habit doubles up rather than being absorbed.
+$chainDotted = $chainUris(
+    static fn ($router) => $router->name('admin.')->resource('photos', $controller)
+);
+check(
+    'a trailing dot in a chain name prefix is not absorbed',
+    isset($chainDotted['admin..photos.show'])
+);
+
+// `->as()` is replaced by a later one on the same chain rather than appended.
+$chainReplaced = $chainUris(
+    static fn ($router) => $router->as('a')->as('b')->resource('photos', $controller)
+);
+check(
+    'the last ->as() on a chain wins',
+    isset($chainReplaced['b.photos.show'])
+);
+
+// ─── Resource modifiers ─────────────────────────────────────────────────────
+
+// getResourceMethods() intersects with only() and *then* subtracts except(),
+// so the two combine instead of cancelling out.
+$narrowed = $resourceUris('photos', static function ($registration): void {
+    $registration->only(['index', 'create'])->except(['create']);
+});
+check(
+    'only() and except() are both applied',
+    array_keys($narrowed) === ['photos.index']
+);
+
+// An empty only() restricts to nothing, which is not the same as never
+// having called it.
+check(
+    'an empty only() registers no routes',
+    $resourceUris('photos', static function ($registration): void {
+        $registration->only([]);
+    }) === []
+);
+
+// apiResource() is expressed as an implicit only() of the five API methods,
+// so an explicit only() replaces it and can bring `create` back.
+$apiWidened = $chainUris(
+    static fn ($router) => $router->apiResource('photos', $controller)->only(['create'])
+);
+check(
+    'an explicit only() replaces the apiResource restriction',
+    ($apiWidened['photos.create'] ?? null) === 'photos/create'
+);
+
+// shallow() takes an argument, so shallow(false) leaves a nested resource
+// nested.
+$notShallow = $resourceUris('bakeries.ovens', static function ($registration): void {
+    $registration->shallow(false);
+});
+check(
+    '->shallow(false) keeps the parent segments',
+    ($notShallow['bakeries.ovens.show'] ?? null) === 'bakeries/{bakery}/ovens/{oven}'
+);
+
+// names() renames the resource every route is derived from; a per-method
+// name() replaces one whole route name and skips the ->as() prefix.
+$renamed = $resourceUris('photos', static function ($registration): void {
+    $registration->names('images');
+});
+check(
+    '->names() renames every generated route',
+    ($renamed['images.show'] ?? null) === 'photos/{photo}'
+);
+
+$perMethod = $resourceUris('photos', static function ($registration): void {
+    $registration->name('index', 'photos.list');
+});
+check(
+    '->name($method, $name) replaces one whole route name',
+    isset($perMethod['photos.list']) && !isset($perMethod['photos.index'])
+);
+
+// parameters() replaces the whole map while parameter() appends to it, so
+// whichever came last on the chain applies.
+$lastOverride = $resourceUris('photos', static function ($registration): void {
+    $registration->parameters(['photos' => 'grid'])->parameter('photos', 'other');
+});
+check(
+    'the last parameter override for a segment wins',
+    ($lastOverride['photos.show'] ?? null) === 'photos/{other}'
+);
+
+// getResourceUri() deletes the last segment's wildcard from the nested URI
+// without anchoring the deletion, so segments that singularize alike lose
+// both wildcards.
+$repeated = $resourceUris('company.companies');
+check(
+    'a repeated wildcard collapses the nested URI',
+    ($repeated['company.companies.show'] ?? null) === 'company/companies/{company}'
+);
+
+// ─── Resource wildcard singularization ──────────────────────────────────────
+
+// The wildcard is `Str::singular()` of the segment, which is Doctrine's
+// inflector rather than a trailing-`s` rule.  These are the shapes a
+// hand-rolled singularizer gets wrong.
+$singulars = [
+    'photos' => 'photo',
+    'categories' => 'category',
+    'addresses' => 'address',
+    'leaves' => 'leaf',
+    'cookies' => 'cookie',
+    'viruses' => 'virus',
+    'bonuses' => 'bonus',
+    'heroes' => 'hero',
+    'knives' => 'knife',
+    'ties' => 'ty',
+    'statuses' => 'status',
+    'series' => 'series',
+    'Photos' => 'Photo',
+];
+$wrong = [];
+foreach ($singulars as $plural => $expected) {
+    if (\Illuminate\Support\Str::singular($plural) !== $expected) {
+        $wrong[] = $plural;
+    }
+}
+check(
+    'the resource wildcards we model match Str::singular()',
+    $wrong === []
+);
+
 // ─── Higher-order collection proxies ────────────────────────────────────────
 
 // Every proxy the LSP knows how to type must actually be proxyable, and
@@ -555,6 +719,31 @@ check(
 check(
     'contains proxies the member as a predicate and returns a bool',
     $proxied->contains->rating === true
+);
+
+// `sum` seeds its reduction with `0` and adds each member to it, so a
+// nullable member still totals to a number.  This is why the LSP types
+// `$reviews->sum->discount` as `float` rather than `?float`: reporting the
+// null would flag correct code that passes the total to a `float` parameter.
+$nullable = new \Illuminate\Support\Collection([
+    (object) ['discount' => 1.5],
+    (object) ['discount' => null],
+]);
+check(
+    'sum over a nullable member is still a number',
+    $nullable->sum->discount === 1.5
+);
+
+// `min` / `max` reduce with *no* initial value, so an empty collection has
+// no extremum at all — which is why the LSP types them nullable even when
+// the member itself is not.
+check(
+    'max over an empty collection is null',
+    (new \Illuminate\Support\Collection())->max->rating === null
+);
+check(
+    'min over an empty collection is null',
+    (new \Illuminate\Support\Collection())->min->rating === null
 );
 
 // `Eloquent\Collection::map()` degrades to the base collection as soon as

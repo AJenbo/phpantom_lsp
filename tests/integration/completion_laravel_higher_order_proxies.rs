@@ -155,6 +155,7 @@ class User extends Model
 {
     public string $email = '';
     public int $age = 0;
+    public ?float $discount = null;
 
     /** @var array<string> */
     public array $tags = [];
@@ -463,10 +464,20 @@ fn predicates_return_bool() {
 }
 
 #[test]
-fn sum_min_and_max_take_the_member_type() {
+fn sum_takes_the_member_type_and_is_never_null() {
     assert_type(SUPPORT, "$items->sum->age", "int");
-    assert_type(SUPPORT, "$items->min->age", "int");
-    assert_type(SUPPORT, "$items->max->age", "int");
+    // `sum` reduces from `0`, so totalling a nullable column cannot yield
+    // `null` — reporting `?float` here would flag correct code that passes
+    // the total to a `float` parameter.
+    assert_type(SUPPORT, "$items->sum->discount", "float");
+}
+
+/// `min` / `max` reduce with no initial value, so an empty collection
+/// yields `null` even for a non-nullable member.
+#[test]
+fn min_and_max_are_nullable() {
+    assert_type(SUPPORT, "$items->min->age", "?int");
+    assert_type(SUPPORT, "$items->max->age", "?int");
 }
 
 #[test]

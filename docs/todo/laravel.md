@@ -945,3 +945,36 @@ on the mock offer the mocked class's own members.
 
 **Where to look:** the Laravel method return-type modelling in
 `virtual_members/laravel/`.
+
+#### L44. Sibling resource registrations and degenerate resource names
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+`Route::resource()` and `Route::apiResource()` are recognized, but the
+registrations that generate route names the same way are not, so every
+`route()` call naming one is reported as an unknown route:
+
+```php
+Route::resources(['photos' => PhotoController::class]);
+Route::apiResources(['photos' => PhotoController::class]);
+Route::singleton('profile', ProfileController::class);
+Route::apiSingleton('profile', ProfileController::class);
+```
+
+`resources()` / `apiResources()` expand to the same seven (or five)
+conventional names per entry. `singleton()` generates `show`, `edit`, and
+`update` at `profile`, `profile/edit`, and `profile`, with `store` and
+`destroy` added by `->creatable()` / `->destroyable()`.
+
+Separately, a resource name with a leading or trailing slash is trimmed
+before the name is derived, where Laravel keeps it and produces a
+degenerate-but-real route set: `Route::resource('/photos/', …)` names its
+routes `index`/`show` (no `photos.` prefix) rather than `photos.index`.
+The same applies to an empty name and to doubled dots (`photos..comments`).
+These are absurd inputs that Laravel handles badly too, so the current
+tidying is arguably more useful; the divergence is recorded here rather
+than fixed because it makes the unknown-route diagnostic disagree with the
+framework in both directions.
+
+**Where to look:** `virtual_members/laravel/route_names.rs`, alongside the
+existing `resource_registration` handling.

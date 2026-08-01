@@ -140,13 +140,33 @@ fn hyphenated_resource_wildcard_uses_underscores() {
     assert_eq!(uri_of(content, "blog-posts.show"), "blog-posts/{blog_post}");
 }
 
+/// The enclosing group's prefix reaches the resource, but a `->prefix()` on
+/// the registration's own chain does not: `ResourceRegistrar` builds its
+/// action from `as`/`uses`/`middleware`/`where`/`missing` and never copies
+/// `prefix` across, so Laravel silently drops it.
 #[test]
-fn resource_uri_inherits_group_and_chain_prefixes() {
+fn resource_uri_inherits_the_group_prefix_but_not_the_chain_prefix() {
     let content = "<?php\nRoute::prefix('admin')->name('admin.')->group(function () {\n    Route::prefix('v2')->resource('photos', PhotoController::class);\n});\n";
-    assert_eq!(
-        uri_of(content, "admin.photos.show"),
-        "admin/v2/photos/{photo}"
-    );
+    assert_eq!(uri_of(content, "admin.photos.show"), "admin/photos/{photo}");
+}
+
+/// `->as()` and `->name()` ahead of the registration prefix every generated
+/// route name, and the last one on the chain wins.
+#[test]
+fn a_chain_as_prefix_reaches_the_generated_route_names() {
+    let content = "<?php\nRoute::as('admin')->resource('photos', PhotoController::class);\n";
+    assert_eq!(uri_of(content, "admin.photos.show"), "photos/{photo}");
+
+    let replaced = "<?php\nRoute::as('a')->as('b')->resource('photos', PhotoController::class);\n";
+    assert_eq!(uri_of(replaced, "b.photos.show"), "photos/{photo}");
+}
+
+/// The registrar appends its own separator, so the trailing dot users write
+/// out of habit produces a doubled one rather than being absorbed.
+#[test]
+fn a_chain_name_prefix_keeps_a_trailing_dot_the_user_wrote() {
+    let content = "<?php\nRoute::name('admin.')->resource('photos', PhotoController::class);\n";
+    assert_eq!(uri_of(content, "admin..photos.show"), "photos/{photo}");
 }
 
 #[test]
@@ -273,16 +293,107 @@ fn unrecoverable_resource_name_generates_no_routes() {
     assert!(routes_of("<?php\nRoute::resource('.', PhotoController::class);\n").is_empty());
 }
 
+/// `->name()` on a resource registration is Laravel's per-method name
+/// override (`name($method, $name)`), not a route name of its own.  The
+/// override is the *whole* name, so it replaces `photos.index` rather than
+/// being appended to it.
 #[test]
-fn a_resource_chain_does_not_declare_a_route_name() {
-    // `->name()` on a resource registration is Laravel's per-method name
-    // override (`name($method, $name)`), not a route name of its own.
+fn a_resource_chain_name_overrides_one_methods_route_name() {
     let content =
         "<?php\nRoute::resource('photos', PhotoController::class)->name('index', 'listing');\n";
     let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
     assert!(
+        names.contains(&"listing".to_string()),
+        "the override should name the index route, got {names:?}"
+    );
+    assert!(
+        !names.contains(&"photos.index".to_string()),
+        "the override should replace the derived name, got {names:?}"
+    );
+    assert!(
         !names.contains(&"index".to_string()),
         "the first argument is a method name, not a route name, got {names:?}"
+    );
+    // The other six keep their derived names.
+    assert!(names.contains(&"photos.show".to_string()), "{names:?}");
+}
+
+/// `->names('images')` renames the resource every route is derived from,
+/// while a per-method entry bypasses the `->as()` prefix entirely.
+#[test]
+fn names_rewrites_the_resource_the_routes_are_derived_from() {
+    let content =
+        "<?php\nRoute::as('admin')->resource('photos', PhotoController::class)->names('images');\n";
+    assert_eq!(uri_of(content, "admin.images.show"), "photos/{photo}");
+
+    let per_method = "<?php\nRoute::as('admin')->resource('photos', PhotoController::class)->name('index', 'x');\n";
+    let names: Vec<String> = routes_of(per_method).into_iter().map(|r| r.name).collect();
+    assert!(names.contains(&"x".to_string()), "{names:?}");
+}
+
+/// `getResourceMethods()` intersects with `only` and *then* subtracts
+/// `except`; neither cancels the other out.
+#[test]
+fn only_and_except_are_both_applied() {
+    let content = "<?php\nRoute::resource('photos', PhotoController::class)->only(['index', 'create'])->except(['create']);\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["photos.index".to_string()]);
+}
+
+/// An empty `->only([])` restricts to nothing, which is not the same as
+/// never having called it.
+#[test]
+fn an_empty_only_registers_no_routes() {
+    let content = "<?php\nRoute::resource('photos', PhotoController::class)->only([]);\n";
+    assert!(routes_of(content).is_empty());
+}
+
+/// `apiResource()` is an implicit `only` of the five API methods, so an
+/// explicit `->only()` replaces it and can bring `create` back.
+#[test]
+fn an_explicit_only_replaces_the_api_resource_restriction() {
+    let content =
+        "<?php\nRoute::apiResource('photos', PhotoController::class)->only(['create']);\n";
+    assert_eq!(uri_of(content, "photos.create"), "photos/create");
+
+    // `->except()` narrows the API set instead of replacing it.
+    let except = "<?php\nRoute::apiResource('photos', PhotoController::class)->except(['show']);\n";
+    let names: Vec<String> = routes_of(except).into_iter().map(|r| r.name).collect();
+    assert!(!names.contains(&"photos.create".to_string()), "{names:?}");
+    assert!(!names.contains(&"photos.show".to_string()), "{names:?}");
+    assert!(names.contains(&"photos.index".to_string()), "{names:?}");
+}
+
+/// `->shallow(false)` turns shallow routing back off.
+#[test]
+fn shallow_reads_its_argument() {
+    let off =
+        "<?php\nRoute::resource('photos.comments', CommentController::class)->shallow(false);\n";
+    assert_eq!(
+        uri_of(off, "photos.comments.show"),
+        "photos/{photo}/comments/{comment}"
+    );
+
+    let on = "<?php\nRoute::resource('photos.comments', CommentController::class)->shallow();\n";
+    assert_eq!(uri_of(on, "comments.show"), "comments/{comment}");
+}
+
+/// `->parameters()` replaces the whole map and `->parameter()` appends to
+/// it, so whichever came last on the chain is the one that applies.
+#[test]
+fn the_last_parameter_override_for_a_segment_wins() {
+    let content = "<?php\nRoute::resource('photos', PhotoController::class)->parameters(['photos' => 'grid'])->parameter('photos', 'other');\n";
+    assert_eq!(uri_of(content, "photos.show"), "photos/{other}");
+}
+
+/// Laravel deletes the last segment's wildcard from the nested URI without
+/// anchoring the deletion, so segments that singularize alike collapse.
+#[test]
+fn a_repeated_wildcard_collapses_the_nested_uri() {
+    let content = "<?php\nRoute::resource('company.companies', CompanyController::class);\n";
+    assert_eq!(
+        uri_of(content, "company.companies.show"),
+        "company/companies/{company}"
     );
 }
 
@@ -316,4 +427,17 @@ fn parameterless_uri_yields_no_parameters() {
     assert!(route_uri_parameters("admin/users").is_empty());
     // Unterminated braces must not loop or panic.
     assert!(route_uri_parameters("users/{user").is_empty());
+}
+
+/// `RouteRegistrar::group()` returns the registrar, so a `->group()` and a
+/// `->resource()` can share one chain.  The resource must not swallow the
+/// group's body, or its routes vanish from completion and every `route()`
+/// call naming one is reported as unknown.
+#[test]
+fn a_group_sharing_the_resource_chain_still_registers_its_routes() {
+    let content = "<?php\nRoute::prefix('admin')->group(function () {\n    Route::get('/dashboard', 'index')->name('dashboard');\n})->resource('photos', PhotoController::class);\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert!(names.contains(&"dashboard".to_string()), "{names:?}");
+    assert!(names.contains(&"photos.show".to_string()), "{names:?}");
+    assert_eq!(uri_of(content, "dashboard"), "admin/dashboard");
 }

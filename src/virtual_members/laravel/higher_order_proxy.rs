@@ -156,15 +156,18 @@ fn literal_text(ty: &PhpType) -> Option<&str> {
 /// How a proxied collection method's result depends on the member the
 /// closure accesses.
 ///
-/// Only four of the thirty-odd proxyable methods actually vary with the
-/// member; the rest produce one type for the whole proxy, which is built
-/// once when the context is created rather than once per grafted member.
+/// Only a handful of the thirty-odd proxyable methods actually vary with
+/// the member; the rest produce one type for the whole proxy, which is
+/// built once when the context is created rather than once per grafted
+/// member.
 enum ProxiedResult {
     /// The same type whichever member is accessed — `filter` returns the
     /// collection, `contains` a `bool`, `first` a nullable item.
     Fixed(PhpType),
-    /// The member's own type (`sum`, `min`, `max`).
-    Member,
+    /// The total of the member (`sum`).
+    Summed,
+    /// The member, or `null` for an empty collection (`min`, `max`).
+    Extremum,
     /// A collection of the member (`map`).
     Mapped,
     /// A collection of the member's elements (`flatMap`).
@@ -237,11 +240,15 @@ pub(crate) fn inject_higher_order_proxy_members(
         .enumerate()
         .map(|(i, p)| (p.name, i))
         .collect();
+    // Static methods are indexed too, so a grafted member *replaces* one
+    // rather than pushing a second entry under the same name.  The proxy
+    // picks up `Enumerable`'s statics (`make`, `wrap`, `empty`, …) through
+    // its `@mixin`, and a value type with an instance method of that name
+    // would otherwise leave the class holding both.
     let mut method_slots: AtomMap<usize> = result
         .methods
         .iter()
         .enumerate()
-        .filter(|(_, m)| !m.is_static)
         .map(|(i, m)| (m.name, i))
         .collect();
 
@@ -367,7 +374,8 @@ impl<'a> ProxyContext<'a> {
     fn result_type(&self, member: Option<&PhpType>) -> PhpType {
         match &self.result {
             ProxiedResult::Fixed(ty) => ty.clone(),
-            ProxiedResult::Member => member.cloned().unwrap_or_else(PhpType::mixed),
+            ProxiedResult::Summed => summed_type(member),
+            ProxiedResult::Extremum => member.cloned().unwrap_or_else(PhpType::mixed).or_null(),
             ProxiedResult::Mapped => {
                 let mapped = member.cloned().unwrap_or_else(PhpType::mixed);
                 PhpType::generic_atom(
@@ -404,9 +412,11 @@ impl<'a> ProxyContext<'a> {
 /// Classify a proxyable collection method, building the result type up
 /// front for every method whose result does not depend on the member.
 ///
-/// Mirrors the return annotations the framework puts on the proxied methods
-/// themselves: `static` for the filtering family, `bool` for the predicates,
-/// the callback's own type for `sum` / `min` / `max`.
+/// Follows what each method does at runtime: `static` for the filtering
+/// family, `bool` for the predicates, a number for the aggregates.  The
+/// framework annotates the aggregates `mixed`, so there is no annotation to
+/// mirror for those — the types here are derived from the reductions the
+/// methods actually perform.
 fn plan_result(method: &str, key: &PhpType, value: &PhpType, collection: Atom) -> ProxiedResult {
     let same_collection = || PhpType::generic_atom(collection, vec![key.clone(), value.clone()]);
 
@@ -444,11 +454,38 @@ fn plan_result(method: &str, key: &PhpType, value: &PhpType, collection: Atom) -
             PhpType::union(vec![PhpType::int(), PhpType::float(), PhpType::null()])
         }
         "percentage" => PhpType::float().or_null(),
-        "sum" | "max" | "min" => return ProxiedResult::Member,
+        "sum" => return ProxiedResult::Summed,
+        // `reject(null)->reduce(…)` with no initial value, so an empty
+        // collection reduces to `null` however non-nullable the member is.
+        "max" | "min" => return ProxiedResult::Extremum,
 
         _ => PhpType::mixed(),
     };
     ProxiedResult::Fixed(fixed)
+}
+
+/// The type `sum` produces over members of type `member`.
+///
+/// `sum` seeds its reduction with `0` and adds each member to it, so it
+/// never yields `null` however nullable the member is, and a member PHP
+/// cannot add as one specific numeric type still comes back as a number.
+fn summed_type(member: Option<&PhpType>) -> PhpType {
+    let Some(member) = member else {
+        return numeric();
+    };
+    let non_null = member.non_null_type();
+    let summed = non_null.as_ref().unwrap_or(member);
+    if summed.is_int() || summed.is_float() {
+        summed.clone()
+    } else {
+        numeric()
+    }
+}
+
+/// `int|float`, what PHP's `+` yields for operands that are not already one
+/// specific numeric type.
+fn numeric() -> PhpType {
+    PhpType::union(vec![PhpType::int(), PhpType::float()])
 }
 
 fn is_eloquent_model_type(
