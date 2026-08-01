@@ -106,6 +106,7 @@ impl Backend {
                 &vendor_dir,
                 &HashSet::new(),
                 &explicit_deps,
+                &self.index_filters(),
                 None,
             );
             // Package roots came out of the same `installed.json` parse
@@ -514,6 +515,7 @@ impl Backend {
                         return classmap_scanner::scan_workspace_fallback_full(
                             project_root,
                             &skip_dirs,
+                            &self.index_filters(),
                             progress,
                         );
                     }
@@ -541,12 +543,14 @@ impl Backend {
         if let Some(p) = progress {
             p.begin_phase(0.0, 0.2, "Scanning project files");
         }
+        let filters = self.index_filters();
         let vendor_dir_paths = vec![project_root.join(vendor_dir)];
         let classmap = classmap_scanner::scan_psr4_directories_with_skip(
             &psr4_dirs,
             &classmap_dirs,
             &vendor_dir_paths,
             skip_paths,
+            &filters,
             progress,
         );
 
@@ -560,6 +564,7 @@ impl Backend {
             vendor_dir,
             skip_paths,
             &explicit_deps,
+            &filters,
             progress,
         );
 

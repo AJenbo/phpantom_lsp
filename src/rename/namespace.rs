@@ -90,8 +90,11 @@ impl Backend {
             }
 
             if let Some(root) = workspace_root {
-                for path in crate::references::collect_php_files_gitignore(&root, &vendor_dir_paths)
-                {
+                for path in crate::references::collect_php_files_gitignore(
+                    &root,
+                    &vendor_dir_paths,
+                    &self.index_filters(),
+                ) {
                     if let Ok(uri) = Url::from_file_path(&path) {
                         uris.insert(uri.to_string());
                     }

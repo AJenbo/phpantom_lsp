@@ -1932,10 +1932,34 @@ impl Backend {
 
     /// Replace the current configuration.
     ///
-    /// Used by integration tests to enable opt-in diagnostics like
-    /// `unresolved-member-access` without needing a `.phpantom.toml` file.
+    /// Used when (re)loading `.phpantom.toml` and by integration tests
+    /// to enable opt-in diagnostics like `unresolved-member-access`
+    /// without needing a `.phpantom.toml` file. Resets the compiled
+    /// `[indexing]` filters so the next scan sees the new settings.
     pub fn set_config(&self, config: config::Config) {
         *self.workspace.config.lock() = config;
+        *self.workspace.index_filters.write() = None;
+    }
+
+    /// Return the compiled `[indexing]` exclude globs and extra PHP
+    /// extensions, building them from the current config on first use.
+    ///
+    /// The compiled filters are cached until [`set_config`](Self::set_config)
+    /// replaces the configuration, so glob compilation never runs on a
+    /// per-file path.
+    pub(crate) fn index_filters(&self) -> Arc<classmap_scanner::IndexFilters> {
+        if let Some(filters) = self.workspace.index_filters.read().as_ref() {
+            return Arc::clone(filters);
+        }
+        let root = self.workspace.workspace_root.read().clone();
+        let indexing = self.config().indexing;
+        let compiled = Arc::new(classmap_scanner::IndexFilters::compile(
+            root.as_deref(),
+            indexing.exclude(),
+            indexing.extensions(),
+        ));
+        *self.workspace.index_filters.write() = Some(Arc::clone(&compiled));
+        compiled
     }
 
     /// Record whether the client handles `window/showDocument`.

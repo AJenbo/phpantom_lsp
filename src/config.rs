@@ -508,11 +508,33 @@ pub struct IndexingConfig {
     ///   if present, still resolves on demand, but never falls back to
     ///   self-scan.
     pub strategy: Option<IndexingStrategy>,
+    /// Paths the workspace scanners must skip, in gitignore syntax
+    /// relative to the workspace root: a bare name matches at any
+    /// depth, a pattern containing `/` anchors to the root, a trailing
+    /// `/` restricts to directories, and a leading `!` re-includes.
+    ///
+    /// Excludes apply to background discovery only; files the editor
+    /// opens are always served.
+    pub exclude: Option<Vec<String>>,
+    /// Extra file extensions (without the dot) treated as PHP source
+    /// during workspace discovery, e.g. `["module", "inc", "theme"]`
+    /// for Drupal. `.php` is always included. Drupal projects get the
+    /// Drupal extensions inside the detected web root automatically;
+    /// this setting extends discovery elsewhere.
+    pub extensions: Option<Vec<String>>,
 }
 
 impl IndexingConfig {
     pub fn strategy(&self) -> IndexingStrategy {
         self.strategy.unwrap_or_default()
+    }
+
+    pub fn exclude(&self) -> &[String] {
+        self.exclude.as_deref().unwrap_or_default()
+    }
+
+    pub fn extensions(&self) -> &[String] {
+        self.extensions.as_deref().unwrap_or_default()
     }
 }
 
@@ -1121,6 +1143,8 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 
 [indexing]
 strategy = "self"
+exclude = ["generated", "web/sites/default/files"]
+extensions = ["module", "inc"]
 
 [semantic_tokens]
 mode = "full"
@@ -1164,6 +1188,17 @@ analyze-timeout = 45000
             Some("deprecated_usage")
         );
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+        assert_eq!(
+            config.indexing.exclude(),
+            &[
+                "generated".to_string(),
+                "web/sites/default/files".to_string()
+            ]
+        );
+        assert_eq!(
+            config.indexing.extensions(),
+            &["module".to_string(), "inc".to_string()]
+        );
         assert_eq!(config.semantic_tokens.mode, Some(SemanticTokensMode::Full));
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(

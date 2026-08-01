@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`analyze` takes more than one path.** `phpantom_lsp analyze app/ lib/Helper.php tests/` scans the union of everything named, mixing directories and single files freely, so a pre-commit hook or a CI step can hand it exactly the paths that changed instead of running the whole project or invoking the binary once per path. Overlapping arguments are reported once, and a path that does not exist still stops the run with exit code 2. Naming no path scans the entire project, as before.
+- **Indexing excludes and extra PHP extensions.** `.phpantom.toml` now supports `[indexing] exclude` — gitignore-style patterns relative to the workspace root that background discovery skips (generated code, test fixtures, upload directories) — and `[indexing] extensions`, extra file extensions treated as PHP source (e.g. `["module", "inc", "theme"]` for Drupal), with matching file watchers so edits to those files refresh the index. Excludes apply to every workspace scanner, including the Drupal web-root scan; files opened in the editor are always served regardless. Contributed by @syntlyx.
 
 ### Changed
 

@@ -342,7 +342,7 @@ impl LanguageServer for Backend {
                 self.workspace.global_config_path.as_deref(),
             ) {
                 Ok(cfg) => {
-                    *self.workspace.config.lock() = cfg;
+                    self.set_config(cfg);
                 }
                 Err(e) => {
                     self.log(
@@ -559,7 +559,18 @@ impl LanguageServer for Backend {
         // Register file watchers for staleness detection.  The client
         // will notify us when PHP files or composer files change on disk
         // (even outside the editor), so we can refresh our indices.
-        let mut watchers = vec![
+        // `[indexing] extensions` entries get their own watchers so files
+        // like Drupal's `.module` refresh the index the way `.php` does.
+        let index_filters = self.index_filters();
+        let mut watchers: Vec<FileSystemWatcher> = index_filters
+            .extra_extensions()
+            .iter()
+            .map(|ext| FileSystemWatcher {
+                glob_pattern: GlobPattern::String(format!("**/*.{ext}")),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            })
+            .collect();
+        watchers.extend([
             FileSystemWatcher {
                 glob_pattern: GlobPattern::String("**/*.php".to_string()),
                 kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
@@ -576,7 +587,7 @@ impl LanguageServer for Backend {
                 glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
                 kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
             },
-        ];
+        ]);
         if self.resolved_class_cache.read().is_laravel() {
             watchers.extend([
                 FileSystemWatcher {

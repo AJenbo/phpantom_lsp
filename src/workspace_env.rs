@@ -52,6 +52,10 @@ pub(crate) struct WorkspaceEnv {
     /// so a `.phpantom.toml` in the developer's own config directory
     /// cannot change what the suite asserts.
     pub(crate) global_config_path: Option<PathBuf>,
+    /// Compiled `[indexing]` exclude globs and extra PHP extensions,
+    /// built lazily from `config` and reset when the config changes.
+    /// Shared across clones so a config reload invalidates everywhere.
+    pub(crate) index_filters: Arc<RwLock<Option<Arc<crate::classmap_scanner::IndexFilters>>>>,
 }
 
 impl WorkspaceEnv {
@@ -76,6 +80,7 @@ impl WorkspaceEnv {
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
             global_config_path,
+            index_filters: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -91,6 +96,7 @@ impl Clone for WorkspaceEnv {
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),
             global_config_path: self.global_config_path.clone(),
+            index_filters: Arc::clone(&self.index_filters),
         }
     }
 }

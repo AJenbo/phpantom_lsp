@@ -114,8 +114,10 @@ impl Backend {
                 if let Some(p) = progress {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
-                let mut scan =
-                    classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+                let filters = self.index_filters();
+                let mut scan = classmap_scanner::scan_workspace_fallback_full(
+                    root, &skip_dirs, &filters, progress,
+                );
 
                 // Merge vendor packages (excluded from the workspace
                 // walk above, scanned separately here).
@@ -127,6 +129,7 @@ impl Backend {
                     &vendor_dir,
                     &HashSet::new(),
                     &explicit_deps,
+                    &filters,
                     progress,
                 );
                 let package_roots = std::mem::take(&mut vendor_scan.package_roots);
@@ -239,8 +242,11 @@ impl Backend {
             if let Some(p) = progress {
                 p.set_scope(70, 74, "Scanning Drupal directories");
             }
-            let drupal_result =
-                classmap_scanner::scan_drupal_directories(&drupal_web_root, progress);
+            let drupal_result = classmap_scanner::scan_drupal_directories(
+                &drupal_web_root,
+                &self.index_filters(),
+                progress,
+            );
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
@@ -484,7 +490,12 @@ impl Backend {
             p.set_scope(80, 85, "Scanning loose PHP files");
         }
 
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+        let scan = classmap_scanner::scan_workspace_fallback_full(
+            root,
+            &skip_dirs,
+            &self.index_filters(),
+            progress,
+        );
         self.populate_autoload_indices(&scan);
         {
             let mut idx = self.symbols.fqn_uri_index.write();
@@ -534,7 +545,12 @@ impl Backend {
         self.resolved_class_cache.write().set_laravel(false);
 
         let skip_dirs = HashSet::new();
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
+        let scan = classmap_scanner::scan_workspace_fallback_full(
+            root,
+            &skip_dirs,
+            &self.index_filters(),
+            progress,
+        );
         self.populate_autoload_indices(&scan);
 
         let symbol_count = scan.classmap.len();

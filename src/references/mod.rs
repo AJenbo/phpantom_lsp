@@ -314,11 +314,13 @@ pub(super) fn member_candidate_keys(
 pub(crate) fn collect_php_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
 ) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
     let mut result = Vec::new();
     let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
+    let filter_excludes = std::sync::Arc::clone(filters);
 
     let walker = WalkBuilder::new(root)
         // Respect .gitignore, .git/info/exclude, global gitignore
@@ -331,21 +333,20 @@ pub(crate) fn collect_php_files_gitignore(
         .parents(true)
         // Also respect .ignore files (ripgrep convention)
         .ignore(true)
-        // Always skip vendor directories, even if not gitignored
+        // Always skip vendor directories (even if not gitignored) and
+        // `[indexing] exclude` matches
         .filter_entry(move |entry| {
-            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                let path = entry.path();
-                if vendor_paths_owned.iter().any(|vp| vp == path) {
-                    return false;
-                }
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir && vendor_paths_owned.iter().any(|vp| vp == entry.path()) {
+                return false;
             }
-            true
+            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
         .build();
 
     for entry in walker.flatten() {
         let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
+        if path.is_file() && filters.is_php_file(path) {
             result.push(path.to_path_buf());
         }
     }
