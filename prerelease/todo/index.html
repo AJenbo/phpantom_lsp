@@ -1310,12 +1310,6 @@ within the same impact tier.</p>
 </thead>
 <tbody>
 <tr>
-<td>L21</td>
-<td><a href="../todo/laravel/#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision">Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)</a></td>
-<td>Medium</td>
-<td>High</td>
-</tr>
-<tr>
 <td>L18</td>
 <td><a href="../todo/laravel/"><code>Macroable::mixin()</code> registrations</a></td>
 <td>Low</td>
@@ -1344,6 +1338,12 @@ within the same impact tier.</p>
 <td><a href="../todo/actions/#a39-convert-to-string-interpolation">Convert to string interpolation</a> (<code>'Hello ' . $name</code> → <code>"Hello $name"</code>)</td>
 <td>Low</td>
 <td>Low</td>
+</tr>
+<tr>
+<td>B2</td>
+<td><a href="../todo/bugs/#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block">Property assigned inside a guarded <code>if</code> keeps its declared type</a></td>
+<td>Medium</td>
+<td>Medium</td>
 </tr>
 </tbody>
 </table>
@@ -2101,10 +2101,28 @@ unlikely to move the needle for most users.</p>
 <td>Low-Medium</td>
 </tr>
 <tr>
+<td>L41</td>
+<td><a href="../todo/laravel/#l41-conditional-return-types-on-url-and-its-sibling-helpers">Conditional return types on <code>url()</code> and its sibling helpers</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>L42</td>
+<td><a href="../todo/laravel/#l42-keyby-and-friends-do-not-rebind-a-collections-key-template"><code>keyBy()</code> and friends do not rebind a collection's key template</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
 <td>L17</td>
 <td><a href="../todo/laravel/#l17-additional-string-contexts-without-booting">Additional string contexts without booting</a> (middleware, assets, validation, Inertia)</td>
 <td>Medium</td>
 <td>Medium</td>
+</tr>
+<tr>
+<td>L43</td>
+<td><a href="../todo/laravel/#l43-thismock-should-return-an-intersection-with-the-mocked-class"><code>$this-&gt;mock()</code> should return an intersection with the mocked class</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
 </tr>
 <tr>
 <td>L36</td>

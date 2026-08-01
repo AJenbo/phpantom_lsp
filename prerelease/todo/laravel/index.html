@@ -1444,10 +1444,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision" class="md-nav__link">
+  <a href="#l41-conditional-return-types-on-url-and-its-sibling-helpers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L21. Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)
+        L41. Conditional return types on <code>url()</code> and its sibling helpers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l42-keyby-and-friends-do-not-rebind-a-collections-key-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L42. <code>keyBy()</code> and friends do not rebind a collection's key template
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l43-this-mock-should-return-an-intersection-with-the-mocked-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L43. <code>$this-&gt;mock()</code> should return an intersection with the mocked class
       </span>
     </span>
   </a>
@@ -2170,10 +2192,32 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision" class="md-nav__link">
+  <a href="#l41-conditional-return-types-on-url-and-its-sibling-helpers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L21. Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)
+        L41. Conditional return types on <code>url()</code> and its sibling helpers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l42-keyby-and-friends-do-not-rebind-a-collections-key-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L42. <code>keyBy()</code> and friends do not rebind a collection's key template
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l43-this-mock-should-return-an-intersection-with-the-mocked-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L43. <code>$this-&gt;mock()</code> should return an intersection with the mocked class
       </span>
     </span>
   </a>
@@ -3091,52 +3135,58 @@ and unused translation keys. Surface as an opt-in workspace report
 always-on diagnostics — dynamic construction (<code>view("emails.$type")</code>)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.</p>
-<h4 id="l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision">L21. Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)<a class="headerlink" href="#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium (a whole class of genuine mismatches goes unreported)
-· Effort: High (blocked on two precision gaps below)</strong></p>
-<p>The argument/return compatibility check has a deliberate "reverse
-direction MAYBE" escape hatch: when the resolved value is a <em>broader</em>
-supertype and the declared type is a <em>narrower</em> subtype (a downcast),
-we accept it rather than flag a mismatch. This is intentionally
-over-generous. It hides real errors such as returning a base type
-where a specific subclass is declared.</p>
-<p>We would like to drop this escape hatch to catch those genuine
-mismatches. We cannot yet, because doing so surfaces ~250 diagnostics
-across real Laravel codebases. These are <em>not</em> classic false
-positives: the code is correct against the model Larastan presents,
-and Larastan hacks around Carbon and Eloquent rather than modelling
-them precisely. Because the entire ecosystem (and therefore
-application code) is written against that looser model, tightening the
-check drowns real projects in mismatches that only PHPantom would
-report. PHPStan/Larastan report zero on the same lines.</p>
-<p>Two resolver-precision gaps produce the bulk of them; both must be
-closed before the escape hatch can go:</p>
-<ol>
-<li>
-<p><strong>Eloquent custom collection classes.</strong> A relation or query typed
-   as the base <code>Illuminate\Database\Eloquent\Collection&lt;int, Model&gt;</code>
-   where the method declares a custom <code>ModelCollection</code> subclass. We
-   do not yet resolve a model's <code>$collectionClass</code> / <code>newCollection()</code>
-   override, so the base type leaks and looks like a downcast. This is
-   the largest chunk and is not Carbon-specific.</p>
-</li>
-<li>
-<p><strong>Carbon parent/child typing.</strong> A value typed <code>Carbon\Carbon</code> where
-   <code>Illuminate\Support\Carbon</code> is declared (for example a datetime-cast
-   property chained through a fluent method). The runtime value is the
-   concrete Laravel subclass, but our cast/property typing lands on the
-   parent. Related to the <code>now()</code>/<code>today()</code> handling already in place,
-   which maps those helpers to <code>Illuminate\Support\Carbon</code>.</p>
-</li>
-</ol>
-<p>Note the <code>now()</code>/<code>today()</code> mapping itself is part of the same looser
-model: it is not strictly sound (the helpers' declared return type is
-the interface) but mirrors Larastan so real code does not drown in
-mismatches. Any tightening here has to preserve that.</p>
-<p>Where to look: the reverse-direction hierarchy block in the argument
-type compatibility layer, and the two resolution paths named above.
-Reproducible in real projects (a production Laravel codebase surfaces
-all ~250 when the escape hatch is removed).</p>
+<h4 id="l41-conditional-return-types-on-url-and-its-sibling-helpers">L41. Conditional return types on <code>url()</code> and its sibling helpers<a class="headerlink" href="#l41-conditional-return-types-on-url-and-its-sibling-helpers" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><code>url()</code> returns the generator or a string depending on whether it got a
+path:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
+</code></pre></div>
+<p>We resolve the call to the contract regardless of the argument, so a
+string result is typed as <code>UrlGenerator</code>. Real-world fallout is
+<code>assertSame(url('/login'), $response-&gt;getTargetUrl())</code> reporting a
+mismatch (four sites in one sample project), though the diagnostic only
+fires there because of B4.</p>
+<p>This is the same shape as the <code>view()</code> helper, which is now resolved
+precisely. <code>route()</code>, <code>secure_url()</code>, <code>action()</code>, and <code>redirect()</code> are
+worth auditing in the same pass, as is <code>app()</code> (<code>($abstract is null ?
+Application : mixed)</code>).</p>
+<p><strong>Where to look:</strong> the helper interception next to <code>view()</code> in
+<code>type_engine/call_resolution/return_types.rs</code> and the matching branch in
+<code>type_engine/variable/rhs_resolution/calls.rs</code>.</p>
+<h4 id="l42-keyby-and-friends-do-not-rebind-a-collections-key-template">L42. <code>keyBy()</code> and friends do not rebind a collection's key template<a class="headerlink" href="#l42-keyby-and-friends-do-not-rebind-a-collections-key-template" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><code>keyBy()</code> re-keys a collection, but we keep the original <code>TKey</code>, so
+looking the result up by its new key is reported as a mismatch:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$byMarket = ProductPrice::where(...)-&gt;get()</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">$byMarket-&gt;get($someString);</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">// false positive: Argument 1 ($key) expects int|null, got string</span>
+</code></pre></div>
+<p>The callback's return type (or the string column name in the
+<code>keyBy('id')</code> form) is the new <code>TKey</code>. <code>mapWithKeys()</code>, <code>groupBy()</code>,
+<code>flip()</code>, and <code>pluck()</code> with a key argument reshape keys the same way
+and should be checked together.</p>
+<p><strong>Where to look:</strong> the collection method modelling in
+<code>virtual_members/laravel/</code>, alongside the custom-collection rewrite.</p>
+<h4 id="l43-this-mock-should-return-an-intersection-with-the-mocked-class">L43. <code>$this-&gt;mock()</code> should return an intersection with the mocked class<a class="headerlink" href="#l43-this-mock-should-return-an-intersection-with-the-mocked-class" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p>Laravel's <code>InteractsWithContainer::mock()</code> is typed as returning
+<code>MockInterface</code>, but it always returns a mock <em>of</em> the given class, and
+test helpers routinely declare the intersection:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">private function mockHelloRetailClient(): Client&amp;MockInterface</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    $mock = $this-&gt;mock(Client::class);</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    // ...</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    return $mock;  // false positive: MockInterface is not Client&amp;MockInterface</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>Typing <code>mock()</code>/<code>partialMock()</code>/<code>spy()</code> as <code>T&amp;MockInterface</code> for a
+<code>class-string&lt;T&gt;</code> argument fixes the return, and also makes completion
+on the mock offer the mocked class's own members.</p>
+<p><strong>Where to look:</strong> the Laravel method return-type modelling in
+<code>virtual_members/laravel/</code>.</p>
 
 
 

@@ -838,6 +838,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. A property assigned inside a guarded <code>if</code> keeps its declared type after the block
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1316,6 +1327,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. A property assigned inside a guarded <code>if</code> keeps its declared type after the block
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1373,6 +1395,38 @@ can produce a false-positive unknown member.</p>
 <code>build_laravel_macro_index</code> from the Laravel block in <code>analyse/run.rs</code>,
 next to <code>build_laravel_date_class</code>, <code>build_provider_resources</code>, and
 <code>build_laravel_morph_map_index</code>.</p>
+<h4 id="b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block">B2. A property assigned inside a guarded <code>if</code> keeps its declared type after the block<a class="headerlink" href="#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p>The lazy-initialisation idiom leaves a property at its declared type
+once the <code>if</code> closes, so returning it from a method with a narrower
+return type is reported as a mismatch:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">protected ?AbstractType $instance = null;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">public function getType(): ConcreteType</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">{</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    if (!$this-&gt;instance instanceof ConcreteType) {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        $this-&gt;instance = $this-&gt;context-&gt;makeConcrete();  // : ConcreteType</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    return $this-&gt;instance;   // false positive: ?AbstractType</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>Both paths out of the <code>if</code> give <code>ConcreteType</code>: the implicit else is the
+negation of the condition, and the then-branch assigns one. The two need
+to be merged the way the forward walker already merges branch outcomes
+for local variables. Property keys are seeded into the walker's scope for
+<code>instanceof</code> narrowing (<code>seed_property_keys_into_scope</code>), so the missing
+piece is recording a property <em>assignment</em> into that scope and joining
+the branches at the end of the block, not new machinery.</p>
+<p>Surfaced by removing the supertype-where-subtype escape hatch from the
+argument/return compatibility layer, which is what made the stale type
+visible. Reproducible in an open-source project: PDepend's
+<code>ASTClassReference::getType()</code> and <code>ASTTraitReference::getType()</code> are the
+two remaining diagnostics <code>analyze</code> reports there, and PHPStan at level
+max reports neither.</p>
+<p><strong>Where to look:</strong> <code>type_engine/variable/forward_walk/</code> (branch merging
+and <code>seed_property_keys_into_scope</code>) and
+<code>type_engine/resolver/property_narrowing.rs</code>.</p>
 
 
 
