@@ -1422,17 +1422,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l40-backing-type-for-enum-validation-rules" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L40. Backing type for enum validation rules
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l39-unused-view-and-translation-key-detection" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2163,17 +2152,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L36. Container binding registrations from service providers
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l40-backing-type-for-enum-validation-rules" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L40. Backing type for enum validation rules
       </span>
     </span>
   </a>
@@ -3108,22 +3086,6 @@ unknown names since the set is inherently open.</p>
 binding <code>bind(Gateway::class, StripeGateway::class)</code> does <strong>not</strong>
 retype <code>app(Gateway::class)</code> to the concrete — the contract is the
 interface.</p>
-<h4 id="l40-backing-type-for-enum-validation-rules">L40. Backing type for enum validation rules<a class="headerlink" href="#l40-backing-type-for-enum-validation-rules" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p><code>validated()</code> array shapes type a field from its validation rules, but
-an enum rule (<code>new Enum(Role::class)</code>, <code>Rule::enum(Role::class)</code>)
-currently degrades to <code>mixed</code>: the rule is an object expression, not a
-rule name the token table knows.</p>
-<p>The validated array holds the raw input, not the enum case, so the
-right type is the enum's backing type — <code>string</code> for a string-backed
-enum, <code>int</code> for an int-backed one. Both are recoverable: the class name
-is written in the rule expression, and the backing type is on the
-<code>ClassInfo</code>. A pure (non-backed) enum has no raw scalar form and should
-stay <code>mixed</code>.</p>
-<p>Guessing <code>string</code> for every enum rule is the thing to avoid: an
-int-backed enum would then be typed as a string, which is worse than
-<code>mixed</code> because it can produce a false diagnostic rather than merely
-missing one.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
 <p>The reverse of L14: keys that are <em>declared</em> but never referenced. The
