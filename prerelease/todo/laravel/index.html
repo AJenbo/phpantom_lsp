@@ -1146,6 +1146,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L45. <code>*_count</code> properties are offered on every relationship
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1872,6 +1883,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L45. <code>*_count</code> properties are offered on every relationship
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2555,6 +2577,26 @@ to subsequent code:
 - <code>throw_if(...)</code> / <code>throw_unless(...)</code> → same logic</p>
 <p>This is similar to the existing guard clause narrowing but triggered
 by specific function names rather than <code>if</code> + early return.</p>
+<h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Medium-High</strong></p>
+<p>For each relationship method we synthesize a <code>{snake_name}_count</code>
+property typed <code>int</code>, unconditionally. At runtime the attribute only
+exists when the query that produced the model called <code>withCount()</code> /
+<code>loadCount()</code>, or when the model lists the relation in <code>$withCount</code>.
+So <code>$post-&gt;comments_count</code> completes and hovers cleanly even where it
+is guaranteed to be <code>null</code>, and a user reading the completion list
+cannot tell which of the two <code>comments</code>-derived entries is real.</p>
+<p>The trade-off is deliberate: <code>withCount()</code> is common enough that
+dropping the properties entirely would cost more than it gains, and
+the alternative needs call-site tracking we do not have. Doing this
+properly means threading "which counts were eager-loaded" from the
+builder chain (<code>Post::withCount('comments')-&gt;first()</code>) into the model
+type, which is the same machinery L8 needs for <code>withSum()</code> and
+friends. <code>$withCount</code> on the model is the easy half and could be read
+declaratively like <code>$casts</code> is today.</p>
+<p>Until then the properties stay, so this is a precision gap rather
+than a missing feature. Reported as a follow-up on
+<a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/312">#312</a>.</p>
 <h4 id="l8-withsum-withavg-withmin-withmax-aggregate-properties">L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties<a class="headerlink" href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Medium-High</strong></p>
 <p>Less common than <code>withCount</code>; only affects codebases using aggregate
