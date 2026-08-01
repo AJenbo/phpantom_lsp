@@ -3,7 +3,7 @@
 /// This module resolves the type of the right-hand side of an assignment
 /// (`$var = <expr>`) to zero or more [`ResolvedType`] values.  It handles:
 ///
-///   - Scalar literals: `1` → `int`, `'hello'` → `string`, etc.
+///   - Scalar literals: `1` → `1`, `'hello'` → `'hello'`, etc.
 ///   - Array literals: `[new Foo()]` → `list<Foo>`,
 ///     `['a' => 1]` → `array{a: int}`
 ///   - `new ClassName(…)` → the instantiated class
@@ -20,9 +20,8 @@
 ///
 /// The entry point is [`resolve_rhs_expression`], which dispatches to
 /// specialised helpers based on the AST node kind.
-/// The only caller is
-/// [`check_expression_for_assignment`](super::resolution::check_expression_for_assignment)
-/// in `variable_resolution.rs`.
+/// It is shared by assignment tracking, diagnostics, callback inference,
+/// and other expression consumers that need one canonical result.
 ///
 /// The dispatch logic lives here; specialised resolution is spread
 /// across sibling files:
@@ -43,7 +42,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
@@ -68,6 +67,74 @@ pub(crate) use calls::{
 pub(crate) use instantiation::{
     TemplateBindingMode, classify_template_binding, remap_inherited_ctor_subs, type_contains_name,
 };
+
+/// Apply unary `+` or `-` to an already-resolved numeric type.
+///
+/// Exact literal members remain exact. A broad integer may become a float
+/// when negating `PHP_INT_MIN`, while unary plus keeps the integer domain.
+/// Any non-numeric branch makes the result unknown.
+fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
+    match ty.kind() {
+        TypeKind::Literal(value) => match &**value {
+            LiteralValue::Int(_) => {
+                let value = value.parse_i64()?;
+                let value = if negated { value.checked_neg()? } else { value };
+                Some(PhpType::literal_int(value.to_string()))
+            }
+            LiteralValue::Float(raw) => {
+                let raw = raw.trim();
+                let signed = if negated {
+                    if let Some(rest) = raw.strip_prefix('-') {
+                        rest.to_string()
+                    } else if let Some(rest) = raw.strip_prefix('+') {
+                        format!("-{rest}")
+                    } else {
+                        format!("-{raw}")
+                    }
+                } else {
+                    raw.strip_prefix('+').unwrap_or(raw).to_string()
+                };
+                Some(PhpType::literal_float(signed))
+            }
+            LiteralValue::String(_) => None,
+        },
+        TypeKind::Union(members) => {
+            let mut signed = Vec::with_capacity(members.len());
+            for member in members {
+                let member = apply_numeric_sign(member, negated)?;
+                for alternative in member.union_members() {
+                    if !signed.iter().any(|existing| existing == alternative) {
+                        signed.push(alternative.clone());
+                    }
+                }
+            }
+            match signed.len() {
+                0 => None,
+                1 => signed.into_iter().next(),
+                _ => Some(PhpType::union(signed)),
+            }
+        }
+        // PHP coerces null here, but the exact result depends on runtime
+        // version and diagnostics policy; keep the established conservative
+        // fallback instead of silently discarding nullability.
+        TypeKind::Nullable(_) => None,
+        _ if ty.is_int_subtype() && negated => {
+            Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
+        }
+        _ if ty.is_int_subtype() => Some(PhpType::int()),
+        _ if ty.is_float_subtype() => Some(PhpType::float()),
+        _ if ty.is_named_ci("numeric") || ty.is_named("number") => {
+            Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
+        }
+        _ => None,
+    }
+}
+
+/// Collapse only semantically redundant alternatives after joining control-flow
+/// expression branches. Exact literal-only unions remain untouched.
+fn simplify_branch_results(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
+    ResolvedType::collapse_redundant_runtime_literals(results)
+}
 
 /// Resolve a variable's type for use in RHS expression evaluation.
 ///
@@ -281,14 +348,22 @@ fn resolve_rhs_expression_inner<'b>(
 ) -> Vec<ResolvedType> {
     match expr {
         // ── Scalar literals ─────────────────────────────────────────
-        Expression::Literal(Literal::Integer(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::int())]
+        Expression::Literal(Literal::Integer(integer)) => {
+            let ty = integer
+                .value
+                .map(|value| PhpType::literal_int(value.to_string()))
+                .unwrap_or_else(PhpType::int);
+            vec![ResolvedType::from_type_string(ty)]
         }
-        Expression::Literal(Literal::Float(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::float())]
+        Expression::Literal(Literal::Float(float)) => {
+            vec![ResolvedType::from_type_string(PhpType::literal_float(
+                bytes_to_str(float.raw).to_string(),
+            ))]
         }
-        Expression::Literal(Literal::String(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::string())]
+        Expression::Literal(Literal::String(string)) => {
+            vec![ResolvedType::from_type_string(PhpType::literal_string_raw(
+                bytes_to_str(string.raw).to_string(),
+            ))]
         }
         Expression::Literal(Literal::True(_) | Literal::False(_)) => {
             vec![ResolvedType::from_type_string(PhpType::bool())]
@@ -406,6 +481,27 @@ fn resolve_rhs_expression_inner<'b>(
             result
         }
         Expression::Parenthesized(p) => resolve_rhs_expression(p.expression, ctx),
+        // Unary signs are separate AST nodes rather than part of numeric
+        // literals. Resolve the operand first so parenthesized expressions,
+        // exact variables, and compound literal branches keep their values.
+        Expression::UnaryPrefix(unary)
+            if matches!(
+                unary.operator,
+                mago_syntax::cst::unary::UnaryPrefixOperator::Negation(_)
+                    | mago_syntax::cst::unary::UnaryPrefixOperator::Plus(_)
+            ) =>
+        {
+            use mago_syntax::cst::unary::UnaryPrefixOperator;
+
+            let negated = matches!(unary.operator, UnaryPrefixOperator::Negation(_));
+            let operand = resolve_rhs_expression(unary.operand, ctx);
+            let signed = (!operand.is_empty())
+                .then(|| ResolvedType::types_joined(&operand))
+                .and_then(|ty| apply_numeric_sign(&ty, negated));
+            vec![ResolvedType::from_type_string(signed.unwrap_or_else(
+                || PhpType::union(vec![PhpType::int(), PhpType::float()]),
+            ))]
+        }
         // ── Error-suppression prefix: `@expr` ───────────────────────
         // The `@` operator doesn't change the runtime type of the
         // expression, so resolve straight through to the operand.
@@ -442,7 +538,7 @@ fn resolve_rhs_expression_inner<'b>(
                 let arm_results = resolve_rhs_expression(arm.expression(), effective_ctx);
                 ResolvedType::extend_unique(&mut combined, arm_results);
             }
-            combined
+            simplify_branch_results(combined)
         }
         Expression::Conditional(cond_expr) => {
             let mut combined = Vec::new();
@@ -464,21 +560,22 @@ fn resolve_rhs_expression_inner<'b>(
                 &mut combined,
                 resolve_rhs_expression(cond_expr.r#else, &else_ctx),
             );
-            combined
+            simplify_branch_results(combined)
         }
         Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
             // When the LHS is syntactically non-nullable (e.g. `new Foo()`,
             // a literal, `clone $x`), the RHS is dead code — return only
             // the LHS results.  Otherwise resolve both sides; if the LHS
             // type string is nullable, strip `null` before unioning.
-            let lhs_non_nullable = matches!(
-                binary.lhs,
+            let lhs_non_nullable = match binary.lhs {
+                Expression::Literal(Literal::Null(_)) => false,
                 Expression::Instantiation(_)
-                    | Expression::Literal(_)
-                    | Expression::Array(_)
-                    | Expression::LegacyArray(_)
-                    | Expression::Clone(_)
-            );
+                | Expression::Literal(_)
+                | Expression::Array(_)
+                | Expression::LegacyArray(_)
+                | Expression::Clone(_) => true,
+                _ => false,
+            };
             let lhs_results = resolve_rhs_expression(binary.lhs, ctx);
             if !lhs_results.is_empty() && lhs_non_nullable {
                 lhs_results
@@ -507,7 +604,7 @@ fn resolve_rhs_expression_inner<'b>(
                 // string looks non-nullable, the user wrote `??`
                 // defensively and both branches are valid candidates.
                 ResolvedType::extend_unique(&mut combined, resolve_rhs_expression(binary.rhs, ctx));
-                combined
+                simplify_branch_results(combined)
             } else {
                 // The LHS resolved to nothing typeable (a genuinely
                 // unresolvable expression). At runtime it could be any
@@ -516,7 +613,7 @@ fn resolve_rhs_expression_inner<'b>(
                 // above.
                 let mut combined = vec![ResolvedType::from_type_string(PhpType::mixed())];
                 ResolvedType::extend_unique(&mut combined, resolve_rhs_expression(binary.rhs, ctx));
-                combined
+                simplify_branch_results(combined)
             }
         }
         Expression::Clone(clone_expr) => resolve_rhs_clone(clone_expr, ctx),
@@ -936,5 +1033,59 @@ fn match_type_pattern(
             match_type_pattern(p_inner, c_inner, template_params, template_bounds, subs);
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_sign_distinguishes_number_pseudo_type_from_number_class() {
+        assert_eq!(
+            apply_numeric_sign(&PhpType::named(atom("number")), true),
+            Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
+        );
+        assert_eq!(
+            apply_numeric_sign(&PhpType::named(atom("Number")), true),
+            None
+        );
+    }
+
+    #[test]
+    fn branch_simplification_keeps_nested_mixed_alternatives() {
+        let nested_mixed = PhpType::union(vec![
+            PhpType::mixed(),
+            PhpType::named(atom("CompletionFallback")),
+        ]);
+        let results = vec![
+            ResolvedType::from_type_string(nested_mixed.clone()),
+            ResolvedType::from_type_string(PhpType::literal_string_raw("'tag'")),
+        ];
+
+        let simplified = simplify_branch_results(results);
+        assert_eq!(simplified.len(), 2);
+        assert_eq!(simplified[0].type_string, nested_mixed);
+        assert_eq!(
+            simplified[1].type_string,
+            PhpType::literal_string_raw("'tag'")
+        );
+    }
+
+    #[test]
+    fn branch_simplification_preserves_class_metadata_while_absorbing_scalar_literal() {
+        let class = crate::test_fixtures::make_class("Example");
+        let results = vec![
+            ResolvedType::from_class(class),
+            ResolvedType::from_type_string(PhpType::literal_string_raw("'fixed'")),
+            ResolvedType::from_type_string(PhpType::string()),
+        ];
+
+        let simplified = simplify_branch_results(results);
+        assert_eq!(simplified.len(), 2);
+        assert!(simplified.iter().any(|result| result.class_info.is_some()));
+        assert!(simplified.iter().any(|result| {
+            result.class_info.is_none() && result.type_string == PhpType::string()
+        }));
     }
 }

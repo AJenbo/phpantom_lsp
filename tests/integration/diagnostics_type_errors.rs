@@ -86,8 +86,8 @@ function test(): void {
     let msgs = type_error_messages(&diags);
     assert!(
         msgs.iter()
-            .any(|m| m.contains("int") && m.contains("string")),
-        "Expected message mentioning int and string, got: {msgs:?}"
+            .any(|m| m.contains("int") && m.contains("\"hello\"")),
+        "Expected message mentioning int and the actual string literal, got: {msgs:?}"
     );
 }
 
@@ -993,8 +993,8 @@ function test(): void {
         "Message should mention expected type, got: {msg}"
     );
     assert!(
-        msg.contains("string"),
-        "Message should mention actual type, got: {msg}"
+        msg.contains("\"hello\""),
+        "Message should mention the actual literal type, got: {msg}"
     );
 }
 
@@ -4866,6 +4866,31 @@ function test(bool $flag): void {
 }
 
 #[test]
+fn canonical_resolver_covers_compound_and_signed_literal_expressions() {
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function orderBy(string $direction): void {}
+/** @param -3 $value */
+function takesNegative(int $value): void {}
+
+function test(bool $flag): void {
+    orderBy(match ($flag) {
+        true => 'asc',
+        false => 'desc',
+    });
+    orderBy('asc' ?? 'desc');
+    orderBy(($flag ? 'asc' : 'desc'));
+    takesNegative(-3);
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert!(
+        msgs.is_empty(),
+        "Canonical expression resolution should cover match, coalesce, parentheses, and signed literals: {msgs:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_int_literal_matching_literal_type() {
     let php = r#"<?php
 /** @param 1|2|3 $mode */
@@ -4938,7 +4963,7 @@ function test(): void {
 #[test]
 fn no_false_positive_for_non_decimal_int_literals_matching_int_param() {
     // Hex, binary, octal, and underscore-separated integer literals are
-    // narrowed to their parsed value, so they still satisfy an `int`
+    // resolved to their canonical parsed value, so they still satisfy an `int`
     // parameter (their raw source text would not parse back into a number).
     let php = r#"<?php
 function takes_int(int $x): void {}

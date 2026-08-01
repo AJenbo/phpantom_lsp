@@ -736,9 +736,9 @@ fn text_condition_result(condition: &PhpType, form: &ArgForm) -> Option<bool> {
 fn type_category(t: &PhpType) -> Option<&'static str> {
     if t.is_string_subtype() {
         Some("string")
-    } else if t.is_int() {
+    } else if t.is_int_subtype() {
         Some("int")
-    } else if t.is_float() {
+    } else if t.is_float_subtype() {
         Some("float")
     } else if t.is_bool() {
         Some("bool")
@@ -1876,6 +1876,34 @@ mod tests {
         )
         .map(|t| t.to_string());
         assert_eq!(resolved.as_deref(), Some("string"));
+    }
+
+    #[test]
+    fn scalar_conditions_classify_resolved_int_and_float_literals() {
+        let params = [param("$value")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+
+        for (condition_type, literal, expected) in [
+            ("int", PhpType::literal_int("1"), "IntBranch"),
+            ("float", PhpType::literal_float("1.5"), "FloatBranch"),
+        ] {
+            let cond = PhpType::parse(&format!(
+                "($value is {condition_type} ? {expected} : ElseBranch)"
+            ));
+            let resolver = |_: &str| Some(literal.clone());
+            let tpl = TemplateContext {
+                defaults: None,
+                params: &[],
+                arg_type_resolver: Some(&resolver),
+            };
+            let resolved = resolve_conditional_with_text_args_and_defaults(
+                &cond, &params, "$value", None, None, loader, &tpl,
+            );
+            assert_eq!(
+                resolved.as_ref().map(ToString::to_string).as_deref(),
+                Some(expected)
+            );
+        }
     }
 
     /// When the argument's type cannot be resolved (e.g. a magic property

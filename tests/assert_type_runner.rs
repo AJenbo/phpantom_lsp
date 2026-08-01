@@ -18,10 +18,14 @@
 //! To skip an assertion that PHPantom cannot yet handle, add `// SKIP`
 //! on the same line as the `assertType()` call.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Once;
 
-use phpantom_lsp::Backend;
+use phpantom_lsp::{
+    Backend,
+    php_type::{LiteralValue, PhpType, TypeKind},
+};
 use tower_lsp::lsp_types::*;
 
 static UNIT_ENUM_STUB: &str = r#"<?php
@@ -696,6 +700,33 @@ fn normalize_type(ty: &str) -> String {
 /// Compare expected (PHPStan) type with actual (PHPantom hover) type.
 /// Returns true if they match after normalization.
 fn types_match(expected: &str, actual: &str) -> bool {
+    if types_match_without_literal_precision(expected, actual) {
+        return true;
+    }
+
+    // The imported PHPStan/Psalm corpora sometimes expect a broad scalar
+    // where PHPantom can prove an exact runtime value. Treat that strictly
+    // narrower result as compatible without weakening collection contracts:
+    // literals are widened only at the top level of a union/nullable value,
+    // never inside generic, shape, or callable payloads.
+    let actual_type = PhpType::parse(actual);
+    let widened = widen_top_level_scalar_literals(&actual_type);
+    widened != actual_type && types_match_without_literal_precision(expected, &widened.to_string())
+}
+
+fn assert_literal_compatibility_is_shallow() {
+    static CHECK: Once = Once::new();
+    CHECK.call_once(|| {
+        assert!(types_match("string", "'x'"));
+        assert!(!types_match("float", "1"));
+        assert!(!types_match("list<string>", "list<'x'>"));
+        assert!(!types_match("array{key: string}", "array{key: 'x'}"));
+        assert!(!types_match("callable(): string", "callable(): 'x'"));
+        assert!(!types_match("string", "int"));
+    });
+}
+
+fn types_match_without_literal_precision(expected: &str, actual: &str) -> bool {
     let ne = normalize_type(expected);
     let na = normalize_type(actual);
 
@@ -738,6 +769,34 @@ fn types_match(expected: &str, actual: &str) -> bool {
     }
 
     false
+}
+
+fn widen_top_level_scalar_literals(ty: &PhpType) -> PhpType {
+    match ty.kind() {
+        TypeKind::Literal(value) => match &**value {
+            LiteralValue::Int(_) => PhpType::int(),
+            LiteralValue::Float(_) => PhpType::float(),
+            LiteralValue::String(_) => PhpType::string(),
+        },
+        TypeKind::Union(members) => {
+            let mut widened = Vec::with_capacity(members.len());
+            let mut seen = HashSet::with_capacity(members.len());
+            for member in members {
+                let member = widen_top_level_scalar_literals(member);
+                for alternative in member.union_members() {
+                    if seen.insert(alternative.clone()) {
+                        widened.push(alternative.clone());
+                    }
+                }
+            }
+            match widened.len() {
+                1 => widened.into_iter().next().unwrap(),
+                _ => PhpType::union(widened),
+            }
+        }
+        TypeKind::Nullable(inner) => PhpType::nullable(widen_top_level_scalar_literals(inner)),
+        _ => ty.clone(),
+    }
 }
 
 /// Shorten FQN components in a type string.
@@ -920,6 +979,10 @@ fn fixture_uri(path: &Path) -> String {
 }
 
 fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> {
+    // This harness compatibility must never become a general type oracle:
+    // it accepts only shallow scalar precision gained by PHPantom.
+    assert_literal_compatibility_is_shallow();
+
     // Parse assertions from original source.
     let assertions = extract_assert_type_calls(&content);
 

@@ -1190,8 +1190,8 @@ class Foo {
     let result = apply_edits(content, &edits);
 
     assert!(
-        result.contains("@return int"),
-        "should update @return type to int:\n{}",
+        result.contains("@return 42"),
+        "should preserve the inferred literal in @return:\n{}",
         result
     );
     assert!(
@@ -1199,7 +1199,7 @@ class Foo {
         "should preserve description:\n{}",
         result
     );
-    // Native type already matches base type — should remain unchanged.
+    // The native type uses the representable scalar base.
     assert!(
         result.contains("): int {"),
         "native type should be updated to int:\n{}",
@@ -1208,7 +1208,7 @@ class Foo {
 }
 
 #[test]
-fn return_type_update_no_docblock_change_for_simple_type() {
+fn return_type_update_adds_literal_return_to_existing_docblock() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -1245,10 +1245,9 @@ class Foo {
         "native type should be changed to int:\n{}",
         result
     );
-    // No @return tag should be added for a simple type without generics.
     assert!(
-        !result.contains("@return int"),
-        "should NOT insert @return for simple type:\n{}",
+        result.contains("@return 42"),
+        "should preserve literal precision in the existing docblock:\n{}",
         result
     );
     assert!(
@@ -1344,10 +1343,11 @@ function foo(): int {
         "native type should be changed to string:\n{}",
         result
     );
-    // No docblock needed for simple type.
+    // The native type is broad enough for PHP, while PHPDoc retains the
+    // exact inferred value.
     assert!(
-        !result.contains("@return"),
-        "should NOT create @return for simple type:\n{}",
+        result.contains("@return 'hello'"),
+        "should create a precise literal @return:\n{}",
         result
     );
 }
@@ -1491,10 +1491,98 @@ class Foo {
         "native type should be int:\n{}",
         result
     );
-    // Simple native type — no docblock needed.
+    assert!(
+        result.contains("@return 42"),
+        "should retain the precise inferred literal in PHPDoc:\n{}",
+        result
+    );
+}
+
+#[test]
+fn missing_return_type_keeps_large_single_domain_literal_union() {
+    let backend = create_test_backend();
+    let uri = "file:///literal_union.php";
+    let content = r#"<?php
+class Foo {
+    public function status(int $code) {
+        if ($code === 1) {
+            return 'draft';
+        }
+        if ($code === 2) {
+            return 'published';
+        }
+        if ($code === 3) {
+            return 'deleted';
+        }
+        return 'archived';
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        2,
+        "Method Foo::status() has no return type specified.",
+        "missingType.return",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 2);
+    let action = find_action(&actions, "Add return type")
+        .expect("four literals in one scalar domain should remain inferable");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert!(
+        result.contains("status(int $code): string"),
+        "native type should be string:\n{}",
+        result
+    );
+    assert!(
+        result.contains("@return 'draft'|'published'|'deleted'|'archived'"),
+        "effective PHPDoc should preserve every literal:\n{}",
+        result
+    );
+}
+
+#[test]
+fn missing_return_type_absorbs_literal_redundant_with_broad_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///broad_and_literal.php";
+    let content = r#"<?php
+class Foo {
+    public function label(bool $flag, string $fallback) {
+        if ($flag) {
+            return 'draft';
+        }
+        return $fallback;
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        2,
+        "Method Foo::label() has no return type specified.",
+        "missingType.return",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 2);
+    let action = find_action(&actions, "Add return type").expect("should offer a return type");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert!(
+        result.contains("label(bool $flag, string $fallback): string"),
+        "native type should be string:\n{}",
+        result
+    );
     assert!(
         !result.contains("@return"),
-        "should NOT add @return for simple native type:\n{}",
+        "a literal redundant with a broad branch must not create PHPDoc:\n{}",
         result
     );
 }

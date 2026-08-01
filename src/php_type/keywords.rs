@@ -62,6 +62,7 @@ pub(crate) fn is_primitive_scalar_name(name: &str) -> bool {
             | "integer"
             | "float"
             | "double"
+            | "real"
             | "string"
             | "bool"
             | "boolean"
@@ -259,7 +260,7 @@ pub(crate) fn is_class_like_name(name: &str) -> bool {
 /// refinement types (`non-empty-string`, `positive-int`, etc.) to their
 /// base PHP types.  It only handles:
 ///
-/// - PHP aliases: `integer` → `int`, `boolean` → `bool`, `double` → `float`
+/// - PHP aliases: `integer` → `int`, `boolean` → `bool`, `double`/`real` → `float`
 /// - Case normalization: `NULL` → `null`, `TRUE` → `true`, `aRray` → `array`
 ///
 /// Class names and unrecognised identifiers pass through unchanged.
@@ -269,7 +270,7 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
         // PHP aliases that map to a different canonical name.
         "integer" => "int".to_string(),
         "boolean" => "bool".to_string(),
-        "double" => "float".to_string(),
+        "double" | "real" => "float".to_string(),
         "no-return" | "noreturn" | "never-return" | "never-returns" => "never".to_string(),
         // Known keywords — return the lowercased form.
         "int" | "float" | "string" | "bool" | "void" | "never" | "null" | "false" | "true"
@@ -300,7 +301,7 @@ pub(crate) fn native_scalar_name(name: &str) -> Option<&str> {
     match lower.as_str() {
         // Direct native types.
         "int" | "integer" => Some("int"),
-        "float" | "double" => Some("float"),
+        "float" | "double" | "real" => Some("float"),
         "string" => Some("string"),
         "bool" | "boolean" => Some("bool"),
         "void" => Some("void"),

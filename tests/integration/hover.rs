@@ -312,6 +312,94 @@ function test() {
 }
 
 #[test]
+fn hover_preserves_scalar_literals_but_widens_collections() {
+    let backend = create_test_backend();
+    let uri = "file:///literal-hover.php";
+    let content = r#"<?php
+function test(bool $flag): void {
+    $scalar = 'draft';
+    $choice = $flag ? 'asc' : 'desc';
+    $collection = [$scalar, $choice];
+    echo $scalar, $choice, $collection;
+}
+"#;
+
+    let scalar = hover_at(&backend, uri, content, 5, 10).expect("hover on $scalar");
+    assert!(
+        hover_text(&scalar).contains("$scalar = 'draft'"),
+        "scalar hover should preserve the exact literal: {}",
+        hover_text(&scalar)
+    );
+
+    let choice = hover_at(&backend, uri, content, 5, 19).expect("hover on $choice");
+    assert!(
+        hover_text(&choice).contains("$choice = 'asc'|'desc'"),
+        "compound scalar hover should preserve the literal union: {}",
+        hover_text(&choice)
+    );
+
+    let collection = hover_at(&backend, uri, content, 5, 28).expect("hover on $collection");
+    assert!(
+        hover_text(&collection).contains("$collection = list<string>"),
+        "collection hover should widen stored literal values: {}",
+        hover_text(&collection)
+    );
+}
+
+#[test]
+fn hover_widens_existing_literal_at_typed_pass_by_reference_boundary() {
+    let backend = create_test_backend();
+    let uri = "file:///literal-by-ref.php";
+    let content = r#"<?php
+function mutate(int &$value): void {
+    $value = 2;
+}
+function test(): void {
+    $value = 1;
+    mutate($value);
+    echo $value;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 10).expect("hover on $value");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$value = int"),
+        "typed by-reference mutation should invalidate the stale literal: {text}"
+    );
+    assert!(
+        !text.contains("$value = 1"),
+        "the pre-call literal must not survive a typed by-reference call: {text}"
+    );
+}
+
+/// The counterpart to the test above: a by-reference call invalidates the
+/// exact value, not everything else known about the variable. `array_shift`
+/// is declared `array &$array` and says nothing about the element type, so
+/// widening the argument to a bare `array` would lose the member access.
+#[test]
+fn hover_keeps_element_type_across_an_array_pass_by_reference_boundary() {
+    let backend = create_test_backend();
+    let uri = "file:///by-ref-elements.php";
+    let content = r#"<?php
+class Node {}
+function test(): void {
+    /** @var list<Node> $nodes */
+    $nodes = [];
+    array_shift($nodes);
+    echo $nodes;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 6, 10).expect("hover on $nodes");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$nodes = list<Node>"),
+        "an `array &$` parameter must not erase the known element type: {text}"
+    );
+}
+
+#[test]
 fn hover_ambiguous_variable_shows_union_type() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -9331,7 +9419,7 @@ class Service {
 // ─── Variable-key array assignment type strings ─────────────────────────────
 
 #[test]
-fn hover_variable_key_string_produces_array_string_value() {
+fn hover_variable_key_string_produces_array_int_or_string_value() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -9353,12 +9441,13 @@ class Svc {
 "#;
 
     // Hover on `$indexed` at line 13 (the usage after the loop).
-    // $key is string (from color()), so type should be array<string, Pen>.
+    // A broad string may be a decimal-integer string at runtime, which PHP
+    // stores as an integer key.
     let hover = hover_at(&backend, uri, content, 13, 9).expect("expected hover on $indexed");
     let text = hover_text(&hover);
     assert!(
-        text.contains("array<string, Pen>"),
-        "Variable-key assignment with string key should produce array<string, Pen>, got: {}",
+        text.contains("array<int|string, Pen>"),
+        "Variable-key assignment with broad string key should produce array<int|string, Pen>, got: {}",
         text
     );
 }

@@ -66,7 +66,9 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                 // Spread: `...$other` — try to resolve iterable element type.
                 saw_spread = true;
                 if let Some(raw) = super::foreach_resolution::resolve_expression_type(v.value, ctx)
-                    && let Some(elem) = raw.extract_value_type(true).cloned()
+                    && let Some(elem) = raw
+                        .iterable_element_type()
+                        .map(|element| element.widen_scalar_literals())
                     && !types.contains(&elem)
                 {
                     types.push(elem);
@@ -144,13 +146,15 @@ fn infer_element_type<'b>(
     value: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
+    infer_element_type_precise(value, ctx).map(|ty| ty.widen_scalar_literals())
+}
+
+/// Resolve an array element before the collection storage boundary widens it.
+fn infer_element_type_precise<'b>(
+    value: &'b Expression<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
     match value {
-        // ── Scalar literals ──
-        Expression::Literal(Literal::String(_)) => Some(PhpType::string()),
-        Expression::Literal(Literal::Integer(_)) => Some(PhpType::int()),
-        Expression::Literal(Literal::Float(_)) => Some(PhpType::float()),
-        Expression::Literal(Literal::True(_) | Literal::False(_)) => Some(PhpType::bool()),
-        Expression::Literal(Literal::Null(_)) => Some(PhpType::null()),
         // ── Nested array literals ──
         Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx, true)
             .or_else(|| Some(PhpType::array())),
@@ -224,7 +228,7 @@ fn infer_element_type<'b>(
             )
         }
         // ── Parenthesized ──
-        Expression::Parenthesized(p) => infer_element_type(p.expression, ctx),
+        Expression::Parenthesized(p) => infer_element_type_precise(p.expression, ctx),
         // ── Property access, method calls on objects, etc. ──
         // Delegate to the unified pipeline which resolves property
         // type hints and method return types through the class
@@ -264,7 +268,7 @@ pub(in crate::type_engine) fn resolve_array_func_raw_type(
     if func_name.eq_ignore_ascii_case("array_map")
         && let Some(element_type) = extract_array_map_element_type(args, ctx)
     {
-        return Some(PhpType::list(element_type));
+        return Some(PhpType::list(element_type.widen_scalar_literals()));
     }
 
     // iterator_to_array: converts an iterator to an array, preserving
@@ -275,8 +279,18 @@ pub(in crate::type_engine) fn resolve_array_func_raw_type(
     if func_name.eq_ignore_ascii_case("iterator_to_array") {
         let iter_expr = super::resolution::first_arg_expr(args)?;
         let raw = super::resolution::resolve_arg_raw_type(iter_expr, ctx)?;
-        let val = raw.extract_element_type().cloned();
-        let key = raw.extract_key_type(false).cloned();
+        let val = raw
+            .iterable_element_type()
+            .map(|value| value.widen_scalar_literals());
+        if matches!(
+            super::resolution::nth_arg_expr(args, 1),
+            Some(Expression::Literal(Literal::False(_)))
+        ) {
+            return Some(val.map_or_else(PhpType::array, PhpType::list));
+        }
+        let key = raw
+            .iterable_key_type()
+            .and_then(|key| super::resolution::normalize_array_key_type(&key));
         return match (key, val) {
             (Some(k), Some(v)) => Some(PhpType::generic_array(k, v)),
             (None, Some(v)) => Some(PhpType::list(v)),
@@ -409,14 +423,18 @@ fn extract_array_map_element_type(
     // seeded to the input array's element type.
     let arr_expr = super::resolution::nth_arg_expr(args, 1)?;
     let input_raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
-    let input_element = input_raw.extract_value_type(true)?.clone();
+    let input_element = input_raw.extract_element_type()?.clone();
 
     if let Some(inferred) = infer_callback_return_type(callback_expr, &input_element, ctx) {
         return Some(inferred);
     }
 
-    // Final fallback: use the input array's element type.
-    Some(input_element)
+    // Final fallback: assume the callback passes its element through. That
+    // only holds for element types a callback is unlikely to convert; a
+    // scalar element says nothing about the result, and `array_map('intval',
+    // $strings)` would be reported as `list<string>` on the strength of an
+    // input the callback exists to change.
+    (!input_element.is_scalar_leaf()).then_some(input_element)
 }
 
 /// Infer the return type of a callback (arrow function or closure) by

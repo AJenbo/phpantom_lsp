@@ -16,7 +16,9 @@ use mago_syntax::cst::*;
 use crate::atom::{atom, bytes_to_str, last_segment};
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
-use crate::php_type::{PhpType, ShapeEntry, TypeKind, is_keyword_type};
+use crate::php_type::{
+    LiteralValue, PhpType, ShapeEntry, TypeKind, is_decimal_int_array_key, is_keyword_type,
+};
 use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
 
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
@@ -1577,8 +1579,10 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
                     .unwrap_or(bytes_to_str(s.raw))
                     .to_string()
             });
-        // Skip numeric-only keys — they are positional, not shape entries.
-        if key.chars().all(|c| c.is_ascii_digit()) {
+        // PHP casts canonical decimal-integer strings (including negatives)
+        // to int keys. Keep non-canonical numeric-looking strings such as
+        // `"08"`, `"+8"`, and `"1.5"` as exact shape keys.
+        if is_decimal_int_array_key(&key) {
             return None;
         }
         Some(key)
@@ -1610,7 +1614,7 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
     // Add/upsert the new key.
     entries.push(ShapeEntry {
         key: Some(key.to_string()),
-        value_type: value_type.clone(),
+        value_type: value_type.widen_scalar_literals(),
         optional: false,
     });
 
@@ -1628,9 +1632,10 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
 /// `PhpType::named("array")` when no element types are available.
 pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
     let mut elem_types: Vec<PhpType> = Vec::new();
+    let value_type = value_type.widen_scalar_literals();
 
     // Extract existing element types from the base.
-    if let Some(existing_elem) = base.extract_element_type() {
+    if let Some(existing_elem) = base.iterable_element_type() {
         for member in existing_elem.union_members() {
             if !member.is_empty() {
                 elem_types.push(member.clone());
@@ -1649,11 +1654,7 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
         return PhpType::array();
     }
 
-    let elem_type = if elem_types.len() == 1 {
-        elem_types.into_iter().next().unwrap()
-    } else {
-        PhpType::union(elem_types)
-    };
+    let elem_type = PhpType::join_runtime_value_types(elem_types);
 
     PhpType::list(elem_type)
 }
@@ -1677,12 +1678,22 @@ pub(super) fn merge_keyed_type(
     key_type: &PhpType,
     value_type: &PhpType,
 ) -> PhpType {
+    let key_type = normalize_array_key_type(key_type)
+        .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
+    let value_type = value_type.widen_scalar_literals();
+
     // Collect existing key types from the base.
     let mut key_types: Vec<PhpType> = Vec::new();
-    if let Some(existing_key) = base.extract_key_type(false)
+    if let Some(existing_key) = base
+        .iterable_key_type()
+        .and_then(|key| normalize_array_key_type(&key))
         && !existing_key.is_empty()
     {
-        key_types.push(existing_key.clone());
+        for member in existing_key.union_members() {
+            if !key_types.iter().any(|e| e.equivalent(member)) {
+                key_types.push(member.clone());
+            }
+        }
     }
     // Add new key type members.
     for member in key_type.union_members() {
@@ -1693,7 +1704,7 @@ pub(super) fn merge_keyed_type(
 
     // Collect existing value types from the base.
     let mut elem_types: Vec<PhpType> = Vec::new();
-    if let Some(existing_elem) = base.extract_element_type() {
+    if let Some(existing_elem) = base.iterable_element_type() {
         for member in existing_elem.union_members() {
             if !member.is_empty() {
                 elem_types.push(member.clone());
@@ -1711,89 +1722,139 @@ pub(super) fn merge_keyed_type(
         return PhpType::array();
     }
 
-    let val_type = if elem_types.len() == 1 {
-        elem_types.into_iter().next().unwrap()
-    } else {
-        PhpType::union(elem_types)
-    };
+    let val_type = PhpType::join_runtime_value_types(elem_types);
 
     if key_types.is_empty() {
         // No key type information — use a single-param generic.
         PhpType::generic_array_val(val_type)
     } else {
-        let k_type = if key_types.len() == 1 {
-            key_types.into_iter().next().unwrap()
-        } else {
-            PhpType::union(key_types)
-        };
+        let k_type = PhpType::join_runtime_value_types(key_types);
         PhpType::generic_array(k_type, val_type)
     }
 }
 
-/// Infer the key type of an array-access index expression.
+/// Infer the source type of an array-access index expression.
 ///
-/// Returns `"string"` for expressions that are known to produce
-/// strings (string literals, method calls returning `string`, string
-/// variables), `"int"` for integer expressions, and `"int|string"`
-/// when the type cannot be determined.
+/// [`merge_keyed_type`] performs collection-boundary normalization exactly
+/// once. Returning the exact source type here preserves distinctions such as a
+/// known non-numeric string versus a broad `string`.
 pub(super) fn infer_array_key_type(index: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
     // Fast path: literal values.
-    match index {
-        Expression::Literal(Literal::Integer(_)) => return PhpType::int(),
-        Expression::Literal(Literal::String(_)) => return PhpType::string(),
-        _ => {}
+    if let Expression::Literal(Literal::Integer(_)) = index {
+        return PhpType::int();
     }
 
     // Resolve the expression type through the standard pipeline.
     let resolved = super::rhs_resolution::resolve_rhs_expression(index, ctx);
     if !resolved.is_empty() {
         let joined = ResolvedType::types_joined(&resolved);
-        // Normalise the resolved type to a valid array key type.
-        // PHP array keys are always int or string; bool and null are
-        // coerced to int, float is truncated to int.
-        if is_int_like_key_typed(&joined) {
-            return PhpType::int();
+        if !joined.is_mixed() {
+            return joined;
         }
-        if is_string_like_key(&joined) {
-            return PhpType::string();
-        }
-        if joined.is_mixed() || is_array_key_type(&joined) {
-            return PhpType::union(vec![PhpType::int(), PhpType::string()]);
-        }
-        // For anything else (e.g. a class-string<T>, or a union),
-        // return as-is if it is composed entirely of int/string
-        // subtypes; otherwise fall back.
-        return joined;
     }
 
     PhpType::union(vec![PhpType::int(), PhpType::string()])
 }
 
-/// Returns `true` when the [`PhpType`] represents a PHP type that
-/// is always coerced to `int` when used as an array key.
-fn is_int_like_key_typed(ty: &PhpType) -> bool {
-    ty.is_int_coercible_key()
-}
-
-/// Returns `true` when the [`PhpType`] represents a string-like
-/// array key type.
-fn is_string_like_key(ty: &PhpType) -> bool {
-    ty.is_string_subtype()
-}
-
-/// Returns `true` when the [`PhpType`] is `array-key` or the
-/// equivalent `int|string` union.
-fn is_array_key_type(ty: &PhpType) -> bool {
-    if ty.is_array_key() {
-        return true;
-    }
-    match ty.kind() {
-        TypeKind::Union(members) if members.len() == 2 => {
-            let has_int = members.iter().any(|m| m.is_int());
-            let has_string = members.iter().any(|m| m.is_string_type());
-            has_int && has_string
+/// Normalize every possible runtime array-key branch to `int` or `string`.
+///
+/// PHP truncates float keys and coerces bool keys to int, while null becomes
+/// the empty string key. Literal and refined scalar types must not escape
+/// into `array<K, V>` payloads.
+pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
+    fn is_non_numeric_string_domain(ty: &PhpType) -> bool {
+        match ty.kind() {
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,
+            TypeKind::Named(name) => matches!(
+                name.to_ascii_lowercase().as_str(),
+                "class-string"
+                    | "interface-string"
+                    | "trait-string"
+                    | "enum-string"
+                    | "callable-string"
+            ),
+            TypeKind::Generic(generic) => matches!(
+                generic.name.to_ascii_lowercase().as_str(),
+                "class-string" | "interface-string"
+            ),
+            _ => false,
         }
-        _ => false,
+    }
+
+    fn collect(ty: &PhpType, normalized: &mut Vec<PhpType>) -> bool {
+        match ty.kind() {
+            TypeKind::Union(members) => members.iter().all(|member| collect(member, normalized)),
+            TypeKind::Nullable(inner) => {
+                if !collect(inner, normalized) {
+                    return false;
+                }
+                // PHP converts the nullable branch to the empty string key.
+                push_unique(normalized, PhpType::string());
+                true
+            }
+            _ if ty.is_null() => {
+                push_unique(normalized, PhpType::string());
+                true
+            }
+            TypeKind::Literal(value) if matches!(&**value, LiteralValue::String(_)) => {
+                if let Some(content) = value.plain_string_content() {
+                    push_unique(
+                        normalized,
+                        if is_decimal_int_array_key(content) {
+                            PhpType::int()
+                        } else {
+                            PhpType::string()
+                        },
+                    );
+                } else {
+                    // Quote-specific escape decoding is not represented in
+                    // LiteralValue. The runtime key may therefore be a
+                    // canonical decimal string (for example `"\x38"`), so
+                    // retain both legal PHP array-key domains.
+                    push_unique(normalized, PhpType::int());
+                    push_unique(normalized, PhpType::string());
+                }
+                true
+            }
+            _ if ty.is_array_key() => {
+                push_unique(normalized, PhpType::int());
+                push_unique(normalized, PhpType::string());
+                true
+            }
+            _ if ty.is_int_coercible_key() => {
+                push_unique(normalized, PhpType::int());
+                true
+            }
+            _ if is_non_numeric_string_domain(ty) => {
+                // Class/interface/callable identifiers cannot be decimal
+                // integer strings, so PHP always keeps them as string keys.
+                push_unique(normalized, PhpType::string());
+                true
+            }
+            _ if ty.is_string_subtype() => {
+                // A broad string may be a valid decimal-integer string at
+                // runtime, in which case PHP stores it as an integer key.
+                push_unique(normalized, PhpType::int());
+                push_unique(normalized, PhpType::string());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn push_unique(types: &mut Vec<PhpType>, member: PhpType) {
+        if !types.iter().any(|existing| existing == &member) {
+            types.push(member);
+        }
+    }
+
+    let mut normalized = Vec::new();
+    if !collect(ty, &mut normalized) || normalized.is_empty() {
+        return None;
+    }
+    match normalized.len() {
+        1 => normalized.into_iter().next(),
+        _ => Some(PhpType::union(normalized)),
     }
 }
 

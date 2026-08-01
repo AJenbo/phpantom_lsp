@@ -3,7 +3,7 @@
 //! narrowing, and guard-clause (early-return) narrowing.
 
 use crate::atom::bytes_to_str;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ResolvedType};
 
 use mago_syntax::cst::*;
@@ -567,13 +567,10 @@ fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
         TypeGuardKind::Array => ty.is_array_like(),
         TypeGuardKind::String => ty.is_subtype_of(&PhpType::string()),
         TypeGuardKind::Int => ty.is_subtype_of(&PhpType::int()),
-        // `is_float()` returns false for integers at runtime, so use
-        // exact type identity instead of `is_subtype_of` (which treats
-        // `int` as a subtype of `float` due to PHP's type coercion).
-        TypeGuardKind::Float => matches!(ty.kind(), TypeKind::Named(n) if {
-            let lower = n.to_ascii_lowercase();
-            lower == "float" || lower == "double" || lower == "real"
-        }),
+        // `is_float()` returns false for integers at runtime. The dedicated
+        // helper includes exact float literals without applying PHP's
+        // int-to-float parameter coercion.
+        TypeGuardKind::Float => ty.is_float_subtype(),
         TypeGuardKind::Bool => ty.is_subtype_of(&PhpType::bool()),
         TypeGuardKind::Numeric => ty.is_subtype_of(&PhpType::numeric()),
         TypeGuardKind::Callable => ty.is_callable(),
@@ -657,7 +654,8 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
     // instead of dropping them or widening to bare `int|float`, so the
     // narrowed type stays a subtype of the original `string`.
     if kind == TypeGuardKind::Numeric && keep_matching {
-        return Some(narrow_to_numeric_inclusive(ty));
+        let narrowed = narrow_to_numeric_inclusive(ty);
+        return (narrowed != ty.clone()).then_some(narrowed);
     }
 
     match ty.kind() {
@@ -723,7 +721,8 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
 ///
 /// - `array-key` → `int|string`
 /// - `scalar` → `int|float|string|bool`
-/// - `numeric` / `number` → `int|float`
+/// - `numeric` → `int|float|numeric-string`
+/// - `number` → `int|float`
 fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
     let name = match ty.kind() {
         TypeKind::Named(n) => n.to_ascii_lowercase(),
@@ -737,7 +736,14 @@ fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
             PhpType::string(),
             PhpType::bool(),
         ])),
-        "numeric" | "number" => Some(PhpType::union(vec![PhpType::int(), PhpType::float()])),
+        "numeric" => Some(PhpType::union(vec![
+            PhpType::int(),
+            PhpType::float(),
+            PhpType::parse("numeric-string"),
+        ])),
+        "number" if ty.is_named("number") => {
+            Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
+        }
         _ => None,
     }
 }
@@ -779,8 +785,93 @@ fn narrow_single_type_to_numeric(ty: &PhpType) -> Option<PhpType> {
     if type_matches_guard(ty, TypeGuardKind::Numeric) {
         return Some(ty.clone());
     }
+    // An exact non-numeric literal cannot become numeric merely because its
+    // broad scalar type is string. Only an imprecise string-like type can be
+    // refined to `numeric-string`.
+    if let TypeKind::Literal(literal) = ty.kind() {
+        if matches!(&**literal, LiteralValue::String(_)) && literal.plain_string_content().is_none()
+        {
+            // The raw spelling contains quote-specific escapes that this
+            // layer does not decode. Keep the feasible then-branch without
+            // claiming the exact literal is definitely numeric.
+            return Some(PhpType::parse("numeric-string"));
+        }
+        return None;
+    }
     if ty.is_subtype_of(&PhpType::string()) {
         return Some(PhpType::parse("numeric-string"));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn float_guard_accepts_float_literals_but_not_int_literals() {
+        let float = PhpType::literal_float("1.5");
+        let int = PhpType::literal_int("1");
+
+        assert!(type_matches_guard(&float, TypeGuardKind::Float));
+        assert!(type_matches_guard(
+            &PhpType::parse("real"),
+            TypeGuardKind::Float
+        ));
+        assert!(!type_matches_guard(&int, TypeGuardKind::Float));
+        assert_eq!(
+            filter_type_by_guard(&float, TypeGuardKind::Float, true),
+            None
+        );
+        assert_eq!(
+            filter_type_by_guard(&float, TypeGuardKind::Float, false),
+            Some(PhpType::empty_sentinel())
+        );
+    }
+
+    #[test]
+    fn float_guard_filters_literal_unions_in_both_directions() {
+        let float = PhpType::literal_float("1.5");
+        let int = PhpType::literal_int("1");
+        let union = PhpType::union(vec![float.clone(), int.clone()]);
+
+        assert_eq!(
+            filter_type_by_guard(&union, TypeGuardKind::Float, true),
+            Some(float)
+        );
+        assert_eq!(
+            filter_type_by_guard(&union, TypeGuardKind::Float, false),
+            Some(int)
+        );
+    }
+
+    #[test]
+    fn numeric_guard_accepts_only_numeric_string_literals() {
+        let numeric_string = PhpType::literal_string_raw("'1.5'");
+        let text = PhpType::literal_string_raw("'draft'");
+        let escaped = PhpType::literal_string_raw("\"\\x31\"");
+
+        assert!(type_matches_guard(&numeric_string, TypeGuardKind::Numeric));
+        assert!(!type_matches_guard(&text, TypeGuardKind::Numeric));
+        assert_eq!(
+            filter_type_by_guard(&numeric_string, TypeGuardKind::Numeric, true),
+            None
+        );
+        assert_eq!(
+            filter_type_by_guard(&text, TypeGuardKind::Numeric, true),
+            Some(PhpType::empty_sentinel())
+        );
+        assert_eq!(
+            filter_type_by_guard(&numeric_string, TypeGuardKind::Numeric, false),
+            Some(PhpType::empty_sentinel())
+        );
+        assert_eq!(
+            filter_type_by_guard(&text, TypeGuardKind::Numeric, false),
+            None
+        );
+        assert_eq!(
+            filter_type_by_guard(&escaped, TypeGuardKind::Numeric, true),
+            Some(PhpType::parse("numeric-string"))
+        );
+    }
 }

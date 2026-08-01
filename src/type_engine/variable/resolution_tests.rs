@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use super::enrich_builder_type_in_scope;
+use super::{
+    enrich_builder_type_in_scope, merge_keyed_type, merge_push_type, normalize_array_key_type,
+};
 use crate::atom::atom;
 use crate::php_type::PhpType;
 use crate::test_fixtures::make_class;
@@ -453,6 +455,563 @@ function test() {
         names.contains(&"User"),
         "$user should resolve to User via User::factory()->create(), got: {:?}",
         names
+    );
+}
+
+#[test]
+fn scalar_literal_reproduction_preserves_ternary_literals() {
+    let content = r#"<?php
+function test(bool $flag): void {
+    $choice = $flag ? 'asc' : 'desc';
+    echo $choice;
+}
+"#;
+    let cursor_offset = content.find("echo $choice").unwrap() as u32 + 5;
+
+    let results = super::resolve_variable_types(
+        "$choice",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        Loaders::default(),
+    );
+
+    assert_eq!(
+        ResolvedType::types_joined(&results).to_string(),
+        "'asc'|'desc'"
+    );
+}
+
+fn resolve_literal_test_var(content: &str, var_name: &str) -> String {
+    let cursor_offset = content.rfind(var_name).unwrap() as u32;
+    let results = super::resolve_variable_types(
+        var_name,
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        Loaders::default(),
+    );
+    ResolvedType::types_joined(&results).to_string()
+}
+
+#[test]
+fn resolve_var_preserves_scalar_literal_assignments() {
+    let content = r#"<?php
+function test() {
+    $string = 'draft';
+    $integer = 42;
+    $hex = 0x2A;
+    $float = 1.25;
+    $numeric_string = '123';
+    $negative = -7;
+    $positive = +8;
+
+    echo $string, $integer, $hex, $float, $numeric_string, $negative, $positive;
+}
+"#;
+
+    let actual = [
+        resolve_literal_test_var(content, "$string"),
+        resolve_literal_test_var(content, "$integer"),
+        resolve_literal_test_var(content, "$hex"),
+        resolve_literal_test_var(content, "$float"),
+        resolve_literal_test_var(content, "$numeric_string"),
+        resolve_literal_test_var(content, "$negative"),
+        resolve_literal_test_var(content, "$positive"),
+    ];
+
+    assert_eq!(actual, ["'draft'", "42", "42", "1.25", "'123'", "-7", "8"]);
+}
+
+#[test]
+fn resolve_var_preserves_literals_through_compound_expressions() {
+    let content = r#"<?php
+function test(
+    bool $flag,
+    int $broad_int,
+    float $broad_float,
+    string $broad_string,
+    ?string $maybe_string,
+) {
+    $ternary = $flag ? 'asc' : 'desc';
+    $matched = match ($flag) { true => 1, false => 2 };
+    $parenthesized = ('wrapped');
+    $operand = 7;
+    $negative_parenthesized = -(7);
+    $positive_variable = +$operand;
+    $negative_union = -($flag ? 1 : 2);
+    $double_negative = -(-7);
+    $negative_broad = -$broad_int;
+    $positive_broad = +$broad_int;
+    $broad_coalesced = $broad_string ?? 'fallback';
+    $nullable_coalesced = $maybe_string ?? 'fallback';
+    $null_coalesced = null ?? 'fallback';
+    $parenthesized_null_coalesced = (null) ?? 'fallback';
+    $mixed_numeric = $flag ? $broad_float : 1;
+    $runtime_domains = match ($broad_int) {
+        0 => 1,
+        1 => $broad_int,
+        default => $broad_float,
+    };
+
+    echo $ternary, $matched, $parenthesized, $negative_parenthesized,
+        $positive_variable, $negative_union, $double_negative, $negative_broad,
+        $positive_broad, $broad_coalesced, $nullable_coalesced, $null_coalesced,
+        $parenthesized_null_coalesced, $mixed_numeric, $runtime_domains;
+}
+"#;
+
+    assert_eq!(
+        resolve_literal_test_var(content, "$ternary"),
+        "'asc'|'desc'"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$matched"), "1|2");
+    assert_eq!(
+        resolve_literal_test_var(content, "$parenthesized"),
+        "'wrapped'"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$negative_parenthesized"),
+        "-7"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$positive_variable"), "7");
+    assert_eq!(
+        resolve_literal_test_var(content, "$negative_union"),
+        "-1|-2"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$double_negative"), "7");
+    assert_eq!(
+        resolve_literal_test_var(content, "$negative_broad"),
+        "int|float"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$positive_broad"), "int");
+    assert_eq!(
+        resolve_literal_test_var(content, "$broad_coalesced"),
+        "string"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$nullable_coalesced"),
+        "string"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$null_coalesced"),
+        "'fallback'"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$parenthesized_null_coalesced"),
+        "'fallback'"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$mixed_numeric"),
+        "float|1"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$runtime_domains"),
+        "int|float"
+    );
+}
+
+#[test]
+fn collection_tracking_widens_only_at_mutable_collection_boundaries() {
+    let content = r#"<?php
+/**
+ * @param Iterator<int, 'draft'> $iterator
+ * @param Iterator<int, 'left'>|Iterator<string, 'right'> $union_iterator
+ */
+function test(bool $flag, string $key, $iterator, $union_iterator) {
+    $shape = [
+        'direction' => $flag ? 'asc' : 'desc',
+        'code' => match ($flag) { true => 1, false => 2 },
+    ];
+    $list = [$flag ? 'left' : 'right', $flag ? 1 : 2];
+    $nested = ['meta' => [$flag ? 'a' : 'b']];
+
+    $pushed = [];
+    $pushed[] = $flag ? 'left' : 'right';
+
+    $written = [];
+    $written['state'] = match ($flag) {
+        true => 'draft',
+        false => 'published',
+    };
+
+    $dynamic = [];
+    $dynamic[$key] = $flag ? 1 : 2;
+
+    $state = 'draft';
+    $from_variable = [$state];
+    $spread_source = [$state];
+    $spread = [...$spread_source];
+    $tuple_container = [['left', 'right']];
+    $tuple = $tuple_container[0];
+    $tuple_spread = [...$tuple];
+    $mapped = array_map(fn($item) => 'mapped', [1]);
+    $converted = iterator_to_array($iterator);
+    $converted_union = iterator_to_array($union_iterator);
+    $renumbered = iterator_to_array($union_iterator, false);
+
+    /** @var Box<'draft'> $box */
+    $structural = [$box];
+
+    echo $shape, $list, $nested, $pushed, $written, $dynamic,
+        $from_variable, $spread, $tuple_spread, $mapped, $converted,
+        $converted_union, $renumbered, $structural;
+}
+"#;
+
+    assert_eq!(
+        resolve_literal_test_var(content, "$shape"),
+        "array{direction: string, code: int}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$list"),
+        "list<string|int>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$nested"),
+        "array{meta: array{string}}"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$pushed"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$written"),
+        "array{state: string}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$dynamic"),
+        "array<int|string, int>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$from_variable"),
+        "list<string>"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$spread"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$tuple_spread"),
+        "list<string>"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$mapped"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$converted"),
+        "array<int, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$converted_union"),
+        "array<int|string, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$renumbered"),
+        "list<string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$structural"),
+        "list<Box<'draft'>>"
+    );
+}
+
+/// `array_map` falls back to the input element type when the callback's
+/// return cannot be inferred. That guess contradicts the callback whenever
+/// the elements are scalars, which is exactly what a converting callback
+/// such as `'intval'` is there to change.
+#[test]
+fn array_map_does_not_claim_the_input_element_type_for_an_opaque_callback() {
+    let content = r#"<?php
+/** @param list<string> $ids */
+function test(array $ids) {
+    $converted = array_map('intval', $ids);
+
+    echo $converted;
+}
+"#;
+
+    assert_ne!(
+        resolve_literal_test_var(content, "$converted"),
+        "list<string>"
+    );
+}
+
+#[test]
+fn control_flow_merges_absorb_literals_redundant_with_broad_scalar_branches() {
+    let content = r#"<?php
+function test(bool $flag, string $broad) {
+    if ($flag) {
+        $result = 'fixed';
+    } else {
+        $result = $broad;
+    }
+
+    echo $result;
+}
+"#;
+
+    assert_eq!(resolve_literal_test_var(content, "$result"), "string");
+}
+
+#[test]
+fn literal_mutations_and_numeric_consumers_invalidate_only_changed_values() {
+    let content = r#"<?php
+function test(bool $flag) {
+    $numeric = '123';
+    $numeric++;
+    $alphabetic = 'abc';
+    $alphabetic++;
+    $unchanged = 'abc';
+    $unchanged--;
+    $integer = 1;
+    $integer++;
+    $float = 1.5;
+    $float++;
+    $number_union = $flag ? 1 : 1.5;
+    $number_union++;
+
+    $text = 'abc';
+    $text[0] = 'z';
+    $string_object = (object) 'x';
+    $int_object = (object) 1;
+    $union_object = (object) ($flag ? 1 : 'x');
+
+    $integer_sum = 1 + 2;
+    $float_sum = 1 + 2.5;
+    $division = 1 / 2;
+
+    echo $numeric, $alphabetic, $unchanged, $integer, $float, $number_union, $text,
+        $string_object, $int_object, $union_object, $integer_sum, $float_sum,
+        $division;
+}
+"#;
+
+    assert_eq!(resolve_literal_test_var(content, "$numeric"), "int|float");
+    assert_eq!(resolve_literal_test_var(content, "$alphabetic"), "string");
+    assert_eq!(resolve_literal_test_var(content, "$unchanged"), "'abc'");
+    assert_eq!(resolve_literal_test_var(content, "$integer"), "int");
+    assert_eq!(resolve_literal_test_var(content, "$float"), "float");
+    assert_eq!(
+        resolve_literal_test_var(content, "$number_union"),
+        "int|float"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$text"), "string");
+    assert_eq!(
+        resolve_literal_test_var(content, "$string_object"),
+        "object{scalar: string}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$int_object"),
+        "object{scalar: int}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$union_object"),
+        "object{scalar: int|string}"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$integer_sum"), "int");
+    assert_eq!(resolve_literal_test_var(content, "$float_sum"), "float");
+    assert_eq!(resolve_literal_test_var(content, "$division"), "int|float");
+}
+
+#[test]
+fn collection_key_boundaries_normalize_literal_and_coercible_keys() {
+    let content = r#"<?php
+function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
+    $int_key = 1;
+    $int_map = [];
+    $int_map[$int_key] = 'x';
+
+    $float_key = 1.5;
+    $float_map = [];
+    $float_map[$float_key] = 'x';
+
+    $union_key = $flag ? 1 : 'id';
+    $union_map = [];
+    $union_map[$union_key] = 'x';
+
+    $null_key = null;
+    $null_map = [];
+    $null_map[$null_key] = 'x';
+
+    $nullable_map = [];
+    $nullable_map[$nullable_key] = 'x';
+
+    $decimal_string_key = '8';
+    $decimal_string_map = [];
+    $decimal_string_map[$decimal_string_key] = 'x';
+
+    $leading_zero_key = '08';
+    $leading_zero_map = [];
+    $leading_zero_map[$leading_zero_key] = 'x';
+
+    $broad_string_map = [];
+    $broad_string_map[$broad_string_key] = 'x';
+
+    $direct_decimal_map = [];
+    $direct_decimal_map['8'] = 'x';
+    $direct_negative_map = [];
+    $direct_negative_map['-2'] = 'x';
+    $direct_leading_zero_map = [];
+    $direct_leading_zero_map['08'] = 'x';
+    $direct_plus_map = [];
+    $direct_plus_map['+8'] = 'x';
+    $direct_decimal_float_map = [];
+    $direct_decimal_float_map['1.5'] = 'x';
+
+    echo $int_map, $float_map, $union_map, $null_map, $nullable_map,
+        $decimal_string_map, $leading_zero_map, $broad_string_map,
+        $direct_decimal_map, $direct_negative_map, $direct_leading_zero_map,
+        $direct_plus_map, $direct_decimal_float_map;
+}
+"#;
+
+    assert_eq!(
+        resolve_literal_test_var(content, "$int_map"),
+        "array<int, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$float_map"),
+        "array<int, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$union_map"),
+        "array<int|string, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$null_map"),
+        "array<string, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$nullable_map"),
+        "array<int|string, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$decimal_string_map"),
+        "array<int, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$leading_zero_map"),
+        "array<string, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$broad_string_map"),
+        "array<int|string, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$direct_decimal_map"),
+        "array<int, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$direct_negative_map"),
+        "array<int, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$direct_leading_zero_map"),
+        "array{08: string}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$direct_plus_map"),
+        "array{+8: string}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$direct_decimal_float_map"),
+        "array{'1.5': string}"
+    );
+}
+
+#[test]
+fn collection_key_normalization_preserves_non_numeric_string_domains() {
+    assert_eq!(
+        normalize_array_key_type(&PhpType::parse("class-string<Foo>")),
+        Some(PhpType::string())
+    );
+    assert_eq!(
+        normalize_array_key_type(&PhpType::parse("interface-string<Foo>")),
+        Some(PhpType::string())
+    );
+    assert_eq!(
+        normalize_array_key_type(&PhpType::parse("class-string")),
+        Some(PhpType::string())
+    );
+    assert_eq!(
+        normalize_array_key_type(&PhpType::string())
+            .unwrap()
+            .to_string(),
+        "int|string"
+    );
+    assert_eq!(
+        normalize_array_key_type(&PhpType::named(atom("number"))),
+        Some(PhpType::int())
+    );
+    assert_eq!(
+        normalize_array_key_type(&PhpType::named(atom("Number"))),
+        None
+    );
+    assert_eq!(
+        normalize_array_key_type(&PhpType::literal_string_raw("\"\\x38\""))
+            .unwrap()
+            .to_string(),
+        "int|string"
+    );
+}
+
+#[test]
+fn mutable_collection_merges_normalize_complete_existing_domains() {
+    assert_eq!(
+        merge_push_type(
+            &PhpType::parse("list<'existing'>"),
+            &PhpType::literal_string_raw("'new'"),
+        ),
+        PhpType::parse("list<string>")
+    );
+    assert_eq!(
+        merge_keyed_type(
+            &PhpType::parse("array<'existing-key', 'existing-value'>"),
+            &PhpType::literal_string_raw("'new-key'"),
+            &PhpType::literal_string_raw("'new-value'"),
+        ),
+        PhpType::parse("array<string, string>")
+    );
+    assert_eq!(
+        merge_keyed_type(
+            &PhpType::parse("list<'existing-value'>"),
+            &PhpType::literal_string_raw("'named-key'"),
+            &PhpType::literal_string_raw("'new-value'"),
+        ),
+        PhpType::parse("array<int|string, string>")
+    );
+}
+
+#[test]
+fn nullable_increment_and_decrement_keep_operator_specific_domains() {
+    let content = r#"<?php
+function test(
+    ?int $inc_int,
+    ?int $dec_int,
+    ?float $inc_float,
+    ?float $dec_float,
+    ?string $inc_string,
+    ?string $dec_string,
+) {
+    $inc_int++;
+    $dec_int--;
+    ++$inc_float;
+    --$dec_float;
+    $inc_string++;
+    $dec_string--;
+
+    echo $inc_int, $dec_int, $inc_float, $dec_float, $inc_string, $dec_string;
+}
+"#;
+
+    assert_eq!(resolve_literal_test_var(content, "$inc_int"), "int");
+    assert_eq!(resolve_literal_test_var(content, "$dec_int"), "?int");
+    assert_eq!(resolve_literal_test_var(content, "$inc_float"), "int|float");
+    assert_eq!(resolve_literal_test_var(content, "$dec_float"), "?float");
+    assert_eq!(
+        resolve_literal_test_var(content, "$inc_string"),
+        "int|float|string"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$dec_string"),
+        "int|float|string|null"
     );
 }
 
@@ -1050,7 +1609,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "int");
+    assert_eq!(ts, "1");
 }
 
 #[test]
@@ -1086,7 +1645,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "int");
+    assert_eq!(ts, "1");
 }
 
 #[test]
@@ -1120,7 +1679,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "int");
+    assert_eq!(ts, "1");
 }
 
 #[test]
@@ -1240,7 +1799,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "int");
+    assert_eq!(ts, "1");
 }
 
 #[test]
@@ -1285,7 +1844,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "int");
+    assert_eq!(ts, "1");
 }
 
 #[test]
@@ -1369,7 +1928,7 @@ $foo;
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert_eq!(ts, "int");
+    assert_eq!(ts, "1");
 }
 
 /// `array_reduce` with a class initial value should resolve to that class.
