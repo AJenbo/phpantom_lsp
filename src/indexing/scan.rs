@@ -42,10 +42,22 @@ impl Backend {
     /// Register a vendor directory path and its URI prefix for
     /// vendor-file detection.
     pub(crate) fn add_vendor_dir(&self, vendor_path: &std::path::Path) {
-        // Store the absolute path for filesystem-level skip logic.
+        // Store the absolute path for filesystem-level skip logic.  Keep
+        // the canonical form alongside the raw one (mirroring the URI
+        // prefixes below): scanned file paths are canonicalized, so on a
+        // symlinked root (macOS `/var` → `/private/var`) a raw-only entry
+        // never prefix-matches and vendor files classify as project code.
         {
             let mut paths = self.workspace.vendor_dir_paths.lock();
-            paths.push(vendor_path.to_path_buf());
+            if !paths.iter().any(|p| p == vendor_path) {
+                paths.push(vendor_path.to_path_buf());
+            }
+            if let Ok(canonical) = vendor_path.canonicalize()
+                && canonical != vendor_path
+                && !paths.contains(&canonical)
+            {
+                paths.push(canonical);
+            }
         }
         // Store URI prefixes for URI-level skip logic (diagnostics, find
         // references, rename).  Keep both raw and canonical forms so macOS

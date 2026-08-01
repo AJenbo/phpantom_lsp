@@ -700,8 +700,15 @@ pub(crate) fn discover_user_files(
             continue;
         }
 
-        let skip_vendor = if filter_overlaps_psr4 {
-            vendor_dirs.clone()
+        let skip_vendor: Vec<PathBuf> = if filter_overlaps_psr4 {
+            // The walker compares canonicalized entry paths below, so
+            // canonicalize the vendor dirs too — otherwise a symlinked
+            // workspace root (macOS `/var` → `/private/var`, monorepo
+            // link farms) never matches and vendor is walked anyway.
+            vendor_dirs
+                .iter()
+                .map(|v| v.canonicalize().unwrap_or_else(|_| v.clone()))
+                .collect()
         } else {
             // User explicitly targeted this path — don't skip vendor
             // subdirectories within it.
