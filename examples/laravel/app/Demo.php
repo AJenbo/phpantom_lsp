@@ -271,6 +271,11 @@ class Demo
 
         $reviews->filter->getRating()->topRated();   // → ReviewCollection
 
+        // `groupBy` is not overridden by Eloquent, so it keeps the custom
+        // collection; `partition` is, with an explicit `->toBase()`.
+        $reviews->groupBy->getTitle()->topRated();   // → ReviewCollection
+        $reviews->partition->getRating();            // → Collection<int, ReviewCollection>
+
         return $reviews->map->getTitle()->implode(', ');   // → Collection<int, string>
     }
 

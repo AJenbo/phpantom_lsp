@@ -432,12 +432,12 @@ fn plan_result(method: &str, key: &PhpType, value: &PhpType, collection: Atom) -
         // The member becomes the collection's key.
         "keyBy" => PhpType::generic_atom(collection, vec![ARRAY_KEY.clone(), value.clone()]),
 
-        // Collections of collections: the outer one can no longer hold
-        // models, so it degrades to the base collection.
-        "groupBy" => PhpType::generic_atom(
-            *SUPPORT_COLLECTION_FQN,
-            vec![ARRAY_KEY.clone(), same_collection()],
-        ),
+        // Collections of collections.  `groupBy` is annotated `static<…,
+        // static<…>>` and `Eloquent\Collection` does not override it, so the
+        // outer stays on the collection it came from.  `partition` *is*
+        // overridden, with an explicit `->toBase()`, so only that one drops
+        // to the base collection.
+        "groupBy" => PhpType::generic_atom(collection, vec![ARRAY_KEY.clone(), same_collection()]),
         "partition" => PhpType::generic_atom(
             *SUPPORT_COLLECTION_FQN,
             vec![PhpType::int(), same_collection()],

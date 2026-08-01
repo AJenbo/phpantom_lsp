@@ -599,3 +599,25 @@ fn injection_replaces_same_named_members_already_on_the_proxy() {
         "Illuminate\\Support\\Collection<int, bool>"
     );
 }
+
+/// `Eloquent\Collection` overrides `partition()` with an explicit
+/// `->toBase()`, so only that one drops to the base collection.  `groupBy()`
+/// is not overridden and keeps `Support\Collection`'s `static<…, static<…>>`
+/// annotation, so its outer collection stays Eloquent.
+#[test]
+fn grouping_an_eloquent_collection_keeps_it_but_partitioning_does_not() {
+    assert_eq!(
+        eloquent_context("groupBy")
+            .result_type(Some(&PhpType::string()))
+            .to_string(),
+        "Illuminate\\Database\\Eloquent\\Collection<array-key, \
+         Illuminate\\Database\\Eloquent\\Collection<int, App\\User>>"
+    );
+    assert_eq!(
+        eloquent_context("partition")
+            .result_type(Some(&PhpType::bool()))
+            .to_string(),
+        "Illuminate\\Support\\Collection<int, \
+         Illuminate\\Database\\Eloquent\\Collection<int, App\\User>>"
+    );
+}

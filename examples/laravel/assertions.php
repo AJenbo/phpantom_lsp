@@ -759,6 +759,23 @@ check(
     $models->filter->getTitle()::class === \App\Models\ReviewCollection::class
 );
 
+// `Eloquent\Collection` overrides `partition()` with an explicit `->toBase()`
+// but does not override `groupBy()`, which keeps `Support\Collection`'s
+// `static<…, static<…>>` annotation.  The two therefore differ, which is why
+// the LSP degrades only one of them.
+check(
+    'grouping an Eloquent collection keeps the custom collection class',
+    $models->groupBy->getTitle()::class === \App\Models\ReviewCollection::class
+);
+check(
+    'partitioning an Eloquent collection degrades to the base collection',
+    $models->partition->getTitle()::class === \Illuminate\Support\Collection::class
+);
+check(
+    'a partitioned Eloquent collection still nests the custom collection',
+    $models->partition->getTitle()->first()::class === \App\Models\ReviewCollection::class
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
