@@ -86,6 +86,15 @@
 //!    mock interface, which does not declare `with()`, breaking
 //!    verification chains such as
 //!    `$mock->shouldHaveReceived('store')->with(...)->once()`.
+//!
+//! 10. **Higher-order collection proxy properties.**  The magic
+//!     `map` / `filter` / `sum` / … properties every `Enumerable`
+//!     inherits are all annotated
+//!     `@property-read HigherOrderCollectionProxy<TKey, TValue>`, which
+//!     records neither the proxied method nor the collection it came
+//!     from.  The patch appends both as extra generic arguments so that
+//!     member access on the proxy can be resolved.  See
+//!     [`super::higher_order_proxy`].
 
 use crate::atom::atom;
 use std::sync::Arc;
@@ -205,6 +214,14 @@ pub fn apply_laravel_patches(class: &mut ClassInfo, fqn: &str) {
     if fqn == LEGACY_MOCK_INTERFACE_FQN || class_extends_legacy_mock_interface(class) {
         patch_mockery_verification_return_types(class);
     }
+
+    // Collections carry one `HigherOrderCollectionProxy` property per
+    // proxyable method.  Tagging them with the method name and the owning
+    // collection class is what lets `$users->map->name` resolve later; see
+    // `higher_order_proxy.rs`.  Dispatched unconditionally because every
+    // `Enumerable` implementation inherits the properties, including
+    // application-defined collections.
+    super::higher_order_proxy::tag_higher_order_proxy_properties(class, fqn);
 }
 
 /// Override `__call` and `__callStatic` return types on Eloquent Builder

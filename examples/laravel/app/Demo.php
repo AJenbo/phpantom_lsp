@@ -222,6 +222,59 @@ class Demo
     }
 
 
+    // ── Higher-Order Collection Proxies ─────────────────────────────────────
+
+    /**
+     * `$reviews->map->getTitle()` is shorthand for
+     * `$reviews->map(fn ($r) => $r->getTitle())`, so the result is typed as
+     * whatever the proxied collection method returns for that member.
+     *
+     * @param  Collection<int, Review>  $reviews
+     */
+    public function higherOrderProxies(Collection $reviews): void
+    {
+        $reviews->map->getTitle();          // → Collection<int, string>
+        $reviews->map->getRating();         // → Collection<int, int>
+        $reviews->flatMap->replies;         // → Collection<array-key, Review>
+
+        $reviews->filter->getRating();      // → Collection<int, Review>
+        $reviews->reject->getRating();      // → Collection<int, Review>
+        $reviews->each->getTitle();         // → Collection<int, Review>
+        $reviews->sortBy->getRating();      // → Collection<int, Review>
+        $reviews->unique->getTitle();       // → Collection<int, Review>
+
+        $reviews->keyBy->getTitle();        // → Collection<array-key, Review>
+        $reviews->groupBy->getTitle();      // → Collection<array-key, Collection<int, Review>>
+        $reviews->partition->getRating();   // → Collection<int, Collection<int, Review>>
+
+        $reviews->first->getRating();       // → Review|null
+        $reviews->contains->getRating();    // → bool
+        $reviews->every->getRating();       // → bool
+        $reviews->sum->getRating();         // → int
+        $reviews->avg->getRating();         // → int|float|null
+
+        // The result is an ordinary collection, so the chain continues.
+        $reviews->map->getTitle()->implode(', ');   // → string
+        $reviews->filter->getRating()->count();     // → int
+    }
+
+    /**
+     * The proxy remembers which collection it came from, so a method that
+     * returns `static` stays on the custom collection.  Mapping to a scalar
+     * cannot, because `ReviewCollection` only holds models — it falls back
+     * to the base `Illuminate\Support\Collection`, exactly as Eloquent does
+     * at runtime.
+     */
+    public function higherOrderProxyOnCustomCollection(): string
+    {
+        $reviews = Review::where('published', true)->get();
+
+        $reviews->filter->getRating()->topRated();   // → ReviewCollection
+
+        return $reviews->map->getTitle()->implode(', ');   // → Collection<int, string>
+    }
+
+
     // ── Eloquent Closure Parameter Inference ────────────────────────────────
 
     public function eloquentClosure(): void

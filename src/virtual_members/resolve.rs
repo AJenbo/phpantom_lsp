@@ -350,11 +350,25 @@ pub fn resolve_class_fully_with_generics(
     let base = resolve_class_fully_inner(class, class_loader, cache);
 
     // Apply generic substitution.
-    let result = if !base.template_params.is_empty() {
+    let mut result = if !base.template_params.is_empty() {
         Arc::new(crate::inheritance::apply_generic_args(&base, generic_args))
     } else {
         base
     };
+
+    // ── Higher-order collection proxy members ───────────────────────
+    // `HigherOrderCollectionProxy` only becomes useful once its type
+    // arguments are concrete: they name the value type whose members the
+    // proxy forwards to, plus the proxied method and collection class
+    // that decide what each forwarded member returns.  Doing this here
+    // rather than at the call site means the synthesized members are
+    // cached alongside the substitution under `(FQN, generic_args)`.
+    if laravel::is_tagged_higher_order_proxy(fqn.as_str(), generic_args) {
+        let mut proxy = Arc::unwrap_or_clone(result);
+        laravel::inject_higher_order_proxy_members(&mut proxy, generic_args, class_loader, cache);
+        proxy.rebuild_method_index();
+        result = Arc::new(proxy);
+    }
 
     // Store the substituted result.
     if let Some(c) = cache {

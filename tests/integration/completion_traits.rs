@@ -4863,3 +4863,149 @@ async fn test_return_this_trait_method_resolves_to_using_class_cross_file() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Docblock tags on an ancestor's trait ───────────────────────────────────
+
+/// `@method` / `@property` tags declared on a trait are visible on every
+/// class that inherits from the trait's consumer, not just on the consumer
+/// itself: the consumer merges the trait's members, so a subclass sees them
+/// the same way it sees the consumer's own tags.
+#[tokio::test]
+async fn test_parent_trait_docblock_tags_reach_a_subclass() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///parent_trait_tags.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property-read string $badge\n",
+        " * @method int score()\n",
+        " */\n",
+        "trait Decorates {}\n",
+        "class Base { use Decorates; }\n",
+        "class Child extends Base {\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    match result.expect("Completion should return results") {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(""))
+                .collect();
+            assert!(
+                names.contains(&"badge"),
+                "`@property-read` on the parent's trait should be visible, got: {names:?}"
+            );
+            assert!(
+                names.contains(&"score"),
+                "`@method` on the parent's trait should be visible, got: {names:?}"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// The tag's template parameters are resolved through both the consumer's
+/// `@use` arguments and the subclass's `@extends` arguments.
+#[tokio::test]
+async fn test_parent_trait_docblock_tags_substitute_generics() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///parent_trait_generics.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Badge { public function label(): string { return ''; } }\n",
+        "/**\n",
+        " * @template TItem\n",
+        " * @property-read TItem $latest\n",
+        " */\n",
+        "trait Holds {}\n",
+        "/**\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Base {\n",
+        "    /** @use Holds<TValue> */\n",
+        "    use Holds;\n",
+        "}\n",
+        "/**\n",
+        " * @extends Base<Badge>\n",
+        " */\n",
+        "class Child extends Base {\n",
+        "    function test() {\n",
+        "        $this->latest->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 19,
+                    character: 23,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    match result.expect("Completion should return results") {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(""))
+                .collect();
+            assert!(
+                names.contains(&"label"),
+                "`TItem` should resolve to `Badge` through `@use` and `@extends`, got: {names:?}"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

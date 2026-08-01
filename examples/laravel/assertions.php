@@ -505,6 +505,71 @@ check(
     ($prefixedUris['ovens.show'] ?? null) === 'bakeries/ovens/{oven}'
 );
 
+// ─── Higher-order collection proxies ────────────────────────────────────────
+
+// Every proxy the LSP knows how to type must actually be proxyable, and
+// every proxyable method must be one the LSP knows how to type — otherwise
+// `$reviews->somethingElse->x` would resolve against a proxy Laravel never
+// creates, or a real proxy would fall through to `mixed`.
+$proxiesProperty = new ReflectionProperty(
+    \Illuminate\Support\Collection::class,
+    'proxies'
+);
+$runtimeProxies = $proxiesProperty->getValue();
+$typedProxies = [
+    'average', 'avg', 'contains', 'doesntContain', 'each', 'every', 'filter',
+    'first', 'flatMap', 'groupBy', 'hasMany', 'hasSole', 'keyBy', 'last',
+    'map', 'max', 'min', 'partition', 'percentage', 'reject', 'skipUntil',
+    'skipWhile', 'some', 'sortBy', 'sortByDesc', 'sum', 'takeUntil',
+    'takeWhile', 'unique', 'unless', 'until', 'when',
+];
+sort($runtimeProxies);
+sort($typedProxies);
+check(
+    'the LSP types exactly the collection methods Laravel proxies',
+    $runtimeProxies === $typedProxies
+);
+
+// `map` collects the accessed member, so a proxy over a scalar member
+// produces a collection of scalars rather than of the original items.
+$proxied = new \Illuminate\Support\Collection([
+    (object) ['rating' => 3],
+    (object) ['rating' => 5],
+]);
+check(
+    'map proxies the member access onto every item',
+    $proxied->map->rating->all() === [3, 5]
+);
+check(
+    'filter proxies the member as a predicate and keeps the items',
+    $proxied->filter->rating->count() === 2
+);
+check(
+    'sum proxies the member and returns its total',
+    $proxied->sum->rating === 8
+);
+check(
+    'first proxies the member as a predicate and returns one item',
+    $proxied->first->rating->rating === 3
+);
+check(
+    'contains proxies the member as a predicate and returns a bool',
+    $proxied->contains->rating === true
+);
+
+// `Eloquent\Collection::map()` degrades to the base collection as soon as
+// the mapped values stop being models — which is why the LSP types
+// `$reviews->map->getTitle()` as `Support\Collection`, not `ReviewCollection`.
+$models = new \App\Models\ReviewCollection([new \App\Models\Review()]);
+check(
+    'mapping an Eloquent collection to a scalar degrades to the base collection',
+    $models->map->getTitle()::class === \Illuminate\Support\Collection::class
+);
+check(
+    'filtering an Eloquent collection keeps the custom collection class',
+    $models->filter->getTitle()::class === \App\Models\ReviewCollection::class
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

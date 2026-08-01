@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use crate::atom::atom;
 use crate::class_lookup::find_class_by_name;
-use crate::inheritance::{apply_generic_args, build_generic_subs};
+use crate::inheritance::build_generic_subs;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::*;
 use crate::util::short_name;
@@ -349,22 +349,18 @@ fn resolve_named_type(
             if !generic_args.is_empty() && !cls.template_params.is_empty() {
                 let generic_arg_strings: Vec<String> =
                     generic_args.iter().map(|a| a.to_string()).collect();
-                let resolved = if let Some(cache) = virtual_members::active_resolved_class_cache() {
-                    virtual_members::resolve_class_fully_with_generics(
-                        &cls,
-                        class_loader,
-                        Some(cache),
-                        &generic_arg_strings,
-                        generic_args,
-                    )
-                } else {
-                    let base = virtual_members::resolve_class_fully(&cls, class_loader);
-                    if !base.template_params.is_empty() {
-                        std::sync::Arc::new(apply_generic_args(&base, generic_args))
-                    } else {
-                        base
-                    }
-                };
+                // Threaded through the same entry point with or without an
+                // active cache: it applies the substitution *and* the
+                // post-substitution fixups that depend on concrete type
+                // arguments (higher-order collection proxy members), which
+                // an inline `apply_generic_args` would skip.
+                let resolved = virtual_members::resolve_class_fully_with_generics(
+                    &cls,
+                    class_loader,
+                    virtual_members::active_resolved_class_cache(),
+                    &generic_arg_strings,
+                    generic_args,
+                );
                 let mut result = std::sync::Arc::unwrap_or_clone(resolved);
 
                 // ── Template-param mixin resolution ────────────────

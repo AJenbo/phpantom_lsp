@@ -314,35 +314,6 @@ aggregate function (`withSum`/`withAvg` → `float`,
 
 The `@property` workaround applies here too.
 
-#### L9. Higher-order collection proxies
-
-**Impact: Low-Medium · Effort: Medium-High**
-
-Larastan reference: `higher-order-collection-proxy-methods.php` (58
-assertions) tests patterns like `$users->map->name`,
-`$users->filter->isActive()`, `$users->avg->id()`, etc. These will
-be useful as integration tests when implementing this feature.
-
-Convenience syntax; most users prefer closures. Niche usage. Requires
-synthesizing virtual properties on collection classes that return a
-proxy type parameterised with the collection's value type.
-
-Laravel collections support higher-order proxies via magic properties
-like `$users->map->name` or `$users->filter->isActive()`. These
-produce a `HigherOrderCollectionProxy` that delegates property
-access / method calls to each item in the collection.
-
-```php
-$users->map->email;           // Collection<int, string>
-$users->filter->isVerified(); // Collection<int, User>
-$users->each->notify();       // void (side-effect)
-```
-
-Larastan handles this with `HigherOrderCollectionProxyPropertyExtension`
-and `HigherOrderCollectionProxyExtension`, which resolve the proxy's
-template types and delegate property/method lookups to the collection's
-value type.
-
 #### L10. `View::withX()` and `RedirectResponse::withX()` dynamic methods
 
 **Impact: Low · Effort: Low**

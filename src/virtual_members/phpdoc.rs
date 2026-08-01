@@ -271,6 +271,14 @@ impl VirtualMemberProvider for PHPDocProvider {
             if !parent.mixins.is_empty() || parent.doc_members.is_some() {
                 return true;
             }
+            // `provide` also reads tags off the traits an ancestor uses.
+            for trait_name in &parent.used_traits {
+                if let Some(trait_info) = class_loader(trait_name)
+                    && trait_info.doc_members.is_some()
+                {
+                    return true;
+                }
+            }
             current_parent = parent.parent_class;
         }
 
@@ -429,6 +437,34 @@ impl VirtualMemberProvider for PHPDocProvider {
                                 type_hint.as_ref(),
                                 &level_subs,
                             ));
+                        }
+                    }
+                }
+
+                // Tags on a trait the *parent* uses are inherited too: the
+                // parent merges the trait's members, so a child sees them
+                // just like the parent's own tags.  Laravel's collections
+                // depend on this — the higher-order proxy properties are
+                // declared on the `EnumeratesValues` trait that
+                // `Support\Collection` uses, and every collection subclass
+                // must see them.
+                for trait_name in &parent.used_traits {
+                    let Some(trait_info) = class_loader(trait_name) else {
+                        continue;
+                    };
+                    let Some(doc) = trait_info.doc_members.as_deref() else {
+                        continue;
+                    };
+                    let trait_subs =
+                        build_trait_substitution_map(&parent, &trait_info, trait_name, &level_subs);
+                    for m in &doc.methods {
+                        if seen_methods.insert(m.name) {
+                            methods.push(substituted_doc_method(m, &trait_subs));
+                        }
+                    }
+                    for (name, type_hint) in &doc.properties {
+                        if seen_props.insert(*name) {
+                            properties.push(doc_property(*name, type_hint.as_ref(), &trait_subs));
                         }
                     }
                 }
@@ -1197,6 +1233,48 @@ fn build_interface_extends_substitution_map(
 
     let mut map = HashMap::new();
     for (i, param_name) in parent_iface.template_params.iter().enumerate() {
+        if let Some(arg) = type_args.get(i) {
+            let resolved = if active_subs.is_empty() {
+                arg.clone()
+            } else {
+                arg.substitute(active_subs)
+            };
+            map.insert(param_name.to_string(), resolved);
+        }
+    }
+    map
+}
+
+/// Map a used trait's template parameters onto the consuming class's
+/// `@use Trait<…>` arguments, composed with the substitutions already in
+/// force at that point in the inheritance walk.
+///
+/// Falls back to `active_subs` when the trait is not parameterised or the
+/// consumer declared no `@use` generics — in that case the trait's tags are
+/// written against whatever names the consumer happens to share, which is
+/// the same assumption the class's own trait tags are read under.
+fn build_trait_substitution_map(
+    consumer: &ClassInfo,
+    trait_info: &ClassInfo,
+    trait_name: &str,
+    active_subs: &HashMap<String, PhpType>,
+) -> HashMap<String, PhpType> {
+    if trait_info.template_params.is_empty() {
+        return active_subs.clone();
+    }
+
+    let trait_short = short_name(trait_name);
+    let Some(type_args) = consumer
+        .use_generics
+        .iter()
+        .find(|(name, _)| short_name(name) == trait_short)
+        .map(|(_, args)| args)
+    else {
+        return active_subs.clone();
+    };
+
+    let mut map = HashMap::new();
+    for (i, param_name) in trait_info.template_params.iter().enumerate() {
         if let Some(arg) = type_args.get(i) {
             let resolved = if active_subs.is_empty() {
                 arg.clone()
