@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785595129588,
+  "lastUpdate": 1785597312955,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12715,6 +12715,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "27fe59d40cb5165435416e2b658b91847df47806",
+          "message": "Backing type for enum validation rules",
+          "timestamp": "2026-08-01T17:00:43+02:00",
+          "tree_id": "521767b4be19d3971c8aca006dd702f73cc2ef97",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/27fe59d40cb5165435416e2b658b91847df47806"
+        },
+        "date": 1785597309611,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.5,
             "unit": "MiB"
           }
         ]
