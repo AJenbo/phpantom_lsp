@@ -82,6 +82,7 @@ pub(super) fn resolve_rhs_property_access(
             Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
             Expression::Self_(_) => Some(current_class_name.to_string()),
             Expression::Static(_) => Some(current_class_name.to_string()),
+            Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
             _ => None,
         };
         if let Some(class_name) = class_name {

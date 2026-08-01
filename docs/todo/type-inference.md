@@ -822,3 +822,73 @@ Everything else tagged `MAYBE` in the source, notably:
   per-value compatibility instead of blanket-accepting would reduce
   false negatives without introducing false positives — a smaller,
   separate follow-up from the move-to-core question above.
+
+---
+
+## T33. Class constant on an expression (`$obj::CONST`) resolves to nothing
+**Impact: Low-Medium · Effort: Low-Medium**
+
+A class constant reached through a variable produces no type at all, so
+hover is blank and anything downstream of it loses the value. The same
+constant reached through a class name or `self` resolves fine.
+
+```php
+class Foo {
+    const INTEGER_CONSTANT = 1;
+}
+
+$foo = new Foo();
+$a = Foo::INTEGER_CONSTANT;    // 1
+$b = $foo::INTEGER_CONSTANT;   // (nothing — PHPStan: 1)
+```
+
+The class-constant branch of `resolve_rhs_property_access` matches only
+`Identifier`, `Self_`, `Static`, and `Parent` for the left-hand side and
+returns an empty vec for anything else. Resolving the subject expression
+to a class first (the forward walker already does this for `$obj->prop`
+in the same function) would cover `$obj::CONST`, and the constant lookup
+below it needs no change.
+
+**Tests to update once fixed:** upstream's `nsrt/deducted-types.php` has
+a `$foo::INTEGER_CONSTANT` block that was dropped when
+`tests/phpstan_nsrt/deducted-types.php` was ported; port it back.
+
+---
+
+## T34. `static::CONST` over-narrows to the declaring class's value
+**Impact: Medium · Effort: Medium**
+
+Late static binding is ignored for class constants: `static::CONST`
+resolves to the value declared on the *current* class, even though a
+subclass may redeclare it. This is unsound in the false-positive
+direction, since the narrowed literal can drive a bogus argument-type
+mismatch or mark a live `match` arm dead.
+
+```php
+class Foo {
+    const NO_TYPE = 1;
+    /** @var string */
+    const TYPE = 'foo';
+
+    public function doFoo(): void {
+        self::NO_TYPE;      // 1      (correct)
+        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)
+        static::TYPE;       // 'foo'  (PHPStan: string — a child must respect @var)
+    }
+}
+```
+
+PHPStan's model: `self::` always yields the declared value. `static::`
+(and `$this::`) yields the value only when it cannot be overridden, i.e.
+the class is `final` or the constant is `final`/`@final`; otherwise it
+widens to the constant's declared type, or `mixed` when the constant is
+untyped.
+
+**Where to change:** the class-constant branch of
+`resolve_rhs_property_access`, which currently maps `Expression::Static`
+to the current class name identically to `Expression::Self_`.
+
+**Tests to update once fixed:** the `static::`/`$this::` assertions in
+upstream's `nsrt/class-constant-types.php` were dropped when
+`tests/phpstan_nsrt/class-constant-types.php` was ported (only the
+`self::` cases survive); port them back.

@@ -10688,6 +10688,42 @@ function test(): void {
     );
 }
 
+#[test]
+fn hover_constant_via_parent_keyword() {
+    let backend = create_test_backend();
+    let uri = "file:///parent_const.php";
+    let content = r#"<?php
+class Base {
+    const LIMIT = 7;
+    const LABEL = 'base';
+}
+class Sub extends Base {
+    public function test(): void {
+        $x = parent::LIMIT;
+        $y = parent::LABEL;
+        $x;
+        $y;
+    }
+}
+"#;
+
+    let hover_x = hover_at(&backend, uri, content, 9, 8).expect("expected hover on $x");
+    let text_x = hover_text(&hover_x);
+    assert!(
+        text_x.contains('7'),
+        "constant via parent:: should resolve to its value, got: {}",
+        text_x
+    );
+
+    let hover_y = hover_at(&backend, uri, content, 10, 8).expect("expected hover on $y");
+    let text_y = hover_text(&hover_y);
+    assert!(
+        text_y.contains("'base'"),
+        "string constant via parent:: should resolve to its value, got: {}",
+        text_y
+    );
+}
+
 // ─── instanceof on nullable strips null ───────────────────────────────
 
 #[test]
