@@ -193,9 +193,61 @@ fn nested_parameters_override_a_parent_wildcard() {
 }
 
 #[test]
+fn chains_that_register_no_resource_contribute_nothing() {
+    // A method chain on something that is not a registration must not be
+    // mistaken for one, however deep the receiver goes.
+    assert!(routes_of("<?php\n$router->middleware('auth')->boot();\n").is_empty());
+}
+
+#[test]
+fn an_unrecognized_modifier_leaves_the_registration_intact() {
+    // A dynamic method name cannot be matched against the known modifiers, so
+    // it is skipped rather than discarding the registration.
+    let content = "<?php\nRoute::resource('photos', C::class)->{$modifier}();\n";
+    assert_eq!(uri_of(content, "photos.show"), "photos/{photo}");
+}
+
+#[test]
+fn legacy_array_parameters_override_the_wildcard() {
+    let content = "<?php\nRoute::resource('photos', PhotoController::class)\n    ->parameters(array('photos' => 'grid'));\n";
+    assert_eq!(uri_of(content, "photos.show"), "photos/{grid}");
+}
+
+#[test]
+fn a_non_array_parameters_argument_leaves_the_wildcard_derived() {
+    // Laravel's `->parameters('singular')` string form asks for exactly the
+    // singularization that is already the default here.
+    let singular =
+        "<?php\nRoute::resource('photos', PhotoController::class)->parameters('singular');\n";
+    assert_eq!(uri_of(singular, "photos.show"), "photos/{photo}");
+
+    let dynamic = "<?php\nRoute::resource('photos', PhotoController::class)->parameters($map);\n";
+    assert_eq!(uri_of(dynamic, "photos.show"), "photos/{photo}");
+}
+
+#[test]
+fn computed_parameters_entries_leave_the_wildcard_derived() {
+    // An entry whose key or value is not a literal contributes nothing rather
+    // than a wrong wildcard, and an element without a key is not an override.
+    let dynamic_value =
+        "<?php\nRoute::resource('photos', C::class)->parameters(['photos' => $name]);\n";
+    assert_eq!(uri_of(dynamic_value, "photos.show"), "photos/{photo}");
+
+    let dynamic_key = "<?php\nRoute::resource('photos', C::class)->parameters([$key => 'grid']);\n";
+    assert_eq!(uri_of(dynamic_key, "photos.show"), "photos/{photo}");
+
+    let keyless = "<?php\nRoute::resource('photos', C::class)->parameters(['grid']);\n";
+    assert_eq!(uri_of(keyless, "photos.show"), "photos/{photo}");
+}
+
+#[test]
 fn single_parameter_call_overrides_the_wildcard() {
     let content = "<?php\nRoute::resource('photos', PhotoController::class)\n    ->parameter('photos', 'grid');\n";
     assert_eq!(uri_of(content, "photos.show"), "photos/{grid}");
+
+    // Both arguments are required for an override; a partial call is ignored.
+    let partial = "<?php\nRoute::resource('photos', C::class)->parameter('photos');\n";
+    assert_eq!(uri_of(partial, "photos.show"), "photos/{photo}");
 }
 
 #[test]
