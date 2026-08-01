@@ -218,7 +218,7 @@ unlikely to move the needle for most users.
 | X3  | Completion item detail on demand (`completionItem/resolve`)                                                                                                                 | Medium      | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium      |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium      |
-| X9  | [Honor editor file excludes and PHP associations during indexing](todo/indexing.md#x9-honor-editor-file-excludes-and-php-associations-during-indexing)                      | Low-Medium  | Medium      |
+| X9  | [Forward editor file excludes and PHP associations to the server](todo/indexing.md#x9-forward-editor-file-excludes-and-php-associations-to-the-server)                      | Low-Medium  | Medium      |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | High        |
 |     | **[Inline Completion](todo/inline-completion.md)**                                                                                                                          |             |             |
 | N1  | Template engine (type-aware snippets)                                                                                                                                       | Medium      | High        |

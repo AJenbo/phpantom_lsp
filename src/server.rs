@@ -289,7 +289,7 @@ impl LanguageServer for Backend {
             // from the very first file load.
             match crate::config::load_config(&root) {
                 Ok(cfg) => {
-                    *self.workspace.config.lock() = cfg;
+                    self.set_config(cfg);
                 }
                 Err(e) => {
                     self.log(
@@ -466,39 +466,49 @@ impl LanguageServer for Backend {
         // Register file watchers for staleness detection.  The client
         // will notify us when PHP files or composer files change on disk
         // (even outside the editor), so we can refresh our indices.
+        // `[indexing] extensions` entries get their own watchers so files
+        // like Drupal's `.module` refresh the index the way `.php` does.
+        let index_filters = self.index_filters();
+        let mut watchers: Vec<FileSystemWatcher> = index_filters
+            .extra_extensions()
+            .iter()
+            .map(|ext| FileSystemWatcher {
+                glob_pattern: GlobPattern::String(format!("**/*.{ext}")),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            })
+            .collect();
+        watchers.extend([
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.php".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/composer.json".to_string()),
+                kind: Some(WatchKind::Change),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
+                kind: Some(WatchKind::Change),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.sql".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+        ]);
         registrations.push(Registration {
             id: "workspace/didChangeWatchedFiles".to_string(),
             method: "workspace/didChangeWatchedFiles".to_string(),
             register_options: Some(
-                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
-                    watchers: vec![
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/*.php".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/composer.json".to_string()),
-                            kind: Some(WatchKind::Change),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
-                            kind: Some(WatchKind::Change),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/*.sql".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                        FileSystemWatcher {
-                            glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
-                            kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                        },
-                    ],
-                })
-                .unwrap(),
+                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions { watchers })
+                    .unwrap(),
             ),
         });
 
@@ -2678,7 +2688,7 @@ impl Backend {
 
     pub(crate) fn reload_laravel_schema_index(&self, root: &std::path::Path) {
         if let Ok(cfg) = crate::config::load_config(root) {
-            *self.workspace.config.lock() = cfg;
+            self.set_config(cfg);
         }
 
         let laravel_config = self.config().laravel;

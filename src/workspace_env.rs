@@ -36,6 +36,10 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) php_version: Mutex<PhpVersion>,
     /// Per-project configuration loaded from `.phpantom.toml`.
     pub(crate) config: Mutex<config::Config>,
+    /// Compiled `[indexing]` exclude globs and extra PHP extensions,
+    /// built lazily from `config` and reset when the config changes.
+    /// Shared across clones so a config reload invalidates everywhere.
+    pub(crate) index_filters: Arc<RwLock<Option<Arc<crate::classmap_scanner::IndexFilters>>>>,
 }
 
 impl WorkspaceEnv {
@@ -48,6 +52,7 @@ impl WorkspaceEnv {
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
             config: Mutex::new(config::Config::default()),
+            index_filters: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -62,6 +67,7 @@ impl Clone for WorkspaceEnv {
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             php_version: Mutex::new(*self.php_version.lock()),
             config: Mutex::new(self.config.lock().clone()),
+            index_filters: Arc::clone(&self.index_filters),
         }
     }
 }

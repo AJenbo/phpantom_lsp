@@ -43,6 +43,7 @@ impl Backend {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
             let laravel_config = self.config().laravel;
+            let filters = self.index_filters();
             for change in &params.changes {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -69,7 +70,11 @@ impl Backend {
                     }
                     continue;
                 }
-                if !path_str.ends_with(".php") {
+                let is_php = std::path::Path::new(path_str)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| filters.is_php_extension(ext));
+                if !is_php {
                     continue;
                 }
 
@@ -81,6 +86,12 @@ impl Backend {
                 let Ok(file_path) = change.uri.to_file_path() else {
                     continue;
                 };
+
+                // Excluded paths are invisible to indexing; skip their
+                // events the way the workspace scanners skip the files.
+                if filters.is_excluded_path(&file_path, false) {
+                    continue;
+                }
 
                 if change.typ == FileChangeType::CHANGED {
                     // `parsed_uris` records the editor URI for open files and

@@ -58,9 +58,17 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 
 ### `[indexing]`
 
-| Key        | Type   | Default  | Description |
-| ---------- | ------ | -------- | ----------- |
-| `strategy` | string | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
+| Key          | Type     | Default  | Description |
+| ------------ | -------- | -------- | ----------- |
+| `strategy`   | string   | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
+| `exclude`    | string[] | `[]`     | Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing `/` anchors to the root, a trailing `/` restricts to directories, and a leading `!` re-includes. Applies to background discovery only — files opened in the editor are always served. |
+| `extensions` | string[] | `[]`     | Extra file extensions (without the dot) treated as PHP source during workspace discovery, e.g. `["module", "inc", "theme"]` for Drupal. `.php` is always included. |
+
+```toml
+[indexing]
+exclude = ["generated", "web/sites/default/files"]
+extensions = ["module", "install", "theme"]
+```
 
 ### `[semantic_tokens]`
 
