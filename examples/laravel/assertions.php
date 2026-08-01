@@ -353,6 +353,8 @@ check(
         'notes',
         'notes.*.body',
         'owner.email',
+        'flavor',
+        'batch_size',
     ]
 );
 check(
@@ -390,6 +392,8 @@ $validated = (new \Illuminate\Validation\Validator(
     [
         'name' => 'Sourdough',
         'owner' => ['email' => 'baker@example.com'],
+        'flavor' => 'strawberry',
+        'batch_size' => 12,
         'unlisted' => 'ignored',
     ],
     (new \App\Http\Requests\StoreBakeryRequest())->rules()
@@ -412,6 +416,19 @@ check(
 check(
     'an unsent nullable field is absent, not present-and-null',
     ! array_key_exists('dough_temp', $validated)
+);
+// An enum rule validates the raw input and hands it back unchanged, which is
+// why the shape types `flavor` as `string` and `batch_size` as `int` rather
+// than as the enum itself.
+check(
+    'an enum rule validates to the raw scalar, not the enum case',
+    ($validated['flavor'] ?? null) === 'strawberry'
+        && ($validated['batch_size'] ?? null) === 12
+);
+check(
+    'the demoed enums are backed by the types the shape claims',
+    (string) (new ReflectionEnum(\App\Models\JamFlavor::class))->getBackingType() === 'string'
+        && (string) (new ReflectionEnum(\App\Models\BatchSize::class))->getBackingType() === 'int'
 );
 
 // ─── Summary ────────────────────────────────────────────────────────────────

@@ -517,6 +517,8 @@ class Demo
         //     dough_temp?: ?int|float,
         //     notes?: list<array{body: string}>,
         //     owner: array{email: string},
+        //     flavor: string,
+        //     batch_size: int,
         //   }
         $data = $request->validated();
 
@@ -524,6 +526,11 @@ class Demo
         $data['apricot'];                 // → bool ('apricot' is optional)
         $data['notes'];                   // → list<array{body: string}>
         $data['owner']['email'];          // → string
+
+        // An enum rule types its field as the enum's backing type, because
+        // the validated array holds the raw input rather than the case.
+        $data['flavor'];                  // → string (JamFlavor: string)
+        $data['batch_size'];              // → int (BatchSize: int)
 
         // A key argument returns that member's type rather than the array.
         $request->validated('name');      // → string

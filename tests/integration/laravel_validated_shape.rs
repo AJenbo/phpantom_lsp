@@ -114,6 +114,72 @@ class StorePostRequest extends FormRequest {
 }
 ";
 
+const ENUM_RULE_PHP: &str = "\
+<?php
+namespace Illuminate\\Validation\\Rules;
+class Enum {
+    public function __construct(string $type) {}
+}
+";
+
+const RULE_FACADE_PHP: &str = "\
+<?php
+namespace Illuminate\\Validation;
+use Illuminate\\Validation\\Rules\\Enum;
+class Rule {
+    public static function enum(string $type): Enum { return new Enum($type); }
+}
+";
+
+const ROLE_ENUM_PHP: &str = "\
+<?php
+namespace App\\Enums;
+enum Role: string {
+    case Admin = 'admin';
+    case Guest = 'guest';
+}
+";
+
+const PRIORITY_ENUM_PHP: &str = "\
+<?php
+namespace App\\Enums;
+enum Priority: int {
+    case Low = 1;
+    case High = 2;
+}
+";
+
+const SUIT_ENUM_PHP: &str = "\
+<?php
+namespace App\\Enums;
+enum Suit {
+    case Hearts;
+    case Spades;
+}
+";
+
+/// A form request whose enum rules are written in its own file's terms: the
+/// controller that calls it imports none of these enums.
+const STORE_TICKET_REQUEST_PHP: &str = "\
+<?php
+namespace App\\Http\\Requests;
+use App\\Enums\\Priority;
+use App\\Enums\\Role;
+use App\\Enums\\Suit;
+use Illuminate\\Foundation\\Http\\FormRequest;
+use Illuminate\\Validation\\Rule;
+use Illuminate\\Validation\\Rules\\Enum;
+class StoreTicketRequest extends FormRequest {
+    public function rules(): array {
+        return [
+            'role' => ['required', new Enum(Role::class)],
+            'priority' => ['required', Rule::enum(Priority::class)],
+            'suit' => ['required', new Enum(Suit::class)],
+        ];
+    }
+}
+";
+
 /// A project's own validator, to prove the receiver test is a subtype walk
 /// rather than a match on the framework's two FQNs.
 const APP_VALIDATOR_PHP: &str = "\
@@ -144,10 +210,19 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
             "vendor/illuminate/Support/Facades/Validator.php",
             VALIDATOR_FACADE_PHP,
         ),
+        ("vendor/illuminate/Validation/Rules/Enum.php", ENUM_RULE_PHP),
+        ("vendor/illuminate/Validation/Rule.php", RULE_FACADE_PHP),
         (
             "src/Http/Requests/StorePostRequest.php",
             STORE_POST_REQUEST_PHP,
         ),
+        (
+            "src/Http/Requests/StoreTicketRequest.php",
+            STORE_TICKET_REQUEST_PHP,
+        ),
+        ("src/Enums/Role.php", ROLE_ENUM_PHP),
+        ("src/Enums/Priority.php", PRIORITY_ENUM_PHP),
+        ("src/Enums/Suit.php", SUIT_ENUM_PHP),
         ("src/AppValidator.php", APP_VALIDATOR_PHP),
     ]
 }
@@ -235,9 +310,12 @@ fn controller(body: &str) -> String {
     format!(
         "<?php
 namespace App;
+use App\\Enums\\Priority;
 use App\\Http\\Requests\\StorePostRequest;
+use App\\Http\\Requests\\StoreTicketRequest;
 use Illuminate\\Http\\Request;
 use Illuminate\\Support\\Facades\\Validator;
+use Illuminate\\Validation\\Rules\\Enum;
 class PostController {{
 {body}
 }}
@@ -454,6 +532,60 @@ async fn a_custom_validator_subclass_is_recognised() {
     assert!(
         hover.contains("nickname: string"),
         "expected a validator subclass to resolve the rules, got: {hover}"
+    );
+}
+
+// ─── Enum rules ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn an_enum_rule_types_its_field_as_the_enums_backing_type() {
+    // The validated array holds the raw input, so a `string`-backed enum
+    // validates a string and an `int`-backed one an int.  The enums are named
+    // in the form request's own imports, which the controller does not share.
+    let source = controller(
+        "    public function store(StoreTicketRequest $request) {
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("role: string"),
+        "expected `role: string` from a string-backed enum, got: {hover}"
+    );
+    assert!(
+        hover.contains("priority: int"),
+        "expected `priority: int` from an int-backed enum, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn a_pure_enum_rule_claims_nothing() {
+    // A non-backed enum has no raw scalar form, so the field stays `mixed`.
+    let source = controller(
+        "    public function store(StoreTicketRequest $request) {
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("suit: mixed"),
+        "expected `suit: mixed` for a pure enum, got: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn an_enum_rule_at_the_call_site_reads_the_calling_files_imports() {
+    let source = controller(
+        "    public function store(Request $request) {
+        $data§ = $request->validate([
+            'priority' => ['required', new Enum(Priority::class)],
+        ]);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("priority: int"),
+        "expected `priority: int` from the call site's enum rule, got: {hover}"
     );
 }
 

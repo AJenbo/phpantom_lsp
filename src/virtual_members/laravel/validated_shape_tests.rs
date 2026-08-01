@@ -1,10 +1,30 @@
 use super::*;
+use crate::test_fixtures::make_class;
+use crate::types::ClassLikeKind;
 use crate::virtual_members::laravel::validation_rules::rules_from_array_text;
+
+/// The enums the enum-rule tests name, and nothing else.
+///
+/// Names are the ones written in the rules arrays below, which are parsed
+/// standalone and so keep their short form.
+fn test_enum(name: &str) -> Option<Arc<ClassInfo>> {
+    let backed = match name {
+        "Role" | "JamFlavor" => Some(BackedEnumType::String),
+        "Level" | "BatchSize" => Some(BackedEnumType::Int),
+        // A pure enum: no backing type, and so no raw scalar form.
+        "Suit" => None,
+        _ => return None,
+    };
+    let mut class = make_class(name);
+    class.kind = ClassLikeKind::Enum;
+    class.backed_type = backed;
+    Some(Arc::new(class))
+}
 
 /// Build the shape for a rules array written as PHP source, and render it.
 fn shape_of(array_text: &str) -> String {
     let rules = rules_from_array_text(array_text).expect("rules should parse");
-    rules_to_shape(&rules)
+    rules_to_shape(&rules, &test_enum)
         .map(|ty| ty.to_string())
         .unwrap_or_else(|| "array".to_string())
 }
@@ -74,19 +94,19 @@ fn rule_parameters_do_not_confuse_the_type() {
 
 #[test]
 fn a_rule_object_keeps_the_key_but_loses_the_type() {
-    // `new Enum(Role::class)` still validated something; we cannot say what,
-    // so the key survives as `mixed` rather than dropping out of the shape.
+    // `Rule::unique(…)` still validated something; we cannot say what, so the
+    // key survives as `mixed` rather than dropping out of the shape.
     assert_eq!(
-        shape_of("['role' => [new Enum(Role::class)]]"),
-        "array{role?: mixed}"
+        shape_of("['email' => [Rule::unique('users')]]"),
+        "array{email?: mixed}"
     );
 }
 
 #[test]
 fn a_required_rule_object_is_still_a_required_key() {
     assert_eq!(
-        shape_of("['role' => ['required', new Enum(Role::class)]]"),
-        "array{role: mixed}"
+        shape_of("['email' => ['required', Rule::unique('users')]]"),
+        "array{email: mixed}"
     );
 }
 
@@ -111,6 +131,106 @@ fn numeric_admits_both_number_types() {
     assert_eq!(
         shape_of("['price' => 'required|numeric']"),
         "array{price: int|float}"
+    );
+}
+
+// ─── Enum rules ─────────────────────────────────────────────────────────────
+
+#[test]
+fn a_string_backed_enum_rule_types_the_field_as_a_string() {
+    // The validated array holds the raw input, not the enum case.
+    assert_eq!(
+        shape_of("['role' => ['required', new Enum(Role::class)]]"),
+        "array{role: string}"
+    );
+}
+
+#[test]
+fn an_int_backed_enum_rule_types_the_field_as_an_int() {
+    assert_eq!(
+        shape_of("['level' => ['required', new Enum(Level::class)]]"),
+        "array{level: int}"
+    );
+}
+
+#[test]
+fn the_rule_enum_shorthand_reads_like_the_rule_object() {
+    assert_eq!(
+        shape_of("['role' => ['required', Rule::enum(Role::class)]]"),
+        "array{role: string}"
+    );
+}
+
+#[test]
+fn a_fluent_enum_rule_still_names_its_enum() {
+    assert_eq!(
+        shape_of("['role' => ['required', Rule::enum(Role::class)->only([Role::Admin])]]"),
+        "array{role: string}"
+    );
+}
+
+#[test]
+fn an_enum_rule_written_without_an_array_is_read_the_same_way() {
+    assert_eq!(
+        shape_of("['role' => new Enum(Role::class)]"),
+        "array{role?: string}"
+    );
+}
+
+#[test]
+fn a_nullable_enum_field_keeps_its_null() {
+    assert_eq!(
+        shape_of("['role' => ['nullable', new Enum(Role::class)]]"),
+        "array{role?: ?string}"
+    );
+}
+
+#[test]
+fn a_pure_enum_rule_stays_mixed() {
+    // A non-backed enum has no raw scalar form, so nothing can be claimed
+    // about the validated value.
+    assert_eq!(
+        shape_of("['suit' => ['required', new Enum(Suit::class)]]"),
+        "array{suit: mixed}"
+    );
+}
+
+#[test]
+fn an_unresolvable_enum_class_stays_mixed() {
+    assert_eq!(
+        shape_of("['role' => ['required', new Enum(Unknown::class)]]"),
+        "array{role: mixed}"
+    );
+}
+
+#[test]
+fn a_declared_type_rule_still_wins_over_the_enum_backing_type() {
+    assert_eq!(
+        shape_of("['level' => ['required', 'string', new Enum(Level::class)]]"),
+        "array{level: string}"
+    );
+}
+
+#[test]
+fn an_enum_rule_resolves_its_class_through_the_declaring_files_imports() {
+    let mut rules = rules_from_array_text("['role' => [new Enum(Role::class)]]").unwrap();
+    resolve_enum_class_names(
+        &mut rules,
+        "<?php\nnamespace App\\Http\\Requests;\nuse App\\Enums\\Role;\n",
+    );
+    assert_eq!(
+        rules.entries[0].enum_class.as_deref(),
+        Some("App\\Enums\\Role")
+    );
+}
+
+#[test]
+fn an_unimported_enum_class_resolves_against_the_declaring_namespace() {
+    let mut rules = rules_from_array_text("['role' => [Rule::enum(Role::class)]]").unwrap();
+    resolve_enum_class_names(&mut rules, "<?php\nnamespace App\\Enums;\n");
+    assert_eq!(
+        rules.entries[0].enum_class.as_deref(),
+        Some("App\\Enums\\Role")
     );
 }
 
@@ -197,13 +317,13 @@ fn a_computed_key_abandons_the_shape() {
     // unknown key.
     let rules = rules_from_array_text("['name' => 'required', $dynamic => 'required']").unwrap();
     assert!(!rules.keys_complete);
-    assert!(rules_to_shape(&rules).is_none());
+    assert!(rules_to_shape(&rules, &test_enum).is_none());
 }
 
 #[test]
 fn a_spread_abandons_the_shape() {
     let rules = rules_from_array_text("[...$base, 'name' => 'required']").unwrap();
-    assert!(rules_to_shape(&rules).is_none());
+    assert!(rules_to_shape(&rules, &test_enum).is_none());
 }
 
 #[test]
@@ -221,7 +341,7 @@ fn rules(array_text: &str) -> RulesArray {
 fn member_type_reads_a_single_key() {
     let rules = rules("['name' => 'required|string', 'age' => 'nullable|integer']");
     assert_eq!(
-        rules_member_type(&rules, "age").map(|t| t.to_string()),
+        rules_member_type(&rules, "age", &test_enum).map(|t| t.to_string()),
         Some("?int".to_string())
     );
 }
@@ -230,7 +350,7 @@ fn member_type_reads_a_single_key() {
 fn member_type_walks_dot_notation() {
     let rules = rules("['owner.email' => 'required|email']");
     assert_eq!(
-        rules_member_type(&rules, "owner.email").map(|t| t.to_string()),
+        rules_member_type(&rules, "owner.email", &test_enum).map(|t| t.to_string()),
         Some("string".to_string())
     );
 }
@@ -238,14 +358,14 @@ fn member_type_walks_dot_notation() {
 #[test]
 fn member_type_of_an_unknown_key_is_none() {
     let rules = rules("['name' => 'required|string']");
-    assert!(rules_member_type(&rules, "nope").is_none());
+    assert!(rules_member_type(&rules, "nope", &test_enum).is_none());
 }
 
 #[test]
 fn only_keeps_the_listed_keys() {
     let shape = rules_to_shape(&rules(
         "['name' => 'required|string', 'age' => 'required|integer', 'city' => 'required|string']",
-    ))
+    ), &test_enum)
     .unwrap();
     let narrowed = narrow_shape(&shape, &["name".to_string(), "city".to_string()], true).unwrap();
     assert_eq!(narrowed.to_string(), "array{name: string, city: string}");
@@ -253,9 +373,10 @@ fn only_keeps_the_listed_keys() {
 
 #[test]
 fn except_drops_the_listed_keys() {
-    let shape = rules_to_shape(&rules(
-        "['name' => 'required|string', 'age' => 'required|integer']",
-    ))
+    let shape = rules_to_shape(
+        &rules("['name' => 'required|string', 'age' => 'required|integer']"),
+        &test_enum,
+    )
     .unwrap();
     let narrowed = narrow_shape(&shape, &["age".to_string()], false).unwrap();
     assert_eq!(narrowed.to_string(), "array{name: string}");
@@ -283,9 +404,12 @@ fn the_bakery_demo_rules_produce_the_documented_shape() {
                 'notes' => 'array',
                 'notes.*.body' => 'required|string',
                 'owner.email' => 'required|email',
+                'flavor' => ['required', new Enum(JamFlavor::class)],
+                'batch_size' => ['required', Rule::enum(BatchSize::class)],
             ]"
         ),
         "array{name: string, apricot?: bool, dough_temp?: ?int|float, \
-notes?: list<array{body: string}>, owner: array{email: string}}"
+notes?: list<array{body: string}>, owner: array{email: string}, \
+flavor: string, batch_size: int}"
     );
 }

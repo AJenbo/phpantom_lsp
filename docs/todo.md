@@ -193,7 +193,6 @@ unlikely to move the needle for most users.
 | L27 | [Legacy `Controller@method` action strings](todo/laravel.md#l27-legacy-controllermethod-action-strings)                                                                     | Low         | Low         |
 | L28 | [Path helper links and completion](todo/laravel.md#l28-path-helper-links-and-completion)                                                                                    | Low         | Low         |
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
-| L40 | [Backing type for enum validation rules](todo/laravel.md#l40-backing-type-for-enum-validation-rules)                                                                        | Low         | Low-Medium  |
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
 | BL8 | [Template signature resolution chain](todo/blade.md#bl8-template-signature-resolution-chain) (Bladestan-compatible contract model)                                           | High        | Medium      |
 | BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
