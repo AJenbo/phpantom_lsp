@@ -904,27 +904,6 @@ binding `bind(Gateway::class, StripeGateway::class)` does **not**
 retype `app(Gateway::class)` to the concrete — the contract is the
 interface.
 
-#### L40. Backing type for enum validation rules
-
-**Impact: Low · Effort: Low-Medium**
-
-`validated()` array shapes type a field from its validation rules, but
-an enum rule (`new Enum(Role::class)`, `Rule::enum(Role::class)`)
-currently degrades to `mixed`: the rule is an object expression, not a
-rule name the token table knows.
-
-The validated array holds the raw input, not the enum case, so the
-right type is the enum's backing type — `string` for a string-backed
-enum, `int` for an int-backed one. Both are recoverable: the class name
-is written in the rule expression, and the backing type is on the
-`ClassInfo`. A pure (non-backed) enum has no raw scalar form and should
-stay `mixed`.
-
-Guessing `string` for every enum rule is the thing to avoid: an
-int-backed enum would then be typed as a string, which is worse than
-`mixed` because it can produce a false diagnostic rather than merely
-missing one.
-
 #### L39. Unused view and translation key detection
 
 **Impact: Low · Effort: Medium**

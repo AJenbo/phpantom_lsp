@@ -18,6 +18,7 @@
 //! nothing, which degrades to "fewer suggestions" rather than to wrong
 //! ones.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_allocator::LocalArena;
@@ -49,6 +50,12 @@ pub(crate) struct ValidationRule {
     /// Byte offset of the key literal's content (just inside the quotes),
     /// in the file named by the owning [`RulesSource`].
     pub key_start: usize,
+    /// The enum class named by an enum rule (`new Enum(Role::class)`,
+    /// `Rule::enum(Role::class)`), or `None` when the entry has no such rule.
+    ///
+    /// Stored exactly as written until [`resolve_enum_class_names`] resolves
+    /// it against the imports of the file that declares the rules array.
+    pub enum_class: Option<String>,
 }
 
 /// The entries of one validation rules array, plus whether its key set is
@@ -161,6 +168,7 @@ fn collect_rules_from_elements<'a>(
             key: key.to_string(),
             rules: render_rule_value(kv.value, content),
             key_start,
+            enum_class: enum_rule_class(kv.value),
         });
     }
 }
@@ -193,6 +201,129 @@ fn render_rule_list<'a>(
         .filter(|p| !p.is_empty())
         .collect();
     parts.join("|")
+}
+
+// ─── Enum rules ─────────────────────────────────────────────────────────────
+
+/// The enum class an enum rule names, exactly as written in the source.
+///
+/// Laravel writes an enum rule as an object — `new Enum(Role::class)` or its
+/// `Rule::enum(Role::class)` shorthand — so the class is only reachable
+/// through the expression, not through the rule string.  The rule may sit
+/// alone or as one element of an array-form rule list, and the shorthand may
+/// carry a fluent chain (`Rule::enum(Role::class)->only([…])`), whose head is
+/// still the call that names the enum.
+///
+/// Returns `None` for every other rule value, and for a class expression
+/// that names no class of its own (`self::class`, a variable).
+fn enum_rule_class(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Array(arr) => arr.elements.iter().find_map(element_enum_class),
+        Expression::LegacyArray(arr) => arr.elements.iter().find_map(element_enum_class),
+        Expression::Parenthesized(p) => enum_rule_class(p.expression),
+        Expression::Instantiation(inst) => {
+            let Expression::Identifier(class) = inst.class else {
+                return None;
+            };
+            if !short_name(bytes_to_str(class.value())).eq_ignore_ascii_case("Enum") {
+                return None;
+            }
+            class_const_name(argument_at(inst.argument_list.as_ref()?, 0)?)
+        }
+        Expression::Call(Call::StaticMethod(call)) => {
+            let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                return None;
+            };
+            if !bytes_to_str(method.value).eq_ignore_ascii_case("enum") {
+                return None;
+            }
+            let Expression::Identifier(class) = call.class else {
+                return None;
+            };
+            if !short_name(bytes_to_str(class.value())).eq_ignore_ascii_case("Rule") {
+                return None;
+            }
+            class_const_name(argument_at(&call.argument_list, 0)?)
+        }
+        Expression::Call(Call::Method(mc)) => enum_rule_class(mc.object),
+        Expression::Call(Call::NullSafeMethod(mc)) => enum_rule_class(mc.object),
+        _ => None,
+    }
+}
+
+fn element_enum_class(element: &ArrayElement<'_>) -> Option<String> {
+    match element {
+        ArrayElement::Value(v) => enum_rule_class(v.value),
+        _ => None,
+    }
+}
+
+/// The class name written in a `Something::class` expression.
+///
+/// `self::class` and friends are relative to a declaration site the rules
+/// array does not carry, so they name nothing here.
+fn class_const_name(expr: &Expression<'_>) -> Option<String> {
+    let Expression::Access(Access::ClassConstant(access)) = expr else {
+        return None;
+    };
+    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
+        return None;
+    };
+    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
+        return None;
+    }
+    let Expression::Identifier(class) = access.class else {
+        return None;
+    };
+    let name = bytes_to_str(class.value());
+    if matches!(
+        name.to_ascii_lowercase().as_str(),
+        "self" | "static" | "parent"
+    ) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// Resolve the enum class names in `rules` against the imports of the file
+/// `program` was parsed from.
+///
+/// `use App\Enums\Role; … new Enum(Role::class)` names `App\Enums\Role`, and
+/// only the declaring file's `use` statements and namespace say so — the
+/// class index cannot, since a bare short name matches nothing there.
+///
+/// Building the import table walks the file's top-level statements, so it is
+/// paid only when an enum rule was actually found.
+fn resolve_enum_names_in_program(rules: &mut RulesArray, program: &Program<'_>) {
+    if !rules.entries.iter().any(|e| e.enum_class.is_some()) {
+        return;
+    }
+
+    let mut use_map = HashMap::new();
+    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+    let namespace = Backend::extract_namespace_from_statements(program.statements.iter());
+
+    for entry in &mut rules.entries {
+        if let Some(name) = &entry.enum_class {
+            entry.enum_class = Some(crate::util::resolve_to_fqn(name, &use_map, &namespace));
+        }
+    }
+}
+
+/// Resolve the enum class names in `rules` against the imports of `content`.
+///
+/// Rules recovered from a file are resolved during the parse that recovered
+/// them; this is for the one array that is parsed on its own — the argument
+/// text of a `validate([…])` call, whose imports are the calling file's.
+/// Nothing is parsed unless an enum rule was found, and the parse then goes
+/// through the shared cache, which the calling file is normally already in.
+pub(crate) fn resolve_enum_class_names(rules: &mut RulesArray, content: &str) {
+    if !rules.entries.iter().any(|e| e.enum_class.is_some()) {
+        return;
+    }
+    crate::parser::with_parsed_program(content, "resolve_enum_class_names", |program, _| {
+        resolve_enum_names_in_program(rules, program);
+    });
 }
 
 fn source_text<'c>(expr: &Expression<'_>, content: &'c str) -> &'c str {
@@ -351,7 +482,10 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Rule
             best = Some((end, rules));
         }
     });
-    best.map(|(_, rules)| rules)
+    let mut rules = best.map(|(_, rules)| rules)?;
+    // Only the winning array is resolved, and only if it holds an enum rule.
+    resolve_enum_names_in_program(&mut rules, program);
+    Some(rules)
 }
 
 /// Parse a rules array written directly at a call site, e.g. the argument
@@ -359,7 +493,10 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Rule
 ///
 /// The text is parsed standalone, so [`ValidationRule::key_start`] offsets
 /// index `array_text` rather than any file; callers that need navigable
-/// offsets must use [`inline_validate_rules`] instead.
+/// offsets must use [`inline_validate_rules`] instead.  For the same reason
+/// there are no imports to read here, so an enum rule keeps its name as
+/// written and the caller must pass the rules through
+/// [`resolve_enum_class_names`] with the surrounding file's content.
 pub(crate) fn rules_from_array_text(array_text: &str) -> Option<RulesArray> {
     let source = format!("<?php return {};", array_text.trim());
     let arena = LocalArena::new();
@@ -610,6 +747,9 @@ pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> RulesA
 
     let mut out = RulesArray::new();
     collect_rules_method(Node::Program(program), class_name, content, &mut out);
+    // An enum rule names its class in this file's terms, and this file is
+    // already parsed — resolving here saves the caller a second pass over it.
+    resolve_enum_names_in_program(&mut out, program);
     out
 }
 

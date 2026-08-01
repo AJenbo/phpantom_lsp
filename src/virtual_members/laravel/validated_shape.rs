@@ -21,7 +21,9 @@
 //!   because that is the value's meaning and every consumer treats it that
 //!   way.
 //! - A rule object (`new Enum(Role::class)`, `Rule::unique(…)`) still yields
-//!   the raw scalar Laravel validated, not the object.
+//!   the raw scalar Laravel validated, not the object.  For an enum rule that
+//!   scalar is the enum's backing type, so a `string`-backed enum types its
+//!   field `string` and an `int`-backed one `int`.
 //!
 //! Where a key's *type* cannot be read the entry degrades to `mixed`, which
 //! accepts anything and so cannot cause a false diagnostic.  Where the key
@@ -35,12 +37,16 @@ use crate::php_type::{PhpType, ShapeEntry};
 use crate::type_engine::call_resolution::VALIDATION_RULES_RESOLVER;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::SubjectExpr;
-use crate::types::{AccessKind, ClassInfo};
+use crate::types::{AccessKind, BackedEnumType, ClassInfo, ClassLikeKind};
 
 use super::validation_rules::{
-    RulesArray, ValidationRule, is_request_like, is_validated_input, rules_from_array_text,
-    rules_in_scope,
+    RulesArray, ValidationRule, is_request_like, is_validated_input, resolve_enum_class_names,
+    rules_from_array_text, rules_in_scope,
 };
+
+/// Resolves a class name to its `ClassInfo`, the loader every shape lookup
+/// that has to read an enum's backing type is handed.
+type ClassLoader<'a> = &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>;
 
 /// The type of an uploaded file in a validated array.
 const UPLOADED_FILE_FQN: &str = "\\Illuminate\\Http\\UploadedFile";
@@ -55,14 +61,14 @@ const VALIDATOR_FQN: &str = "Illuminate\\Validation\\Validator";
 ///
 /// Returns `None` when the shape would be untrustworthy — an incomplete key
 /// set, or no keys at all — and the caller should fall back to plain `array`.
-fn rules_to_shape(rules: &RulesArray) -> Option<PhpType> {
+fn rules_to_shape(rules: &RulesArray, class_loader: ClassLoader<'_>) -> Option<PhpType> {
     if !rules.keys_complete || rules.is_empty() {
         return None;
     }
 
     let mut root = Node::default();
     for rule in &rules.entries {
-        root.insert(&rule.key, RuleSpec::parse(rule));
+        root.insert(&rule.key, RuleSpec::parse(rule, class_loader));
     }
     root.shape()
 }
@@ -72,8 +78,12 @@ fn rules_to_shape(rules: &RulesArray) -> Option<PhpType> {
 /// Dot notation reaches nested keys, so `validated('owner.email')` resolves
 /// through the shape the same way the runtime lookup walks the array.
 /// Returns `None` when the key is not in the shape.
-fn rules_member_type(rules: &RulesArray, key: &str) -> Option<PhpType> {
-    let shape = rules_to_shape(rules)?;
+fn rules_member_type(
+    rules: &RulesArray,
+    key: &str,
+    class_loader: ClassLoader<'_>,
+) -> Option<PhpType> {
+    let shape = rules_to_shape(rules, class_loader)?;
     key.split('.')
         .try_fold(shape, |ty, segment| ty.shape_value_type(segment).cloned())
 }
@@ -118,7 +128,8 @@ pub(crate) fn rules_for_receiver(
     let class = backend.find_or_load_class(receiver_fqn)?;
     // The type engine has no document URI to offer, so the class lookup falls
     // back to the FQN index.  Only the entries are wanted here — which file
-    // they came from matters to go-to-definition, not to a type.
+    // they came from matters to go-to-definition, not to a type, and the
+    // names an enum rule carries were already resolved against that file.
     rules_in_scope(backend, &class, "", content, offset as usize).map(|resolved| resolved.rules)
 }
 
@@ -181,16 +192,19 @@ pub(crate) fn resolve_shape_at_call(
         // describes, so the rules come from the call site rather than scope —
         // which is why this arm needs no active resolver.
         ShapeCall::Validate if is_request_like(receiver, class_loader) => {
-            let rules = rules_from_array_text(args.first()?)?;
-            rules_to_shape(&rules)
+            let mut rules = rules_from_array_text(args.first()?)?;
+            // The rules array is written at the call site, so an enum rule in
+            // it names its class in this file's terms.
+            resolve_enum_class_names(&mut rules, content);
+            rules_to_shape(&rules, class_loader)
         }
         ShapeCall::Validated
             if is_request_like(receiver, class_loader) || is_validator(receiver, class_loader) =>
         {
             let rules = lookup_rules(receiver, content, offset)?;
             match args.first().and_then(|a| unquote(a)) {
-                Some(key) => rules_member_type(&rules, &key),
-                None => rules_to_shape(&rules),
+                Some(key) => rules_member_type(&rules, &key, class_loader),
+                None => rules_to_shape(&rules, class_loader),
             }
         }
         // Narrowing applies to a `ValidatedInput` only.  `$request->only()`
@@ -198,7 +212,7 @@ pub(crate) fn resolve_shape_at_call(
         ShapeCall::Only | ShapeCall::Except if is_validated_input(receiver) => {
             let source = safe_source()?;
             let rules = lookup_rules(&source, content, offset)?;
-            let shape = rules_to_shape(&rules)?;
+            let shape = rules_to_shape(&rules, class_loader)?;
             let keys = key_list(args);
             narrow_shape(&shape, &keys, call == ShapeCall::Only)
         }
@@ -322,7 +336,7 @@ struct RuleSpec {
 }
 
 impl RuleSpec {
-    fn parse(rule: &ValidationRule) -> Self {
+    fn parse(rule: &ValidationRule, class_loader: ClassLoader<'_>) -> Self {
         let mut spec = RuleSpec::default();
         for token in rule.rules.split('|') {
             // `max:255` and `date_format:Y-m-d` carry a parameter that says
@@ -343,6 +357,13 @@ impl RuleSpec {
                     }
                 }
             }
+        }
+        // An enum rule is an object, so it names no type token; the scalar it
+        // validates is the enum's own backing type.
+        if spec.base.is_none()
+            && let Some(fqn) = rule.enum_class.as_deref()
+        {
+            spec.base = enum_backing_type(fqn, class_loader);
         }
         spec
     }
@@ -371,18 +392,34 @@ impl RuleSpec {
     }
 }
 
+/// The scalar an enum rule validates: the enum's backing type.
+///
+/// The validated array holds the raw input rather than the enum case, so a
+/// `string`-backed enum validates a `string` and an `int`-backed one an
+/// `int`.  A pure enum has no scalar form, and a class name that resolves to
+/// nothing — or to something that is not an enum — says nothing about the
+/// value: all of these return `None` and leave the field `mixed`, rather than
+/// guessing `string` and mistyping every `int`-backed enum.
+fn enum_backing_type(fqn: &str, class_loader: ClassLoader<'_>) -> Option<PhpType> {
+    let class = class_loader(fqn)?;
+    if class.kind != ClassLikeKind::Enum {
+        return None;
+    }
+    match class.backed_type? {
+        BackedEnumType::String => Some(PhpType::string()),
+        BackedEnumType::Int => Some(PhpType::int()),
+    }
+}
+
 /// The value type a single validation rule implies, or `None` when the rule
 /// constrains the value without naming its type (`max`, `unique`, `confirmed`).
 fn rule_token_type(name: &str) -> Option<PhpType> {
     let ty = match name {
-        // Rules that only accept strings.  `date` and `enum` included: the
-        // validated array holds the raw input, so a date is still its string
-        // and a backed enum is still its scalar.
+        // Rules that only accept strings.  `date` included: the validated
+        // array holds the raw input, so a date is still its string.
         "string" | "email" | "url" | "active_url" | "uuid" | "ulid" | "ip" | "ipv4" | "ipv6"
         | "json" | "alpha" | "alpha_dash" | "alpha_num" | "ascii" | "date" | "date_format"
-        | "timezone" | "mac_address" | "hex_color" | "current_password" | "enum" => {
-            PhpType::string()
-        }
+        | "timezone" | "mac_address" | "hex_color" | "current_password" => PhpType::string(),
         "integer" | "int" => PhpType::int(),
         "boolean" | "bool" | "accepted" | "declined" => PhpType::bool(),
         "numeric" | "decimal" => PhpType::union(vec![PhpType::int(), PhpType::float()]),

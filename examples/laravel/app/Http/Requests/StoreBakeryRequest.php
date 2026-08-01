@@ -2,7 +2,11 @@
 
 namespace App\Http\Requests;
 
+use App\Models\BatchSize;
+use App\Models\JamFlavor;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Enum;
 
 /**
  * The keys of `rules()` are the complete set of inputs this request may
@@ -28,6 +32,10 @@ class StoreBakeryRequest extends FormRequest
             'notes' => 'array',
             'notes.*.body' => 'required|string',
             'owner.email' => 'required|email',
+            // An enum rule validates the raw input, so the validated value is
+            // the enum's backing type: string here, int for `batch_size`.
+            'flavor' => ['required', new Enum(JamFlavor::class)],
+            'batch_size' => ['required', Rule::enum(BatchSize::class)],
         ];
     }
 

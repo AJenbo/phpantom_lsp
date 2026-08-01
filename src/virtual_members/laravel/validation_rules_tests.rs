@@ -73,6 +73,26 @@ class StoreUserRequest extends FormRequest {
 }
 
 #[test]
+fn an_enum_rule_is_resolved_against_the_declaring_files_imports() {
+    // Resolution happens during the parse that recovered the rules, so the
+    // entry already carries the enum's FQN.
+    let content = "<?php
+namespace App\\Http\\Requests;
+use App\\Enums\\Role;
+class StoreUserRequest extends FormRequest {
+    public function rules(): array {
+        return ['role' => ['required', new Enum(Role::class)]];
+    }
+}
+";
+    let rules = rules_from_class_source(content, "StoreUserRequest");
+    assert_eq!(
+        rules.entries[0].enum_class.as_deref(),
+        Some("App\\Enums\\Role")
+    );
+}
+
+#[test]
 fn key_offsets_point_inside_the_quotes() {
     let content = "<?php
 class StoreUserRequest extends FormRequest {
@@ -258,6 +278,7 @@ fn rule(key: &str) -> ValidationRule {
         key: key.to_string(),
         rules: "required".to_string(),
         key_start: 0,
+        enum_class: None,
     }
 }
 
