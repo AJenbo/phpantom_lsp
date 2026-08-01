@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785621211840,
+  "lastUpdate": 1785621929878,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12919,6 +12919,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "17cdf973e32f3feaf85edc5db128e2839ad380ae",
+          "message": "Framework internals no longer appear as properties on Eloquent models",
+          "timestamp": "2026-08-01T23:47:13+02:00",
+          "tree_id": "7f8399a3861cb47793b36eefdd9b636cd267c0ee",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/17cdf973e32f3feaf85edc5db128e2839ad380ae"
+        },
+        "date": 1785621926744,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.4,
             "unit": "MiB"
           }
         ]
