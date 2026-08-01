@@ -140,6 +140,7 @@ impl Backend {
 
             if let Some(m) = effective.get_method_ci(&method_lower) {
                 let mut result_method = m.clone();
+                let mut self_bound_params = crate::atom::AtomSet::default();
 
                 // Apply method-level template substitutions when
                 // call-site argument text is available.
@@ -156,6 +157,8 @@ impl Backend {
                             &mut result_method,
                             &method_subs,
                         );
+                        self_bound_params =
+                            super::template_subs::self_bound_template_params(&m.template_bindings);
                     }
                     // Collapse any conditionals nested inside the return type
                     // (e.g. `Collection<($k is array|string ? array-key :
@@ -191,6 +194,7 @@ impl Backend {
                     parameters: result_method.parameters.clone(),
                     return_type: result_method.return_type.clone(),
                     owner_class: Some(owner.fqn()),
+                    self_bound_params,
                     ..Default::default()
                 };
 
@@ -294,6 +298,7 @@ impl Backend {
         let m = merged.get_method_ci(method_name)?;
 
         let mut result_method = m.clone();
+        let mut self_bound_params = crate::atom::AtomSet::default();
 
         // Apply method-level template substitutions when call-site
         // argument text is available.
@@ -303,6 +308,8 @@ impl Backend {
                 Self::build_method_template_subs(&merged, method_name, &split_args, rctx);
             if !method_subs.is_empty() {
                 crate::inheritance::apply_substitution_to_method(&mut result_method, &method_subs);
+                self_bound_params =
+                    super::template_subs::self_bound_template_params(&m.template_bindings);
             }
             // Collapse conditionals nested inside the return type (e.g.
             // `Str::replace`'s `($subject is string ? string : string[])`
@@ -337,6 +344,7 @@ impl Backend {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
             owner_class: Some(owner.fqn()),
+            self_bound_params,
             ..Default::default()
         })
     }
@@ -389,6 +397,9 @@ impl Backend {
                 return ResolvedCallableTarget {
                     parameters: parameters.into(),
                     return_type: func.return_type.clone(),
+                    self_bound_params: super::template_subs::self_bound_template_params(
+                        &func.template_bindings,
+                    ),
                     ..Default::default()
                 };
             }
@@ -447,12 +458,15 @@ impl Backend {
             let split_args = crate::type_engine::types::conditional::split_text_args(at);
             let subs = Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
             if !subs.is_empty() {
+                let self_bound_params =
+                    super::template_subs::self_bound_template_params(&ctor.template_bindings);
                 let mut result_ctor = ctor;
                 crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);
                 return Some(ResolvedCallableTarget {
                     parameters: result_ctor.parameters.clone(),
                     return_type: result_ctor.return_type.clone(),
                     owner_class: Some(ci.fqn()),
+                    self_bound_params,
                     ..Default::default()
                 });
             }

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::Backend;
-use crate::atom::atom;
+use crate::atom::{Atom, AtomSet, atom};
 use crate::class_lookup::is_self_or_static;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::variable::rhs_resolution::{
@@ -872,6 +872,33 @@ impl Backend {
         };
         Self::resolve_arg_text_to_type(body, &param_ctx)
     }
+}
+
+/// Parameter names (`$`-prefixed) that are the *exclusive* binding site
+/// for a `@template` parameter.
+///
+/// A template bound from exactly one parameter has no independent
+/// signal to check that parameter's argument against: the substituted
+/// type came from resolving that same argument, so any diagnostic that
+/// compares the argument to it again is comparing the argument against
+/// itself through two potentially-diverging resolution paths. See B4
+/// in `docs/todo/bugs.md` — PHPUnit's
+/// `assertSame(ExpectedType $expected, mixed $actual)` binds
+/// `ExpectedType` only from `$expected`, so checking `$expected` against
+/// `ExpectedType` is circular and can never legitimately fail.
+///
+/// A template bound from more than one parameter (or from a parameter
+/// plus a return-type appearance elsewhere) is not covered here — those
+/// still carry a real independent check.
+pub(crate) fn self_bound_template_params(bindings: &[(Atom, Atom)]) -> AtomSet {
+    let mut result = AtomSet::default();
+    for (tpl_name, param_name) in bindings {
+        let is_sole_binding = bindings.iter().filter(|(t, _)| t == tpl_name).count() == 1;
+        if is_sole_binding {
+            result.insert(*param_name);
+        }
+    }
+    result
 }
 
 /// Bind a template parameter by walking a parameter hint and an argument

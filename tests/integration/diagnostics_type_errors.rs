@@ -2357,6 +2357,49 @@ class MyTest extends TestCase {
     );
 }
 
+#[test]
+fn no_false_positive_when_template_argument_is_its_own_sole_binding_site() {
+    // A template param that is bound only by the parameter being
+    // checked is circular: the substituted parameter type came from
+    // resolving that exact argument, so comparing the argument to it
+    // again — through a resolver that may disagree with the one used
+    // for template binding — can only produce a false positive (see
+    // bugs.md B4). This mirrors the real-world PHPUnit pattern
+    // `assertSame(url('/login'), $x)`, where `url()`'s conditional
+    // return type resolves differently for the two passes: the
+    // template-binding pass sees `UrlGenerator`, the argument-type pass
+    // sees `string`.
+    let php = r#"<?php
+class UrlGenerator {}
+
+/**
+ * @return ($path is null ? UrlGenerator : string)
+ */
+function url(?string $path = null): UrlGenerator|string {}
+
+class TestCase {
+    /**
+     * @template ExpectedType
+     * @param ExpectedType $expected
+     */
+    final public static function assertSame(mixed $expected, mixed $actual, string $message = ''): void {}
+}
+
+class MyTest extends TestCase {
+    public function testLogin(): void {
+        self::assertSame(url('/login'), 'https://example.test/login');
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag an argument against a parameter type substituted from that \
+         same argument, got: {msgs:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Class-level template parameter substitution
 // ═══════════════════════════════════════════════════════════════════════════

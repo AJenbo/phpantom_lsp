@@ -636,6 +636,16 @@ impl Backend {
                     None => continue, // Extra argument beyond declared params
                 };
 
+                // Skip a parameter whose substituted type came solely from
+                // resolving this very argument (e.g. PHPUnit's
+                // `assertSame(ExpectedType $expected, mixed $actual)`,
+                // where `ExpectedType` is bound only by `$expected`).
+                // Comparing the argument to its own substitution is
+                // circular and can only produce false positives.
+                if resolved.self_bound_params.contains(&param.name) {
+                    continue;
+                }
+
                 // Skip if parameter has no type hint.
                 let param_type = match &param.type_hint {
                     Some(t) if !t.is_untyped() && !t.is_mixed() => t,

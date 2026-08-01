@@ -80,39 +80,3 @@ max reports neither.
 **Where to look:** `type_engine/variable/forward_walk/` (branch merging
 and `seed_property_keys_into_scope`) and
 `type_engine/resolver/property_narrowing.rs`.
-
-#### B4. A template bound from an argument is used to check that same argument
-
-**Impact: Medium · Effort: Medium**
-
-When a parameter's type *is* a template that has no other binding site,
-the argument gets resolved twice and the two resolutions can disagree,
-producing a mismatch against a type inferred from the argument itself.
-PHPUnit's `assertSame` is the common shape:
-
-```php
-/**
- * @template ExpectedType
- * @param ExpectedType $expected
- */
-public static function assertSame(mixed $expected, mixed $actual, string $message = ''): void
-```
-
-```php
-self::assertSame(url('/login'), $response->getTargetUrl());
-// false positive: Argument 1 ($expected) expects
-// Illuminate\Contracts\Routing\UrlGenerator, got string
-```
-
-`ExpectedType` can only be bound from `$expected`, so checking
-`$expected` against it is circular and can never legitimately fail. Here
-the binding pass resolved `url('/login')` to `UrlGenerator` and the
-checking pass resolved the same expression to `string` (see L41 for why
-that expression is ambiguous), but the inconsistency is the trigger, not
-the cause: an argument that is the sole binding site for a template
-should be skipped by the compatibility check entirely.
-
-**Where to look:** `type_engine/call_resolution/template_subs.rs` for
-which parameters contribute bindings, and
-`diagnostics/type_errors/compatibility.rs` for skipping a parameter
-whose type resolves to a template bound only by that parameter.

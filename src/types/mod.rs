@@ -1041,6 +1041,19 @@ pub(crate) struct ResolvedCallableTarget {
     /// stand in for it: in `$this->state->canChangeTo(…)` the enclosing
     /// class is not the class that declares `canChangeTo`.
     pub owner_class: Option<Atom>,
+    /// Parameter names (`$`-prefixed) whose substituted type came from
+    /// resolving that same parameter's own argument, and only that
+    /// argument (the `@template` it declares has no other binding site).
+    ///
+    /// Checking such an argument against its own substituted parameter
+    /// type is circular: the substitution was produced by resolving this
+    /// exact argument expression, so comparing the argument to it again
+    /// through a possibly different resolution path can disagree and
+    /// produce a false positive, never a genuine mismatch (e.g.
+    /// PHPUnit's `assertSame(ExpectedType $expected, mixed $actual)`).
+    /// The argument-compatibility diagnostic must skip these parameters
+    /// entirely.
+    pub self_bound_params: crate::atom::AtomSet,
 }
 /// Stores extracted information about a standalone PHP function.
 ///

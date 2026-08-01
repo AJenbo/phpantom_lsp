@@ -31,7 +31,6 @@ within the same impact tier.
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 | B2  | [Property assigned inside a guarded `if` keeps its declared type](todo/bugs.md#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block)                | Medium      | Medium      |
-| B4  | [A template bound from an argument is used to check that same argument](todo/bugs.md#b4-a-template-bound-from-an-argument-is-used-to-check-that-same-argument)                | Medium      | Medium      |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 
