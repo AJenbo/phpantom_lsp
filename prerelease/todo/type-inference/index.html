@@ -1493,17 +1493,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#t34-class-constant-references-widen-their-literal-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T34. Class constant references widen their literal value
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1932,17 +1921,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#t34-class-constant-references-widen-their-literal-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T34. Class constant references widen their literal value
-      </span>
-    </span>
-  </a>
   
 </li>
       
@@ -2695,33 +2673,6 @@ some of these).</p>
   false negatives without introducing false positives — a smaller,
   separate follow-up from the move-to-core question above.</li>
 </ul>
-<hr />
-<h2 id="t34-class-constant-references-widen-their-literal-value">T34. Class constant references widen their literal value<a class="headerlink" href="#t34-class-constant-references-widen-their-literal-value" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p>A constant declared with a scalar literal loses that value when it is
-referenced. Expression resolution keeps literals now, but constant
-resolution still reports the base type, so precision depends on whether
-the value reaches the expression through a variable or a constant.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    const INTEGER_CONSTANT = 1;</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    const STRING_CONSTANT = &#39;foo&#39;;</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">}</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">$a = 1;                        // 1</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">$b = Foo::INTEGER_CONSTANT;    // int    (PHPStan: 1)</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="x">$c = Foo::STRING_CONSTANT;     // string (PHPStan: &#39;foo&#39;)</span>
-</code></pre></div>
-<p>Beyond hover precision, this is what would let <code>match</code>/<code>switch</code> arms
-keyed on class constants narrow, and it feeds constant-expression
-evaluation (Phase 5K of <a href="../test-porting/">test-porting.md</a>).</p>
-<p><strong>Where to change:</strong> class-constant resolution, which should carry the
-declared initialiser's literal type through to
-<code>type_engine/variable/rhs_resolution/</code> the way a literal assignment
-already does.</p>
-<p><strong>Tests to update once fixed:</strong> the <code>classConstants()</code> assertions in
-<code>tests/phpstan_nsrt/deducted-types.php</code> currently expect the widened
-<code>int</code>/<code>float</code>/<code>string</code>; upstream's <code>nsrt/deducted-types.php</code> expects
-<code>1</code>/<code>1.0</code>/<code>'foo'</code>.</p>
 
 
 
