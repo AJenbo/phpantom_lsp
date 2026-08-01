@@ -1033,6 +1033,14 @@ pub(crate) struct ResolvedCallableTarget {
     /// function calls.  The type checker tries each overload and only
     /// emits a diagnostic when the call is incompatible with ALL.
     pub overloads: Vec<Vec<ParameterInfo>>,
+    /// FQN of the class the callable was resolved on, when it is a class
+    /// member (`None` for standalone functions and closures).
+    ///
+    /// Consumers use it to substitute `self`/`static`/`parent` in the
+    /// signature.  The syntactic prefix of the call expression cannot
+    /// stand in for it: in `$this->state->canChangeTo(…)` the enclosing
+    /// class is not the class that declares `canChangeTo`.
+    pub owner_class: Option<Atom>,
 }
 /// Stores extracted information about a standalone PHP function.
 ///

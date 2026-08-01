@@ -587,29 +587,16 @@ impl Backend {
             // mapping positional args to parameter indices.
             let mut positional_idx: usize = 0;
 
-            let call_context_class: Option<String> = {
-                let class_part = if let Some(pos) = expr.find("::") {
-                    Some(&expr[..pos])
-                } else if expr.starts_with("$this->") {
-                    Some("$this" as &str)
-                } else {
-                    None
-                };
-                class_part.and_then(|cp| {
-                    if cp.eq_ignore_ascii_case("self")
-                        || cp.eq_ignore_ascii_case("static")
-                        || cp.eq_ignore_ascii_case("$this")
-                    {
-                        find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
-                            .map(|c| c.fqn().to_string())
-                    } else if cp.eq_ignore_ascii_case("parent") {
-                        find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
-                            .and_then(|c| c.parent_class.as_ref().map(|p| p.to_string()))
-                    } else {
-                        class_loader(cp).map(|cls| cls.fqn().to_string())
-                    }
-                })
-            };
+            // Class that `self` / `static` / `parent` in the signature
+            // refer to.  This is the class the callable was resolved on,
+            // never the syntactic prefix of the call expression: in
+            // `$this->state->canChangeTo(…)` the enclosing class is not
+            // the one declaring `canChangeTo`.  `self` on an inherited
+            // method is already bound to its declaring class by the
+            // inheritance merge, so anything still bare here was
+            // declared on the owner itself.
+            let call_context_class: Option<String> =
+                resolved.owner_class.map(|fqn| fqn.to_string());
             let ctx_parent_fqn: Option<String> = call_context_class.as_ref().and_then(|fqn| {
                 class_loader(fqn).and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
             });
@@ -672,7 +659,7 @@ impl Backend {
                 }
 
                 let resolved_param;
-                let effective_param_type = if param_type.contains_self_ref() {
+                let effective_param_type = if param_type.contains_relative_class_ref() {
                     if let Some(ref fqn) = call_context_class {
                         resolved_param =
                             param_type.resolve_self_refs_bounded(fqn, ctx_parent_fqn.as_deref());
@@ -738,7 +725,7 @@ impl Backend {
                                 && !alt_type.is_mixed()
                             {
                                 let resolved_alt;
-                                let effective_alt = if alt_type.contains_self_ref() {
+                                let effective_alt = if alt_type.contains_relative_class_ref() {
                                     if let Some(ref fqn) = call_context_class {
                                         resolved_alt = alt_type.resolve_self_refs_bounded(
                                             fqn,
@@ -791,7 +778,7 @@ impl Backend {
                     "Argument {} ({}) expects {}, got {}",
                     arg_idx + 1,
                     param_name,
-                    param_type,
+                    effective_param_type,
                     arg_type,
                 );
 

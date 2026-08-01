@@ -477,36 +477,59 @@ impl PhpType {
     /// `$this` references that [`replace_self`] / [`replace_self_with_type`]
     /// would replace.
     pub fn contains_self_ref(&self) -> bool {
+        self.contains_name_matching(&is_self_ref_name)
+    }
+
+    /// Check whether this type tree contains any relative class-reference
+    /// keyword: `self`, `static`, `$this`, or `parent`.
+    ///
+    /// This is the gate for [`resolve_self_refs_bounded`], which resolves
+    /// all four. [`contains_self_ref`] omits `parent`, so using it as the
+    /// gate leaves a `parent` type hint unresolved.
+    ///
+    /// [`resolve_self_refs_bounded`]: PhpType::resolve_self_refs_bounded
+    /// [`contains_self_ref`]: PhpType::contains_self_ref
+    pub fn contains_relative_class_ref(&self) -> bool {
+        self.contains_name_matching(&|name| {
+            is_self_ref_name(name) || name.eq_ignore_ascii_case("parent")
+        })
+    }
+
+    /// Walk the type tree looking for a named type whose name satisfies
+    /// `pred`.
+    fn contains_name_matching(&self, pred: &dyn Fn(&str) -> bool) -> bool {
         match self.kind() {
-            TypeKind::Named(_) => self.is_self_ref(),
-            TypeKind::Nullable(inner) => inner.contains_self_ref(),
+            TypeKind::Named(s) => pred(s),
+            TypeKind::Nullable(inner) => inner.contains_name_matching(pred),
             TypeKind::Union(types) | TypeKind::Intersection(types) => {
-                types.iter().any(|t| t.contains_self_ref())
+                types.iter().any(|t| t.contains_name_matching(pred))
             }
             TypeKind::Generic(g) => {
-                is_self_ref_name(&g.name) || g.args.iter().any(|a| a.contains_self_ref())
+                pred(&g.name) || g.args.iter().any(|a| a.contains_name_matching(pred))
             }
-            TypeKind::Array(inner) => inner.contains_self_ref(),
-            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
-                entries.iter().any(|e| e.value_type.contains_self_ref())
-            }
+            TypeKind::Array(inner) => inner.contains_name_matching(pred),
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
+                .iter()
+                .any(|e| e.value_type.contains_name_matching(pred)),
             TypeKind::Callable(c) => {
-                c.params.iter().any(|p| p.type_hint.contains_self_ref())
+                c.params
+                    .iter()
+                    .any(|p| p.type_hint.contains_name_matching(pred))
                     || c.return_type
                         .as_ref()
-                        .is_some_and(|r| r.contains_self_ref())
+                        .is_some_and(|r| r.contains_name_matching(pred))
             }
             TypeKind::Conditional(c) => {
-                c.condition.contains_self_ref()
-                    || c.then_type.contains_self_ref()
-                    || c.else_type.contains_self_ref()
+                c.condition.contains_name_matching(pred)
+                    || c.then_type.contains_name_matching(pred)
+                    || c.else_type.contains_name_matching(pred)
             }
-            TypeKind::ClassString(inner) | TypeKind::InterfaceString(inner) => {
-                inner.as_ref().is_some_and(|t| t.contains_self_ref())
-            }
-            TypeKind::KeyOf(inner) | TypeKind::ValueOf(inner) => inner.contains_self_ref(),
+            TypeKind::ClassString(inner) | TypeKind::InterfaceString(inner) => inner
+                .as_ref()
+                .is_some_and(|t| t.contains_name_matching(pred)),
+            TypeKind::KeyOf(inner) | TypeKind::ValueOf(inner) => inner.contains_name_matching(pred),
             TypeKind::IndexAccess(base, index) => {
-                base.contains_self_ref() || index.contains_self_ref()
+                base.contains_name_matching(pred) || index.contains_name_matching(pred)
             }
             TypeKind::StaticType(_) | TypeKind::ThisType(_) => false,
             TypeKind::Literal(_) | TypeKind::Raw(_) | TypeKind::IntRange(_, _) => false,

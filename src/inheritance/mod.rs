@@ -40,7 +40,8 @@ pub(crate) use generics::apply_substitution;
 pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
     apply_substitution_to_property, build_generic_subs, build_substitution_map, default_type_args,
-    method_references_params, property_references_params,
+    method_has_bare_self, method_references_params, property_references_params,
+    replace_bare_self_in_method,
 };
 
 /// A borrow-or-owned handle to a `ClassInfo`, used to walk the parent
@@ -367,13 +368,11 @@ pub(crate) fn resolve_class_with_inheritance(
                 }
                 continue;
             }
-            // Replace bare `self` in the return type with the declaring
-            // (parent) class name so that `self` resolves to the class
-            // that defines the method, not the inheriting child.
-            let needs_bare_self = method
-                .return_type
-                .as_ref()
-                .is_some_and(|r| r.contains_bare_self());
+            // Replace bare `self` in the return type and parameter hints
+            // with the declaring (parent) class name so that `self`
+            // resolves to the class that defines the method, not the
+            // inheriting child.
+            let needs_bare_self = method_has_bare_self(method);
             if !needs_sub && !needs_bare_self {
                 // Substitution is a no-op and there is no bare `self`:
                 // keep the shared `Arc` instead of deep-cloning.
@@ -390,10 +389,8 @@ pub(crate) fn resolve_class_with_inheritance(
                 if needs_sub {
                     apply_substitution_to_method(&mut ancestor_method, &level_subs);
                 }
-                if let Some(ref mut rt) = ancestor_method.return_type
-                    && rt.contains_bare_self()
-                {
-                    *rt = rt.replace_bare_self(&parent_fqn);
+                if needs_bare_self {
+                    replace_bare_self_in_method(&mut ancestor_method, &parent_fqn);
                 }
                 ancestor_method
             });

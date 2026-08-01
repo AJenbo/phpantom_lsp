@@ -826,6 +826,129 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_self_param_reached_through_a_property() {
+    // The receiver is a property, so the enclosing class (`Machine`) is
+    // not the class declaring `canChangeTo` — `self` must bind to `State`.
+    let php = r#"<?php
+enum State: string
+{
+    case A = 'a';
+    case B = 'b';
+
+    public function canChangeTo(self $newState): bool { return true; }
+}
+
+class Machine
+{
+    public State $state = State::A;
+
+    public function go(): void
+    {
+        $this->state->canChangeTo(State::B);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag an enum case passed to a self parameter of the same enum, got: {diags:?}"
+    );
+}
+
+#[test]
+fn self_param_mismatch_names_the_declaring_class() {
+    let php = r#"<?php
+class Node {
+    public function merge(self $other): void {}
+}
+class Other {}
+class Machine {
+    public Node $node;
+    public function go(): void {
+        $this->node->merge(new Other());
+    }
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert_eq!(
+        msgs,
+        vec!["Argument 1 ($other) expects Node, got Other".to_string()],
+        "The message must name the class `self` resolves to, not the keyword"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_inherited_self_param_given_the_declaring_class() {
+    // `self` in an inherited method binds to the class that declares it,
+    // so `Base` is still an acceptable argument when called on a `Child`.
+    let php = r#"<?php
+class Base {
+    public function merge(self $other): void {}
+}
+class Child extends Base {}
+class Machine {
+    public Child $child;
+    public function go(): void {
+        $this->child->merge(new Base());
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag Base passed to an inherited self parameter, got: {diags:?}"
+    );
+}
+
+#[test]
+fn parent_param_is_resolved_to_the_parent_class() {
+    let php = r#"<?php
+class Base {}
+class Other {}
+class Mid extends Base {
+    public function take(parent $p): void {}
+}
+class Machine {
+    public Mid $mid;
+    public function go(): void {
+        $this->mid->take(new Base());
+        $this->mid->take(new Other());
+    }
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert_eq!(
+        msgs,
+        vec!["Argument 1 ($p) expects Base, got Other".to_string()],
+        "`parent` must resolve to Base: accept a Base, reject an unrelated class"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_static_param_with_matching_enum_case() {
+    let php = r#"<?php
+enum State: string {
+    case A = 'a';
+    case B = 'b';
+
+    /** @param static $newState */
+    public function canChangeTo($newState): bool { return true; }
+}
+class Machine {
+    public State $state = State::A;
+    public function go(): void {
+        $this->state->canChangeTo(State::B);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag an enum case passed to a `static` parameter, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: iterable param with array ───────────────────────────────
 
 #[test]

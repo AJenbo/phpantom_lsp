@@ -2443,6 +2443,15 @@ class ClosureParamInferenceDemo
 
 class StaticEnumDemo
 {
+    /** The receiver is a property, so `self` below binds to Status, not to this class. */
+    private Status $state = Status::Pending;
+
+    public function transitions(): void
+    {
+        $this->state->canChangeTo(Status::Active);   // self parameter accepts a Status
+        Status::Pending->canChangeTo(Status::Active);
+    }
+
     public function demo(): void
     {
         User::$defaultRole;          // static property
@@ -5310,6 +5319,12 @@ enum Status: string
     {
         return self::Active->value;  // self::CaseName->value resolved
     }
+
+    /** A `self` parameter binds to the enum that declares the method. */
+    public function canChangeTo(self $next): bool
+    {
+        return $this !== $next;
+    }
 }
 
 enum Priority: int
@@ -7028,6 +7043,14 @@ function runDemoAssertions(): void
     assert(trait_exists(HasSlug::class), 'HasSlug trait must exist');
     assert(enum_exists(Status::class), 'Status enum must exist');
     assert(enum_exists(Priority::class), 'Priority enum must exist');
+    assert(
+        Status::Pending->canChangeTo(Status::Active),
+        'A self parameter accepts another case of the declaring enum'
+    );
+    assert(
+        !Status::Active->canChangeTo(Status::Active),
+        'canChangeTo() rejects a transition to the current case'
+    );
 
     // User members that demos reference
     assert(method_exists(User::class, 'getEmail'), 'User must have getEmail()');

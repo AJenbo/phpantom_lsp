@@ -81,45 +81,6 @@ max reports neither.
 and `seed_property_keys_into_scope`) and
 `type_engine/resolver/property_narrowing.rs`.
 
-#### B3. `self` in a parameter type is not resolved to the declaring class
-
-**Impact: Medium · Effort: Low**
-
-A parameter declared `self` is compared literally, so passing an
-instance of the declaring class is reported as a mismatch:
-
-```php
-enum State: string
-{
-    case A = 'a';
-    case B = 'b';
-
-    public function canChangeTo(self $newState): bool { ... }
-    public function canChangeToNamed(State $newState): bool { ... }
-}
-
-$this->state->canChangeTo(State::B);       // false positive:
-                                           // expects self, got T\State
-$this->state->canChangeToNamed(State::B);  // fine
-```
-
-The two methods are identical apart from spelling, which isolates the
-fault to `self` never being substituted for the declaring class in
-parameter position. The diagnostic prints the type as the bare word
-`self`, so the substitution is missing rather than resolving to the
-wrong class. `static` and `parent` are worth checking at the same time,
-as is the return position.
-
-Enums make it most visible (a state-machine `canChangeTo(self $next)` is
-a common shape) but nothing here is enum-specific.
-
-**Where to look:** wherever a parameter's declared type is turned into a
-`PhpType` for the compatibility check, in
-`diagnostics/type_errors/compatibility.rs` and the parameter type
-resolution feeding it. Relative type resolution already exists for the
-subject side, so this is likely a matter of routing the parameter side
-through the same substitution.
-
 #### B4. A template bound from an argument is used to check that same argument
 
 **Impact: Medium · Effort: Medium**

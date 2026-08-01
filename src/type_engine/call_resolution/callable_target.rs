@@ -190,6 +190,7 @@ impl Backend {
                 let target = ResolvedCallableTarget {
                     parameters: result_method.parameters.clone(),
                     return_type: result_method.return_type.clone(),
+                    owner_class: Some(owner.fqn()),
                     ..Default::default()
                 };
 
@@ -214,6 +215,7 @@ impl Backend {
                 let target = ResolvedCallableTarget {
                     parameters: m.parameters.clone(),
                     return_type: m.return_type.clone(),
+                    owner_class: Some(owner.fqn()),
                     ..Default::default()
                 };
 
@@ -334,6 +336,7 @@ impl Backend {
         Some(ResolvedCallableTarget {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
+            owner_class: Some(owner.fqn()),
             ..Default::default()
         })
     }
@@ -430,6 +433,7 @@ impl Backend {
                     parameters: crate::types::SharedVec::new(),
                     return_type: None,
                     accepts_any_args: true,
+                    owner_class: Some(ci.fqn()),
                     ..Default::default()
                 });
             }
@@ -448,6 +452,7 @@ impl Backend {
                 return Some(ResolvedCallableTarget {
                     parameters: result_ctor.parameters.clone(),
                     return_type: result_ctor.return_type.clone(),
+                    owner_class: Some(ci.fqn()),
                     ..Default::default()
                 });
             }
@@ -456,6 +461,7 @@ impl Backend {
         Some(ResolvedCallableTarget {
             parameters: ctor.parameters.clone(),
             return_type: ctor.return_type.clone(),
+            owner_class: Some(ci.fqn()),
             ..Default::default()
         })
     }

@@ -42,6 +42,51 @@ pub(crate) fn apply_substitution_to_method(
     }
 }
 
+/// Whether [`replace_bare_self_in_method`] would rewrite anything in
+/// `method`.
+///
+/// Checks the same fields the replacement touches (return type and
+/// parameter hints) so callers can keep the shared `Arc<MethodInfo>`
+/// when the rewrite would be a no-op.
+pub(crate) fn method_has_bare_self(method: &MethodInfo) -> bool {
+    method
+        .return_type
+        .as_ref()
+        .is_some_and(|r| r.contains_bare_self())
+        || method
+            .parameters
+            .iter()
+            .any(|p| p.type_hint.as_ref().is_some_and(|h| h.contains_bare_self()))
+}
+
+/// Replace bare `self` in a method's return type and parameter hints
+/// with `class_name`.
+///
+/// `self` binds to the class that declares the method, so an inherited
+/// or trait-imported method must carry the declaring class rather than
+/// the literal keyword. `static` is deliberately left alone: it binds
+/// late, to the class the call is made on.
+pub(crate) fn replace_bare_self_in_method(method: &mut MethodInfo, class_name: &str) {
+    if let Some(ref mut ret) = method.return_type
+        && ret.contains_bare_self()
+    {
+        *ret = ret.replace_bare_self(class_name);
+    }
+    let any_param = method
+        .parameters
+        .iter()
+        .any(|p| p.type_hint.as_ref().is_some_and(|h| h.contains_bare_self()));
+    if any_param {
+        for param in method.parameters.make_mut() {
+            if let Some(ref mut hint) = param.type_hint
+                && hint.contains_bare_self()
+            {
+                *hint = hint.replace_bare_self(class_name);
+            }
+        }
+    }
+}
+
 /// Apply generic type substitution to a conditional return type tree.
 ///
 /// Delegates to [`PhpType::substitute`] which recursively walks all

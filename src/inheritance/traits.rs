@@ -19,8 +19,9 @@ use crate::virtual_members::{
 };
 
 use super::generics::{
-    apply_substitution_to_method, apply_substitution_to_property, method_references_params,
-    property_references_params, right_align_offset,
+    apply_substitution_to_method, apply_substitution_to_property, method_has_bare_self,
+    method_references_params, property_references_params, replace_bare_self_in_method,
+    right_align_offset,
 };
 use super::{MergeDedup, TraitContext};
 
@@ -249,10 +250,7 @@ pub(crate) fn merge_traits_into(
             let needs_sub = method_references_params(method, &sub_keys);
             // Replace bare `self` with the using class name so that
             // `self` resolves to the class that imports the trait.
-            let needs_bare_self = method
-                .return_type
-                .as_ref()
-                .is_some_and(|r| r.contains_bare_self());
+            let needs_bare_self = method_has_bare_self(method);
             if vis_change.is_none() && !needs_sub && !needs_bare_self {
                 // Nothing to rewrite: keep the shared `Arc` instead of
                 // deep-cloning the trait method into the using class.
@@ -268,10 +266,8 @@ pub(crate) fn merge_traits_into(
                 if needs_sub {
                     apply_substitution_to_method(&mut method, &trait_subs);
                 }
-                if let Some(ref mut rt) = method.return_type
-                    && rt.contains_bare_self()
-                {
-                    *rt = rt.replace_bare_self(self_class_name);
+                if needs_bare_self {
+                    replace_bare_self_in_method(&mut method, self_class_name);
                 }
                 method
             };
