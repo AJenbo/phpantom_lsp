@@ -297,6 +297,31 @@ to subsequent code:
 This is similar to the existing guard clause narrowing but triggered
 by specific function names rather than `if` + early return.
 
+#### L45. `*_count` properties are offered on every relationship
+
+**Impact: Low-Medium · Effort: Medium-High**
+
+For each relationship method we synthesize a `{snake_name}_count`
+property typed `int`, unconditionally. At runtime the attribute only
+exists when the query that produced the model called `withCount()` /
+`loadCount()`, or when the model lists the relation in `$withCount`.
+So `$post->comments_count` completes and hovers cleanly even where it
+is guaranteed to be `null`, and a user reading the completion list
+cannot tell which of the two `comments`-derived entries is real.
+
+The trade-off is deliberate: `withCount()` is common enough that
+dropping the properties entirely would cost more than it gains, and
+the alternative needs call-site tracking we do not have. Doing this
+properly means threading "which counts were eager-loaded" from the
+builder chain (`Post::withCount('comments')->first()`) into the model
+type, which is the same machinery L8 needs for `withSum()` and
+friends. `$withCount` on the model is the easy half and could be read
+declaratively like `$casts` is today.
+
+Until then the properties stay, so this is a precision gap rather
+than a missing feature. Reported as a follow-up on
+[#312](https://github.com/PHPantom-dev/phpantom_lsp/issues/312).
+
 #### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
 **Impact: Low-Medium · Effort: Medium-High**

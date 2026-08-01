@@ -160,7 +160,6 @@ pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_related_type_typed,
-    is_relationship_builder_method,
 };
 pub(crate) use relationships::{
     class_declares_pivot_relationship, extract_pivot_using, extract_with_pivot_columns,
@@ -180,12 +179,14 @@ pub(crate) use factory::{
     factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
 };
 
+use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
     MAX_INHERITANCE_DEPTH, PropertyInfo, PropertySource,
 };
 
+use super::resolve::resolve_class_base_cached;
 use super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
 use database_schema::SchemaTable;
 
@@ -660,6 +661,29 @@ impl VirtualMemberProvider for LaravelModelProvider {
         let mut methods = Vec::new();
         let mut seen_props: std::collections::HashSet<String> = std::collections::HashSet::new();
         let schema_table = model_schema_table(class, cache);
+
+        // Method names declared by the base Eloquent Model, resolved with
+        // inheritance (own + traits + parent chain) but without virtual
+        // members.  Anything the framework's own Model declares is an
+        // internal — the relationship builder API (`hasMany`, `belongsTo`)
+        // and its protected helpers (`newHasOne`, `morphEagerTo`) all
+        // return relationship types — and must not be mistaken for a
+        // user-defined member.
+        //
+        // Collected into a set rather than probed with `has_method`: the
+        // base-resolved Model carries no valid method index, so each probe
+        // would be a linear scan over ~500 framework methods, once per
+        // method of every model.  Keys are lowercased because PHP method
+        // names are case-insensitive.
+        let base_model_methods: AtomSet = class_loader(ELOQUENT_MODEL_FQN)
+            .map(|base| {
+                resolve_class_base_cached(&base, class_loader)
+                    .methods
+                    .iter()
+                    .map(|m| ascii_lowercase_atom(&m.name))
+                    .collect()
+            })
+            .unwrap_or_default();
         let mutator_methods = mutator_methods_by_property(class);
 
         // ── Cast properties ─────────────────────────────────────────
@@ -798,6 +822,12 @@ impl VirtualMemberProvider for LaravelModelProvider {
         }
 
         for method in &class.methods {
+            // Framework internals inherited from the base Model never
+            // describe a member of the user's model.
+            if base_model_methods.contains(&ascii_lowercase_atom(&method.name)) {
+                continue;
+            }
+
             // ── Scope methods ───────────────────────────────────────
             if is_scope_method(method) {
                 // Skip `#[Scope]`-attributed methods that also use
@@ -868,10 +898,6 @@ impl VirtualMemberProvider for LaravelModelProvider {
             }
 
             // ── Relationship properties ─────────────────────────────
-            if is_relationship_builder_method(&method.name) {
-                continue;
-            }
-
             let return_type = match method.return_type.as_ref() {
                 Some(rt) => rt,
                 None => continue,
@@ -941,7 +967,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
         // property with that name already exists (e.g. from an explicit
         // `@property` tag).
         for method in &class.methods {
-            if is_relationship_builder_method(&method.name) {
+            if base_model_methods.contains(&ascii_lowercase_atom(&method.name)) {
                 continue;
             }
             let return_type = match method.return_type.as_ref() {

@@ -28,9 +28,53 @@ const COMPOSER_JSON: &str = r#"{
 const MODEL_PHP: &str = "\
 <?php
 namespace Illuminate\\Database\\Eloquent;
+use Illuminate\\Database\\Eloquent\\Relations\\HasOne;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsTo;
+use Illuminate\\Database\\Eloquent\\Relations\\MorphTo;
 class Model {
     /** @return \\Illuminate\\Database\\Eloquent\\Builder<static> */
     public static function with(mixed $relations): Builder { return new Builder(); }
+    /**
+     * @template TRelatedModel of Model
+     * @param class-string<TRelatedModel> $related
+     * @return HasOne<TRelatedModel, $this>
+     */
+    public function hasOne($related, $foreignKey = null, $localKey = null) {}
+    /**
+     * @template TRelatedModel of Model
+     * @param class-string<TRelatedModel> $related
+     * @return HasMany<TRelatedModel, $this>
+     */
+    public function hasMany($related, $foreignKey = null, $localKey = null) {}
+    /**
+     * @template TRelatedModel of Model
+     * @param class-string<TRelatedModel> $related
+     * @return BelongsTo<TRelatedModel, $this>
+     */
+    public function belongsTo($related, $foreignKey = null, $ownerKey = null, $relation = null) {}
+    /**
+     * @return MorphTo<Model, $this>
+     */
+    public function morphTo($name = null, $type = null, $id = null, $ownerKey = null) {}
+    /**
+     * @return MorphTo<Model, $this>
+     */
+    protected function morphEagerTo($name, $type, $id, $ownerKey) {}
+    /**
+     * @return MorphTo<Model, $this>
+     */
+    protected function morphInstanceTo($target, $name, $type, $id, $ownerKey) {}
+    /**
+     * @template TRelatedModel of Model
+     * @return HasOne<TRelatedModel, $this>
+     */
+    protected function newHasOne($query, $parent, $foreignKey, $localKey) {}
+    /**
+     * @template TRelatedModel of Model
+     * @return HasMany<TRelatedModel, $this>
+     */
+    protected function newHasMany($query, $parent, $foreignKey, $localKey) {}
 }
 ";
 
@@ -1062,6 +1106,7 @@ class TestModel extends Model {
         props
     );
 
+    // Public relationship builder methods from HasRelationships
     let builder_methods = [
         "hasOne",
         "hasMany",
@@ -1084,6 +1129,19 @@ class TestModel extends Model {
         );
     }
 
+    // Protected internal methods from HasRelationships that also
+    // return relationship types
+    let internal_methods = ["morphEagerTo", "morphInstanceTo", "newHasOne", "newHasMany"];
+    for name in internal_methods {
+        assert!(
+            !props.contains(&name),
+            "Internal framework method '{}' must not appear as property, got: {:?}",
+            name,
+            props
+        );
+    }
+
+    // Count variants of all the above
     let builder_count_names = [
         "has_one_count",
         "has_many_count",
@@ -1096,11 +1154,174 @@ class TestModel extends Model {
         "morphed_by_many_count",
         "has_many_through_count",
         "has_one_through_count",
+        "morph_eager_to_count",
+        "morph_instance_to_count",
+        "new_has_one_count",
+        "new_has_many_count",
     ];
     for name in builder_count_names {
         assert!(
             !props.contains(&name),
             "Builder-derived count property '{}' must not appear, got: {:?}",
+            name,
+            props
+        );
+    }
+}
+
+/// A model with no members of its own offers nothing but its columns.
+#[tokio::test]
+async fn test_bare_model_suggests_only_columns() {
+    let php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class TestModel extends Model {}
+";
+    let caller = "\
+<?php
+namespace App\\Models;
+$m = new TestModel();
+$m->
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/TestModel.php", php),
+        ("src/Models/Caller.php", caller),
+    ]);
+
+    // "$m->" at line 3, character 5
+    let items = complete_at(&backend, &dir, "src/Models/Caller.php", caller, 3, 5).await;
+    let mut props = property_names(&items);
+    props.sort_unstable();
+
+    assert_eq!(props, vec!["created_at", "id", "updated_at"]);
+}
+
+/// The real framework declares the relationship API in a trait on `Model`
+/// rather than on `Model` itself, so a fix that only inspects the class's
+/// own methods would pass [`MODEL_PHP`]'s flattened stub and still leak on
+/// a real project.  This mirrors the framework layout instead.
+#[tokio::test]
+async fn test_relationship_builder_methods_in_trait_not_suggested_as_properties() {
+    const TRAIT_MODEL_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent;
+class Model {
+    use Concerns\\HasRelationships;
+    /** @return \\Illuminate\\Database\\Eloquent\\Builder<static> */
+    public static function with(mixed $relations): Builder { return new Builder(); }
+}
+";
+    const HAS_RELATIONSHIPS_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Concerns;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasOne;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsTo;
+use Illuminate\\Database\\Eloquent\\Relations\\MorphTo;
+trait HasRelationships {
+    /**
+     * @template TRelatedModel of Model
+     * @param class-string<TRelatedModel> $related
+     * @return HasOne<TRelatedModel, $this>
+     */
+    public function hasOne($related, $foreignKey = null, $localKey = null) {}
+    /**
+     * @template TRelatedModel of Model
+     * @param class-string<TRelatedModel> $related
+     * @return HasMany<TRelatedModel, $this>
+     */
+    public function hasMany($related, $foreignKey = null, $localKey = null) {}
+    /**
+     * @template TRelatedModel of Model
+     * @param class-string<TRelatedModel> $related
+     * @return BelongsTo<TRelatedModel, $this>
+     */
+    public function belongsTo($related, $foreignKey = null, $ownerKey = null, $relation = null) {}
+    /**
+     * @return MorphTo<Model, $this>
+     */
+    protected function morphEagerTo($name, $type, $id, $ownerKey) {}
+    /**
+     * @template TRelatedModel of Model
+     * @return HasOne<TRelatedModel, $this>
+     */
+    protected function newHasOne($query, $parent, $foreignKey, $localKey) {}
+    /**
+     * @template TRelatedModel of Model
+     * @return BelongsTo<TRelatedModel, $this>
+     */
+    protected function newBelongsTo($query, $child, $foreignKey, $ownerKey, $relation) {}
+}
+";
+    let related_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Related extends Model {}
+";
+    let php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class TestModel extends Model {
+    /** @return HasMany<\\App\\Models\\Related, $this> */
+    public function children(): HasMany { return $this->hasMany(Related::class); }
+    public function test() {
+        $this->
+    }
+}
+";
+    let composer = COMPOSER_JSON.replace(
+        "\"Illuminate\\\\Database\\\\Eloquent\\\\\": \"vendor/illuminate/Eloquent/\",",
+        "\"Illuminate\\\\Database\\\\Eloquent\\\\\": \"vendor/illuminate/Eloquent/\",\n            \
+         \"Illuminate\\\\Database\\\\Eloquent\\\\Concerns\\\\\": \"vendor/illuminate/Eloquent/Concerns/\",",
+    );
+    assert_ne!(composer, COMPOSER_JSON, "psr-4 mapping not injected");
+
+    let mut files = framework_stubs();
+    for file in files.iter_mut() {
+        if file.0 == "vendor/illuminate/Eloquent/Model.php" {
+            file.1 = TRAIT_MODEL_PHP;
+        }
+    }
+    files.push((
+        "vendor/illuminate/Eloquent/Concerns/HasRelationships.php",
+        HAS_RELATIONSHIPS_PHP,
+    ));
+    files.push(("src/Models/Related.php", related_php));
+    files.push(("src/Models/TestModel.php", php));
+    let (backend, dir) = create_psr4_workspace(&composer, &files);
+
+    // "$this->" at line 8, character 15
+    let items = complete_at(&backend, &dir, "src/Models/TestModel.php", php, 8, 15).await;
+    let props = property_names(&items);
+
+    assert!(
+        props.contains(&"children"),
+        "User-defined relationship 'children' should appear, got: {:?}",
+        props
+    );
+
+    for name in [
+        "hasOne",
+        "hasMany",
+        "belongsTo",
+        "morphEagerTo",
+        "newHasOne",
+        "newBelongsTo",
+        "has_one_count",
+        "has_many_count",
+        "belongs_to_count",
+        "morph_eager_to_count",
+        "new_has_one_count",
+        "new_belongs_to_count",
+    ] {
+        assert!(
+            !props.contains(&name),
+            "Framework member '{}' inherited through a trait must not appear as property, got: {:?}",
             name,
             props
         );
