@@ -560,9 +560,19 @@ fn scan_drupal_directories_finds_php_and_module_files() {
 }
 
 #[test]
-fn scan_drupal_directories_skips_test_dirs() {
+fn scan_drupal_directories_indexes_test_dirs_by_default() {
     let dir = tempfile::tempdir().unwrap();
     let web_root = dir.path();
+
+    // Module tests extend base classes living under core/tests/, so
+    // test directories must be indexed for those tests to resolve.
+    let base_dir = web_root.join("core/tests/Drupal/Tests");
+    std::fs::create_dir_all(&base_dir).unwrap();
+    std::fs::write(
+        base_dir.join("UnitTestCase.php"),
+        "<?php\nnamespace Drupal\\Tests;\nclass UnitTestCase {}",
+    )
+    .unwrap();
 
     let test_dir = web_root.join("modules/contrib/token/tests/src");
     std::fs::create_dir_all(&test_dir).unwrap();
@@ -572,25 +582,30 @@ fn scan_drupal_directories_skips_test_dirs() {
     )
     .unwrap();
 
-    // Also test the "Tests" casing
-    let test_dir2 = web_root.join("core/Tests");
-    std::fs::create_dir_all(&test_dir2).unwrap();
-    std::fs::write(
-        test_dir2.join("CoreTest.php"),
-        "<?php\nnamespace Drupal\\Tests;\nclass CoreTest {}",
-    )
-    .unwrap();
-
     let result = scan_drupal_directories(web_root, &IndexFilters::empty(), None);
+    assert!(
+        result.classmap.contains_key("Drupal\\Tests\\UnitTestCase"),
+        "core test base classes must be indexed"
+    );
+    assert!(
+        result
+            .classmap
+            .contains_key("Drupal\\Tests\\token\\TokenTest"),
+        "module tests are indexed by default"
+    );
+
+    // Projects that want the old behaviour opt in via the exclude list.
+    let filters = test_filters(dir.path(), &["tests/", "Tests/"], &[]);
+    let result = scan_drupal_directories(web_root, &filters, None);
     assert!(
         !result
             .classmap
             .contains_key("Drupal\\Tests\\token\\TokenTest"),
-        "should skip tests/ directories"
+        "exclude patterns trim test directories on demand"
     );
     assert!(
-        !result.classmap.contains_key("Drupal\\Tests\\CoreTest"),
-        "should skip Tests/ directories"
+        !result.classmap.contains_key("Drupal\\Tests\\UnitTestCase"),
+        "exclude patterns apply to core tests too"
     );
 }
 
