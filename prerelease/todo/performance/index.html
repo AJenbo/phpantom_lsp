@@ -1414,6 +1414,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p48-higher-order-collection-proxy-injection-repeats-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P48. Higher-order collection proxy injection repeats work
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1976,6 +1987,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P35. Diagnostic passes reach only a fraction of available cores
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p48-higher-order-collection-proxy-injection-repeats-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P48. Higher-order collection proxy injection repeats work
       </span>
     </span>
   </a>
@@ -2817,6 +2839,45 @@ rose from 3.78% to 4.36% of samples once the hashing/allocation cost
 was removed, suggesting the read lock on <code>fqn_class_index</code> (contended
 by 32 workers doing <code>find_or_load_class</code> concurrently) is closer to the
 real ceiling than the hashing was.</p>
+<hr />
+<h2 id="p48-higher-order-collection-proxy-injection-repeats-work">P48. Higher-order collection proxy injection repeats work<a class="headerlink" href="#p48-higher-order-collection-proxy-injection-repeats-work" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p>Grafting the item type's members onto a
+<code>HigherOrderCollectionProxy&lt;TKey, TValue, 'method', Collection&gt;</code> runs
+inside <code>resolve_class_fully_with_generics</code>, on the generic-substitution
+path. Two avoidable costs sit there. Neither is a correctness problem
+and both are linear rather than exponential, which is why they were left
+when the feature landed; the outer <code>(FQN, generic_args)</code> cache absorbs
+most of the repetition.</p>
+<ol>
+<li>
+<p><strong>The value type is resolved twice.</strong> The framework annotates the
+   proxy <code>@mixin \Illuminate\Support\Enumerable&lt;TKey, TValue&gt;</code> <em>and</em>
+   <code>@mixin TValue</code>. The second is a template-parameter mixin, so the
+   "Template-param mixin resolution" block in
+   <code>type_engine/types/resolution.rs</code> resolves the value class and merges
+   its members after <code>inject_higher_order_proxy_members</code> has already
+   grafted the same members with their proxied types. The injected
+   members win (<code>merge_virtual_members</code> keeps whichever arrived first),
+   so the second pass is pure waste. Skipping the template-param mixin
+   for a tagged proxy, or letting the injection mark <code>TValue</code> as already
+   consumed, avoids it.</p>
+</li>
+<li>
+<p><strong>Grafted members are not interned.</strong> <code>inject_higher_order_proxy_members</code>
+   builds each <code>MethodInfo</code>/<code>PropertyInfo</code> directly, where every other
+   transform site in the codebase goes through
+   <code>intern_transformed_method</code> / <code>intern_transformed_property</code> so that
+   applying the same transform to the same origin shares one <code>Arc</code>. The
+   proxied members of one item type are byte-identical across every
+   proxy that wraps it with the same result shape, so the same model's
+   members are re-allocated once per distinct <code>(proxied method, owning
+   collection)</code> pair rather than shared.</p>
+</li>
+</ol>
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/higher_order_proxy.rs</code>,
+<code>virtual_members/resolve.rs</code>, and the template-param mixin block in
+<code>type_engine/types/resolution.rs</code>.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues were addressed by eager class
