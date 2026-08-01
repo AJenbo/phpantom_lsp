@@ -40,3 +40,118 @@ can produce a false-positive unknown member.
 next to `build_laravel_date_class`, `build_provider_resources`, and
 `build_laravel_morph_map_index`.
 
+
+#### B2. A property assigned inside a guarded `if` keeps its declared type after the block
+
+**Impact: Medium · Effort: Medium**
+
+The lazy-initialisation idiom leaves a property at its declared type
+once the `if` closes, so returning it from a method with a narrower
+return type is reported as a mismatch:
+
+```php
+protected ?AbstractType $instance = null;
+
+public function getType(): ConcreteType
+{
+    if (!$this->instance instanceof ConcreteType) {
+        $this->instance = $this->context->makeConcrete();  // : ConcreteType
+    }
+
+    return $this->instance;   // false positive: ?AbstractType
+}
+```
+
+Both paths out of the `if` give `ConcreteType`: the implicit else is the
+negation of the condition, and the then-branch assigns one. The two need
+to be merged the way the forward walker already merges branch outcomes
+for local variables. Property keys are seeded into the walker's scope for
+`instanceof` narrowing (`seed_property_keys_into_scope`), so the missing
+piece is recording a property *assignment* into that scope and joining
+the branches at the end of the block, not new machinery.
+
+Surfaced by removing the supertype-where-subtype escape hatch from the
+argument/return compatibility layer, which is what made the stale type
+visible. Reproducible in an open-source project: PDepend's
+`ASTClassReference::getType()` and `ASTTraitReference::getType()` are the
+two remaining diagnostics `analyze` reports there, and PHPStan at level
+max reports neither.
+
+**Where to look:** `type_engine/variable/forward_walk/` (branch merging
+and `seed_property_keys_into_scope`) and
+`type_engine/resolver/property_narrowing.rs`.
+
+#### B3. `self` in a parameter type is not resolved to the declaring class
+
+**Impact: Medium · Effort: Low**
+
+A parameter declared `self` is compared literally, so passing an
+instance of the declaring class is reported as a mismatch:
+
+```php
+enum State: string
+{
+    case A = 'a';
+    case B = 'b';
+
+    public function canChangeTo(self $newState): bool { ... }
+    public function canChangeToNamed(State $newState): bool { ... }
+}
+
+$this->state->canChangeTo(State::B);       // false positive:
+                                           // expects self, got T\State
+$this->state->canChangeToNamed(State::B);  // fine
+```
+
+The two methods are identical apart from spelling, which isolates the
+fault to `self` never being substituted for the declaring class in
+parameter position. The diagnostic prints the type as the bare word
+`self`, so the substitution is missing rather than resolving to the
+wrong class. `static` and `parent` are worth checking at the same time,
+as is the return position.
+
+Enums make it most visible (a state-machine `canChangeTo(self $next)` is
+a common shape) but nothing here is enum-specific.
+
+**Where to look:** wherever a parameter's declared type is turned into a
+`PhpType` for the compatibility check, in
+`diagnostics/type_errors/compatibility.rs` and the parameter type
+resolution feeding it. Relative type resolution already exists for the
+subject side, so this is likely a matter of routing the parameter side
+through the same substitution.
+
+#### B4. A template bound from an argument is used to check that same argument
+
+**Impact: Medium · Effort: Medium**
+
+When a parameter's type *is* a template that has no other binding site,
+the argument gets resolved twice and the two resolutions can disagree,
+producing a mismatch against a type inferred from the argument itself.
+PHPUnit's `assertSame` is the common shape:
+
+```php
+/**
+ * @template ExpectedType
+ * @param ExpectedType $expected
+ */
+public static function assertSame(mixed $expected, mixed $actual, string $message = ''): void
+```
+
+```php
+self::assertSame(url('/login'), $response->getTargetUrl());
+// false positive: Argument 1 ($expected) expects
+// Illuminate\Contracts\Routing\UrlGenerator, got string
+```
+
+`ExpectedType` can only be bound from `$expected`, so checking
+`$expected` against it is circular and can never legitimately fail. Here
+the binding pass resolved `url('/login')` to `UrlGenerator` and the
+checking pass resolved the same expression to `string` (see L41 for why
+that expression is ambiguous), but the inconsistency is the trigger, not
+the cause: an argument that is the sole binding site for a template
+should be skipped by the compatibility check entirely.
+
+**Where to look:** `type_engine/call_resolution/template_subs.rs` for
+which parameters contribute bindings, and
+`diagnostics/type_errors/compatibility.rs` for skipping a parameter
+whose type resolves to a template bound only by that parameter.

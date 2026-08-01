@@ -549,6 +549,49 @@ fn is_var_class_constant(expr: &Expression<'_>, var_name: &str) -> bool {
     false
 }
 
+/// Extract the variable a `match` subject of the form `$var::class`
+/// tests, so the arms' `Foo::class` conditions can narrow it.
+///
+/// Returns `None` for `match (true)` (narrowed from the conditions
+/// themselves) and for subjects that are not a plain variable's class,
+/// such as `$this->kind::class`.  The name is returned without the `$`,
+/// matching how the narrowing helpers take variable names.
+pub(in crate::type_engine) fn match_class_subject_var<'b>(
+    subject: &'b Expression<'b>,
+) -> Option<&'b str> {
+    let subject = match subject {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let Expression::Access(Access::ClassConstant(cca)) = subject else {
+        return None;
+    };
+    let ClassLikeConstantSelector::Identifier(ident) = &cca.constant else {
+        return None;
+    };
+    if ident.value != b"class" {
+        return None;
+    }
+    match cca.class {
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
+        _ => None,
+    }
+}
+
+/// The class a `match ($x::class)` arm condition names, if any.
+///
+/// Every condition on an arm names one alternative the subject may be, so
+/// an arm's conditions together describe a union.
+pub(in crate::type_engine) fn class_match_condition_class(
+    condition: &Expression<'_>,
+) -> Option<PhpType> {
+    let condition = match condition {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    extract_class_string_from_expr(condition).map(|n| PhpType::named(atom(n.as_ref())))
+}
+
 /// If `expr` is `assert($var instanceof ClassName)` (or the negated
 /// form `assert(!$var instanceof ClassName)`), narrow or exclude
 /// `results` accordingly.

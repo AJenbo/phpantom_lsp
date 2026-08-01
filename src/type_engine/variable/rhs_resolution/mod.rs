@@ -63,6 +63,7 @@ use property_access::resolve_rhs_property_access;
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
 pub(crate) use calls::{
     build_function_template_subs, infer_closure_literal_type, is_array_like_wrapper,
+    resolve_arg_variable_raw_type,
 };
 pub(crate) use instantiation::{
     TemplateBindingMode, classify_template_binding, remap_inherited_ctor_subs, type_contains_name,
@@ -143,11 +144,22 @@ fn resolve_var_types(
 /// narrows a potentially different variable).
 fn extract_match_arm_narrowings(
     expr_arm: &MatchExpressionArm<'_>,
+    subject_var: Option<&str>,
     ctx: &VarResolutionCtx<'_>,
 ) -> HashMap<String, Vec<ResolvedType>> {
     let mut overrides: HashMap<String, Vec<ResolvedType>> = HashMap::new();
     for condition in expr_arm.conditions.iter() {
-        if let Some((var_name, mut class_type)) = extract_instanceof_pair(condition) {
+        // `match ($x::class) { Foo::class, Bar::class => … }` — each
+        // condition names one class the subject may be, so the arm body
+        // sees the union of them.
+        let pair = match subject_var {
+            Some(var) => {
+                crate::type_engine::types::narrowing::class_match_condition_class(condition)
+                    .map(|ty| (var.to_owned(), ty))
+            }
+            None => extract_instanceof_pair(condition),
+        };
+        if let Some((var_name, mut class_type)) = pair {
             // Resolve the short class name to FQN so that downstream
             // comparisons and ResolvedType hints carry the fully-qualified name.
             if let TypeKind::Named(name) = class_type.kind()
@@ -401,16 +413,20 @@ fn resolve_rhs_expression_inner<'b>(
             resolve_rhs_expression(unary.operand, ctx)
         }
         Expression::Match(match_expr) => {
-            let is_match_true = match_expr.expression.is_true();
+            // Two subject shapes carry narrowing information: `match (true)`
+            // with `instanceof` conditions, and `match ($x::class)` with
+            // `Foo::class` conditions.
+            let subject_var = crate::type_engine::types::narrowing::match_class_subject_var(
+                match_expr.expression,
+            );
+            let narrows = match_expr.expression.is_true() || subject_var.is_some();
             let mut combined = Vec::new();
             for arm in match_expr.arms.iter() {
-                // For match(true) arms with instanceof conditions,
-                // create a new context with narrowed variable types so
-                // that property and method accesses in the arm expression
-                // resolve against the narrowed class.
-                let arm_ctx = if is_match_true {
+                // Create a new context with narrowed variable types so that
+                // the arm expression resolves against the narrowed class.
+                let arm_ctx = if narrows {
                     if let MatchArm::Expression(expr_arm) = arm {
-                        let overrides = extract_match_arm_narrowings(expr_arm, ctx);
+                        let overrides = extract_match_arm_narrowings(expr_arm, subject_var, ctx);
                         if !overrides.is_empty() {
                             Some(ctx.with_match_arm_narrowing(overrides))
                         } else {
@@ -561,6 +577,12 @@ fn resolve_rhs_expression_inner<'b>(
         // assignments *before* the current one, preventing cycles.
         Expression::Variable(Variable::Direct(dv)) => {
             let rhs_var = bytes_to_str(dv.name).to_string();
+            // A match arm may have narrowed the variable (`match ($x::class)
+            // { Foo::class => $x }`), in which case the arm's type wins over
+            // the declared one.
+            if let Some(narrowed) = ctx.match_arm_narrowing.get(&rhs_var) {
+                return narrowed.clone();
+            }
             // Guard: never recurse into the same variable (self-assignment).
             if rhs_var == ctx.var_name {
                 return vec![];

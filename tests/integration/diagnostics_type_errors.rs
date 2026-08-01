@@ -2448,10 +2448,10 @@ function test(): void {
 // ─── Interface → concrete implementor: MAYBE (reverse hierarchy) ────────────
 
 #[test]
-fn no_diagnostic_for_interface_arg_to_concrete_param() {
-    // CarbonInterface passed where Carbon is expected.
-    // Carbon implements CarbonInterface, so the value *might* be
-    // the right concrete type at runtime (MAYBE → stay silent).
+fn flags_interface_arg_to_concrete_param() {
+    // CarbonInterface passed where Carbon is expected: any other
+    // implementation of the interface would be a type error, so the
+    // downcast is reported rather than assumed to work out.
     let php = r#"<?php
 interface CarbonInterface {}
 class Carbon implements CarbonInterface {}
@@ -2464,15 +2464,15 @@ function test(CarbonInterface $ci): void {
 "#;
     let diags = collect(php);
     assert!(
-        !has_type_error(&diags),
-        "Should not flag interface arg passed to concrete param (MAYBE), got: {diags:?}"
+        has_type_error(&diags),
+        "Should flag interface arg passed to concrete param, got: {diags:?}"
     );
 }
 
 #[test]
-fn no_diagnostic_for_parent_arg_to_child_param() {
-    // Parent class passed where child is expected.
-    // The value might be the child at runtime.
+fn flags_parent_arg_to_child_param() {
+    // Parent class passed where a child is expected.  Nothing proves the
+    // value is the child, so the downcast is reported.
     let php = r#"<?php
 class Animal {}
 class Cat extends Animal {}
@@ -2485,8 +2485,31 @@ function test(Animal $a): void {
 "#;
     let diags = collect(php);
     assert!(
+        has_type_error(&diags),
+        "Should flag parent arg to child param, got: {diags:?}"
+    );
+}
+
+/// An `instanceof` check ahead of the call proves the narrower type, and
+/// then the same call is fine.
+#[test]
+fn no_diagnostic_for_parent_arg_narrowed_by_instanceof() {
+    let php = r#"<?php
+class Animal {}
+class Cat extends Animal {}
+
+function takes_cat(Cat $c): void {}
+
+function test(Animal $a): void {
+    if ($a instanceof Cat) {
+        takes_cat($a);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
         !has_type_error(&diags),
-        "Should not flag parent arg to child param (MAYBE), got: {diags:?}"
+        "instanceof-narrowed parent should satisfy the child param, got: {diags:?}"
     );
 }
 
@@ -2625,9 +2648,9 @@ function test(): void {
 // ─── Non-final parent with unrelated child: MAYBE ───────────────────────────
 
 #[test]
-fn no_diagnostic_for_non_final_unrelated_with_common_parent() {
-    // If a non-final class is passed where a sibling subclass is
-    // expected, the developer might have narrowed.  Stay silent.
+fn flags_non_final_parent_where_sibling_subclass_expected() {
+    // A value typed as the shared parent could be either sibling, so
+    // passing it where one of them is declared is a downcast.
     let php = r#"<?php
 class Animal {}
 class Dog extends Animal {}
@@ -2641,8 +2664,8 @@ function test(Animal $a): void {
 "#;
     let diags = collect(php);
     assert!(
-        !has_type_error(&diags),
-        "Non-final parent to child should be MAYBE (silent), got: {diags:?}"
+        has_type_error(&diags),
+        "Should flag parent passed where a sibling subclass is declared, got: {diags:?}"
     );
 }
 
@@ -6473,5 +6496,128 @@ function test(): void {
         !has_type_error(&out),
         "Enum case of a built-in must resolve to the enum, not the polyfill's int constant: {:?}",
         type_error_messages(&out)
+    );
+}
+
+// ─── Inherited @param docblock on an override ───────────────────────────────
+
+/// PHP forces an override to restate the native hint, so the ancestor's
+/// `@param` (narrowed by `@implements`) still describes what arrives.
+#[test]
+fn no_diagnostic_for_param_narrowed_by_inherited_template_docblock() {
+    let php = r#"<?php
+class Node {}
+class CallLike extends Node {}
+/** @template-covariant TNodeType of Node */
+interface Rule {
+    /** @param TNodeType $node */
+    public function processNode(Node $node): array;
+}
+class Helper {
+    public function take(CallLike $c): int { return 1; }
+}
+/** @implements Rule<CallLike> */
+final class MyRule implements Rule {
+    private Helper $h;
+    public function processNode(Node $node): array {
+        $this->h->take($node);
+        return [];
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "@implements Rule<CallLike> narrows $$node to CallLike, got: {diags:?}"
+    );
+}
+
+/// The inherited docblock only applies when the override kept the
+/// ancestor's native hint.  Widening it deliberately keeps the wider type.
+#[test]
+fn flags_param_where_override_widened_the_native_hint() {
+    let php = r#"<?php
+class Node {}
+class CallLike extends Node {}
+/** @template-covariant TNodeType of CallLike */
+interface Rule {
+    /** @param TNodeType $node */
+    public function processNode(CallLike $node): array;
+}
+class Helper {
+    public function take(CallLike $c): int { return 1; }
+}
+/** @implements Rule<CallLike> */
+final class MyRule implements Rule {
+    private Helper $h;
+    public function processNode(mixed $node): array {
+        return [];
+    }
+}
+class Caller {
+    public function go(Helper $h, Node $n): void {
+        $h->take($n);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "a plain Node argument is still flagged against a CallLike param, got: {diags:?}"
+    );
+}
+
+// ─── match ($x::class) arm narrowing ────────────────────────────────────────
+
+/// A `match ($node::class)` dispatch table narrows the subject in each arm,
+/// so passing it to a handler declared for that exact class is fine.  This
+/// is how visitor dispatch is written since PHP 8.
+#[test]
+fn no_diagnostic_for_argument_narrowed_by_match_on_class_constant() {
+    let php = r#"<?php
+class Node {}
+class CallLike extends Node {}
+class StaticCall extends Node {}
+class FuncCall extends Node {}
+class Visitor {
+    public function visitStaticCall(StaticCall $node): void {}
+    public function visitFuncCall(FuncCall $node): void {}
+    public function visitCall(CallLike $node): void {}
+    public function dispatch(Node $node): void {
+        match ($node::class) {
+            StaticCall::class => $this->visitStaticCall($node),
+            FuncCall::class => $this->visitFuncCall($node),
+            default => null,
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "match ($$node::class) arms should narrow the argument, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_argument_in_match_arm_that_narrows_to_a_different_class() {
+    let php = r#"<?php
+class Node {}
+class StaticCall extends Node {}
+class FuncCall extends Node {}
+class Visitor {
+    public function visitFuncCall(FuncCall $node): void {}
+    public function dispatch(Node $node): void {
+        match ($node::class) {
+            StaticCall::class => $this->visitFuncCall($node),
+            default => null,
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "an arm narrowed to StaticCall cannot feed a FuncCall param, got: {diags:?}"
     );
 }

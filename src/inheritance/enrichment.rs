@@ -140,14 +140,35 @@ fn positional_parameters_would_change(
 /// Whether [`enrich_single_parameter`] would change `existing_param`.
 ///
 /// Mirrors the apply function's conditions (keep the two in sync).
+/// Whether the child's own native parameter hint supersedes the
+/// ancestor's docblock type.
+///
+/// PHP requires an override to restate every parameter's type hint, so a
+/// child that repeats the ancestor's hint verbatim has declared nothing
+/// new: the ancestor's `@param` docblock (with template substitutions
+/// from `@extends`/`@implements` already applied) still describes the
+/// value that reaches the body.  That is what narrows a
+/// `@implements Rule<CallLike>` implementation's `Node $node` parameter
+/// to `CallLike`, matching how PHPStan inherits PHPDoc.
+///
+/// A child that names a *different* specific type has made a deliberate
+/// declaration — parameters are contravariant, so it may legitimately be
+/// wider than the ancestor's — and keeps it.
+fn child_native_hint_overrides(
+    existing_param: &ParameterInfo,
+    ancestor_param: &ParameterInfo,
+) -> bool {
+    existing_param.native_type_hint != ancestor_param.native_type_hint
+        && existing_param.native_type_hint.as_ref().is_some_and(|nt| {
+            !nt.is_object() && !nt.is_mixed() && !nt.is_array_like() && !nt.is_iterable()
+        })
+}
+
 fn parameter_enrichment_would_change(
     existing_param: &ParameterInfo,
     ancestor_param: &ParameterInfo,
 ) -> bool {
-    let child_has_specific_native = existing_param.native_type_hint.as_ref().is_some_and(|nt| {
-        !nt.is_object() && !nt.is_mixed() && !nt.is_array_like() && !nt.is_iterable()
-    });
-    if !child_has_specific_native
+    if !child_native_hint_overrides(existing_param, ancestor_param)
         && lacks_docblock_override(&existing_param.type_hint, &existing_param.native_type_hint)
         && ancestor_has_richer_type(&ancestor_param.type_hint, &ancestor_param.native_type_hint)
         && existing_param.type_hint != ancestor_param.type_hint
@@ -302,14 +323,9 @@ pub(crate) fn enrich_single_parameter(
 ) {
     // Type hint enrichment — the child must lack a docblock override
     // AND the ancestor must have a richer type (docblock that goes
-    // beyond its native hint).  Additionally, skip enrichment when
-    // the child has a specific native type (not `object`/`mixed`)
-    // because the child's declaration is intentional and may be
-    // wider than the ancestor's (contravariant parameters).
-    let child_has_specific_native = existing_param.native_type_hint.as_ref().is_some_and(|nt| {
-        !nt.is_object() && !nt.is_mixed() && !nt.is_array_like() && !nt.is_iterable()
-    });
-    if !child_has_specific_native
+    // beyond its native hint), AND the child must not have declared a
+    // narrower/wider native hint of its own.
+    if !child_native_hint_overrides(existing_param, ancestor_param)
         && lacks_docblock_override(&existing_param.type_hint, &existing_param.native_type_hint)
         && ancestor_has_richer_type(&ancestor_param.type_hint, &ancestor_param.native_type_hint)
     {

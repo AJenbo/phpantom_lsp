@@ -137,10 +137,20 @@ impl Backend {
             match binding_mode {
                 TemplateBindingMode::Direct => {
                     if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
+                        // `Direct` is also where the classifier lands for a
+                        // hint that buries the template deeper than it
+                        // models (`array<string, array<string, T>>`).
+                        // Binding the whole argument there would re-wrap it,
+                        // so unify the two shapes when the hint is not just
+                        // the template name.
+                        let bound_type = param_hint
+                            .filter(|h| !matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name.as_str()))
+                            .and_then(|h| unify_template(h, &resolved_type, tpl_name))
+                            .unwrap_or(resolved_type);
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
                             tpl_name.to_string(),
-                            resolved_type,
+                            bound_type,
                         );
                     }
                 }
@@ -209,6 +219,22 @@ impl Backend {
                         // typed value and extract the positional generic
                         // argument (key or value type).
                         if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
+                            // Walk the parameter hint and the argument type
+                            // together first.  Positional extraction only
+                            // unwraps one level, so it binds the whole inner
+                            // array for a hint like
+                            // `array<string, array<string, T>>`.
+                            if let Some(unified) = param_hint
+                                .filter(|h| !names_template_directly(h, tpl_name))
+                                .and_then(|h| unify_template(h, &resolved_type, tpl_name))
+                            {
+                                crate::type_engine::variable::rhs_resolution::insert_or_union(
+                                    &mut subs,
+                                    tpl_name.to_string(),
+                                    unified,
+                                );
+                                continue;
+                            }
                             let generic_arg_count = param_hint
                                 .and_then(|h| match h.kind() {
                                     crate::php_type::TypeKind::Generic(g) => Some(g.args.len()),
@@ -715,7 +741,11 @@ impl Backend {
             return Some(ty);
         }
 
-        None
+        // The general resolver only reports class-backed results, so a
+        // property or variable holding a non-class type (`array<string,
+        // Leaf>`) comes back empty.  Read the declared type directly so
+        // template params can still bind from it.
+        crate::type_engine::variable::rhs_resolution::resolve_arg_variable_raw_type(trimmed, ctx)
     }
 
     /// Infer a closure/arrow-function argument's effective return type.
@@ -842,4 +872,50 @@ impl Backend {
         };
         Self::resolve_arg_text_to_type(body, &param_ctx)
     }
+}
+
+/// Bind a template parameter by walking a parameter hint and an argument
+/// type together.
+///
+/// Returns the argument's subtree at whichever position `tpl_name` occupies
+/// in `param_hint`.  For `@param array<string, array<string, T>> $in` and an
+/// argument typed `array<string, array<string, Leaf>>`, that is `Leaf` —
+/// where positional extraction, which unwraps a single level, would bind the
+/// whole inner array.
+///
+/// Returns `None` when the hint does not name the template, or when the two
+/// shapes disagree, leaving the caller's positional extraction to run.
+fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> Option<PhpType> {
+    match param_hint.kind() {
+        TypeKind::Named(name) if &**name == tpl_name => Some(arg_type.clone()),
+        TypeKind::Generic(hint) => {
+            let arg = match arg_type.kind() {
+                TypeKind::Generic(arg) if arg.args.len() == hint.args.len() => arg,
+                _ => return None,
+            };
+            hint.args
+                .iter()
+                .zip(arg.args.iter())
+                .find_map(|(h, a)| unify_template(h, a, tpl_name))
+        }
+        TypeKind::Array(inner) => match arg_type.kind() {
+            TypeKind::Array(arg_inner) => unify_template(inner, arg_inner, tpl_name),
+            // `T[]` against `array<K, V>` / `list<V>`: the value type lines up.
+            _ => arg_type
+                .extract_value_type(false)
+                .and_then(|v| unify_template(inner, v, tpl_name)),
+        },
+        TypeKind::Nullable(inner) => unify_template(inner, arg_type.unwrap_nullable(), tpl_name),
+        _ => None,
+    }
+}
+
+/// Whether a generic hint names `tpl_name` as one of its own arguments.
+///
+/// The flat case (`array<TKey, TValue>`) is the positional extractor's
+/// business — it knows the key/value arity quirks — so structural
+/// unification stays out of its way.
+fn names_template_directly(hint: &PhpType, tpl_name: &str) -> bool {
+    matches!(hint.kind(), TypeKind::Generic(g)
+        if g.args.iter().any(|a| matches!(a.kind(), TypeKind::Named(n) if &**n == tpl_name)))
 }

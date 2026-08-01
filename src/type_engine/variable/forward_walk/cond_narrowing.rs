@@ -206,14 +206,24 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
             apply_cursor_ternary_narrowing(bin.lhs, scope, ctx);
             apply_cursor_ternary_narrowing(bin.rhs, scope, ctx);
         }
-        // Non-`true` match expressions — recurse into arms.
+        // Non-`true` match expressions.  `match ($x::class)` still proves
+        // which class the subject is in each arm.
         Expression::Match(match_expr) => {
+            let subject_var = narrowing::match_class_subject_var(match_expr.expression);
             for arm in match_expr.arms.iter() {
                 let arm_expr = match arm {
                     MatchArm::Expression(e) => e.expression,
                     MatchArm::Default(d) => d.expression,
                 };
+                let arm_span = arm_expr.span();
+                if cursor < arm_span.start.offset || cursor > arm_span.end.offset {
+                    continue;
+                }
+                if let (Some(var), MatchArm::Expression(expr_arm)) = (subject_var, arm) {
+                    apply_class_match_arm_narrowing(var, expr_arm, scope, ctx);
+                }
                 apply_cursor_ternary_narrowing(arm_expr, scope, ctx);
+                return;
             }
         }
         _ => {}
@@ -221,6 +231,42 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
 }
 
 // ─── Narrowing helpers ──────────────────────────────────────────────────────
+
+/// Narrow a `match ($x::class)` subject to the classes one arm names.
+///
+/// `match ($node::class) { ASTClass::class, ASTEnum::class => … }` proves
+/// the subject is one of the listed classes inside that arm, exactly like
+/// a chain of `instanceof` checks would — except the identity is exact, so
+/// no subclass survives.
+pub(crate) fn apply_class_match_arm_narrowing<'b>(
+    subject_var: &str,
+    expr_arm: &'b MatchExpressionArm<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let classes: Vec<PhpType> = expr_arm
+        .conditions
+        .iter()
+        .filter_map(|c| narrowing::class_match_condition_class(c))
+        .collect();
+    if classes.is_empty() {
+        return;
+    }
+
+    let scope_snapshot = scope.locals.clone();
+    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
+        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
+    };
+    let var_ctx = build_var_ctx(subject_var, ctx, &scope_resolver);
+    let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
+    if union.is_empty() {
+        return;
+    }
+    scope.set(
+        subject_var,
+        union.into_iter().map(ResolvedType::from_class).collect(),
+    );
+}
 
 /// Apply condition-based narrowing (instanceof, null check, type guard)
 /// to the scope.  This narrows types for the "truthy" branch.

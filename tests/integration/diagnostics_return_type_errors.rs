@@ -2985,3 +2985,221 @@ namespace App {
         return_error_messages(&diags).join("; ")
     );
 }
+
+// ─── Eloquent custom collections and the view() helper ──────────────────────
+
+/// Eloquent scaffolding with a model that declares a custom collection and a
+/// self-referential `hasMany`, mirroring what real Laravel models look like:
+/// the collection class lives in the model's own namespace, so it is named
+/// without an import.
+const ELOQUENT_COLLECTION_SCAFFOLD: &str = r#"
+namespace Illuminate\Database\Eloquent {
+    /** @template TCollection */
+    trait HasCollection {}
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+        /** @return \Illuminate\Database\Eloquent\Relations\HasMany<static, $this> */
+        protected function hasMany(string $related, string $foreign = '', string $local = '') {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {
+        /** @return $this */
+        public function where($column, $value = null) {}
+        /** @return \Illuminate\Database\Eloquent\Collection<int, TModel> */
+        public function get() {}
+    }
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     */
+    class Collection {
+        /** @return TModel|null */
+        public function first(): mixed {}
+    }
+}
+namespace Illuminate\Database\Eloquent\Relations {
+    /**
+     * @template TRelated of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     */
+    class HasMany {
+        /** @return \Illuminate\Database\Eloquent\Collection<int, TRelated> */
+        public function get() {}
+    }
+}
+namespace App\Models {
+    use Illuminate\Database\Eloquent\Collection;
+    use Illuminate\Database\Eloquent\HasCollection;
+    use Illuminate\Database\Eloquent\Model;
+    use Illuminate\Database\Eloquent\Relations\HasMany;
+
+    /** @extends Collection<int, Order> */
+    final class OrderCollection extends Collection {}
+
+    class Order extends Model {
+        /** @use HasCollection<OrderCollection> */
+        use HasCollection;
+
+        /** @return HasMany<self, $this> */
+        public function children(): HasMany
+        {
+            return $this->hasMany(self::class, 'parent_id', 'id');
+        }
+    }
+}
+"#;
+
+#[test]
+fn chained_builder_get_returns_the_models_custom_collection() {
+    // `Builder::get()` is annotated `Collection<int, TModel>`; substituting
+    // TModel is not enough, because the model builds an `OrderCollection`.
+    let php = format!(
+        "<?php\n{ELOQUENT_COLLECTION_SCAFFOLD}\nnamespace App {{\n    use App\\Models\\Order;\n    use App\\Models\\OrderCollection;\n    class Repo {{\n        public function all(): OrderCollection {{ return Order::where('paid', true)->get(); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_return_error(&diags),
+        "chained get() should resolve to OrderCollection, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn self_referential_relation_property_uses_the_custom_collection() {
+    // `HasMany<self, $this>` names the owning model, so the relation
+    // property is an `OrderCollection`, not the base collection.
+    let php = format!(
+        "<?php\n{ELOQUENT_COLLECTION_SCAFFOLD}\nnamespace App {{\n    use App\\Models\\Order;\n    use App\\Models\\OrderCollection;\n    class Repo {{\n        public function kids(Order $order): OrderCollection {{ return $order->children; }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_return_error(&diags),
+        "a self-referential relation should resolve to OrderCollection, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn relation_get_returns_the_related_models_custom_collection() {
+    let php = format!(
+        "<?php\n{ELOQUENT_COLLECTION_SCAFFOLD}\nnamespace App {{\n    use App\\Models\\Order;\n    use App\\Models\\OrderCollection;\n    class Repo {{\n        public function kids(Order $order): OrderCollection {{ return $order->children()->get(); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_return_error(&diags),
+        "relation get() should resolve to OrderCollection, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn base_collection_is_flagged_where_a_custom_collection_is_declared() {
+    // The precision fix must not turn into a blanket pass: a plain
+    // `Collection` really is incompatible with `OrderCollection`.
+    let php = format!(
+        "<?php\n{ELOQUENT_COLLECTION_SCAFFOLD}\nnamespace App {{\n    use Illuminate\\Database\\Eloquent\\Collection;\n    use App\\Models\\OrderCollection;\n    class Repo {{\n        public function all(Collection $rows): OrderCollection {{ return $rows; }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        has_return_error(&diags),
+        "the base Collection is not an OrderCollection and should be flagged"
+    );
+}
+
+/// Laravel's `view()` helper is declared to return the *contract*, but the
+/// view factory always builds the concrete `Illuminate\View\View`.
+const VIEW_SCAFFOLD: &str = r#"
+namespace Illuminate\Contracts\View {
+    interface View {}
+    interface Factory {}
+}
+namespace Illuminate\View {
+    class View implements \Illuminate\Contracts\View\View {}
+    class Component {}
+}
+namespace {
+    /** @return ($view is null ? \Illuminate\Contracts\View\Factory : \Illuminate\Contracts\View\View) */
+    function view($view = null, $data = [], $mergeData = []) {}
+}
+"#;
+
+#[test]
+fn view_helper_satisfies_a_concrete_view_return() {
+    // Every Blade component declares `render(): View` against the concrete
+    // class, which is what `view('name')` actually hands back.
+    let php = format!(
+        "<?php\n{VIEW_SCAFFOLD}\nnamespace App {{\n    use Illuminate\\View\\Component;\n    use Illuminate\\View\\View;\n    class Card extends Component {{\n        public function render(): View {{ return view('components.card', ['a' => 1]); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_return_error(&diags),
+        "view('name') should resolve to the concrete Illuminate\\View\\View, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn argument_less_view_helper_still_resolves_to_the_factory() {
+    let php = format!(
+        "<?php\n{VIEW_SCAFFOLD}\nnamespace App {{\n    use Illuminate\\Contracts\\View\\Factory;\n    class Views {{\n        public function factory(): Factory {{ return view(); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_return_error(&diags),
+        "view() with no arguments is the factory, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+// ─── match ($x::class) arm narrowing ────────────────────────────────────────
+
+#[test]
+fn match_on_class_constant_narrows_the_subject_in_each_arm() {
+    // `match ($v::class)` proves which class the subject is, so an arm
+    // returning it satisfies a union of exactly those classes.
+    let php = r#"<?php
+class Base {}
+class A extends Base {}
+class B extends Base {}
+class C extends Base {}
+class Runner {
+    public function run(Base $v): A|B {
+        return match ($v::class) {
+            A::class,
+            B::class => $v,
+            default => throw new \Exception('unexpected'),
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "match ($$v::class) arms should narrow the subject, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn match_on_class_constant_still_flags_an_arm_outside_the_declared_union() {
+    let php = r#"<?php
+class Base {}
+class A extends Base {}
+class B extends Base {}
+class C extends Base {}
+class Runner {
+    public function run(Base $v): A|B {
+        return match ($v::class) {
+            C::class => $v,
+            default => throw new \Exception('unexpected'),
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_return_error(&diags),
+        "an arm narrowed to C cannot satisfy A|B"
+    );
+}

@@ -56,7 +56,10 @@ pub(crate) fn is_type_compatible(
     //
     // A future pass may tighten specific MAYBE relationships (reporting
     // them as mismatches rather than letting them pass) once we are
-    // confident the narrowing does not introduce false positives.
+    // confident the narrowing does not introduce false positives.  Each
+    // one that goes has to be paid for with resolver precision first:
+    // see the class-hierarchy section below for how the supertype-where-
+    // subtype hatch was retired.
 
     // Skip if either type is unresolved/unknown.
     if arg_type.is_untyped() || param_type.is_untyped() {
@@ -602,51 +605,21 @@ pub(crate) fn is_type_compatible(
         return true;
     }
 
-    // ── Class hierarchy: reverse direction MAYBE ────────────────
+    // ── Class hierarchy ─────────────────────────────────────────
     //
-    // Direction 1 (arg <: param, e.g. `Cat` passed to `Animal`)
-    // is a strict YES handled by the `is_subtype_of_typed` fallback
-    // at the end of this function.  No need to duplicate it here.
+    // Only one direction is compatible: arg <: param (e.g. `Cat`
+    // passed to `Animal`), a strict YES handled by the
+    // `is_subtype_of_typed` fallback at the end of this function.
     //
-    // Direction 2 (param <: arg, e.g. `Carbon\Carbon` passed where a
-    // `Illuminate\Support\Carbon` subclass is expected) is a MAYBE:
-    // the argument is a *broader* type but the value *might* be the
-    // narrower concrete at runtime (the developer may have checked
-    // with instanceof, or the API always returns the concrete type
-    // despite being typed as the parent).  This also covers cases the
-    // resolver still under-narrows, such as an Eloquent relation typed
-    // as the base `Collection` where a custom collection subclass is
-    // declared — dropping this rule turns those into false positives
-    // that PHPStan does not report.
-    //
-    // However, if the arg's class is **final**, the value cannot be
-    // any subtype — it is exactly that class.  So `final class Jack`
-    // passed to `JackSparrow` (where Jack does not extend
-    // JackSparrow) is a definite NO.
-    //
-    // We intentionally do NOT treat `object` or `stdClass` as
-    // universal supertypes here.  `base_name()` returns `None` for
-    // `object` (it is in the scalar-name list), so it never enters
-    // this block.  `stdClass` has a base_name but is not a parent
-    // of arbitrary classes in PHP — the hierarchy walk will simply
-    // not find a relationship, which is correct.
-
-    if let (Some(arg_base), Some(param_base)) = (arg_type.base_name(), param_type.base_name()) {
-        let arg_cls = class_loader(arg_base);
-
-        let arg_is_final = arg_cls.as_ref().is_some_and(|cls| cls.is_final);
-        if !arg_is_final {
-            if is_subtype_of_typed(param_type, arg_type, class_loader) {
-                return true;
-            }
-            // Also try loading param and walking up to arg.
-            if let Some(param_cls) = class_loader(param_base)
-                && crate::class_lookup::is_subtype_of(&param_cls, arg_base, class_loader)
-            {
-                return true;
-            }
-        }
-    }
+    // The reverse direction (param <: arg — a supertype value where a
+    // subtype is declared) is a downcast and *is* reported.  It used to
+    // be treated as a MAYBE on the grounds that the value might be the
+    // narrower concrete at runtime, which hid a whole class of genuine
+    // mismatches.  Everything that made it look necessary in real
+    // Laravel code was our own imprecision: models' custom Eloquent
+    // collections, and the `view()` helper's contract-typed conditional
+    // return.  Both are resolved precisely now, so the escape hatch is
+    // gone.
 
     // ── Arrayable/ArrayAccess arg → bare array: MAYBE ───────────
     // Many collection-like types implement ArrayAccess or Arrayable

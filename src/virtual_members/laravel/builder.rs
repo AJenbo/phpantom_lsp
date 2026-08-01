@@ -16,62 +16,11 @@
 use std::sync::Arc;
 
 use crate::inheritance::apply_substitution_to_conditional;
-use crate::php_type::{PhpType, TypeKind};
-use crate::types::{
-    ClassInfo, ELOQUENT_COLLECTION_FQN, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility,
-};
+use crate::php_type::PhpType;
+use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility};
 use crate::virtual_members::ResolvedClassCache;
 
 use super::ELOQUENT_BUILDER_FQN;
-
-/// Replace `\Illuminate\Database\Eloquent\Collection` with a custom
-/// collection class in a [`PhpType`], preserving generic parameters.
-pub(super) fn replace_eloquent_collection_typed(ty: &PhpType, custom_collection: &str) -> PhpType {
-    replace_collection_in_type(ty, custom_collection)
-}
-
-/// Recursively walk a `PhpType` tree and replace any `Generic` whose
-/// base name is the Eloquent Collection FQN with `custom_collection`.
-fn replace_collection_in_type(ty: &PhpType, custom_collection: &str) -> PhpType {
-    match ty.kind() {
-        TypeKind::Generic(g) if g.name == ELOQUENT_COLLECTION_FQN => {
-            let new_args = g
-                .args
-                .iter()
-                .map(|a| replace_collection_in_type(a, custom_collection))
-                .collect();
-            PhpType::generic(custom_collection, new_args)
-        }
-        TypeKind::Generic(g) => {
-            let new_args = g
-                .args
-                .iter()
-                .map(|a| replace_collection_in_type(a, custom_collection))
-                .collect();
-            PhpType::generic_atom(g.name, new_args)
-        }
-        TypeKind::Union(members) => PhpType::union(
-            members
-                .iter()
-                .map(|m| replace_collection_in_type(m, custom_collection))
-                .collect(),
-        ),
-        TypeKind::Intersection(members) => PhpType::intersection(
-            members
-                .iter()
-                .map(|m| replace_collection_in_type(m, custom_collection))
-                .collect(),
-        ),
-        TypeKind::Nullable(inner) => {
-            PhpType::nullable(replace_collection_in_type(inner, custom_collection))
-        }
-        TypeKind::Array(inner) => {
-            PhpType::array_of(replace_collection_in_type(inner, custom_collection))
-        }
-        // Named types, scalars, etc. — no collection to replace.
-        other => other.clone().into(),
-    }
-}
 
 /// Build static virtual methods by forwarding Eloquent Builder's public
 /// instance methods onto the model class.
@@ -213,11 +162,13 @@ pub(super) fn build_builder_forwarded_methods(
                 }
             }
 
-            // Replace Eloquent Collection with custom collection class.
-            if let Some(coll_name) = custom_collection
-                && let Some(ref mut ret) = forwarded.return_type
+            // Rewrite the base Eloquent Collection to whichever collection
+            // the model in the (now substituted) return type builds.
+            if let Some(ref mut ret) = forwarded.return_type
+                && let Some(rewritten) =
+                    super::replace_eloquent_collections_in_type(ret, class_loader)
             {
-                *ret = replace_eloquent_collection_typed(ret, coll_name);
+                *ret = rewritten;
             }
 
             forwarded

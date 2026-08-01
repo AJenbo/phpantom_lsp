@@ -939,51 +939,76 @@ always-on diagnostics — dynamic construction (`view("emails.$type")`)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.
 
-#### L21. Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)
+#### L41. Conditional return types on `url()` and its sibling helpers
 
-**Impact: Medium (a whole class of genuine mismatches goes unreported)
-· Effort: High (blocked on two precision gaps below)**
+**Impact: Medium · Effort: Low**
 
-The argument/return compatibility check has a deliberate "reverse
-direction MAYBE" escape hatch: when the resolved value is a *broader*
-supertype and the declared type is a *narrower* subtype (a downcast),
-we accept it rather than flag a mismatch. This is intentionally
-over-generous. It hides real errors such as returning a base type
-where a specific subclass is declared.
+`url()` returns the generator or a string depending on whether it got a
+path:
 
-We would like to drop this escape hatch to catch those genuine
-mismatches. We cannot yet, because doing so surfaces ~250 diagnostics
-across real Laravel codebases. These are *not* classic false
-positives: the code is correct against the model Larastan presents,
-and Larastan hacks around Carbon and Eloquent rather than modelling
-them precisely. Because the entire ecosystem (and therefore
-application code) is written against that looser model, tightening the
-check drowns real projects in mismatches that only PHPantom would
-report. PHPStan/Larastan report zero on the same lines.
+```php
+/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */
+function url($path = null, $parameters = [], $secure = null);
+```
 
-Two resolver-precision gaps produce the bulk of them; both must be
-closed before the escape hatch can go:
+We resolve the call to the contract regardless of the argument, so a
+string result is typed as `UrlGenerator`. Real-world fallout is
+`assertSame(url('/login'), $response->getTargetUrl())` reporting a
+mismatch (four sites in one sample project), though the diagnostic only
+fires there because of B4.
 
-1. **Eloquent custom collection classes.** A relation or query typed
-   as the base `Illuminate\Database\Eloquent\Collection<int, Model>`
-   where the method declares a custom `ModelCollection` subclass. We
-   do not yet resolve a model's `$collectionClass` / `newCollection()`
-   override, so the base type leaks and looks like a downcast. This is
-   the largest chunk and is not Carbon-specific.
+This is the same shape as the `view()` helper, which is now resolved
+precisely. `route()`, `secure_url()`, `action()`, and `redirect()` are
+worth auditing in the same pass, as is `app()` (`($abstract is null ?
+Application : mixed)`).
 
-2. **Carbon parent/child typing.** A value typed `Carbon\Carbon` where
-   `Illuminate\Support\Carbon` is declared (for example a datetime-cast
-   property chained through a fluent method). The runtime value is the
-   concrete Laravel subclass, but our cast/property typing lands on the
-   parent. Related to the `now()`/`today()` handling already in place,
-   which maps those helpers to `Illuminate\Support\Carbon`.
+**Where to look:** the helper interception next to `view()` in
+`type_engine/call_resolution/return_types.rs` and the matching branch in
+`type_engine/variable/rhs_resolution/calls.rs`.
 
-Note the `now()`/`today()` mapping itself is part of the same looser
-model: it is not strictly sound (the helpers' declared return type is
-the interface) but mirrors Larastan so real code does not drown in
-mismatches. Any tightening here has to preserve that.
+#### L42. `keyBy()` and friends do not rebind a collection's key template
 
-Where to look: the reverse-direction hierarchy block in the argument
-type compatibility layer, and the two resolution paths named above.
-Reproducible in real projects (a production Laravel codebase surfaces
-all ~250 when the escape hatch is removed).
+**Impact: Medium · Effort: Low-Medium**
+
+`keyBy()` re-keys a collection, but we keep the original `TKey`, so
+looking the result up by its new key is reported as a mismatch:
+
+```php
+$byMarket = ProductPrice::where(...)->get()
+    ->keyBy(fn (ProductPrice $pp): string => $pp->market->value);
+
+$byMarket->get($someString);
+// false positive: Argument 1 ($key) expects int|null, got string
+```
+
+The callback's return type (or the string column name in the
+`keyBy('id')` form) is the new `TKey`. `mapWithKeys()`, `groupBy()`,
+`flip()`, and `pluck()` with a key argument reshape keys the same way
+and should be checked together.
+
+**Where to look:** the collection method modelling in
+`virtual_members/laravel/`, alongside the custom-collection rewrite.
+
+#### L43. `$this->mock()` should return an intersection with the mocked class
+
+**Impact: Low-Medium · Effort: Low**
+
+Laravel's `InteractsWithContainer::mock()` is typed as returning
+`MockInterface`, but it always returns a mock *of* the given class, and
+test helpers routinely declare the intersection:
+
+```php
+private function mockHelloRetailClient(): Client&MockInterface
+{
+    $mock = $this->mock(Client::class);
+    // ...
+    return $mock;  // false positive: MockInterface is not Client&MockInterface
+}
+```
+
+Typing `mock()`/`partialMock()`/`spy()` as `T&MockInterface` for a
+`class-string<T>` argument fixes the return, and also makes completion
+on the mock offer the mocked class's own members.
+
+**Where to look:** the Laravel method return-type modelling in
+`virtual_members/laravel/`.

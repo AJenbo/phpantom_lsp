@@ -14,44 +14,6 @@ fn make_builder(methods: Vec<MethodInfo>) -> ClassInfo {
     builder
 }
 
-// ── replace_eloquent_collection ─────────────────────────────────
-
-#[test]
-fn replace_eloquent_collection_in_return_type() {
-    let result = replace_eloquent_collection_typed(
-        &PhpType::parse("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\User>"),
-        "App\\Collections\\UserCollection",
-    )
-    .to_string();
-    assert_eq!(
-        result,
-        "App\\Collections\\UserCollection<int, App\\Models\\User>"
-    );
-}
-
-#[test]
-fn replace_eloquent_collection_preserves_other_types() {
-    let result = replace_eloquent_collection_typed(
-        &PhpType::parse("Illuminate\\Support\\Collection<int, string>"),
-        "App\\Collections\\UserCollection",
-    )
-    .to_string();
-    assert_eq!(result, "Illuminate\\Support\\Collection<int, string>");
-}
-
-#[test]
-fn replace_eloquent_collection_in_union() {
-    let result = replace_eloquent_collection_typed(
-        &PhpType::parse("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\User>|null"),
-        "App\\Collections\\UserCollection",
-    )
-    .to_string();
-    assert_eq!(
-        result,
-        "App\\Collections\\UserCollection<int, App\\Models\\User>|null"
-    );
-}
-
 // ── build_builder_forwarded_methods ─────────────────────────────
 
 #[test]

@@ -25,12 +25,14 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| L21 | [Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)](todo/laravel.md#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision) | Medium      | High        |
 | L18 | [`Macroable::mixin()` registrations](todo/laravel.md)                                                                          | Low         | Medium      |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
+| B2  | [Property assigned inside a guarded `if` keeps its declared type](todo/bugs.md#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block)                | Medium      | Medium      |
+| B3  | [`self` in a parameter type is not resolved to the declaring class](todo/bugs.md#b3-self-in-a-parameter-type-is-not-resolved-to-the-declaring-class)                | Medium      | Low         |
+| B4  | [A template bound from an argument is used to check that same argument](todo/bugs.md#b4-a-template-bound-from-an-argument-is-used-to-check-that-same-argument)                | Medium      | Medium      |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 
@@ -168,7 +170,10 @@ unlikely to move the needle for most users.
 | L16 | [Hover for Laravel string keys](todo/laravel.md)                                                                                          | Medium      | Low-Medium  |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Low-Medium  |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Low-Medium  |
+| L41 | [Conditional return types on `url()` and its sibling helpers](todo/laravel.md#l41-conditional-return-types-on-url-and-its-sibling-helpers)                                  | Medium      | Low         |
+| L42 | [`keyBy()` and friends do not rebind a collection's key template](todo/laravel.md#l42-keyby-and-friends-do-not-rebind-a-collections-key-template)                           | Medium      | Low-Medium  |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium      |
+| L43 | [`$this->mock()` should return an intersection with the mocked class](todo/laravel.md#l43-thismock-should-return-an-intersection-with-the-mocked-class)                     | Low-Medium  | Low         |
 | L36 | [Container binding registrations from service providers](todo/laravel.md#l36-container-binding-registrations-from-service-providers)                                        | Medium      | Medium      |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |

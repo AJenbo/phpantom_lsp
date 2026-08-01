@@ -2647,3 +2647,92 @@ fn builder_scope_preserves_deprecated() {
     assert_eq!(methods.len(), 1);
     assert!(methods[0].deprecation_message.is_some());
 }
+
+// ── replace_eloquent_collections_in_type ────────────────────────
+
+/// Loader for a model that collects into a non-generic custom collection
+/// (the common `@extends Collection<int, User>` shape).
+fn collection_loader(name: &str) -> Option<Arc<ClassInfo>> {
+    match name {
+        "App\\Models\\User" => {
+            let mut user = make_class("App\\Models\\User");
+            user.laravel = Some(Box::new(crate::types::LaravelMetadata {
+                custom_collection: Some(PhpType::named(atom("App\\Collections\\UserCollection"))),
+                ..Default::default()
+            }));
+            Some(Arc::new(user))
+        }
+        "App\\Collections\\UserCollection" => {
+            Some(Arc::new(make_class("App\\Collections\\UserCollection")))
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn replace_eloquent_collection_in_return_type() {
+    let result = replace_eloquent_collections_in_type(
+        &PhpType::parse("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\User>"),
+        &collection_loader,
+    )
+    .expect("the model declares a custom collection")
+    .to_string();
+    assert_eq!(result, "App\\Collections\\UserCollection");
+}
+
+#[test]
+fn replace_eloquent_collection_keeps_arity_of_a_generic_collection() {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Collections\\UserCollection" {
+            let mut coll = make_class("App\\Collections\\UserCollection");
+            coll.template_params = vec![atom("TKey"), atom("TModel")];
+            Some(Arc::new(coll))
+        } else {
+            collection_loader(name)
+        }
+    };
+    let result = replace_eloquent_collections_in_type(
+        &PhpType::parse("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\User>"),
+        &loader,
+    )
+    .expect("the model declares a custom collection")
+    .to_string();
+    assert_eq!(
+        result,
+        "App\\Collections\\UserCollection<int, App\\Models\\User>"
+    );
+}
+
+#[test]
+fn replace_eloquent_collection_preserves_other_types() {
+    assert!(
+        replace_eloquent_collections_in_type(
+            &PhpType::parse("Illuminate\\Support\\Collection<int, string>"),
+            &collection_loader,
+        )
+        .is_none(),
+        "only the Eloquent collection is rewritten"
+    );
+}
+
+#[test]
+fn replace_eloquent_collection_leaves_models_without_a_custom_collection() {
+    assert!(
+        replace_eloquent_collections_in_type(
+            &PhpType::parse("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\Post>"),
+            &collection_loader,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn replace_eloquent_collection_in_union() {
+    let result = replace_eloquent_collections_in_type(
+        &PhpType::parse("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\User>|null"),
+        &collection_loader,
+    )
+    .expect("the model declares a custom collection")
+    .to_string();
+    assert_eq!(result, "App\\Collections\\UserCollection|null");
+}

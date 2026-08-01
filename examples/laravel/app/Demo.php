@@ -13,6 +13,7 @@ use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
+use App\Models\ReviewCollection;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
@@ -196,6 +197,28 @@ class Demo
         // Relationship properties also use the custom collection
         $review = new Review();
         $review->replies->topRated();     // HasMany<Review> → ReviewCollection
+    }
+
+    /**
+     * A builder chain is typed as the model's collection, not the base
+     * `Illuminate\Database\Eloquent\Collection`, so declaring the custom
+     * class as the return type checks out.
+     */
+    public function publishedReviews(): ReviewCollection
+    {
+        return Review::where('published', true)->get();
+    }
+
+    /** A self-referential `HasMany<Review, $this>` is a ReviewCollection too. */
+    public function repliesTo(Review $review): ReviewCollection
+    {
+        return $review->replies;
+    }
+
+    /** So is the relation's own `get()`. */
+    public function fetchedReplies(Review $review): ReviewCollection
+    {
+        return $review->replies()->get();
     }
 
 

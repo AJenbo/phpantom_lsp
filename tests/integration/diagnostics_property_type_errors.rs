@@ -2401,3 +2401,103 @@ namespace App {
         property_error_messages(&diags).join("; ")
     );
 }
+
+// ─── Template inference from a property argument ────────────────────────────
+
+/// `@template T of Base` bound through `@param array<string, T>`: the
+/// argument is a property, whose declared element type is what T binds to.
+#[test]
+fn template_binds_from_a_property_arguments_element_type() {
+    let php = r#"<?php
+abstract class Base {}
+class Leaf extends Base {}
+class Holder {
+    /** @var array<string, Leaf> */
+    private array $one = [];
+    /** @var array<string, Leaf> */
+    private array $copy = [];
+
+    /**
+     * @template T of Base
+     * @param array<string, T> $in
+     * @return array<string, T>
+     */
+    private function copyOne(array $in): array { return $in; }
+
+    public function go(): void {
+        $this->copy = $this->copyOne($this->one);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        property_error_messages(&diags).is_empty(),
+        "T should bind to Leaf, not its bound Base, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+/// The same, with the template buried two levels down.  Positional
+/// extraction unwraps one level; the shapes have to be unified.
+#[test]
+fn template_binds_through_a_nested_generic_parameter() {
+    let php = r#"<?php
+abstract class Base {}
+class Leaf extends Base {}
+class Holder {
+    /** @var array<string, array<string, Leaf>> */
+    private array $two = [];
+    /** @var array<string, array<string, Leaf>> */
+    private array $copy = [];
+
+    /**
+     * @template T of Base
+     * @param array<string, array<string, T>> $in
+     * @return array<string, array<string, T>>
+     */
+    private function copyTwo(array $in): array { return $in; }
+
+    public function go(): void {
+        $this->copy = $this->copyTwo($this->two);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        property_error_messages(&diags).is_empty(),
+        "T should bind to Leaf through the nested array, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+/// A genuinely mismatched element type is still reported.
+#[test]
+fn flags_property_assignment_when_the_bound_template_disagrees() {
+    let php = r#"<?php
+abstract class Base {}
+class Leaf extends Base {}
+class Twig extends Base {}
+class Holder {
+    /** @var array<string, Twig> */
+    private array $twigs = [];
+    /** @var array<string, Leaf> */
+    private array $copy = [];
+
+    /**
+     * @template T of Base
+     * @param array<string, T> $in
+     * @return array<string, T>
+     */
+    private function copyOne(array $in): array { return $in; }
+
+    public function go(): void {
+        $this->copy = $this->copyOne($this->twigs);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !property_error_messages(&diags).is_empty(),
+        "array<string, Twig> is not array<string, Leaf>"
+    );
+}

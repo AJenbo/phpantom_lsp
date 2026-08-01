@@ -196,15 +196,26 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                 record_match_ternary_snapshots(elem_expr, scope, ctx);
             }
         }
-        // Match expressions where the subject is NOT `true` — just
-        // recurse into arm expressions.
+        // Match expressions where the subject is NOT `true`.  A
+        // `match ($x::class)` subject is still narrowed per arm; any other
+        // subject just gets recursed into.
         Expression::Match(match_expr) => {
+            let subject_var = narrowing::match_class_subject_var(match_expr.expression);
             for arm in match_expr.arms.iter() {
                 let arm_expr = match arm {
                     MatchArm::Expression(e) => e.expression,
                     MatchArm::Default(d) => d.expression,
                 };
-                record_match_ternary_snapshots(arm_expr, scope, ctx);
+                match (subject_var, arm) {
+                    (Some(var), MatchArm::Expression(expr_arm)) => {
+                        let mut arm_scope = scope.clone();
+                        apply_class_match_arm_narrowing(var, expr_arm, &mut arm_scope, ctx);
+                        record_scope_snapshot(arm_expr.span().start.offset, &arm_scope);
+                        record_scope_snapshot_recursive(arm_expr, &arm_scope);
+                        record_match_ternary_snapshots(arm_expr, &arm_scope, ctx);
+                    }
+                    _ => record_match_ternary_snapshots(arm_expr, scope, ctx),
+                }
             }
         }
         _ => {}

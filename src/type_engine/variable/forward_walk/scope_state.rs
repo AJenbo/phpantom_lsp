@@ -531,8 +531,6 @@ pub(crate) fn resolve_param_type(
         }
     });
 
-    let type_for_resolution: Option<&PhpType> = enriched_type.as_ref().or(native_type);
-
     // Check the `@param` docblock annotation.
     let raw_docblock_type = crate::docblock::find_iterable_raw_type_in_source(
         ctx.content,
@@ -541,11 +539,25 @@ pub(crate) fn resolve_param_type(
     )
     .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
 
+    // With no `@param` of its own, an override inherits the ancestor's,
+    // which `@extends`/`@implements` template substitution may have
+    // narrowed below the native hint PHP forced the override to restate.
+    let inherited_refinement = if raw_docblock_type.is_none() && enriched_type.is_none() {
+        inherited_param_refinement(pname, method_name, native_type, ctx)
+    } else {
+        None
+    };
+
+    let type_for_resolution: Option<&PhpType> = inherited_refinement
+        .as_ref()
+        .or(enriched_type.as_ref())
+        .or(native_type);
+
     // Pick the effective type: docblock overrides native when it is
     // a compatible refinement.  Use the enriched type (e.g.
     // `Builder<User>`) rather than the bare native type so that
     // the generic args survive into the resolved ClassInfo.
-    let native_for_effective = enriched_type.as_ref().or(native_type).cloned();
+    let native_for_effective = type_for_resolution.cloned();
     let doc_parsed = raw_docblock_type.clone();
     let effective_type = crate::docblock::resolve_effective_type_typed(
         native_for_effective.as_ref(),
@@ -678,6 +690,56 @@ pub(crate) fn resolve_param_type(
     }
 
     param_results
+}
+
+/// The narrower parameter type an override inherits from its ancestor's
+/// `@param` docblock.
+///
+/// PHP requires an override to restate every native type hint, so
+/// `processNode(Node $node)` implementing `@param TNodeType $node` on
+/// `@implements Rule<CallLike>` still receives a `CallLike`.  The merged
+/// class carries that substituted type (see
+/// `inheritance::enrichment::child_native_hint_overrides`); this reads it
+/// back out so the walker seeds the body with the refined type instead of
+/// the restated hint.
+///
+/// Only consulted for parameters whose native hint names a class and that
+/// carry no `@param` of their own, so the merged-class lookup stays off
+/// the common path.
+fn inherited_param_refinement(
+    pname: &str,
+    method_name: Option<&str>,
+    native_type: Option<&PhpType>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let method_name = method_name?;
+    let native = native_type?;
+    // Only a class-named hint can be refined by an inherited docblock.
+    native.base_name()?;
+    let class = ctx.current_class;
+    if class.name.is_empty()
+        || (class.parent_class.is_none() && class.interfaces.is_empty() && class.mixins.is_empty())
+    {
+        return None;
+    }
+
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        class,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    let param = merged
+        .get_method(method_name)?
+        .parameters
+        .iter()
+        .find(|p| p.name == pname)?;
+    let hint = param.type_hint.as_ref()?;
+
+    // The merged parameter must be the same declaration (same native
+    // hint) carrying a docblock type that differs from it.  Enrichment
+    // only copies an ancestor type when it is a genuine refinement, so
+    // the difference is the inherited narrowing.
+    (param.native_type_hint.as_ref() == Some(native) && hint != native).then(|| hint.clone())
 }
 
 /// Try to resolve a parameter type from the fully-merged class info

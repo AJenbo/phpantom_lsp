@@ -287,7 +287,7 @@ pub(crate) fn build_function_template_subs(
 ///
 /// Tries docblock annotations first, then falls back to AST-based
 /// raw type inference.
-pub(super) fn resolve_arg_variable_raw_type(
+pub(crate) fn resolve_arg_variable_raw_type(
     arg_text: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
@@ -798,6 +798,25 @@ pub(super) fn resolve_rhs_function_call<'b>(
             (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
         {
             return ResolvedType::from_classes(vec![cls]);
+        }
+
+        // ── view('name') → concrete Illuminate\View\View ──
+        // The helper's conditional return type names the *contract*, but
+        // the factory always builds the concrete view object.  Mirrors
+        // Larastan's `view()` stub.
+        if normalized_func.trim_start_matches('\\') == "view" {
+            let arg_texts =
+                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                    &func_call.argument_list,
+                    content,
+                );
+            if crate::virtual_members::laravel::view_helper_returns_view(
+                normalized_func,
+                arg_texts.first().map(String::as_str).unwrap_or(""),
+            ) && let Some(cls) = (ctx.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
+            {
+                return ResolvedType::from_classes(vec![cls]);
+            }
         }
     }
 
@@ -1661,11 +1680,19 @@ pub(super) fn resolve_owner_method_call(
         } else {
             substituted
         };
-        if substituted.contains_self_ref() {
+        let resolved = if substituted.contains_self_ref() {
             self_replace(&substituted)
         } else {
             substituted
-        }
+        };
+        // Eloquent's own `get()`/`all()`/relation accessors are annotated
+        // with the base `Collection<int, TModel>`; once TModel is concrete
+        // we know which collection subclass the model really builds.
+        crate::virtual_members::laravel::replace_eloquent_collections_in_type(
+            &resolved,
+            ctx.class_loader,
+        )
+        .unwrap_or(resolved)
     });
 
     // Resolver from an argument's source text to its type, used to evaluate

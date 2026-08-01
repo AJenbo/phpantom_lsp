@@ -428,7 +428,13 @@ impl Backend {
                                 } else {
                                     substituted
                                 };
-                                **hint_out = Some(resolved_hint);
+                                **hint_out = Some(
+                                    crate::virtual_members::laravel::replace_eloquent_collections_in_type(
+                                        &resolved_hint,
+                                        ctx.class_loader,
+                                    )
+                                    .unwrap_or(resolved_hint),
+                                );
                             }
                             hint_captured = true;
                         }
@@ -552,7 +558,13 @@ impl Backend {
                         } else {
                             ret.clone()
                         };
-                        **hint_out = Some(resolved_hint);
+                        **hint_out = Some(
+                            crate::virtual_members::laravel::replace_eloquent_collections_in_type(
+                                &resolved_hint,
+                                ctx.class_loader,
+                            )
+                            .unwrap_or(resolved_hint),
+                        );
                     }
 
                     let split_args = split_text_args(text_args);
@@ -625,6 +637,18 @@ impl Backend {
                     "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
                 ) && let Some(cls) =
                     (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
+                {
+                    return vec![cls];
+                }
+
+                // ── view('name') → concrete Illuminate\View\View ─────
+                if crate::virtual_members::laravel::view_helper_returns_view(
+                    normalized_func,
+                    Self::extract_first_arg_text(text_args)
+                        .as_deref()
+                        .unwrap_or(""),
+                ) && let Some(cls) =
+                    (ctx.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
                 {
                     return vec![cls];
                 }

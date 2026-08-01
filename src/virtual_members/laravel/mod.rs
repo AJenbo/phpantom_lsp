@@ -175,9 +175,10 @@ pub(crate) use factory::{
     factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
 };
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
-    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, PropertyInfo, PropertySource,
+    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
+    MAX_INHERITANCE_DEPTH, PropertyInfo, PropertySource,
 };
 
 use super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
@@ -195,6 +196,28 @@ pub const SUPPORT_CARBON_FQN: &str = "Illuminate\\Support\\Carbon";
 
 /// Internal class-loader key for the class selected through `Date::use()`.
 pub const CONFIGURED_DATE_CLASS_FQN: &str = "phpantom-configured-laravel-date-class";
+
+/// The fully-qualified name of the concrete view object Laravel's view
+/// factory builds, which the `view()` helper hands back.
+pub const VIEW_FQN: &str = "Illuminate\\View\\View";
+
+/// Whether a call to the `view()` helper names a template, and therefore
+/// returns a rendered view rather than the view factory.
+///
+/// The helper's declared return type is
+/// `($view is null ? Contracts\View\Factory : Contracts\View\View)`, but
+/// the factory always constructs the concrete `Illuminate\View\View`.
+/// Resolving to the contract loses that and reports a mismatch on the
+/// (correct) `render(): View` signature every Blade component writes.
+/// Mapping the named form to the concrete class mirrors Larastan's
+/// `view()` stub, which the ecosystem is written against.
+pub(crate) fn view_helper_returns_view(func_name: &str, text_args: &str) -> bool {
+    if func_name.trim_start_matches('\\') != "view" {
+        return false;
+    }
+    let first = text_args.trim();
+    !first.is_empty() && !first.eq_ignore_ascii_case("null")
+}
 
 /// Build a substitution map that replaces `static`, `$this`, and `self`
 /// with the given type.
@@ -287,6 +310,152 @@ fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'
             .iter()
             .find(|c| c.name == short)
             .map(|c| c.as_ref())
+    }
+}
+
+/// Rewrite every `Illuminate\Database\Eloquent\Collection<…, TModel>`
+/// node in a type to the collection class the model actually builds.
+///
+/// Laravel's own `Builder::get()`, `Relation::get()` and friends are
+/// annotated `@return Collection<int, TModel>`.  A model that declares a
+/// custom collection (via `#[CollectedBy]`, `@use HasCollection<X>`, or a
+/// `newCollection()` override) hands back that subclass at runtime, so the
+/// declared base type is wrong for every such model.  Substituting
+/// `TModel` alone leaves `Collection<int, Audience>` where the code
+/// (correctly) declares `AudienceCollection`.
+///
+/// This mirrors Larastan's `CollectionHelper::replaceCollectionsInType()`:
+/// the model is read off the *last* generic argument, so a builder that
+/// returns some other model's collection resolves to that model's
+/// collection class rather than the receiver's.
+///
+/// The generic arity of the result follows the target collection class:
+/// a collection with two template parameters keeps `<key, model>`, one
+/// keeps `<model>`, and a non-generic subclass (the common
+/// `@extends Collection<int, Model>` shape) becomes a bare class name.
+///
+/// Returns `None` when nothing was rewritten, so callers on the hot path
+/// keep their existing type without allocating a copy.
+pub(crate) fn replace_eloquent_collections_in_type(
+    ty: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if !mentions_eloquent_collection(ty) {
+        return None;
+    }
+    rewrite_eloquent_collections(ty, class_loader)
+}
+
+/// Cheap pre-check for [`replace_eloquent_collections_in_type`].
+///
+/// Walking the tree twice is still cheaper than cloning it: the vast
+/// majority of return types never name the Eloquent collection, and this
+/// pass allocates nothing.
+fn mentions_eloquent_collection(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Generic(g) => {
+            is_eloquent_collection_name(&g.name) || g.args.iter().any(mentions_eloquent_collection)
+        }
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
+            members.iter().any(mentions_eloquent_collection)
+        }
+        TypeKind::Nullable(inner) | TypeKind::Array(inner) => mentions_eloquent_collection(inner),
+        _ => false,
+    }
+}
+
+fn is_eloquent_collection_name(name: &str) -> bool {
+    name.trim_start_matches('\\') == ELOQUENT_COLLECTION_FQN
+}
+
+fn rewrite_eloquent_collections(
+    ty: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    match ty.kind() {
+        TypeKind::Generic(g) if is_eloquent_collection_name(&g.name) => {
+            let model = g.args.last()?.base_name()?;
+            let collection = custom_collection_for_model(model, class_loader)?;
+            Some(collection_type_for(&collection, &g.args, class_loader))
+        }
+        TypeKind::Generic(g) => {
+            let args = rewrite_members(&g.args, class_loader)?;
+            Some(PhpType::generic_atom(g.name, args))
+        }
+        TypeKind::Union(members) => Some(PhpType::union(rewrite_members(members, class_loader)?)),
+        TypeKind::Intersection(members) => Some(PhpType::intersection(rewrite_members(
+            members,
+            class_loader,
+        )?)),
+        TypeKind::Nullable(inner) => Some(PhpType::nullable(rewrite_eloquent_collections(
+            inner,
+            class_loader,
+        )?)),
+        TypeKind::Array(inner) => Some(PhpType::array_of(rewrite_eloquent_collections(
+            inner,
+            class_loader,
+        )?)),
+        _ => None,
+    }
+}
+
+/// Rewrite a list of type members, returning `None` when none changed.
+fn rewrite_members(
+    members: &[PhpType],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Vec<PhpType>> {
+    let mut changed = false;
+    let rewritten: Vec<PhpType> = members
+        .iter()
+        .map(|m| match rewrite_eloquent_collections(m, class_loader) {
+            Some(new) => {
+                changed = true;
+                new
+            }
+            None => m.clone(),
+        })
+        .collect();
+    changed.then_some(rewritten)
+}
+
+/// Look up the custom collection declared by a model or, failing that,
+/// inherited from one of its parents.
+///
+/// `#[CollectedBy]`, `$collectionClass` and `newCollection()` overrides
+/// all live on the class that declares them but apply to every subclass,
+/// so a shared base model can set the collection for a whole hierarchy.
+fn custom_collection_for_model(
+    model: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<String> {
+    let mut current = class_loader(model)?;
+    for _ in 0..MAX_INHERITANCE_DEPTH {
+        if let Some(collection) = current.laravel().and_then(|l| l.custom_collection.as_ref()) {
+            return collection.base_name().map(str::to_owned);
+        }
+        current = class_loader(current.parent_class.as_ref()?)?;
+    }
+    None
+}
+
+/// Build the replacement type for a custom collection class, matching its
+/// generic arity to the class's own template parameters.
+fn collection_type_for(
+    collection: &str,
+    base_args: &[PhpType],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    let arity = class_loader(collection).map_or(0, |c| c.template_params.len());
+    match arity {
+        0 => PhpType::named(atom(collection)),
+        1 => PhpType::generic(
+            collection,
+            vec![base_args.last().cloned().unwrap_or_else(PhpType::mixed)],
+        ),
+        _ if arity >= base_args.len() => PhpType::generic(collection, base_args.to_vec()),
+        // More arguments than the target accepts: keep the trailing ones,
+        // which are the value types (`<key, model>` → `<model>`).
+        n => PhpType::generic(collection, base_args[base_args.len() - n..].to_vec()),
     }
 }
 
@@ -714,14 +883,17 @@ impl VirtualMemberProvider for LaravelModelProvider {
             // should produce `ReviewCollection<Review>`, not
             // `ProductCollection<Review>`.
             let custom_collection = if kind == RelationshipKind::Collection {
-                related_type
-                    .and_then(|t| t.base_name().and_then(class_loader))
-                    .and_then(|related_class| {
-                        related_class
-                            .laravel
-                            .as_ref()
-                            .and_then(|l| l.custom_collection.as_ref().map(|c| c.to_string()))
-                    })
+                related_type.and_then(|t| {
+                    // A self-referential relation (`HasMany<self, $this>`)
+                    // names the owning model, so the keyword has to be
+                    // resolved before the model can be looked up.
+                    let model = if t.is_self_ref() {
+                        class.fqn().to_string()
+                    } else {
+                        t.base_name()?.to_string()
+                    };
+                    custom_collection_for_model(&model, class_loader)
+                })
             } else {
                 None
             };
