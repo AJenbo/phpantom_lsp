@@ -30,21 +30,20 @@ These editors require you to [install PHPantom](installation.md) first.
 
 ### Neovim
 
-PHPantom is included in [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig). If you use nvim-lspconfig, enable it with:
+PHPantom is included in [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) (just needs to be enabled). If you do not use nvim-lspconfig, then you will need to manually configure it:
 
 ```lua
-require('lspconfig').phpantom.setup({})
-```
-
-Alternatively, with Neovim's built-in LSP client (no plugins required):
-
-```lua
-vim.lsp.config['phpantom'] = {
+vim.lsp.config('phpantom_lsp', {
   cmd = { 'phpantom_lsp' },
   filetypes = { 'php' },
-  root_markers = { 'composer.json', '.git' },
-}
-vim.lsp.enable('phpantom')
+  root_markers = { '.phpantom.toml', '.git', 'composer.json' },
+})
+```
+
+Finally, enable it with:
+
+```lua
+vim.lsp.enable('phpantom_lsp')
 ```
 
 ### PHPStorm
