@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785612582721,
+  "lastUpdate": 1785613723046,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12817,6 +12817,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d12e7c90f7357d4ad5d4025ae806bfddc4cfdc52",
+          "message": "fix: exclude relationship builder methods from virtual properties\n\nThe relationship property synthesis loop iterated over all inherited\nmethods, including the base relationship builder methods from\nHasRelationships (hasMany, belongsTo, morphOne, etc.).  Because these\nmethods have relationship return types, they were incorrectly turned\ninto virtual properties and count properties (has_many_count,\nbelongs_to_count, etc.) on every Eloquent model.\n\nSkip methods whose name matches one of the known relationship builder\nmethod names in both the property and count property synthesis loops.\n\nCloses #312\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-01T21:31:15+02:00",
+          "tree_id": "ff224df83c622b2d169d6bb8dc7b4550f823b7e9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d12e7c90f7357d4ad5d4025ae806bfddc4cfdc52"
+        },
+        "date": 1785613718957,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.6,
             "unit": "MiB"
           }
         ]
