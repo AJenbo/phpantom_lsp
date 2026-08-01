@@ -270,6 +270,110 @@ pub(crate) fn join_uri_segments(left: &str, right: &str) -> String {
     }
 }
 
+/// Plurals whose singular form the suffix rules in [`singularize_english_word`]
+/// cannot derive.  Laravel uses Doctrine's inflector, which carries a far
+/// longer table; this covers the words that plausibly name a resource route.
+const IRREGULAR_SINGULARS: &[(&str, &str)] = &[
+    ("aliases", "alias"),
+    ("analyses", "analysis"),
+    ("buses", "bus"),
+    ("campuses", "campus"),
+    ("children", "child"),
+    ("crises", "crisis"),
+    ("criteria", "criterion"),
+    ("diagnoses", "diagnosis"),
+    ("feet", "foot"),
+    ("geese", "goose"),
+    ("indices", "index"),
+    ("matrices", "matrix"),
+    ("media", "medium"),
+    ("men", "man"),
+    ("mice", "mouse"),
+    ("movies", "movie"),
+    ("oxen", "ox"),
+    ("people", "person"),
+    ("quizzes", "quiz"),
+    ("statuses", "status"),
+    ("teeth", "tooth"),
+    ("theses", "thesis"),
+    ("vertices", "vertex"),
+    ("women", "woman"),
+];
+
+/// Words that are their own plural.
+const UNCOUNTABLE_WORDS: &[&str] = &[
+    "equipment",
+    "fish",
+    "information",
+    "money",
+    "news",
+    "rice",
+    "series",
+    "sheep",
+    "software",
+    "species",
+];
+
+/// Reduce an English plural to its singular form, as `Str::singular()` does.
+///
+/// This is the counterpart of `pluralize_english_word`: it inverts the same
+/// suffix rules (`-ies` → `-y`, `-es` after a sibilant, otherwise `-s`) and
+/// falls back to a small irregular table.  Words that are already singular,
+/// and words that are their own plural, are returned unchanged.
+///
+/// The result is lowercased.  Laravel's inflector preserves the input's case,
+/// which only differs for a capitalized plural — not something a resource name
+/// or table name is written as.
+pub(crate) fn singularize_english_word(word: &str) -> String {
+    let mut lower = word.to_ascii_lowercase();
+    if UNCOUNTABLE_WORDS.contains(&lower.as_str()) {
+        return lower;
+    }
+    if let Some((_, singular)) = IRREGULAR_SINGULARS
+        .iter()
+        .find(|(plural, _)| *plural == lower)
+    {
+        return (*singular).to_string();
+    }
+    // Each rule below shortens the lowercased copy in place, so a word needs
+    // one allocation to singularize rather than two.
+    //
+    // `categories` → `category`, but `ties` → `tie`: the `-ies` plural only
+    // applies to a `-y` that follows a consonant.
+    if let Some(stem) = lower.strip_suffix("ies")
+        && stem.len() > 1
+        && !matches!(stem.chars().last(), Some('a' | 'e' | 'i' | 'o' | 'u'))
+    {
+        let stem_len = stem.len();
+        lower.truncate(stem_len);
+        lower.push('y');
+        return lower;
+    }
+    // `addresses` → `address`, `boxes` → `box`: `-es` is only dropped whole
+    // when the stem ends in a sibilant, which is what earned it the `e`.
+    // A single `s` does not qualify — `houses` is `house` plus `s`.
+    if let Some(stem) = lower.strip_suffix("es")
+        && (stem.ends_with("ss")
+            || stem.ends_with('x')
+            || stem.ends_with('z')
+            || stem.ends_with("ch")
+            || stem.ends_with("sh"))
+    {
+        let stem_len = stem.len();
+        lower.truncate(stem_len);
+        return lower;
+    }
+    // `ss` is not a plural marker (`address`, `status`).
+    if let Some(stem) = lower.strip_suffix('s')
+        && !stem.is_empty()
+        && !stem.ends_with('s')
+    {
+        let stem_len = stem.len();
+        lower.truncate(stem_len);
+    }
+    lower
+}
+
 /// The first argument of a call, when it is a plain string literal.
 pub(crate) fn first_string_arg<'c>(args: &ArgumentList<'_>, content: &'c str) -> Option<&'c str> {
     args.arguments

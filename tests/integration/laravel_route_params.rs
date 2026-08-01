@@ -24,6 +24,11 @@ Route::get('/users/{user}/posts/{post}', 'show')->name('users.posts.show');
 Route::prefix('admin')->name('admin.')->group(function () {
     Route::patch('/bakeries/{bakery}/cancel', 'cancel')->name('bakeries.cancel');
 });
+
+Route::resource('photos', PhotoController::class);
+Route::resource('photos.comments', CommentController::class);
+Route::apiResource('categories', CategoryController::class)
+    ->parameters(['categories' => 'slug']);
 ";
 
 async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
@@ -159,4 +164,31 @@ async fn the_route_name_argument_still_completes_names() {
         labels.contains(&"users.posts.show".to_string()),
         "expected the route names, got {labels:?}"
     );
+}
+
+#[tokio::test]
+async fn resource_route_offers_its_derived_parameter() {
+    let source = consumer("route('photos.show', ['']);");
+    let labels = labels_after(&source, "['").await;
+    assert_eq!(labels, vec!["photo".to_string()]);
+}
+
+#[tokio::test]
+async fn nested_resource_route_offers_every_derived_parameter() {
+    let source = consumer("route('photos.comments.update', ['']);");
+    let labels = labels_after(&source, "['").await;
+    assert_eq!(labels, vec!["photo".to_string(), "comment".to_string()]);
+}
+
+#[tokio::test]
+async fn resource_parameters_override_the_derived_name() {
+    let source = consumer("route('categories.show', ['']);");
+    let labels = labels_after(&source, "['").await;
+    assert_eq!(labels, vec!["slug".to_string()]);
+}
+
+#[tokio::test]
+async fn resource_index_route_offers_no_parameters() {
+    let source = consumer("route('photos.index', ['']);");
+    assert!(labels_after(&source, "['").await.is_empty());
 }

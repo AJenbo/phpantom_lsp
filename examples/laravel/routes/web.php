@@ -15,3 +15,8 @@ Route::prefix('bakeries')
         Route::get('{bakery}', 'show')->name('bakeries.show');
         Route::patch('{bakery}/cancel', 'cancel')->name('bakeries.cancel');
     });
+
+// A resource registration names no URI: Laravel derives one from the resource
+// name, singularizing each segment to build the {parameters}.  This nested
+// name yields bakeries/{bakery}/ovens and bakeries/{bakery}/ovens/{oven}.
+Route::resource('bakeries.ovens', BakeryController::class)->only(['index', 'show']);

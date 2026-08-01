@@ -178,7 +178,6 @@ unlikely to move the needle for most users.
 | L36 | [Container binding registrations from service providers](todo/laravel.md#l36-container-binding-registrations-from-service-providers)                                        | Medium      | Medium      |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |
-| L43 | [Resource route URIs](todo/laravel.md#l43-resource-route-uris)                                                                                                              | Low-Medium  | Low-Medium  |
 | L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Low-Medium  |
 | L41 | [Morph aliases in `*_type` column comparisons](todo/laravel.md#l41-morph-aliases-in-_type-column-comparisons)                                                               | Low-Medium  | Medium      |
 | L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names)                                                                                  | Low-Medium  | Medium      |

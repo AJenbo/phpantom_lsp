@@ -4049,6 +4049,137 @@ Route::get('/products', [ProductController::class, 'index'])->name('products.ind
     assert_eq!(definition_line(&result), 1);
 }
 
+/// A resource route declares its names at the resource-name literal rather
+/// than in a `->name()` call, so that literal is what the name resolves to.
+async fn resource_route_definition_line(route_name: &str, routes: &str) -> u32 {
+    let service_php = format!(
+        "\
+<?php
+namespace App\\Services;
+class Service {{
+    public function demo(): void {{
+        $url = route('{route_name}');
+    }}
+}}
+"
+    );
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php.as_str()),
+        ("routes/web.php", routes),
+    ]);
+
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        &service_php,
+        4,
+        22,
+    )
+    .await;
+
+    let result = result.unwrap_or_else(|| panic!("route('{route_name}') should resolve"));
+    assert!(
+        definition_uri(&result)
+            .as_str()
+            .ends_with("/routes/web.php"),
+        "Should jump to routes/web.php, got: {}",
+        definition_uri(&result)
+    );
+    definition_line(&result)
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_resource_route() {
+    let routes = "\
+<?php
+Route::get('/', function () {})->name('home');
+Route::resource('photos', PhotoController::class);
+";
+    assert_eq!(
+        resource_route_definition_line("photos.show", routes).await,
+        2,
+        "Route::resource('photos') is on line 2 (0-indexed)"
+    );
+    assert_eq!(
+        resource_route_definition_line("photos.destroy", routes).await,
+        2
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_api_resource_route_behind_modifiers() {
+    // The registration is found through the chain links that follow it.
+    let routes = "\
+<?php
+Route::apiResource('photos', PhotoController::class)
+    ->middleware('auth')
+    ->only(['index', 'show']);
+";
+    assert_eq!(
+        resource_route_definition_line("photos.index", routes).await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_resource_route_excluded_name_is_not_resolved() {
+    let routes = "\
+<?php
+Route::resource('photos', PhotoController::class)->only(['index']);
+";
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $url = route('photos.destroy');
+    }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("routes/web.php", routes),
+    ]);
+
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        22,
+    )
+    .await;
+
+    assert!(
+        result.is_none(),
+        "->only(['index']) does not register photos.destroy, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_resource_route_in_named_group() {
+    // The group's name prefix applies to the generated names, and a shallow
+    // nested resource names its member routes after the last segment only.
+    let routes = "\
+<?php
+Route::name('admin.')->group(function () {
+    Route::resource('photos.comments', CommentController::class)->shallow();
+});
+";
+    assert_eq!(
+        resource_route_definition_line("admin.photos.comments.index", routes).await,
+        2
+    );
+    assert_eq!(
+        resource_route_definition_line("admin.comments.show", routes).await,
+        2
+    );
+}
+
 // ─── Blade @include go-to-definition ─────────────────────────────────────────
 
 #[tokio::test]

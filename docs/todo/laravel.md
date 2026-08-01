@@ -687,23 +687,6 @@ pattern set. Gaps by kind:
   class. No new data needed. Provider-registered binding names stay out
   of scope (see the table at the top).
 
-#### L43. Resource route URIs
-
-**Impact: Low-Medium · Effort: Low-Medium**
-
-`Route::resource()` / `apiResource()` registrations name no URI, so the
-routes the scanner generates for them carry no URI and their parameters
-do not complete. Laravel derives the URI from the resource name
-(`Route::resource('photos', …)` → `photos`, `photos/create`,
-`photos/{photo}`, `photos/{photo}/edit`), where the parameter is
-`Str::singular()` of the last segment — nested names singularize each
-prior segment (`photos.comments` → `photos/{photo}/comments/{comment}`)
-— and `->parameters(['photos' => 'grid'])` overrides the derived name.
-Recording those URIs completes route parameters for resource routes and
-gives the L16 hover a URI to show for them. A singularizer is needed;
-`pluralize_english_word` in `virtual_members/laravel/mod.rs` is the
-existing counterpart.
-
 #### L24. Translation depth: JSON lang files, locales, placeholders
 
 **Impact: Medium-High · Effort: Medium**

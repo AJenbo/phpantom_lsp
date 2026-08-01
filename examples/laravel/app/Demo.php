@@ -291,6 +291,8 @@ class Demo
      *     path registered in config/view.php (resources/theme/views).
      *  6. Type a quote inside route('bakeries.show', [ … ]) to complete the
      *     route's URI parameter names.
+     *  7. Do the same inside route('bakeries.ovens.show', [ … ]) — the
+     *     parameters of a Route::resource() route are derived from its name.
      */
     public function laravelNavigation(): void
     {
@@ -316,6 +318,11 @@ class Demo
         // prefix comes from the enclosing Route::prefix('bakeries') group).
         route('bakeries.show', ['bakery' => 1]);
         route('bakeries.cancel', ['bakery' => 1]);
+
+        // Route::resource() writes no URI of its own, so the parameters come
+        // from the one Laravel derives from the resource name — each segment
+        // of bakeries.ovens singularized into bakeries/{bakery}/ovens/{oven}.
+        route('bakeries.ovens.show', ['bakery' => 1, 'oven' => 2]);
 
         // Translation Keys
         __('messages.welcome');
