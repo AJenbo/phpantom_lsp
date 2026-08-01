@@ -35,7 +35,9 @@ namespace PsalmTest_loop_for_2 {
         break;
     }
 
-    assertType('string', $a);
-    assertType('int', $b);
+    // PHPantom is more precise than Psalm here: the single assignment
+    // reaching each break keeps its literal value.
+    assertType('\'hello\'', $a);
+    assertType('5', $b);
 }
 

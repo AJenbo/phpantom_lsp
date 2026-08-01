@@ -30,11 +30,11 @@ final class Foo
 		$foo = new self();
 		$arrayLiteral = [];
 
-		assertType('int', $integerLiteral);
+		assertType('1', $integerLiteral);
 		assertType('bool', $booleanLiteral);
 		assertType('bool', $anotherBooleanLiteral);
-		assertType('string', $stringLiteral);
-		assertType('float', $floatLiteral);
+		assertType('\'foo\'', $stringLiteral);
+		assertType('1.0', $floatLiteral);
 		assertType('null', $nullLiteral);
 		assertType('Lorem', $loremObjectLiteral);
 		assertType('Foo', $foo);
@@ -68,10 +68,10 @@ final class Foo
 	public function reassignment(): void
 	{
 		$x = 1;
-		assertType('int', $x);
+		assertType('1', $x);
 
 		$x = 'hello';
-		assertType('string', $x);
+		assertType('\'hello\'', $x);
 
 		$x = new Lorem();
 		assertType('Lorem', $x);

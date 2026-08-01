@@ -97,6 +97,8 @@ unlikely to move the needle for most users.
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium      |
 | T4  | Non-empty-\* type narrowing and propagation                                                                                                                                 | Low         | Low         |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Low         |
+| T33 | [Statically-known ternary conditions keep both branches](todo/type-inference.md#t33-statically-known-ternary-conditions-keep-both-branches)                                 | Low         | Low         |
+| T34 | [Class constant references widen their literal value](todo/type-inference.md#t34-class-constant-references-widen-their-literal-value)                                       | Low         | Low-Medium  |
 | T9  | [Dead-code elimination after `never`-returning calls](todo/type-inference.md#t9-dead-code-elimination-after-never-returning-calls)                                          | Low         | Low-Medium  |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium  |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Low-Medium  |
@@ -109,6 +111,7 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B1  | [`analyze` flags framework Artisan commands as unknown](todo/bugs.md#b1-analyze-flags-framework-artisan-commands-as-unknown)                                                 | Medium      | Low         |
+| B3  | [Property write overrides the declared type even through `__set`](todo/bugs.md#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set)             | Low-Medium  | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

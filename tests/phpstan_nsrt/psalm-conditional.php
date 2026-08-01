@@ -69,7 +69,9 @@ class IgnoreNullCheck {
 		$a = rand(0, 1) ? 5 : null;
 		if ($a !== null) { }
 		$b = $a;
-		assertType('int|null', $b);
+		// PHPantom is more precise than Psalm here: it keeps the literal
+		// `5` from the ternary rather than widening it to `int`.
+		assertType('5|null', $b);
 	}
 }
 
@@ -85,7 +87,9 @@ class NullableIntReplacement {
 			$a = 3;
 		}
 
-		assertType('int|null', $a);
+		// PHPantom is more precise than Psalm here: both the assigned `3`
+		// and the original `5|null` survive the merge as literals.
+		assertType('3|5|null', $a);
 	}
 }
 
@@ -110,7 +114,9 @@ class IsScalarNarrowing {
 			exit;
 		}
 
-		assertType('string', $a);
+		// PHPantom is more precise than Psalm here: the surviving branch
+		// keeps the literal `'hello'` rather than widening it to `string`.
+		assertType('\'hello\'', $a);
 	}
 }
 

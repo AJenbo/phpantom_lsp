@@ -126,8 +126,10 @@ namespace PsalmTest_loop_while_6 {
         break;
     }
 
-    assertType('string', $a);
-    assertType('int', $b);
+    // PHPantom is more precise than Psalm here: the single assignment
+    // reaching each break keeps its literal value.
+    assertType('\'hello\'', $a);
+    assertType('5', $b);
 }
 
 // Test: whileWithNotEmptyCheck

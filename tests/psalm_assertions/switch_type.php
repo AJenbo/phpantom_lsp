@@ -40,8 +40,10 @@ namespace PsalmTest_switch_type_2 {
             $b = 1;
     }
 
+    // PHPantom is more precise than Psalm here: `$b` keeps the literal value
+    // assigned on each path instead of widening to `int`.
     assertType('bool', $a);
-    assertType('int', $b);
+    assertType('2|1', $b);
 }
 
 // Test: switchVarConditionalReAssignment

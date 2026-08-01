@@ -17,15 +17,20 @@
 //!
 //! To skip an assertion that PHPantom cannot yet handle, add `// SKIP`
 //! on the same line as the `assertType()` call.
+//!
+//! Expected types are matched exactly, modulo the cosmetic spellings
+//! `normalize_type` canonicalizes. In particular a scalar literal is not
+//! interchangeable with its base type: an assertion expecting `string`
+//! fails against `'foo'`. Where PHPantom resolves a value more precisely
+//! than the upstream corpus does, record the precise type and say so in a
+//! comment; where it is *less* precise, keep the upstream expectation and
+//! mark the line `// SKIP` so the gap stays visible instead of being
+//! absorbed by a lenient comparison.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Once;
 
-use phpantom_lsp::{
-    Backend,
-    php_type::{LiteralValue, PhpType, TypeKind},
-};
+use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
 static UNIT_ENUM_STUB: &str = r#"<?php
@@ -605,14 +610,55 @@ fn transform_source(
 
 // ─── Type comparison ────────────────────────────────────────────────────────
 
+/// Rewrite double-quoted string literals to single quotes.
+///
+/// PHPStan and Psalm always render a string literal with single quotes,
+/// while PHPantom keeps the literal's source spelling, so `$a = "hello"`
+/// resolves to `"hello"` and `$b = 'hello'` to `'hello'`. Only the quote
+/// style differs, so canonicalize it on both sides and let upstream
+/// expectations port verbatim.
+///
+/// Literals containing a backslash or a single quote are left untouched:
+/// PHP's escape rules differ between the two quote styles, so rewriting
+/// those would change which value the literal denotes.
+fn canonicalize_literal_quotes(ty: &str) -> String {
+    let mut result = String::with_capacity(ty.len());
+    let mut rest = ty;
+
+    while let Some(open) = rest.find('"') {
+        result.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+
+        let Some(close) = after.find('"') else {
+            result.push_str(&rest[open..]);
+            return result;
+        };
+
+        let content = &after[..close];
+        let quote = if content.contains('\\') || content.contains('\'') {
+            '"'
+        } else {
+            '\''
+        };
+        result.push(quote);
+        result.push_str(content);
+        result.push(quote);
+
+        rest = &after[close + 1..];
+    }
+
+    result.push_str(rest);
+    result
+}
+
 /// Normalize a type string for comparison.
 ///
 /// PHPStan and PHPantom may format the same type differently. This
 /// function canonicalizes both sides so that cosmetic differences
-/// (spacing, leading backslash, FQN vs short name, `?T` vs `T|null`)
-/// don't cause spurious failures.
+/// (spacing, leading backslash, FQN vs short name, `?T` vs `T|null`,
+/// literal quote style) don't cause spurious failures.
 fn normalize_type(ty: &str) -> String {
-    let mut s = ty.trim().to_string();
+    let mut s = canonicalize_literal_quotes(ty.trim());
 
     // Strip leading backslash from FQN types.
     if s.starts_with('\\') {
@@ -700,33 +746,6 @@ fn normalize_type(ty: &str) -> String {
 /// Compare expected (PHPStan) type with actual (PHPantom hover) type.
 /// Returns true if they match after normalization.
 fn types_match(expected: &str, actual: &str) -> bool {
-    if types_match_without_literal_precision(expected, actual) {
-        return true;
-    }
-
-    // The imported PHPStan/Psalm corpora sometimes expect a broad scalar
-    // where PHPantom can prove an exact runtime value. Treat that strictly
-    // narrower result as compatible without weakening collection contracts:
-    // literals are widened only at the top level of a union/nullable value,
-    // never inside generic, shape, or callable payloads.
-    let actual_type = PhpType::parse(actual);
-    let widened = widen_top_level_scalar_literals(&actual_type);
-    widened != actual_type && types_match_without_literal_precision(expected, &widened.to_string())
-}
-
-fn assert_literal_compatibility_is_shallow() {
-    static CHECK: Once = Once::new();
-    CHECK.call_once(|| {
-        assert!(types_match("string", "'x'"));
-        assert!(!types_match("float", "1"));
-        assert!(!types_match("list<string>", "list<'x'>"));
-        assert!(!types_match("array{key: string}", "array{key: 'x'}"));
-        assert!(!types_match("callable(): string", "callable(): 'x'"));
-        assert!(!types_match("string", "int"));
-    });
-}
-
-fn types_match_without_literal_precision(expected: &str, actual: &str) -> bool {
     let ne = normalize_type(expected);
     let na = normalize_type(actual);
 
@@ -769,34 +788,6 @@ fn types_match_without_literal_precision(expected: &str, actual: &str) -> bool {
     }
 
     false
-}
-
-fn widen_top_level_scalar_literals(ty: &PhpType) -> PhpType {
-    match ty.kind() {
-        TypeKind::Literal(value) => match &**value {
-            LiteralValue::Int(_) => PhpType::int(),
-            LiteralValue::Float(_) => PhpType::float(),
-            LiteralValue::String(_) => PhpType::string(),
-        },
-        TypeKind::Union(members) => {
-            let mut widened = Vec::with_capacity(members.len());
-            let mut seen = HashSet::with_capacity(members.len());
-            for member in members {
-                let member = widen_top_level_scalar_literals(member);
-                for alternative in member.union_members() {
-                    if seen.insert(alternative.clone()) {
-                        widened.push(alternative.clone());
-                    }
-                }
-            }
-            match widened.len() {
-                1 => widened.into_iter().next().unwrap(),
-                _ => PhpType::union(widened),
-            }
-        }
-        TypeKind::Nullable(inner) => PhpType::nullable(widen_top_level_scalar_literals(inner)),
-        _ => ty.clone(),
-    }
 }
 
 /// Shorten FQN components in a type string.
@@ -979,10 +970,6 @@ fn fixture_uri(path: &Path) -> String {
 }
 
 fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> {
-    // This harness compatibility must never become a general type oracle:
-    // it accepts only shallow scalar precision gained by PHPantom.
-    assert_literal_compatibility_is_shallow();
-
     // Parse assertions from original source.
     let assertions = extract_assert_type_calls(&content);
 

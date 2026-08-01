@@ -822,3 +822,64 @@ Everything else tagged `MAYBE` in the source, notably:
   per-value compatibility instead of blanket-accepting would reduce
   false negatives without introducing false positives — a smaller,
   separate follow-up from the move-to-core question above.
+
+---
+
+## T33. Statically-known ternary conditions keep both branches
+**Impact: Low · Effort: Low**
+
+A ternary whose condition is statically known still unions both arms:
+`true ? 1 : 2` resolves to `1|2` where PHPStan prunes the dead arm and
+reports `1`. The same applies to `false ? 1 : 2` (should be `2`) and to
+a short ternary whose LHS is a literal. Now that scalar literals
+survive expression resolution, the imprecision is visible in hover
+output, and it blocks two verbatim upstream expectations in
+`tests/phpstan_nsrt/binary.php` (upstream `nsrt/binary.php` asserts `1`
+and `2` for these exact expressions; the ported fixture currently
+expects the widened `int`).
+
+```php
+$a = true ? 1 : 2;   // PHPantom: 1|2   PHPStan: 1
+$b = false ? 1 : 2;  // PHPantom: 1|2   PHPStan: 2
+```
+
+**Where to change:** ternary resolution in the shared RHS pipeline
+(`type_engine/variable/rhs_resolution/`). When the condition resolves
+to a type with known truthiness (a bool literal, or a scalar literal
+whose truthiness is defined), resolve only the live arm instead of
+unioning both.
+
+---
+
+## T34. Class constant references widen their literal value
+**Impact: Low · Effort: Low-Medium**
+
+A constant declared with a scalar literal loses that value when it is
+referenced. Expression resolution keeps literals now, but constant
+resolution still reports the base type, so precision depends on whether
+the value reaches the expression through a variable or a constant.
+
+```php
+class Foo {
+    const INTEGER_CONSTANT = 1;
+    const STRING_CONSTANT = 'foo';
+}
+
+$a = 1;                        // 1
+$b = Foo::INTEGER_CONSTANT;    // int    (PHPStan: 1)
+$c = Foo::STRING_CONSTANT;     // string (PHPStan: 'foo')
+```
+
+Beyond hover precision, this is what would let `match`/`switch` arms
+keyed on class constants narrow, and it feeds constant-expression
+evaluation (Phase 5K of [test-porting.md](test-porting.md)).
+
+**Where to change:** class-constant resolution, which should carry the
+declared initialiser's literal type through to
+`type_engine/variable/rhs_resolution/` the way a literal assignment
+already does.
+
+**Tests to update once fixed:** the `classConstants()` assertions in
+`tests/phpstan_nsrt/deducted-types.php` currently expect the widened
+`int`/`float`/`string`; upstream's `nsrt/deducted-types.php` expects
+`1`/`1.0`/`'foo'`.

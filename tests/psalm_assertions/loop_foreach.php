@@ -20,7 +20,9 @@ namespace PsalmTest_loop_foreach_1 {
         $moo = $foo;
     }
 
-    assertType('int', $moo);
+    // PHPantom is more precise than Psalm here: the switch arms keep their
+    // literal values instead of widening to `int`.
+    assertType('2|3', $moo);
 }
 
 // Test: switchVariableWithFallthroughStatement
@@ -42,7 +44,9 @@ namespace PsalmTest_loop_foreach_2 {
         $moo = $foo;
     }
 
-    assertType('int', $moo);
+    // PHPantom is more precise than Psalm here: the switch arms keep their
+    // literal values instead of widening to `int`.
+    assertType('2|3', $moo);
 }
 
 // Test: assignInsideForeach
@@ -153,9 +157,10 @@ namespace PsalmTest_loop_foreach_10 {
       }
     }
 
-    // PHPantom is stricter than Psalm here: since ["a","b","c"] is non-empty,
-    // the pre-loop null cannot survive into post-loop scope.
-    assertType('int|string', $tag);
+    // PHPantom is stricter than Psalm here on two counts: since ["a","b","c"]
+    // is non-empty the pre-loop null cannot survive into post-loop scope, and
+    // the assigned `5` keeps its literal value instead of widening to `int`.
+    assertType('5|string', $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithRedefineAndBreak

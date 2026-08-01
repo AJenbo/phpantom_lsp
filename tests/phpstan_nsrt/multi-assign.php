@@ -27,21 +27,21 @@ function multiAssignNull(): void {
 
 function multiAssignInt(): void {
 	$a = $b = $c = 42;
-	assertType('int', $a);
-	assertType('int', $b);
-	assertType('int', $c);
+	assertType('42', $a);
+	assertType('42', $b);
+	assertType('42', $c);
 }
 
 function multiAssignString(): void {
 	$a = $b = 'hello';
-	assertType('string', $a);
-	assertType('string', $b);
+	assertType('\'hello\'', $a);
+	assertType('\'hello\'', $b);
 }
 
 function multiAssignFloat(): void {
 	$a = $b = 3.14;
-	assertType('float', $a);
-	assertType('float', $b);
+	assertType('3.14', $a);
+	assertType('3.14', $b);
 }
 
 function multiAssignBool(): void {
@@ -73,12 +73,12 @@ function multiAssignUnion($union): void {
 
 function reassignAfterChain(): void {
 	$a = $b = 1;
-	assertType('int', $a);
-	assertType('int', $b);
+	assertType('1', $a);
+	assertType('1', $b);
 
 	$a = 'changed';
-	assertType('string', $a);
-	assertType('int', $b);
+	assertType('\'changed\'', $a);
+	assertType('1', $b);
 }
 
 function multiAssignArray(): void {

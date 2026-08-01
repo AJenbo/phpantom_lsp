@@ -80,3 +80,54 @@ max reports neither.
 **Where to look:** `type_engine/variable/forward_walk/` (branch merging
 and `seed_property_keys_into_scope`) and
 `type_engine/resolver/property_narrowing.rs`.
+
+
+#### B3. A property write overrides the declared type even when it goes through `__set`
+
+**Impact: Low-Medium · Effort: Medium**
+
+`$obj->prop = expr` records the assigned type under a property-path key
+(`assignment.rs`, the `Expression::Access(Access::Property(_) | ...)`
+branch) so that a later read of the same path resolves through the
+assignment "rather than the declaring class's declared property hints".
+That is right for a real declared property, and it is what makes
+`stdClass` chains resolve. It is wrong when the write dispatches to
+`__set`, which is free to transform, reroute, or drop the value instead
+of storing it as given. `__get` then decides what a read returns, and the
+recorded write type has no authority over it.
+
+```php
+/** @template TData of array */
+class DataBag {
+    /** @param TData $data */
+    public function __construct(private array $data) {}
+    /** @return TData[K] */
+    public function __get(string $property) { return $this->data[$property]; }
+    /** @param TData[K] $value */
+    public function __set(string $property, $value) { /* may store anything */ }
+}
+
+/** @extends DataBag<array{a: int, b: string}> */
+class FooBag extends DataBag {}
+
+$foo = new FooBag(["a" => 5, "b" => "hello"]);
+$foo->a = 9;
+$a = $foo->a;   // PHPantom: 9      Psalm: int (via __get's TData[K])
+```
+
+The write should not be recorded when the property is undeclared on the
+subject's class *and* that class declares `__set`; the read should keep
+resolving through `__get`. Psalm and PHPStan both treat magic property
+writes as opaque for this reason.
+
+This predates literal preservation in expression resolution: the recorded
+type used to coincide with the declared type (`int` either way), so the
+override was invisible. It surfaced when the write started recording `9`.
+
+**Where to look:** the property-assignment branch of
+`type_engine/variable/forward_walk/assignment.rs`, and the magic-member
+resolution in `virtual_members/`.
+
+**Test:** the `inheritTemplateParamViaConstructor` case in
+`tests/psalm_assertions/template_class_template_extends.php` carries two
+`// SKIP` markers that clear when this is fixed.
