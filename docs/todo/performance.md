@@ -868,6 +868,46 @@ real ceiling than the hashing was.
 
 ---
 
+## P48. Higher-order collection proxy injection repeats work
+
+**Impact: Low · Effort: Low**
+
+Grafting the item type's members onto a
+`HigherOrderCollectionProxy<TKey, TValue, 'method', Collection>` runs
+inside `resolve_class_fully_with_generics`, on the generic-substitution
+path. Two avoidable costs sit there. Neither is a correctness problem
+and both are linear rather than exponential, which is why they were left
+when the feature landed; the outer `(FQN, generic_args)` cache absorbs
+most of the repetition.
+
+1. **The value type is resolved twice.** The framework annotates the
+   proxy `@mixin \Illuminate\Support\Enumerable<TKey, TValue>` *and*
+   `@mixin TValue`. The second is a template-parameter mixin, so the
+   "Template-param mixin resolution" block in
+   `type_engine/types/resolution.rs` resolves the value class and merges
+   its members after `inject_higher_order_proxy_members` has already
+   grafted the same members with their proxied types. The injected
+   members win (`merge_virtual_members` keeps whichever arrived first),
+   so the second pass is pure waste. Skipping the template-param mixin
+   for a tagged proxy, or letting the injection mark `TValue` as already
+   consumed, avoids it.
+
+2. **Grafted members are not interned.** `inject_higher_order_proxy_members`
+   builds each `MethodInfo`/`PropertyInfo` directly, where every other
+   transform site in the codebase goes through
+   `intern_transformed_method` / `intern_transformed_property` so that
+   applying the same transform to the same origin shares one `Arc`. The
+   proxied members of one item type are byte-identical across every
+   proxy that wraps it with the same result shape, so the same model's
+   members are re-allocated once per distinct `(proxied method, owning
+   collection)` pair rather than shared.
+
+**Where to look:** `virtual_members/laravel/higher_order_proxy.rs`,
+`virtual_members/resolve.rs`, and the template-param mixin block in
+`type_engine/types/resolution.rs`.
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues were addressed by eager class

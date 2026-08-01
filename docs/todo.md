@@ -187,11 +187,11 @@ unlikely to move the needle for most users.
 | L7  | `$pivot` property on BelongsToMany                                                                                                                                          | Medium      | Medium-High |
 | L13 | [Factory count-conditional return types](todo/laravel.md#l13-factory-count-conditional-return-types)                                                                       | Medium      | Medium-High |
 | L8  | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | Medium-High |
-| L9  | Higher-order collection proxies                                                                                                                                             | Low-Medium  | Medium-High |
 | L10 | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Low         |
 | L27 | [Legacy `Controller@method` action strings](todo/laravel.md#l27-legacy-controllermethod-action-strings)                                                                     | Low         | Low         |
 | L28 | [Path helper links and completion](todo/laravel.md#l28-path-helper-links-and-completion)                                                                                    | Low         | Low         |
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
+| L44 | [Sibling resource registrations and degenerate resource names](todo/laravel.md#l44-sibling-resource-registrations-and-degenerate-resource-names)                             | Low-Medium  | Low-Medium  |
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
 | BL8 | [Template signature resolution chain](todo/blade.md#bl8-template-signature-resolution-chain) (Bladestan-compatible contract model)                                           | High        | Medium      |
 | BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
@@ -213,6 +213,7 @@ unlikely to move the needle for most users.
 | P18 | [Subtype result caching](todo/performance.md#p18-subtype-result-caching) (per-request HashMap for hierarchy walks)                                                          | Medium      | Low         |
 | P20 | [Content-hash gated resolution cache persistence](todo/performance.md#p20-content-hash-gated-resolution-cache-persistence)                                                  | Medium      | Medium      |
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Medium      |
+| P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Low         |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X3  | Completion item detail on demand (`completionItem/resolve`)                                                                                                                 | Medium      | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium      |

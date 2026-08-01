@@ -84,12 +84,6 @@ full set of CI checks, testing conventions, and code style rules.
   rather than the full suite during development for faster feedback.
 - **Debug root causes.** When investigating a bug, determine the root
   cause rather than patching symptoms.
-- **Clean commit history.** Use atomic commits, each representing one
-  logical change. No fixup or WIP commits. Use
-  [conventional commits](https://www.conventionalcommits.org/) for the
-  subject line (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, etc.).
-  The commit body should explain *why* the change was made, not just
-  what changed. Wrap the body at 80 characters.
 - **Comments only where they add value.** Don't add obvious or
   boilerplate comments. Do comment tricky logic, non-obvious design
   decisions, and workarounds. Follow existing conventions.
