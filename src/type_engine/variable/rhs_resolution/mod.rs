@@ -1053,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn review_regression_branch_simplification_keeps_nested_mixed_alternatives() {
+    fn branch_simplification_keeps_nested_mixed_alternatives() {
         let nested_mixed = PhpType::union(vec![
             PhpType::mixed(),
             PhpType::named(atom("CompletionFallback")),

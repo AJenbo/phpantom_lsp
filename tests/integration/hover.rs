@@ -373,6 +373,32 @@ function test(): void {
     );
 }
 
+/// The counterpart to the test above: a by-reference call invalidates the
+/// exact value, not everything else known about the variable. `array_shift`
+/// is declared `array &$array` and says nothing about the element type, so
+/// widening the argument to a bare `array` would lose the member access.
+#[test]
+fn hover_keeps_element_type_across_an_array_pass_by_reference_boundary() {
+    let backend = create_test_backend();
+    let uri = "file:///by-ref-elements.php";
+    let content = r#"<?php
+class Node {}
+function test(): void {
+    /** @var list<Node> $nodes */
+    $nodes = [];
+    array_shift($nodes);
+    echo $nodes;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 6, 10).expect("hover on $nodes");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$nodes = list<Node>"),
+        "an `array &$` parameter must not erase the known element type: {text}"
+    );
+}
+
 #[test]
 fn hover_ambiguous_variable_shows_union_type() {
     let backend = create_test_backend();

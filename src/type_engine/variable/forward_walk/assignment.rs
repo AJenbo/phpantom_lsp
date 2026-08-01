@@ -2469,10 +2469,20 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 _ => effective_hint.is_scalar(),
             };
             if primitive_hint {
-                scope.set(
-                    &var_name,
-                    vec![ResolvedType::from_type_string(effective_hint)],
-                );
+                // The callee may assign any value the parameter type allows,
+                // so an exact value observed before the call is stale. What
+                // the call cannot invalidate is precision the hint does not
+                // contradict: `array_shift(array &$array)` says nothing about
+                // the element type of a `Node[]` argument. Keep a value the
+                // hint already covers, minus its literal precision, and fall
+                // back to the hint only when the two genuinely disagree.
+                let existing = scope.get(&var_name);
+                let refined = (!existing.is_empty())
+                    .then(|| ResolvedType::types_joined(existing))
+                    .filter(|existing| existing.is_subtype_of(&effective_hint))
+                    .map(|existing| existing.widen_scalar_literals())
+                    .unwrap_or(effective_hint);
+                scope.set(&var_name, vec![ResolvedType::from_type_string(refined)]);
             }
         } else if !already_in_scope {
             // Untyped pass-by-reference parameters (e.g. `&$matches`

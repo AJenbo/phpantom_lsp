@@ -429,8 +429,12 @@ fn extract_array_map_element_type(
         return Some(inferred);
     }
 
-    // Final fallback: use the input array's element type.
-    Some(input_element)
+    // Final fallback: assume the callback passes its element through. That
+    // only holds for element types a callback is unlikely to convert; a
+    // scalar element says nothing about the result, and `array_map('intval',
+    // $strings)` would be reported as `list<string>` on the strength of an
+    // input the callback exists to change.
+    (!input_element.is_scalar_leaf()).then_some(input_element)
 }
 
 /// Infer the return type of a callback (arrow function or closure) by

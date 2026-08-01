@@ -712,6 +712,27 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
 }
 
+/// `array_map` falls back to the input element type when the callback's
+/// return cannot be inferred. That guess contradicts the callback whenever
+/// the elements are scalars, which is exactly what a converting callback
+/// such as `'intval'` is there to change.
+#[test]
+fn array_map_does_not_claim_the_input_element_type_for_an_opaque_callback() {
+    let content = r#"<?php
+/** @param list<string> $ids */
+function test(array $ids) {
+    $converted = array_map('intval', $ids);
+
+    echo $converted;
+}
+"#;
+
+    assert_ne!(
+        resolve_literal_test_var(content, "$converted"),
+        "list<string>"
+    );
+}
+
 #[test]
 fn control_flow_merges_absorb_literals_redundant_with_broad_scalar_branches() {
     let content = r#"<?php
