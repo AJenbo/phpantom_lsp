@@ -408,3 +408,52 @@ fn walker_early_exit_stops_after_break() {
     });
     assert_eq!(visited, vec!["a".to_string()]);
 }
+
+// ── Singularizer ─────────────────────────────────────────────────────────────
+
+#[test]
+fn singularizes_regular_plurals() {
+    assert_eq!(singularize_english_word("photos"), "photo");
+    assert_eq!(singularize_english_word("comments"), "comment");
+    assert_eq!(singularize_english_word("houses"), "house");
+    assert_eq!(singularize_english_word("blog-posts"), "blog-post");
+}
+
+#[test]
+fn singularizes_consonant_y_plurals() {
+    assert_eq!(singularize_english_word("categories"), "category");
+    assert_eq!(singularize_english_word("companies"), "company");
+    // A vowel before `-ies` is a plain `-s` plural.
+    assert_eq!(singularize_english_word("ties"), "tie");
+}
+
+#[test]
+fn singularizes_sibilant_es_plurals() {
+    assert_eq!(singularize_english_word("addresses"), "address");
+    assert_eq!(singularize_english_word("boxes"), "box");
+    assert_eq!(singularize_english_word("dishes"), "dish");
+    assert_eq!(singularize_english_word("watches"), "watch");
+}
+
+#[test]
+fn singularizes_irregular_and_uncountable_words() {
+    assert_eq!(singularize_english_word("people"), "person");
+    assert_eq!(singularize_english_word("children"), "child");
+    assert_eq!(singularize_english_word("statuses"), "status");
+    assert_eq!(singularize_english_word("series"), "series");
+    assert_eq!(singularize_english_word("news"), "news");
+}
+
+#[test]
+fn leaves_singular_words_alone() {
+    assert_eq!(singularize_english_word("photo"), "photo");
+    assert_eq!(singularize_english_word("address"), "address");
+}
+
+#[test]
+fn singularizing_short_and_empty_words_does_not_panic() {
+    assert_eq!(singularize_english_word(""), "");
+    // Stripping the `s` would leave nothing, so the word is left alone.
+    assert_eq!(singularize_english_word("s"), "s");
+    assert_eq!(singularize_english_word("es"), "e");
+}

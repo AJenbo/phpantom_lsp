@@ -431,6 +431,80 @@ check(
         && (string) (new ReflectionEnum(\App\Models\BatchSize::class))->getBackingType() === 'int'
 );
 
+// ─── Resource route URIs ────────────────────────────────────────────────────
+
+// Route::resource() names no URI; the registrar derives one from the resource
+// name, singularizing every segment into a {parameter}.  These assertions pin
+// down the derivation the LSP reimplements, including the nested form used by
+// routes/web.php and the ->parameters() override.
+$resourceUris = static function (string $name, ?callable $configure = null): array {
+    $router = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+    $registration = $router->resource($name, \App\Http\Controllers\BakeryController::class);
+    if ($configure !== null) {
+        $configure($registration);
+    }
+    $registration->register();
+
+    $uris = [];
+    foreach ($router->getRoutes() as $route) {
+        $uris[$route->getName()] = $route->uri();
+    }
+
+    return $uris;
+};
+
+$photoUris = $resourceUris('photos');
+check(
+    'photos.show is photos/{photo}',
+    ($photoUris['photos.show'] ?? null) === 'photos/{photo}'
+);
+check(
+    'photos.edit is photos/{photo}/edit',
+    ($photoUris['photos.edit'] ?? null) === 'photos/{photo}/edit'
+);
+check(
+    'photos.create is photos/create',
+    ($photoUris['photos.create'] ?? null) === 'photos/create'
+);
+
+$nestedUris = $resourceUris('bakeries.ovens');
+check(
+    'a nested resource singularizes each parent segment',
+    ($nestedUris['bakeries.ovens.show'] ?? null) === 'bakeries/{bakery}/ovens/{oven}'
+);
+check(
+    'the parent wildcard is kept on the collection route',
+    ($nestedUris['bakeries.ovens.index'] ?? null) === 'bakeries/{bakery}/ovens'
+);
+
+$overriddenUris = $resourceUris('photos', static function ($registration): void {
+    $registration->parameters(['photos' => 'grid']);
+});
+check(
+    '->parameters() replaces the derived wildcard',
+    ($overriddenUris['photos.show'] ?? null) === 'photos/{grid}'
+);
+
+$shallowUris = $resourceUris('bakeries.ovens', static function ($registration): void {
+    $registration->shallow();
+});
+// Shallow member routes lose the parent segments from their *name* too.
+check(
+    '->shallow() drops the parent segments from the member routes',
+    ($shallowUris['ovens.show'] ?? null) === 'ovens/{oven}'
+);
+check(
+    '->shallow() leaves the collection routes nested',
+    ($shallowUris['bakeries.ovens.index'] ?? null) === 'bakeries/{bakery}/ovens'
+);
+
+// A slash in the resource name is a URI prefix, not a name separator.
+$prefixedUris = $resourceUris('bakeries/ovens');
+check(
+    'a slashed resource name becomes a URI prefix',
+    ($prefixedUris['ovens.show'] ?? null) === 'bakeries/ovens/{oven}'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
