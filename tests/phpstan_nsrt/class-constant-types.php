@@ -25,10 +25,10 @@ class Foo
 
 	public function doFoo()
 	{
-		assertType('int', self::NO_TYPE);
-		assertType('string', self::TYPE);
-		assertType('string', self::PRIVATE_TYPE);
-		assertType('float', self::FLOAT_CONST);
+		assertType('1', self::NO_TYPE);
+		assertType("'foo'", self::TYPE);
+		assertType("'foo'", self::PRIVATE_TYPE);
+		assertType('3.14', self::FLOAT_CONST);
 		assertType('bool', self::BOOL_CONST);
 		assertType('null', self::NULL_CONST);
 		assertType('array', self::ARRAY_CONST);
@@ -47,12 +47,12 @@ class Bar extends Foo
 
 	public function doFoo()
 	{
-		assertType('string', self::TYPE);
-		assertType('string', self::PRIVATE_TYPE);
-		assertType('int', self::EXTRA);
+		assertType("'bar'", self::TYPE);
+		assertType("'bar'", self::PRIVATE_TYPE);
+		assertType('99', self::EXTRA);
 
-		assertType('int', self::NO_TYPE);
-		assertType('float', self::FLOAT_CONST);
+		assertType('1', self::NO_TYPE);
+		assertType('3.14', self::FLOAT_CONST);
 		assertType('bool', self::BOOL_CONST);
 		assertType('null', self::NULL_CONST);
 	}
@@ -67,10 +67,10 @@ class Baz extends Foo
 
 	public function doFoo()
 	{
-		assertType('int', self::TYPE);
+		assertType('1', self::TYPE);
 
-		assertType('int', self::NO_TYPE);
-		assertType('float', self::FLOAT_CONST);
+		assertType('1', self::NO_TYPE);
+		assertType('3.14', self::FLOAT_CONST);
 	}
 
 }
@@ -88,9 +88,9 @@ final class FinalFoo
 
 	public function doFoo()
 	{
-		assertType('int', self::NO_TYPE);
-		assertType('string', self::TYPE);
-		assertType('string', self::PRIVATE_TYPE);
+		assertType('1', self::NO_TYPE);
+		assertType("'foo'", self::TYPE);
+		assertType("'foo'", self::PRIVATE_TYPE);
 	}
 
 }
@@ -107,11 +107,11 @@ class ConstantExpressions
 
 	public function doFoo()
 	{
-		assertType('int', self::A);
-		assertType('int', self::B);
-		assertType('string', self::STR_A);
-		assertType('string', self::STR_B);
-		assertType('float', self::FLOAT_A);
+		assertType('10', self::A);
+		assertType('20', self::B);
+		assertType("'hello'", self::STR_A);
+		assertType("'world'", self::STR_B);
+		assertType('1.5', self::FLOAT_A);
 		assertType('bool', self::BOOL_A);
 	}
 
@@ -122,9 +122,9 @@ class InheritedConstants extends Foo
 
 	public function accessInherited()
 	{
-		assertType('int', self::NO_TYPE);
-		assertType('string', self::TYPE);
-		assertType('float', self::FLOAT_CONST);
+		assertType('1', self::NO_TYPE);
+		assertType("'foo'", self::TYPE);
+		assertType('3.14', self::FLOAT_CONST);
 		assertType('bool', self::BOOL_CONST);
 		assertType('null', self::NULL_CONST);
 		assertType('array', self::ARRAY_CONST);

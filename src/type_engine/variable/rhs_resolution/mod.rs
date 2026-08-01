@@ -765,7 +765,9 @@ fn resolve_rhs_expression_inner<'b>(
 /// Recognises integer literals (`42`, `-1`, `0xFF`), float literals
 /// (`3.14`, `1e10`), string literals (`'hello'`, `"world"`), boolean
 /// keywords (`true`, `false`), `null`, and array literals (`[...]`,
-/// `array(...)`).  Returns `None` for expressions that cannot be
+/// `array(...)`).  Scalar literals keep their value (`1`, `'foo'`)
+/// rather than widening to the base type, matching how a literal
+/// assignment resolves.  Returns `None` for expressions that cannot be
 /// trivially classified (e.g. concatenation, function calls).
 pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
     let v = value.trim();
@@ -774,8 +776,18 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
     }
 
     // String literals: single or double quoted.
-    if (v.starts_with('\'') && v.ends_with('\'')) || (v.starts_with('"') && v.ends_with('"')) {
-        return Some(PhpType::string());
+    if v.len() >= 2
+        && ((v.starts_with('\'') && v.ends_with('\'')) || (v.starts_with('"') && v.ends_with('"')))
+    {
+        // Only keep the value when the text is a single literal.  An
+        // expression that merely starts and ends with a quote (e.g. the
+        // concatenation `'a' . 'b'`) still produces a string, but not
+        // that literal.
+        return if is_single_quoted_literal(v) {
+            Some(PhpType::literal_string_raw(v.to_string()))
+        } else {
+            Some(PhpType::string())
+        };
     }
 
     // Array literals.
@@ -795,17 +807,29 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
 
     // Numeric literals — try integer first, then float.
     // Strip optional leading sign for parsing.
-    let numeric = v
-        .strip_prefix('-')
-        .or_else(|| v.strip_prefix('+'))
-        .unwrap_or(v);
+    let (sign, numeric) = if let Some(rest) = v.strip_prefix('-') {
+        ("-", rest)
+    } else if let Some(rest) = v.strip_prefix('+') {
+        ("", rest)
+    } else {
+        ("", v)
+    };
+    let int_literal = |raw: &str| {
+        // Normalise hex/binary/octal/underscored spellings to the
+        // decimal value (`0xFF` → `255`).  Spellings that overflow
+        // `i64` widen to plain `int`.
+        Some(match crate::php_type::parse_php_int_literal(raw) {
+            Some(parsed) => PhpType::literal_int(parsed.to_string()),
+            None => PhpType::int(),
+        })
+    };
     if numeric.starts_with("0x") || numeric.starts_with("0X") {
         // Hex integer.
         if numeric[2..]
             .chars()
             .all(|c| c.is_ascii_hexdigit() || c == '_')
         {
-            return Some(PhpType::int());
+            return int_literal(v);
         }
     }
     if numeric.starts_with("0b") || numeric.starts_with("0B") {
@@ -814,7 +838,7 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
             .chars()
             .all(|c| c == '0' || c == '1' || c == '_')
         {
-            return Some(PhpType::int());
+            return int_literal(v);
         }
     }
     if numeric.starts_with("0o") || numeric.starts_with("0O") {
@@ -823,7 +847,7 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
             .chars()
             .all(|c| ('0'..='7').contains(&c) || c == '_')
         {
-            return Some(PhpType::int());
+            return int_literal(v);
         }
     }
     // Decimal integer (may contain underscores: 1_000_000).
@@ -831,7 +855,7 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
         && numeric.chars().all(|c| c.is_ascii_digit() || c == '_')
         && numeric.chars().next().is_some_and(|c| c.is_ascii_digit())
     {
-        return Some(PhpType::int());
+        return int_literal(v);
     }
     // Float: contains `.` or `e`/`E` among digits.
     if !numeric.is_empty() {
@@ -848,11 +872,34 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
                     || c == '_'
             })
         {
-            return Some(PhpType::float());
+            // The character check also accepts arithmetic like
+            // `1.0-2.0`; only keep the value when the whole text
+            // parses as one float.
+            return Some(match crate::php_type::parse_php_float_literal(numeric) {
+                Some(_) => PhpType::literal_float(format!("{sign}{numeric}")),
+                None => PhpType::float(),
+            });
         }
     }
 
     None
+}
+
+/// Whether `v` (which starts and ends with the same quote character) is
+/// one string literal, i.e. its opening quote is closed only at the very
+/// end.  `'foo'` → true, `'a' . 'b'` → false.
+fn is_single_quoted_literal(v: &str) -> bool {
+    let quote = v.as_bytes()[0];
+    let inner = &v.as_bytes()[1..v.len() - 1];
+    let mut i = 0;
+    while i < inner.len() {
+        match inner[i] {
+            b'\\' => i += 2,
+            b if b == quote => return false,
+            _ => i += 1,
+        }
+    }
+    true
 }
 
 /// Resolve a pipe expression `$input |> callable(...)` to the callable's
@@ -1104,6 +1151,80 @@ mod tests {
             simplified[1].type_string,
             PhpType::literal_string_raw("'tag'")
         );
+    }
+
+    #[test]
+    fn constant_value_inference_keeps_scalar_literals() {
+        assert_eq!(
+            infer_type_from_constant_value("1"),
+            Some(PhpType::literal_int("1"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("-42"),
+            Some(PhpType::literal_int("-42"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("1_000"),
+            Some(PhpType::literal_int("1000"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("0xFF"),
+            Some(PhpType::literal_int("255"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("3.14"),
+            Some(PhpType::literal_float("3.14"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("-1.5e3"),
+            Some(PhpType::literal_float("-1.5e3"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("'foo'"),
+            Some(PhpType::literal_string_raw("'foo'"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("\"bar\""),
+            Some(PhpType::literal_string_raw("\"bar\""))
+        );
+    }
+
+    #[test]
+    fn constant_value_inference_widens_non_literals() {
+        // Concatenation that merely starts and ends with a quote.
+        assert_eq!(
+            infer_type_from_constant_value("'a' . 'b'"),
+            Some(PhpType::string())
+        );
+        // A quote escaped at the end does not close the literal.
+        assert_eq!(
+            infer_type_from_constant_value("'it\\'s'"),
+            Some(PhpType::literal_string_raw("'it\\'s'"))
+        );
+        // Integer overflow of i64 widens to plain int.
+        assert_eq!(
+            infer_type_from_constant_value("99999999999999999999"),
+            Some(PhpType::int())
+        );
+        // Float arithmetic passes the character filter but is not one value.
+        assert_eq!(
+            infer_type_from_constant_value("1.0-2.0"),
+            Some(PhpType::float())
+        );
+        // Booleans, null, and arrays keep their base type.
+        assert_eq!(
+            infer_type_from_constant_value("true"),
+            Some(PhpType::bool())
+        );
+        assert_eq!(
+            infer_type_from_constant_value("null"),
+            Some(PhpType::null())
+        );
+        assert_eq!(
+            infer_type_from_constant_value("[1, 2]"),
+            Some(PhpType::array())
+        );
+        assert_eq!(infer_type_from_constant_value("self::OTHER"), None);
     }
 
     #[test]

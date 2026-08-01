@@ -97,7 +97,6 @@ unlikely to move the needle for most users.
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium      |
 | T4  | Non-empty-\* type narrowing and propagation                                                                                                                                 | Low         | Low         |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Low         |
-| T34 | [Class constant references widen their literal value](todo/type-inference.md#t34-class-constant-references-widen-their-literal-value)                                       | Low         | Low-Medium  |
 | T9  | [Dead-code elimination after `never`-returning calls](todo/type-inference.md#t9-dead-code-elimination-after-never-returning-calls)                                          | Low         | Low-Medium  |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium  |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Low-Medium  |

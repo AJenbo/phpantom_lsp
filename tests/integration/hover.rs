@@ -8464,8 +8464,8 @@ function test() {
     let hover = hover_at(&backend, uri, content, 3, 10).expect("expected hover on $timeout");
     let text = hover_text(&hover);
     assert!(
-        text.contains("int"),
-        "variable assigned from integer constant should resolve to int, got: {}",
+        text.contains("30"),
+        "variable assigned from integer constant should resolve to its value, got: {}",
         text
     );
 }
@@ -8490,8 +8490,8 @@ function test() {
     let hover = hover_at(&backend, uri, content, 3, 10).expect("expected hover on $name");
     let text = hover_text(&hover);
     assert!(
-        text.contains("string"),
-        "variable assigned from string constant should resolve to string, got: {}",
+        text.contains("'PHPantom'"),
+        "variable assigned from string constant should resolve to its value, got: {}",
         text
     );
 }
@@ -8516,8 +8516,8 @@ function test() {
     let hover = hover_at(&backend, uri, content, 3, 10).expect("expected hover on $retries");
     let text = hover_text(&hover);
     assert!(
-        text.contains("int"),
-        "variable assigned from top-level const int should resolve to int, got: {}",
+        text.contains('5'),
+        "variable assigned from top-level const int should resolve to its value, got: {}",
         text
     );
 }
@@ -8548,24 +8548,24 @@ function test() {
     let hover_a = hover_at(&backend, uri, content, 12, 10).expect("expected hover on $a");
     let text_a = hover_text(&hover_a);
     assert!(
-        text_a.contains("int"),
-        "Config::TIMEOUT (int literal) should infer int, got: {}",
+        text_a.contains("30"),
+        "Config::TIMEOUT (int literal) should infer 30, got: {}",
         text_a
     );
 
     let hover_b = hover_at(&backend, uri, content, 13, 10).expect("expected hover on $b");
     let text_b = hover_text(&hover_b);
     assert!(
-        text_b.contains("string"),
-        "Config::NAME (string literal) should infer string, got: {}",
+        text_b.contains("'app'"),
+        "Config::NAME (string literal) should infer 'app', got: {}",
         text_b
     );
 
     let hover_c = hover_at(&backend, uri, content, 14, 10).expect("expected hover on $c");
     let text_c = hover_text(&hover_c);
     assert!(
-        text_c.contains("float"),
-        "Config::RATE (float literal) should infer float, got: {}",
+        text_c.contains("3.14"),
+        "Config::RATE (float literal) should infer 3.14, got: {}",
         text_c
     );
 
@@ -8579,7 +8579,7 @@ function test() {
 }
 
 #[test]
-fn hover_variable_assigned_from_class_constant_with_type_hint_takes_precedence() {
+fn hover_variable_assigned_from_typed_class_constant_keeps_literal() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -8592,13 +8592,13 @@ function test() {
 }
 "#;
 
-    // When a typed class constant exists, the explicit type hint should
-    // be used (not the value-based inference).
+    // A typed class constant still resolves to its initializer's literal
+    // value — the value narrows the declared scalar type.
     let hover = hover_at(&backend, uri, content, 6, 10).expect("expected hover on $v");
     let text = hover_text(&hover);
     assert!(
-        text.contains("string"),
-        "typed class constant should use the type hint, got: {}",
+        text.contains("'1.0'"),
+        "typed class constant should keep its literal value, got: {}",
         text
     );
 }
@@ -10609,8 +10609,8 @@ class ChildClass extends ParentClass {
     let hover = hover_at(&backend, uri, content, 7, 8).expect("expected hover on $x");
     let text = hover_text(&hover);
     assert!(
-        text.contains("int"),
-        "inherited constant via self:: should resolve to int, got: {}",
+        text.contains("42"),
+        "inherited constant via self:: should resolve to its value, got: {}",
         text
     );
 }
@@ -10632,8 +10632,8 @@ class MyClass {
     let hover = hover_at(&backend, uri, content, 5, 8).expect("expected hover on $x");
     let text = hover_text(&hover);
     assert!(
-        text.contains("string"),
-        "own constant via self:: should resolve to string, got: {}",
+        text.contains("'hello'"),
+        "own constant via self:: should resolve to its value, got: {}",
         text
     );
 }
@@ -10658,8 +10658,8 @@ class Child extends Parent_ {
     let hover = hover_at(&backend, uri, content, 8, 8).expect("expected hover on $x");
     let text = hover_text(&hover);
     assert!(
-        text.contains("int"),
-        "grandparent constant via self:: should resolve to int, got: {}",
+        text.contains('3'),
+        "grandparent constant via self:: should resolve to its value, got: {}",
         text
     );
 }
@@ -10682,8 +10682,8 @@ function test(): void {
     let hover = hover_at(&backend, uri, content, 7, 4).expect("expected hover on $x");
     let text = hover_text(&hover);
     assert!(
-        text.contains("string"),
-        "inherited constant via class name should resolve to string, got: {}",
+        text.contains("'active'"),
+        "inherited constant via class name should resolve to its value, got: {}",
         text
     );
 }

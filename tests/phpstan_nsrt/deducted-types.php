@@ -43,9 +43,9 @@ final class Foo
 
 	public function classConstants(): void
 	{
-		assertType('int', self::INTEGER_CONSTANT);
-		assertType('float', self::FLOAT_CONSTANT);
-		assertType('string', self::STRING_CONSTANT);
+		assertType('1', self::INTEGER_CONSTANT);
+		assertType('1.0', self::FLOAT_CONSTANT);
+		assertType('\'foo\'', self::STRING_CONSTANT);
 		assertType('array', self::ARRAY_CONSTANT);
 		assertType('bool', self::BOOLEAN_CONSTANT);
 		assertType('null', self::NULL_CONSTANT);
