@@ -493,7 +493,10 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Rule
 ///
 /// The text is parsed standalone, so [`ValidationRule::key_start`] offsets
 /// index `array_text` rather than any file; callers that need navigable
-/// offsets must use [`inline_validate_rules`] instead.
+/// offsets must use [`inline_validate_rules`] instead.  For the same reason
+/// there are no imports to read here, so an enum rule keeps its name as
+/// written and the caller must pass the rules through
+/// [`resolve_enum_class_names`] with the surrounding file's content.
 pub(crate) fn rules_from_array_text(array_text: &str) -> Option<RulesArray> {
     let source = format!("<?php return {};", array_text.trim());
     let arena = LocalArena::new();
