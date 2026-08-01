@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785613803559,
+  "lastUpdate": 1785621211840,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12885,6 +12885,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ffd60406db4c9c44c101322415dea751da1c3df1",
+          "message": "Laravel higher-order collection proxies",
+          "timestamp": "2026-08-01T23:37:31+02:00",
+          "tree_id": "5602ddbc6c1b8cbea39a4ddfb76566b926fb385d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ffd60406db4c9c44c101322415dea751da1c3df1"
+        },
+        "date": 1785621209059,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.7,
             "unit": "MiB"
           }
         ]
