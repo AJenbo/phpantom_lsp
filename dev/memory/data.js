@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785580203440,
+  "lastUpdate": 1785588661210,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12647,6 +12647,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "422f1282ea66ac1aa27ef0ea8e1507214630a594",
+          "message": "fix: class constant references keep their literal value\n\nA constant declared with a scalar initializer widened to its base type\nwhen referenced (`Foo::STRING_CONSTANT` → `string`), while the same\nliteral assigned to a variable kept its value. Constant-value inference\nnow produces the literal type (`'foo'`, `1`, `3.14`) so precision no\nlonger depends on whether a value reaches an expression through a\nvariable or a constant. This covers class constants (including typed\nconstants, `self::`, and inheritance) and global `const`/`define()`\nconstants, since all resolve through the same value classifier.\n\nNon-literal initializers keep the previous widened result: quoted text\nthat is actually a concatenation, arithmetic between floats, and int\nspellings that overflow i64 all stay at the base type. Hex, binary,\noctal, and underscored int spellings normalise to their decimal value.\n\nThe ported PHPStan fixtures now assert the literal expectations from\nupstream's nsrt corpus instead of the widened types.\n\nCloses #309",
+          "timestamp": "2026-08-01T14:31:04+02:00",
+          "tree_id": "c882c7732de70c4179032a4138453d86a3c72994",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/422f1282ea66ac1aa27ef0ea8e1507214630a594"
+        },
+        "date": 1785588657373,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.8,
             "unit": "MiB"
           }
         ]
