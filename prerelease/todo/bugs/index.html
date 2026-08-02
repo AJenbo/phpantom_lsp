@@ -860,6 +860,61 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b4-analyze-reports-blade-type-diagnostics-six-lines-too-early" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B4. <code>analyze</code> reports Blade type diagnostics six lines too early
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b5-promote-constructor-param-leaves-an-orphaned-docblock-behind" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B5. "Promote constructor param" leaves an orphaned docblock behind
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B6. "Add <code>final</code>" may insert before a class's opening brace instead of its constructor (needs confirmation)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b7-eloquent-string-completions-backward-paren-scan-has-no-bound" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B7. Eloquent string-completion's backward paren scan has no bound
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b8-extends-keyword-completion-offered-inside-enum-declaration-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B8. <code>extends</code> keyword completion offered inside <code>enum</code> declaration headers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1360,6 +1415,61 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b4-analyze-reports-blade-type-diagnostics-six-lines-too-early" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B4. <code>analyze</code> reports Blade type diagnostics six lines too early
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b5-promote-constructor-param-leaves-an-orphaned-docblock-behind" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B5. "Promote constructor param" leaves an orphaned docblock behind
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B6. "Add <code>final</code>" may insert before a class's opening brace instead of its constructor (needs confirmation)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b7-eloquent-string-completions-backward-paren-scan-has-no-bound" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B7. Eloquent string-completion's backward paren scan has no bound
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b8-extends-keyword-completion-offered-inside-enum-declaration-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B8. <code>extends</code> keyword completion offered inside <code>enum</code> declaration headers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1490,6 +1600,144 @@ resolution in <code>virtual_members/</code>.</p>
 <p><strong>Test:</strong> the <code>inheritTemplateParamViaConstructor</code> case in
 <code>tests/psalm_assertions/template_class_template_extends.php</code> carries two
 <code>// SKIP</code> markers that clear when this is fixed.</p>
+<h4 id="b4-analyze-reports-blade-type-diagnostics-six-lines-too-early">B4. <code>analyze</code> reports Blade type diagnostics six lines too early<a class="headerlink" href="#b4-analyze-reports-blade-type-diagnostics-six-lines-too-early" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p>Diagnostics that a Blade template reports through the type-mismatch
+passes land six lines above the code that produced them, so the CLI
+points at unrelated markup:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>resources/views/pages/invoice.blade.php
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  545   Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
+</code></pre></div>
+<p>The call is on line 551. The offset is exactly <code>blade::PROLOGUE_LINES</code>,
+and it is a double translation. <code>Backend::offset_range_to_lsp_range</code>
+(<code>diagnostics/mod.rs</code>) already maps a Blade file's virtual-PHP range back
+to Blade coordinates via <code>map.php_to_blade</code>, and then <code>analyse/run.rs</code>
+maps the same range a second time:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kd">let</span><span class="w"> </span><span class="n">line</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="k">ref</span><span class="w"> </span><span class="n">map</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">source_map</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="n">map</span><span class="p">.</span><span class="n">php_to_blade</span><span class="p">(</span><span class="n">d</span><span class="p">.</span><span class="n">range</span><span class="p">.</span><span class="n">start</span><span class="p">).</span><span class="n">line</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="n">d</span><span class="p">.</span><span class="n">range</span><span class="p">.</span><span class="n">start</span><span class="p">.</span><span class="n">line</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">};</span>
+</code></pre></div>
+<p>The Laravel string-key diagnostics (<code>invalid_laravel_view</code>,
+<code>invalid_laravel_route</code>, …) are unaffected because they build their range
+with the <em>free</em> <code>offset_range_to_lsp_range(content, …)</code>, which does no
+Blade translation, so <code>run.rs</code> supplies the only one they need. Every
+pass that goes through the <code>&amp;self</code> method — the three <code>type_mismatch_*</code>
+collectors, <code>unknown_member</code>, <code>unknown_variable</code> — is shifted.</p>
+<p>The LSP path does not double-translate, so this is <code>analyze</code>-only.</p>
+<p>The fix is to pick one owner for the translation. Having every collector
+emit Blade coordinates (what the <code>&amp;self</code> method already does) and
+dropping the <code>php_to_blade</code> call in <code>run.rs</code> is the smaller change, but
+it needs an audit that no collector still emits virtual-PHP coordinates.</p>
+<p><strong>Where to look:</strong> <code>src/analyse/run.rs</code> (the <code>source_map</code> branch),
+<code>Backend::offset_range_to_lsp_range</code> and the free
+<code>offset_range_to_lsp_range</code> in <code>src/diagnostics/mod.rs</code>.</p>
+<p><strong>Reproduce:</strong> point <code>analyze</code> at any project whose Blade templates
+trigger a <code>type_mismatch_argument</code>, and compare the reported line with
+the source.</p>
+<h4 id="b5-promote-constructor-param-leaves-an-orphaned-docblock-behind">B5. "Promote constructor param" leaves an orphaned docblock behind<a class="headerlink" href="#b5-promote-constructor-param-leaves-an-orphaned-docblock-behind" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p>The "Promote property to constructor parameter" code action deletes only
+the property declaration's own line, not a <code>/** @var ... */</code> docblock
+that precedes it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    /** @var int */</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    private int $bar;   // deleted</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    public function __construct(private int $bar) {}   // promoted here</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>Applying the action leaves the now-orphaned <code>/** @var int */</code> sitting
+above the constructor. <code>property_delete_start</code>
+(<code>code_actions/promote_constructor_param.rs</code>) is computed with
+<code>find_line_start</code>, which only walks back to the previous newline on the
+same line — it cannot reach a comment on an earlier line, by design (it
+is also used for the non-docblock leading-whitespace case). There is no
+current test covering a property with a preceding docblock.</p>
+<p><strong>Where to look:</strong> <code>build_promotion_candidate</code> in
+<code>code_actions/promote_constructor_param.rs</code> — extend
+<code>property_delete_start</code> to also swallow an immediately-preceding
+docblock (mirroring how other code actions in this module, e.g.
+<code>update_docblock.rs</code>, locate an existing docblock above a declaration).</p>
+<h4 id="b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation">B6. "Add <code>final</code>" may insert before a class's opening brace instead of its constructor (needs confirmation)<a class="headerlink" href="#b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p>Found by manual trace while cleaning up comments in
+<code>code_actions/phpstan/new_static.rs</code>; not yet confirmed with a failing
+test, so verify before fixing.</p>
+<p><code>build_constructor_info</code> locates where to insert <code>final</code> before an
+unmodified constructor. For a constructor with no explicit visibility
+keyword, where the enclosing class's opening brace sits alone on its
+own line (Allman style):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Foo</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    function __construct() {}</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
+</code></pre></div>
+<p>Tracing the offsets by hand: <code>before_kw.trim_end().rfind('\n')</code> (line
+~516) skips backward past the blank run of whitespace between the
+brace line and the <code>function</code> keyword's line, landing right <em>before</em>
+the <code>{</code> rather than at the start of <code>function …</code>. The next check
+(<code>line_trimmed.is_empty()</code>, line ~520-523), meant to detect "no
+modifiers on this line, fall back further", instead sees the lone <code>{</code>
+character as if it were modifier text on the same line as <code>function</code>
+and skips the fallback branch. The final <code>decl_start</code> then points at
+the <code>{</code> character itself, so inserting <code>final</code> would produce
+<code>class Foo\nfinal {\n    function __construct() {}\n}</code> — <code>final</code>
+attached to the brace line, not the constructor — which is invalid
+PHP.</p>
+<p><strong>Where to look:</strong> <code>build_constructor_info</code> in
+<code>code_actions/phpstan/new_static.rs</code>. The line/modifier detection at
+~514-531 needs to distinguish "text on the function's own line" from
+"trailing content from an earlier line that <code>trim_end()</code> bridged past
+a blank line" — e.g. by checking whether <code>decl_start_offset</code> and
+<code>func_kw_offset</code> are on the same source line (count newlines between
+them) rather than only checking whether the slice between them is
+non-empty after trimming.</p>
+<p><strong>To confirm:</strong> add a test with a modifier-less constructor whose
+class brace is on its own line (as above) and assert the insertion
+point lands on the <code>function</code> line, not the brace line.</p>
+<h4 id="b7-eloquent-string-completions-backward-paren-scan-has-no-bound">B7. Eloquent string-completion's backward paren scan has no bound<a class="headerlink" href="#b7-eloquent-string-completions-backward-paren-scan-has-no-bound" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p>Found while cleaning up comments in <code>completion/eloquent_string.rs</code>.
+<code>detect_string_call_context</code> calls <code>find_matching_open_paren</code> on
+<code>content[..quote_pos]</code> (everything in the file before the cursor's
+opening quote) with no length cap. The function scans backward byte by
+byte tracking bracket depth; if the preceding source has an unbalanced
+<code>)</code>/<code>]</code> before the real matching <code>(</code> — e.g. the cursor's string
+literal is itself inside a malformed/mid-edit expression — depth never
+returns to 0 and the scan runs all the way to the start of the file.</p>
+<p>This mirrors a case already fixed elsewhere in the codebase: the
+<code>function</code>-keyword backward scan in
+<code>code_actions/phpstan/add_throws.rs</code>'s <code>find_enclosing_docblock</code> had
+the same unbounded-backward-scan shape and was capped at 2000 bytes.
+<code>find_matching_open_paren</code> has no equivalent cap, and it is on the
+completion hot path (triggered on every keystroke inside a string
+literal argument), so a large file with an unbalanced bracket before
+the cursor pays for an O(file size) scan on every trigger.</p>
+<p><strong>Where to look:</strong> <code>find_matching_open_paren</code> in
+<code>completion/eloquent_string.rs</code> — give the backward scan a byte-offset
+floor (matching the pattern and rationale already used in
+<code>add_throws.rs</code>) so pathological/mid-edit source can't force an
+unbounded scan.</p>
+<h4 id="b8-extends-keyword-completion-offered-inside-enum-declaration-headers">B8. <code>extends</code> keyword completion offered inside <code>enum</code> declaration headers<a class="headerlink" href="#b8-extends-keyword-completion-offered-inside-enum-declaration-headers" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p>Found while cleaning up comments in <code>completion/context/keyword_completion.rs</code>.
+<code>build_keyword_context</code> sets
+<code>in_extends_declaration_header: decl_kind.is_some()</code>, which is <code>true</code>
+whenever <code>decl_kind</code> is <code>Class</code>, <code>Interface</code>, <em>or</em> <code>Enum</code>. PHP enums
+cannot use <code>extends</code> (only <code>implements</code>), so typing <code>enum Foo ext|</code>
+offers an <code>extends</code> completion that will always produce invalid PHP.
+<code>in_implements_declaration_header</code> a few lines below already gets this
+right, restricting itself to <code>Class | Enum</code>.</p>
+<p><strong>Where to look:</strong> <code>build_keyword_context</code> in
+<code>completion/context/keyword_completion.rs</code> — change
+<code>in_extends_declaration_header</code> to
+<code>matches!(decl_kind, Some(DeclarationHeaderKind::Class | DeclarationHeaderKind::Interface))</code>,
+matching the pattern already used for <code>in_implements_declaration_header</code>.
+No existing test exercises this path; add one for <code>enum Foo ext|</code> (no
+completion) and <code>interface Foo ext|</code> (completion offered, extends
+existing coverage of the Class case).</p>
 
 
 
