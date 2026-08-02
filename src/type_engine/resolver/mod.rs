@@ -302,7 +302,13 @@ fn resolve_target_classes_expr_inner(
                 if let Some(cls) = find_class_by_name(all_classes, class) {
                     vec![Arc::clone(cls)]
                 } else {
-                    class_loader(class).into_iter().collect()
+                    // `Foo::` is a source-level reference: PHP resolves an
+                    // unqualified name against the current namespace before
+                    // the global scope, so a same-namespace class must win
+                    // over a global class of the same short name.
+                    let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+                    let fqn = crate::util::resolve_source_class_name(class, ns, class_loader);
+                    class_loader(&fqn).into_iter().collect()
                 }
             };
 
@@ -341,7 +347,11 @@ fn resolve_target_classes_expr_inner(
             if let Some(cls) = find_class_by_name(all_classes, name) {
                 return vec![ResolvedType::from_arc(Arc::clone(cls))];
             }
-            class_loader(name)
+            // Source-level reference: the current namespace wins over
+            // a global class of the same short name.
+            let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+            let fqn = crate::util::resolve_source_class_name(name, ns, class_loader);
+            class_loader(&fqn)
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()

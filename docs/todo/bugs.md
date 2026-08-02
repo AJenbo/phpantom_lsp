@@ -307,3 +307,41 @@ matching the pattern already used for `in_implements_declaration_header`.
 No existing test exercises this path; add one for `enum Foo ext|` (no
 completion) and `interface Foo ext|` (completion offered, extends
 existing coverage of the Class case).
+
+#### B9. A relative qualified class name is not resolved against the current namespace
+
+**Impact: High · Effort: Medium**
+
+`new View\Event()` inside `namespace Site` resolves to the global
+`Event` class instead of `Site\View\Event`, so every member declared on
+the project class is flagged as unknown ("Method 'siteOnly' not found
+on class 'Event'"). PHP resolves a *qualified* name (one containing a
+separator but no leading `\`) by prefixing the current namespace,
+exactly as it does an unqualified name; only a leading `\` escapes to
+the global scope.
+
+This is the same defect class as the already-fixed unqualified case
+(`B::x()` picking the global `B` over a sibling `Src\B`), and it was
+reported against the same issue (#299) by a second commenter, whose
+namespace `Site\View` and class `Event` collided with a global stub.
+A likely third report ("redeclaring a type with docblocks is ignored",
+using `/** @var Object\FirstOne $obj */`) is probably this bug too: the
+`@var` docblock path resolves relative qualified names correctly, so
+the mis-resolution the reporter saw most likely came from the
+class-reference path instead.
+
+**Where to look:** `resolve_source_class_name` in `src/util.rs` bails
+out of the namespace preference entirely when the name contains a
+separator (`if !name.contains('\\')`), so only unqualified names get
+the current-namespace-first treatment. Extend it to qualified names:
+a name that does not start with `\` should try `{current_ns}\{name}`
+before the global fallback. Watch the import interaction — a leading
+segment matching a `use` import (`use Other\View;` + `View\Event`)
+must resolve to `Other\View\Event`, not `{current_ns}\View\Event`, so
+the import prefix has to be checked before applying the namespace
+prefix.
+
+Reproduce with a PSR-4 workspace mapping `Site\` to `src/`, a project
+`src/View/Event.php` declaring `Site\View\Event::siteOnly()`, a global
+`Event` stub without it, and a consumer in `namespace Site` calling
+`(new View\Event())->siteOnly()`.

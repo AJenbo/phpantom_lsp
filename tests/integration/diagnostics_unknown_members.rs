@@ -5718,6 +5718,148 @@ fn new_falls_back_to_global_stub_when_no_same_namespace_class() {
     );
 }
 
+/// A minimal global `B` stub without the static method the namespaced
+/// sibling declares: a diagnostic on `x` proves the static call was wrongly
+/// resolved to the global class instead of the same-namespace one.
+static GLOBAL_B_STUB: &str = "<?php\nclass B {\n    public static function z(): void {}\n}\n";
+
+/// A static call `B::x()` inside `namespace Src` must resolve `B` to the
+/// same-namespace `Src\B`, not a global class `B` that happens to share the
+/// short name.  PHP resolves an unqualified class reference against the
+/// current namespace first; the global class is only reachable via `\B`.
+#[test]
+fn static_call_same_namespace_class_wins_over_global_class() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/"}}}"#;
+    let namespaced_b =
+        "<?php\nnamespace Src;\nclass B {\n    public static function x(): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/B.php", namespaced_b)],
+        &[("B", GLOBAL_B_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Src;\nclass A {\n    public static function y(): void {\n        B::x();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'x'")),
+        "`B::x()` inside `namespace Src` must resolve to Src\\B where `x()` \
+         exists, not the global `B`, got: {diags:?}"
+    );
+}
+
+/// The global fallback still works for static calls: with no same-namespace
+/// class, `B::z()` resolves to the global `B`, and a missing method is
+/// flagged there.
+#[test]
+fn static_call_falls_back_to_global_class_when_no_same_namespace_class() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/"}}}"#;
+
+    let (backend, _dir) =
+        create_psr4_workspace_with_stubs(composer_json, &[], &[("B", GLOBAL_B_STUB)]);
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Src;\nclass A {\n    public static function y(): void {\n        B::z();\n        B::missing();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'z'")),
+        "`B::z()` must fall back to the global `B` where `z()` exists, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("missing")),
+        "`B::missing()` must be flagged on the global `B`, got: {diags:?}"
+    );
+}
+
+/// An explicit `use` import outranks the same-namespace class: with both
+/// `Src\B` and `Other\B` in play, `use Other\B;` means `B::imported()`
+/// resolves to `Other\B`, and `Src\B`'s own method is unknown there.
+#[test]
+fn static_call_use_import_wins_over_same_namespace_class() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/", "Other\\": "other/"}}}"#;
+    let namespaced_b =
+        "<?php\nnamespace Src;\nclass B {\n    public static function x(): void {}\n}\n";
+    let other_b =
+        "<?php\nnamespace Other;\nclass B {\n    public static function imported(): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/B.php", namespaced_b), ("other/B.php", other_b)],
+        &[("B", GLOBAL_B_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Src;\nuse Other\\B;\nclass A {\n    public static function y(): void {\n        B::imported();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("imported")),
+        "`use Other\\B` must outrank the same-namespace Src\\B, so \
+         `B::imported()` is known, got: {diags:?}"
+    );
+}
+
+/// A static *property* subject takes a different resolution path than a
+/// static call, so it needs its own guard: `B::$inst->localOnly()` inside
+/// `namespace Src` must read `$inst` off `Src\B` (typed `Src\Thing`), not
+/// off a global `B` whose `$inst` is some unrelated class.
+#[test]
+fn static_property_subject_same_namespace_class_wins_over_global_class() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/"}}}"#;
+    let namespaced_b = "<?php\nnamespace Src;\nclass B {\n    public static Thing $inst;\n}\n";
+    let thing =
+        "<?php\nnamespace Src;\nclass Thing {\n    public function localOnly(): void {}\n}\n";
+    let global_b = "<?php\nclass B {\n    public static \\GlobalThing $inst;\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/B.php", namespaced_b), ("src/Thing.php", thing)],
+        &[
+            ("B", global_b),
+            ("GlobalThing", "<?php\nclass GlobalThing {}\n"),
+        ],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Src;\nclass A {\n    public static function y(): void {\n        B::$inst->localOnly();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("localOnly")),
+        "`B::$inst` must read the static property off the same-namespace \
+         Src\\B, so `localOnly()` is known, got: {diags:?}"
+    );
+}
+
+/// A fully-qualified `\B::z()` must reach the global class even when a
+/// same-namespace `Src\B` exists: the leading backslash is how PHP escapes
+/// the current namespace, so the namespace preference must not apply.
+#[test]
+fn static_call_leading_backslash_reaches_global_class() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/"}}}"#;
+    let namespaced_b =
+        "<?php\nnamespace Src;\nclass B {\n    public static function x(): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/B.php", namespaced_b)],
+        &[("B", GLOBAL_B_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Src;\nclass A {\n    public static function y(): void {\n        \\B::z();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'z'")),
+        "`\\B::z()` must resolve to the global `B` where `z()` exists, \
+         not the same-namespace Src\\B, got: {diags:?}"
+    );
+}
+
 // ─── Array callables are data, not member accesses ──────────────────────────
 
 /// A `[Class::class, 'method']` pair nested in a returned array is plain
