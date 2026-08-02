@@ -5860,6 +5860,183 @@ fn static_call_leading_backslash_reaches_global_class() {
     );
 }
 
+/// A global `Event` stub without the method the namespaced project class
+/// declares: a diagnostic on `siteOnly` proves a relative qualified name was
+/// wrongly resolved to the global class.
+static GLOBAL_EVENT_STUB: &str =
+    "<?php\nclass Event {\n    public function globalOnly(): void {}\n}\n";
+
+/// The project class the relative qualified reference should reach.
+static SITE_VIEW_EVENT: &str = "<?php\nnamespace Site\\View;\nclass Event {\n    public function siteOnly(): void {}\n    public static function make(): self { return new self(); }\n}\n";
+
+/// `new View\Event()` inside `namespace Site` must resolve to
+/// `Site\View\Event`, not the global `Event`.  PHP resolves a qualified name
+/// (a separator but no leading `\`) by prefixing the current namespace, just
+/// as it does an unqualified one.
+#[test]
+fn new_relative_qualified_name_resolves_against_current_namespace() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Site\\": "src/"}}}"#;
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/View/Event.php", SITE_VIEW_EVENT)],
+        &[("Event", GLOBAL_EVENT_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Site;\nclass Consumer {\n    public function run(): void {\n        $e = new View\\Event();\n        $e->siteOnly();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("siteOnly")),
+        "`new View\\Event()` inside `namespace Site` must resolve to \
+         Site\\View\\Event where `siteOnly()` exists, got: {diags:?}"
+    );
+}
+
+/// The same preference applies to a static call on a relative qualified
+/// name: `View\Event::make()` inside `namespace Site` is `Site\View\Event`.
+#[test]
+fn static_call_relative_qualified_name_resolves_against_current_namespace() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Site\\": "src/"}}}"#;
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("src/View/Event.php", SITE_VIEW_EVENT)],
+        &[("Event", GLOBAL_EVENT_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Site;\nclass Consumer {\n    public function run(): void {\n        View\\Event::make()->siteOnly();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("make") || d.message.contains("siteOnly")),
+        "`View\\Event::make()` inside `namespace Site` must resolve to \
+         Site\\View\\Event, got: {diags:?}"
+    );
+}
+
+/// The current namespace also wins over a *global qualified* class of the
+/// same path: with both `Site\View\Event` and a root-namespace
+/// `View\Event`, a relative `View\Event` inside `namespace Site` is the
+/// former.
+#[test]
+fn relative_qualified_name_prefers_current_namespace_over_global_path() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Site\\": "src/", "": "global/"}}}"#;
+    let global_view_event =
+        "<?php\nnamespace View;\nclass Event {\n    public function globalViewOnly(): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[
+            ("src/View/Event.php", SITE_VIEW_EVENT),
+            ("global/View/Event.php", global_view_event),
+        ],
+        &[],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Site;\nclass Consumer {\n    public function run(): void {\n        $e = new View\\Event();\n        $e->siteOnly();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("siteOnly")),
+        "`new View\\Event()` must prefer Site\\View\\Event over the global \
+         View\\Event, got: {diags:?}"
+    );
+}
+
+/// An import of the leading segment outranks the current namespace:
+/// `use Other\View;` makes `View\Event` mean `Other\View\Event`, even when a
+/// `Site\View\Event` also exists.
+#[test]
+fn relative_qualified_name_import_prefix_wins_over_current_namespace() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Site\\": "src/", "Other\\": "other/"}}}"#;
+    let other_event = "<?php\nnamespace Other\\View;\nclass Event {\n    public function importedOnly(): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[
+            ("src/View/Event.php", SITE_VIEW_EVENT),
+            ("other/View/Event.php", other_event),
+        ],
+        &[("Event", GLOBAL_EVENT_STUB)],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Site;\nuse Other\\View;\nclass Consumer {\n    public function run(): void {\n        $e = new View\\Event();\n        $e->importedOnly();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("importedOnly")),
+        "`use Other\\View` must expand `View\\Event` to Other\\View\\Event \
+         rather than Site\\View\\Event, got: {diags:?}"
+    );
+}
+
+/// A leading backslash still escapes to the global scope: `\View\Event`
+/// means the global `View\Event`, never `Site\View\Event`.
+#[test]
+fn leading_backslash_qualified_name_reaches_global_namespace() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Site\\": "src/", "": "global/"}}}"#;
+    let global_view_event =
+        "<?php\nnamespace View;\nclass Event {\n    public function globalViewOnly(): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[
+            ("src/View/Event.php", SITE_VIEW_EVENT),
+            ("global/View/Event.php", global_view_event),
+        ],
+        &[],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Site;\nclass Consumer {\n    public function run(): void {\n        $e = new \\View\\Event();\n        $e->globalViewOnly();\n        $e->siteOnly();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("globalViewOnly")),
+        "`new \\View\\Event()` must resolve to the global View\\Event, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("siteOnly")),
+        "`\\View\\Event` must not pick up Site\\View\\Event's members, got: {diags:?}"
+    );
+}
+
+/// With no same-namespace match, a relative qualified name still resolves
+/// against the global namespace, so members it does not declare are flagged.
+#[test]
+fn relative_qualified_name_falls_back_to_global_namespace() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Site\\": "src/", "": "global/"}}}"#;
+    let global_view_event =
+        "<?php\nnamespace View;\nclass Event {\n    public function globalViewOnly(): void {}\n}\n";
+
+    let (backend, _dir) = create_psr4_workspace_with_stubs(
+        composer_json,
+        &[("global/View/Event.php", global_view_event)],
+        &[],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Site;\nclass Consumer {\n    public function run(): void {\n        $e = new View\\Event();\n        $e->globalViewOnly();\n        $e->missingMethod();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("globalViewOnly")),
+        "with no Site\\View\\Event, `new View\\Event()` must fall back to the \
+         global View\\Event, got: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("missingMethod")),
+        "the global View\\Event has no `missingMethod()`, got: {diags:?}"
+    );
+}
+
 // ─── Array callables are data, not member accesses ──────────────────────────
 
 /// A `[Class::class, 'method']` pair nested in a returned array is plain

@@ -1287,17 +1287,25 @@ impl Backend {
             if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(stripped)) {
                 return Some(cls);
             }
+            if let Some(cls) = self.resolve_class_name(name, classes, use_map, namespace) {
+                return Some(cls);
+            }
             // When the name is namespace-qualified (e.g. "App\IteratorAggregate")
-            // and the direct lookup failed, try the short name as a global class.
-            // This handles the case where resolve_parent_class_names prepended the
-            // file namespace to an unqualified global class name.
+            // and every context-aware lookup failed, try the short name as a
+            // global class.  This handles the case where
+            // resolve_parent_class_names prepended the file namespace to an
+            // unqualified global class name.  It runs last: a qualified name
+            // written in source (`View\Event`) resolves through the import
+            // table and the current namespace before the global scope, so
+            // this fallback must not pre-empt `Site\View\Event` with a global
+            // `Event` that merely shares the short name.
             if stripped.contains('\\') {
                 let short = crate::util::short_name(stripped);
                 if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(short)) {
                     return Some(cls);
                 }
             }
-            self.resolve_class_name(name, classes, use_map, namespace)
+            None
         }
     }
 

@@ -94,10 +94,13 @@ pub(crate) fn resolve_name_via_loader(
 /// preferring a class in the current namespace over a global class of the
 /// same short name.
 ///
-/// PHP resolves an unqualified class reference (as written in `new Foo()`
+/// PHP resolves a relative class reference (as written in `new Foo()`
 /// or a type hint) against the current namespace before falling back to
 /// the global scope, so `new Iterator()` inside `namespace App` means
 /// `App\Iterator` when that class exists, not the global SPL `\Iterator`.
+/// The same applies to a *qualified* relative name: `new View\Event()`
+/// inside `namespace Site` means `Site\View\Event`.  Only a leading `\`
+/// escapes to the global scope.
 ///
 /// The plain [`resolve_name_via_loader`] delegates to the class loader,
 /// which is deliberately global-first for already-canonicalised names
@@ -115,15 +118,22 @@ pub(crate) fn resolve_source_class_name(
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> String {
     let resolved = class_loader(name);
-    // Only an unqualified name inside a namespace can be shadowed by a
-    // global stub of the same short name.
-    if !name.contains('\\')
+    // Only a relative name inside a namespace can be shadowed by a global
+    // class of the same path; a leading `\` is an explicit global reference.
+    if !name.starts_with('\\')
         && let Some(ns) = namespace
     {
-        // The loader landed on a global class (or found nothing); an
-        // explicit import would have resolved to a namespaced/aliased
-        // class whose FQN carries a namespace.
-        let landed_on_global = resolved.as_ref().is_none_or(|c| c.file_namespace.is_none());
+        // Did the loader land outside the current namespace?  An
+        // unqualified name that resolved to a global class, or a qualified
+        // name that resolved to exactly the global path it spells, can
+        // still be shadowed by a class in the current namespace.  A name
+        // that resolved through an import carries a different prefix and
+        // is left alone: the import outranks the namespace.
+        let landed_on_global = match resolved.as_ref() {
+            None => true,
+            Some(c) if !name.contains('\\') => c.file_namespace.is_none(),
+            Some(c) => c.fqn().eq_ignore_ascii_case(name),
+        };
         if landed_on_global {
             let ns_qualified = format!("{ns}\\{name}");
             if let Some(local) = class_loader(&ns_qualified)
