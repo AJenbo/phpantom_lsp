@@ -177,7 +177,6 @@ unlikely to move the needle for most users.
 | L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names)                                                                                  | Low-Medium  | Medium      |
 | L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Low         |
 | L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Low         |
-| L13 | [Factory count-conditional return types](todo/laravel.md#l13-factory-count-conditional-return-types)                                                                       | Medium      | Medium-High |
 | L8  | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | Medium-High |
 | L45 | [`*_count` properties are offered on every relationship](todo/laravel.md#l45-_count-properties-are-offered-on-every-relationship)                                           | Low-Medium  | Medium-High |
 | L10 | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Low         |
