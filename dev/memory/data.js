@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785629884849,
+  "lastUpdate": 1785660707177,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -12987,6 +12987,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "38919ea76d29a5da070ee6667d8fd858b5a1d5d4",
+          "message": "chore: remove already implemented feature item from todo list",
+          "timestamp": "2026-08-02T10:35:07+02:00",
+          "tree_id": "7841a90fc74a415ccb2bad4c4ac590099a7e2c8b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/38919ea76d29a5da070ee6667d8fd858b5a1d5d4"
+        },
+        "date": 1785660702435,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74,
             "unit": "MiB"
           }
         ]
