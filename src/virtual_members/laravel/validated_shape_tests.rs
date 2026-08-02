@@ -383,6 +383,28 @@ fn except_drops_the_listed_keys() {
 }
 
 #[test]
+fn a_key_list_reads_both_the_array_and_the_variadic_form() {
+    assert_eq!(key_list(&["['name', 'city']"]).unwrap(), ["name", "city"]);
+    assert_eq!(key_list(&["'name'", "'city'"]).unwrap(), ["name", "city"]);
+}
+
+#[test]
+fn a_literal_empty_key_list_is_an_empty_list() {
+    // `only([])` really does narrow to nothing, so this is not the same as a
+    // list that could not be read.
+    assert_eq!(key_list(&["[]"]).unwrap(), Vec::<String>::new());
+}
+
+#[test]
+fn an_unreadable_key_makes_the_whole_list_none() {
+    // A partial list narrows further than the call does, which turns reading a
+    // dropped key into a bogus unknown-key error.
+    assert!(key_list(&["$keys"]).is_none());
+    assert!(key_list(&["['title', $extra]"]).is_none());
+    assert!(key_list(&["'title'", "$extra"]).is_none());
+}
+
+#[test]
 fn nullable_numeric_renders_as_a_nullable_union() {
     // Documented in `examples/laravel/app/Demo.php::validatedArrayShape`.
     assert_eq!(

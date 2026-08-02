@@ -659,3 +659,66 @@ async fn a_computed_rule_key_falls_back_to_plain_array() {
         "an incomplete key set must not become a shape: {hover}"
     );
 }
+
+#[tokio::test]
+async fn validated_with_a_computed_key_is_not_the_whole_shape() {
+    // `validated($key)` returns one field's value whatever the key is, so an
+    // unreadable key must leave the declared type alone.  Typing it as the
+    // whole array reports every use of the value as an array mismatch.
+    let source = controller(
+        "    public function store(StorePostRequest $request, string $key) {
+        $value§ = $request->validated($key);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "a computed key selects one field, not the shape: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn only_with_a_computed_key_list_keeps_the_declared_array() {
+    // The keys narrowed to are unknown, so any shape would omit real keys and
+    // report reading them as an unknown-key error.
+    let source = controller(
+        "    public function store(StorePostRequest $request, array $keys) {
+        $subset§ = $request->safe()->only($keys);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "an unreadable key list must not narrow the shape: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn only_with_a_partly_computed_key_list_keeps_the_declared_array() {
+    let source = controller(
+        "    public function store(StorePostRequest $request, string $extra) {
+        $subset§ = $request->safe()->only(['title', $extra]);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "dropping the unreadable key would narrow too far: {hover}"
+    );
+}
+
+#[tokio::test]
+async fn except_with_a_computed_key_list_keeps_the_declared_array() {
+    // Keeping every key would be safe for diagnostics but still wrong: the
+    // shape would claim fields the call removed.
+    let source = controller(
+        "    public function store(StorePostRequest $request, array $keys) {
+        $subset§ = $request->safe()->except($keys);
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        !hover.contains("array{"),
+        "an unreadable key list must not produce a shape: {hover}"
+    );
+}

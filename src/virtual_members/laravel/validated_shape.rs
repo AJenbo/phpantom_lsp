@@ -91,8 +91,10 @@ fn rules_member_type(
 /// Narrow a shape to the listed keys (`safe()->only([…])`) or to everything
 /// but them (`safe()->except([…])`).
 ///
-/// Returns `None` when no shape is available; an empty `keys` list narrows to
-/// nothing and yields an empty shape, matching the runtime.
+/// Returns `None` when no shape is available.  An empty `keys` list narrows to
+/// nothing and yields an empty shape, which matches the runtime because the
+/// only way to reach it is a literal `only([])`; [`key_list`] rejects a list it
+/// could not read rather than passing an empty one on.
 fn narrow_shape(shape: &PhpType, keys: &[String], keep: bool) -> Option<PhpType> {
     let entries = shape.shape_entries()?;
     let narrowed: Vec<ShapeEntry> = entries
@@ -202,9 +204,12 @@ pub(crate) fn resolve_shape_at_call(
             if is_request_like(receiver, class_loader) || is_validator(receiver, class_loader) =>
         {
             let rules = lookup_rules(receiver, content, offset)?;
-            match args.first().and_then(|a| unquote(a)) {
-                Some(key) => rules_member_type(&rules, &key, class_loader),
+            match args.first() {
                 None => rules_to_shape(&rules, class_loader),
+                // `validated($key)` returns one field's value, never the whole
+                // array, so a key that cannot be read leaves the declared
+                // `array` in place rather than typing the call as the shape.
+                Some(arg) => rules_member_type(&rules, &unquote(arg)?, class_loader),
             }
         }
         // Narrowing applies to a `ValidatedInput` only.  `$request->only()`
@@ -213,7 +218,7 @@ pub(crate) fn resolve_shape_at_call(
             let source = safe_source()?;
             let rules = lookup_rules(&source, content, offset)?;
             let shape = rules_to_shape(&rules, class_loader)?;
-            let keys = key_list(args);
+            let keys = key_list(args)?;
             narrow_shape(&shape, &keys, call == ShapeCall::Only)
         }
         _ => None,
@@ -307,7 +312,11 @@ fn unquote(arg: &str) -> Option<String> {
 /// Every field name an `only()` / `except()` call lists, written either as one
 /// array literal (`only(['name', 'email'])`) or variadically
 /// (`only('name', 'email')`).
-fn key_list(args: &[&str]) -> Vec<String> {
+///
+/// `None` as soon as one listed key is not a plain string literal.  A key set
+/// that silently drops `$keys` is not the set the runtime narrows to, and
+/// `only()` against a short list yields a shape that omits real keys.
+fn key_list(args: &[&str]) -> Option<Vec<String>> {
     let single_array = args
         .first()
         .map(|arg| arg.trim())
@@ -317,9 +326,9 @@ fn key_list(args: &[&str]) -> Vec<String> {
     match single_array {
         Some(inner) => crate::type_engine::conditional_resolution::split_text_args(inner)
             .into_iter()
-            .filter_map(unquote)
+            .map(unquote)
             .collect(),
-        None => args.iter().filter_map(|arg| unquote(arg)).collect(),
+        None => args.iter().map(|arg| unquote(arg)).collect(),
     }
 }
 
