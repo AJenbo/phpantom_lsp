@@ -650,3 +650,50 @@ against parallel type-resolution paths. Add a regression test with a
 short `@extends`/`@implements` argument list against an interface with
 a key-like leading template param, reached via `@mixin`/`@implements`
 tag merging rather than the main inheritance chain.
+
+#### B18. Override completion offers `final` parent methods
+
+**Impact: Medium · Effort: Medium**
+
+`collect_overridable_methods` in
+`completion/context/override_completion.rs` filters private, magic, and
+virtual methods, but nothing filters `final`. A `final public function
+onLock()` on a parent is therefore offered as an override candidate, and
+accepting the completion inserts a declaration PHP rejects outright
+("Cannot override final method Base::onLock()").
+
+Both override entry points are affected: the `function get|` path and
+the class-body-root path, where it is more visible because the inserted
+snippet is a complete declaration rather than just a name.
+
+**Where to look:** `MethodInfo` has no `is_final` field — `is_final`
+exists only on `ClassInfo`. The fix is to record the method modifier
+during parsing (`method.modifiers` is already read for `is_abstract` and
+`is_static` at `parser/classes.rs:1298`) and skip final methods in
+`MethodCollector::push_from_class`. Adding the field touches every
+`MethodInfo` construction site (~30 in `src/`, plus test fixtures), so
+it is a mechanical but wide change; keep it a task of its own.
+
+Note that a `final` parent method should still be offered by *member
+access* completion (`$obj->onL|`) — only override candidates need the
+filter.
+
+#### B19. Override completion drops `readonly` from a redeclared property
+
+**Impact: Medium · Effort: Medium**
+
+At the class-body root, a parent's `public readonly string $onName` is
+offered with the inserted declaration `public string $onName;`. PHP
+rejects that: "Cannot redeclare readonly property A::$x as non-readonly
+B::$x". Redeclaring it *as* readonly is legal (verified on PHP 8.5), so
+the fix is to carry the modifier through, not to filter the property
+out.
+
+**Where to look:** `PropertyInfo` has no `is_readonly` field. The
+modifier is currently recovered by a local re-parse in
+`code_actions/generate_getter_setter.rs` (`has_readonly`), which shows
+where to read it from during parsing. Once `PropertyInfo` carries it,
+`build_property_override_completions` should emit `readonly ` after the
+visibility keyword whenever `include_declaration` is set. Same blast
+radius caveat as [B18](#b18-override-completion-offers-final-parent-methods):
+adding the field touches every `PropertyInfo` construction site.

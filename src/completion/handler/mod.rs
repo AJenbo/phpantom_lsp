@@ -232,6 +232,29 @@ impl Backend {
                 return Ok(self.complete_type_hint(&content, &th_ctx, &ctx, position, &uri));
             }
 
+            // ── Class-body root member completion ───────────────────
+            // At a new-member position with no modifier typed yet
+            // (e.g. `o` right inside a class body), offer overridable
+            // parent/interface/trait members with their full
+            // declarations plus member keywords, and suppress
+            // class/function/constant completions, which are invalid
+            // at this position.
+            //
+            // Runs before the modifier-anchored check below because that
+            // one scans backwards for `function`/`const` without skipping
+            // comments, so a docblock mentioning `const` above the cursor
+            // claims the position.  This check is lexical and only matches
+            // a bare identifier, so `public function ge|` and `const FO|`
+            // still fall through to it.
+            if let Some(items) =
+                self.try_class_root_member_completion(&uri, &content, position, &ctx)
+            {
+                if items.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(CompletionResponse::Array(items)));
+            }
+
             if crate::completion::context::override_completion::is_member_declaration_name_position_at_offset(
                 &content,
                 cursor_offset as usize,

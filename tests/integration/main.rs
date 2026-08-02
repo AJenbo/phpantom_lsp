@@ -33,6 +33,7 @@ mod completion_catch;
 mod completion_class_declaration;
 mod completion_class_name_context;
 mod completion_class_names;
+mod completion_class_root;
 mod completion_closure_param_inference;
 mod completion_comments;
 mod completion_compound_narrowing;

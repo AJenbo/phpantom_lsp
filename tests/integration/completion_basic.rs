@@ -2082,10 +2082,23 @@ async fn test_completion_empty_class_falls_back() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    // Empty class has no methods or properties, so should return None
+    // Empty class with no parent has nothing to override — only member
+    // keywords (`public`, `function`, `const`, …) are offered.
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
     assert!(
-        result.is_none(),
-        "Empty class with no members should return None"
+        items
+            .iter()
+            .all(|i| i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Empty class body should only offer member keywords, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        items.iter().any(|i| i.label == "public"),
+        "Class body should offer member keywords"
     );
 }
 
@@ -2131,8 +2144,20 @@ async fn test_completion_no_access_operator_shows_fallback() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    // Without `->` or `::`, no class members should be suggested
-    assert!(result.is_none(), "No access operator should return None");
+    // Without `->` or `::`, the class's own members must not be
+    // suggested — only member keywords for a new declaration.
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        items
+            .iter()
+            .all(|i| i.kind == Some(CompletionItemKind::KEYWORD)),
+        "No access operator should offer only member keywords, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]

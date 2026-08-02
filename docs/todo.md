@@ -126,6 +126,8 @@ unlikely to move the needle for most users.
 | B15 | [`IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard](todo/bugs.md#b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard)                               | Low         | Medium      |
 | B16 | [Cursor-position narrowing inside a `for` condition isn't applied](todo/bugs.md#b16-cursor-position-narrowing-inside-a-for-condition-isnt-applied)                          | Low         | Low         |
 | B17 | [`virtual_members/resolve.rs` reimplements generic substitution without right-alignment](todo/bugs.md#b17-virtual_membersresolversrs-reimplements-generic-substitution-without-right-alignment) | Low-Medium  | Low-Medium  |
+| B18 | [Override completion offers `final` parent methods](todo/bugs.md#b18-override-completion-offers-final-parent-methods)                                                        | Medium      | Medium      |
+| B19 | [Override completion drops `readonly` from a redeclared property](todo/bugs.md#b19-override-completion-drops-readonly-from-a-redeclared-property)                            | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

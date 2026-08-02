@@ -347,13 +347,15 @@ impl Backend {
                     replace_range: range,
                     php_version: self.php_version(),
                     line_start: line_start_position(content, position),
+                    include_declaration: false,
                 },
             );
             return if items.is_empty() { None } else { Some(items) };
         }
 
         if is_after_const_keyword(content, position) {
-            let constants = collect_overridable_constants(class, &partial, &class_loader);
+            let constants =
+                collect_overridable_constants(class, &partial, self.php_version(), &class_loader);
             if constants.is_empty() {
                 return None;
             }
@@ -367,6 +369,7 @@ impl Backend {
                     replace_range: range,
                     php_version: self.php_version(),
                     line_start: line_start_position(content, position),
+                    include_declaration: false,
                 },
             );
             return if items.is_empty() { None } else { Some(items) };
@@ -387,12 +390,176 @@ impl Backend {
                     replace_range: range,
                     php_version: self.php_version(),
                     line_start: line_start_position(content, position),
+                    include_declaration: false,
                 },
             );
             return if items.is_empty() { None } else { Some(items) };
         }
 
         None
+    }
+
+    /// Suggest overridable parent/interface/trait members with their full
+    /// declarations when the cursor is at the class-body root (a new
+    /// member position where no modifier has been typed yet).
+    ///
+    /// Returns `None` when the cursor is not at a class-body member start,
+    /// so the caller falls through to other strategies.  Returns
+    /// `Some(items)` when it is — possibly with only keyword items —
+    /// so the caller short-circuits and class/function/constant
+    /// completions (which are invalid at this position) never appear.
+    pub(super) fn try_class_root_member_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        ctx: &FileContext,
+    ) -> Option<Vec<CompletionItem>> {
+        use crate::completion::context::override_completion::{
+            NameOverrideCompletionOpts, OverrideCompletionOpts,
+            build_constant_override_completions, build_override_completions,
+            build_property_override_completions, class_body_partial_starts_with_dollar,
+            collect_overridable_constants, collect_overridable_methods,
+            collect_overridable_properties, extract_method_name_partial, indent_for_position,
+            is_class_body_member_start, line_start_position,
+        };
+        use crate::types::ClassLikeKind;
+
+        let cursor_offset = position_to_offset(content, position);
+        let class = find_class_at_offset(&ctx.classes, cursor_offset)?;
+        // `find_class_at_offset` also matches the header and any leading
+        // attributes; only the body counts.  A synthetic class has no
+        // recorded braces.
+        if class.start_offset == 0 || cursor_offset <= class.start_offset {
+            return None;
+        }
+        // A statement start inside a method body (`foo(); ba|`) sits at a
+        // brace depth of its own, but so does an anonymous class declared
+        // inside that method.  The cursor is at a class-body root when the
+        // innermost function-like scope around it opens *before* the class
+        // body does — i.e. the body is not nested in the function.
+        {
+            let maps = self.symbol_maps.read();
+            let map = maps.get(uri)?;
+            if map.find_enclosing_scope(cursor_offset) >= class.start_offset {
+                return None;
+            }
+        }
+        if !is_class_body_member_start(content, class.start_offset as usize, cursor_offset as usize)
+        {
+            return None;
+        }
+        let dollar_prefixed =
+            class_body_partial_starts_with_dollar(content, cursor_offset as usize);
+
+        let (partial, mut range) = extract_method_name_partial(content, position)?;
+        // A `$` prefix (`$on|`) means a property override; the inserted
+        // declaration carries its own `$`, so the range must replace it.
+        if dollar_prefixed {
+            range.start.character = range.start.character.saturating_sub(1);
+        }
+
+        // Keywords that open a member declaration (`public`, `function`,
+        // `const`, …) are the other valid tokens at this position.
+        let mut items = if dollar_prefixed {
+            Vec::new()
+        } else {
+            let keyword_ctx = {
+                let maps = self.symbol_maps.read();
+                let map = maps.get(uri);
+                crate::completion::keyword_completion::build_keyword_context(
+                    content,
+                    position,
+                    cursor_offset,
+                    map.map(|m| m.as_ref()),
+                    &ctx.classes,
+                )
+            };
+            crate::completion::keyword_completion::build_keyword_completions(
+                &partial,
+                crate::completion::class_completion::ClassNameContext::Any,
+                keyword_ctx,
+            )
+        };
+
+        // Interfaces redeclaring inherited members is unusual — offer
+        // keywords only there.
+        if matches!(class.kind, ClassLikeKind::Interface) {
+            return Some(items);
+        }
+        if class.parent_class.is_none()
+            && class.interfaces.is_empty()
+            && class.used_traits.is_empty()
+        {
+            return Some(items);
+        }
+
+        let class_loader = self.class_loader(ctx);
+        let indent = indent_for_position(content, position, class);
+        let line_start = line_start_position(content, position);
+        let php_version = self.php_version();
+
+        if !dollar_prefixed {
+            let methods = collect_overridable_methods(class, &partial, &class_loader);
+            items.extend(build_override_completions(
+                &methods,
+                &OverrideCompletionOpts {
+                    use_map: &ctx.use_map,
+                    file_namespace: &ctx.namespace,
+                    indent: &indent,
+                    replace_range: range,
+                    php_version,
+                    line_start,
+                    include_declaration: true,
+                },
+            ));
+        }
+
+        // Enums cannot have properties, not even via traits.
+        if !matches!(class.kind, ClassLikeKind::Enum) {
+            let props = collect_overridable_properties(class, &partial, &class_loader);
+            let mut prop_items = build_property_override_completions(
+                &props,
+                &NameOverrideCompletionOpts {
+                    use_map: &ctx.use_map,
+                    file_namespace: &ctx.namespace,
+                    indent: &indent,
+                    replace_range: range,
+                    php_version,
+                    line_start,
+                    include_declaration: true,
+                },
+            );
+            // The replace range covers the typed `$`, so the filter text
+            // must include it for the client-side match to succeed.
+            if dollar_prefixed {
+                for item in &mut prop_items {
+                    if let Some(ft) = &item.filter_text {
+                        item.filter_text = Some(format!("${ft}"));
+                    }
+                }
+            }
+            items.extend(prop_items);
+        }
+
+        if !dollar_prefixed {
+            let constants =
+                collect_overridable_constants(class, &partial, php_version, &class_loader);
+            items.extend(build_constant_override_completions(
+                &constants,
+                &NameOverrideCompletionOpts {
+                    use_map: &ctx.use_map,
+                    file_namespace: &ctx.namespace,
+                    indent: &indent,
+                    replace_range: range,
+                    php_version,
+                    line_start,
+                    include_declaration: true,
+                },
+            ));
+        }
+
+        Some(items)
     }
 
     /// Extract a [`CompletionTarget`] from the symbol map's precomputed

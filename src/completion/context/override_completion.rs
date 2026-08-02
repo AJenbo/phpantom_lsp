@@ -31,6 +31,10 @@ use crate::util::short_name;
 const METHOD_OVERRIDE_ATTR_MIN: PhpVersion = PhpVersion::new(8, 3);
 const PROPERTY_OVERRIDE_ATTR_MIN: PhpVersion = PhpVersion::new(8, 5);
 const CONSTANT_OVERRIDE_ATTR_MIN: PhpVersion = PhpVersion::new(8, 6);
+/// Implementing classes may redeclare an interface constant from PHP 8.1.
+const INTERFACE_CONST_OVERRIDE_MIN: PhpVersion = PhpVersion::new(8, 1);
+/// Traits may declare constants from PHP 8.2.
+const TRAIT_CONST_MIN: PhpVersion = PhpVersion::new(8, 2);
 
 /// Collect public/protected methods from parents, interfaces, and
 /// directly-used traits that the current class can still override or
@@ -188,6 +192,20 @@ pub(crate) struct OverrideCompletionOpts<'a> {
     pub replace_range: Range,
     pub php_version: PhpVersion,
     pub line_start: Position,
+    /// Insert the full declaration (visibility, `static`, keyword) rather
+    /// than only the member name.  Used at the class-body root where the
+    /// user has not typed any modifier yet.
+    pub include_declaration: bool,
+}
+
+fn visibility_keyword(visibility: Visibility) -> &'static str {
+    match visibility {
+        Visibility::Public => "public",
+        Visibility::Protected => "protected",
+        // Private members are filtered out by the collectors; if one
+        // slips through, a private override is redeclared as private.
+        Visibility::Private => "private",
+    }
 }
 
 /// Build completion items for overridable methods matching `partial`.
@@ -226,12 +244,22 @@ pub(crate) fn build_override_completions(
         let params_escaped = params.replace('$', "\\$");
         let return_escaped = return_type.replace('$', "\\$");
 
+        let declaration = if opts.include_declaration {
+            let static_kw = if method.is_static { "static " } else { "" };
+            format!(
+                "{} {static_kw}function ",
+                visibility_keyword(method.visibility)
+            )
+        } else {
+            String::new()
+        };
+
         // Brace lines intentionally have no leading indent.  Clients
         // re-indent multi-line snippet continuations relative to the
         // insertion line (`    public function …`), so baking in the
         // member indent here would double it (`        {`).
         let insert_text = format!(
-            "{}({}){}\n{{\n    $0\n}}",
+            "{declaration}{}({}){}\n{{\n    $0\n}}",
             method.name, params_escaped, return_escaped
         );
 
@@ -389,10 +417,16 @@ impl PropertyCollector<'_> {
     }
 }
 
-/// Collect public/protected constants from parents.
+/// Collect public/protected constants the class can still redeclare, from
+/// the parent chain and from interfaces and traits.
+///
+/// Overriding an interface constant is only legal on PHP 8.1+, and traits
+/// could not declare constants before PHP 8.2, so both sources are gated
+/// on `php_version`.
 pub(crate) fn collect_overridable_constants(
     class: &ClassInfo,
     partial: &str,
+    php_version: PhpVersion,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<(ConstantInfo, String)> {
     let own: HashSet<String> = class
@@ -401,39 +435,110 @@ pub(crate) fn collect_overridable_constants(
         .map(|c| c.name.to_lowercase())
         .collect();
 
-    let mut results = Vec::new();
-    let mut seen = HashSet::new();
-    let mut visited = HashSet::new();
+    let mut collector = ConstantCollector {
+        partial,
+        class_loader,
+        own: &own,
+        seen: HashSet::new(),
+        visited: HashSet::new(),
+        results: Vec::new(),
+    };
+
     let mut parent_name = class.parent_class;
     let mut depth = 0usize;
     while let Some(ref pname) = parent_name {
         if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
             break;
         }
-        if !visited.insert(pname.to_string()) {
+        if !collector.visited.insert(pname.to_string()) {
             break;
         }
         let Some(parent) = class_loader(pname) else {
             break;
         };
-        let declaring = parent.fqn().to_string();
-        for c in &parent.constants {
-            if c.visibility == Visibility::Private || c.is_enum_case {
-                continue;
+        collector.push_from(&parent);
+        if php_version >= INTERFACE_CONST_OVERRIDE_MIN {
+            for iface in &parent.interfaces {
+                collector.collect_from_interface(iface, depth + 1);
             }
-            if !partial.is_empty() && !starts_with_ignore_ascii_case(&c.name, partial) {
-                continue;
-            }
-            let lower = c.name.to_lowercase();
-            if own.contains(&lower) || !seen.insert(lower) {
-                continue;
-            }
-            results.push(((**c).clone(), declaring.clone()));
+        }
+        if php_version >= TRAIT_CONST_MIN {
+            collector.collect_from_traits(&parent.used_traits, depth + 1);
         }
         parent_name = parent.parent_class;
         depth += 1;
     }
-    results
+
+    if php_version >= INTERFACE_CONST_OVERRIDE_MIN {
+        for iface in &class.interfaces {
+            collector.collect_from_interface(iface, 0);
+        }
+    }
+    if php_version >= TRAIT_CONST_MIN {
+        collector.collect_from_traits(&class.used_traits, 0);
+    }
+
+    collector.results
+}
+
+struct ConstantCollector<'a> {
+    partial: &'a str,
+    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    own: &'a HashSet<String>,
+    seen: HashSet<String>,
+    visited: HashSet<String>,
+    results: Vec<(ConstantInfo, String)>,
+}
+
+impl ConstantCollector<'_> {
+    fn push_from(&mut self, owner: &ClassInfo) {
+        let declaring = owner.fqn().to_string();
+        for c in &owner.constants {
+            if c.visibility == Visibility::Private || c.is_enum_case {
+                continue;
+            }
+            if !self.partial.is_empty() && !starts_with_ignore_ascii_case(&c.name, self.partial) {
+                continue;
+            }
+            let lower = c.name.to_lowercase();
+            if self.own.contains(&lower) || !self.seen.insert(lower) {
+                continue;
+            }
+            self.results.push(((**c).clone(), declaring.clone()));
+        }
+    }
+
+    fn collect_from_interface(&mut self, iface_name: &str, depth: usize) {
+        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
+            return;
+        }
+        if !self.visited.insert(iface_name.to_string()) {
+            return;
+        }
+        let Some(iface) = (self.class_loader)(iface_name) else {
+            return;
+        };
+        self.push_from(&iface);
+        for parent_iface in &iface.interfaces {
+            self.collect_from_interface(parent_iface, depth + 1);
+        }
+    }
+
+    fn collect_from_traits(&mut self, traits: &[crate::atom::Atom], depth: usize) {
+        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
+            return;
+        }
+        for tname in traits {
+            if !self.visited.insert(tname.to_string()) {
+                continue;
+            }
+            let Some(tr) = (self.class_loader)(tname) else {
+                continue;
+            };
+            self.push_from(&tr);
+            self.collect_from_traits(&tr.used_traits, depth + 1);
+        }
+    }
 }
 
 /// Build property-name override completions (`$title` already typed `$`).
@@ -464,10 +569,24 @@ pub(crate) fn build_property_override_completions(
             .map(|t| shorten_type_display(t, opts.use_map, opts.file_namespace))
             .filter(|s| !s.is_empty());
         let default = property_default_value(prop);
-        let insert = match default {
+        let mut insert = match default {
             Some(d) => format!("{} = {}", prop.name, d),
             None => prop.name.to_string(),
         };
+        if opts.include_declaration {
+            let static_kw = if prop.is_static { "static " } else { "" };
+            let type_prefix = prop
+                .native_type_hint
+                .as_ref()
+                .map(|t| shorten_type_display(t, opts.use_map, opts.file_namespace))
+                .filter(|s| !s.is_empty())
+                .map(|t| format!("{t} "))
+                .unwrap_or_default();
+            insert = format!(
+                "{} {static_kw}{type_prefix}${insert};",
+                visibility_keyword(prop.visibility)
+            );
+        }
         let label = match (&type_str, default) {
             (Some(t), Some(d)) => format!("${}: {} = {}", prop.name, t, d),
             (Some(t), None) => format!("${}: {}", prop.name, t),
@@ -521,6 +640,10 @@ pub(crate) struct NameOverrideCompletionOpts<'a> {
     pub replace_range: Range,
     pub php_version: PhpVersion,
     pub line_start: Position,
+    /// Insert the full declaration (visibility, `static`/`const`, `$`,
+    /// trailing `;`) rather than only the member name.  Used at the
+    /// class-body root where the user has not typed any modifier yet.
+    pub include_declaration: bool,
 }
 
 /// Build constant-name override completions.
@@ -549,10 +672,31 @@ pub(crate) fn build_constant_override_completions(
             .map(|t| shorten_type_display(t, opts.use_map, opts.file_namespace))
             .filter(|s| !s.is_empty());
         let default = c.value.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        let insert = match default {
+        let mut insert = match default {
             Some(d) => format!("{} = {}", c.name, d),
             None => c.name.to_string(),
         };
+        if opts.include_declaration {
+            // `type_hint` holds the native `const int FOO` hint (PHP 8.3+),
+            // never an inferred type, so it is safe to re-emit verbatim.
+            let type_prefix = type_str
+                .as_ref()
+                .map(|t| format!("{t} "))
+                .unwrap_or_default();
+            // A class constant must have a value; when the parent's value
+            // is unknown, end at `= ` so the cursor lands where the value
+            // goes.
+            insert = match default {
+                Some(_) => format!(
+                    "{} const {type_prefix}{insert};",
+                    visibility_keyword(c.visibility)
+                ),
+                None => format!(
+                    "{} const {type_prefix}{insert} = ",
+                    visibility_keyword(c.visibility)
+                ),
+            };
+        }
         let label = match (&type_str, default) {
             (Some(t), Some(d)) => format!("{}: {} = {}", c.name, t, d),
             (Some(t), None) => format!("{}: {}", c.name, t),
@@ -766,6 +910,237 @@ fn in_const_initializer(bytes: &[u8], from: usize, pos: usize) -> bool {
         }
     }
     in_value
+}
+
+/// Whether the cursor sits at the start of a new member declaration in the
+/// class-like body whose opening brace is at `body_start`.
+///
+/// Scans forward from the brace with a PHP-aware lexer so that comments,
+/// docblocks, attributes, strings, and heredocs before the cursor are
+/// skipped rather than mistaken for code.  A backwards scan cannot do
+/// this: `// closes with }` and `/** @var int */` both end on bytes that
+/// look like ordinary code from behind.
+///
+/// The cursor qualifies when, at the class body's own brace depth, the
+/// only thing between the last `{`/`}`/`;` boundary and the cursor is
+/// skippable trivia plus an optional `$` and identifier characters.
+/// Nested braces (method bodies, property hooks, trait-use adaptation
+/// blocks) therefore fall out for free, as does any position inside a
+/// comment or string literal.
+///
+/// A leading `$` before the partial is accepted too (`$on|` for a
+/// property override); the caller distinguishes it via
+/// [`class_body_partial_starts_with_dollar`].
+pub(crate) fn is_class_body_member_start(content: &str, body_start: usize, cursor: usize) -> bool {
+    let bytes = content.as_bytes();
+    let cursor = cursor.min(bytes.len());
+    if body_start >= cursor || bytes.get(body_start) != Some(&b'{') {
+        return false;
+    }
+
+    // Offset of the first significant byte of the member being typed, or
+    // `None` when nothing but trivia has followed the last boundary.
+    let mut pending_start: Option<usize> = None;
+    let mut depth = 0usize;
+    let mut i = body_start + 1;
+
+    while i < cursor {
+        let b = bytes[i];
+        match b {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i = skip_line_comment(bytes, i);
+                continue;
+            }
+            b'#' if bytes.get(i + 1) == Some(&b'[') => {
+                // Attributes precede the member they decorate, so they
+                // leave the member-start position intact.
+                let end = skip_attribute(bytes, i);
+                if end > cursor {
+                    return false;
+                }
+                i = end;
+                continue;
+            }
+            b'#' => {
+                i = skip_line_comment(bytes, i);
+                continue;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                let end = skip_block_comment(bytes, i);
+                if end > cursor {
+                    return false;
+                }
+                i = end;
+                continue;
+            }
+            b'\'' | b'"' => {
+                let end = skip_quoted(bytes, i);
+                if end > cursor {
+                    return false;
+                }
+                if pending_start.is_none() {
+                    pending_start = Some(i);
+                }
+                i = end;
+                continue;
+            }
+            b'<' if bytes[i..].starts_with(b"<<<") => {
+                let end = skip_heredoc(bytes, i);
+                if end > cursor {
+                    return false;
+                }
+                if pending_start.is_none() {
+                    pending_start = Some(i);
+                }
+                i = end;
+                continue;
+            }
+            b'{' => {
+                depth += 1;
+                pending_start = None;
+            }
+            b'}' => {
+                if depth == 0 {
+                    // The body's closing brace: the cursor is past the
+                    // end of this class.
+                    return false;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    pending_start = None;
+                }
+            }
+            b';' if depth == 0 => pending_start = None,
+            _ if b.is_ascii_whitespace() => {}
+            _ if depth == 0 && pending_start.is_none() => pending_start = Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if depth != 0 {
+        return false;
+    }
+    let Some(start) = pending_start else {
+        return true;
+    };
+    let mut k = start;
+    if bytes[k] == b'$' {
+        k += 1;
+    }
+    bytes[k..cursor].iter().all(|&b| is_ident_byte(b))
+}
+
+/// Whether the partial identifier at `cursor` is preceded by `$`.
+pub(crate) fn class_body_partial_starts_with_dollar(content: &str, cursor: usize) -> bool {
+    let bytes = content.as_bytes();
+    let cursor = cursor.min(bytes.len());
+    let mut i = cursor;
+    while i > 0 && is_ident_byte(bytes[i - 1]) {
+        i -= 1;
+    }
+    i > 0 && bytes[i - 1] == b'$'
+}
+
+/// Offset just past the end of the `//` or `#` comment starting at `i`.
+fn skip_line_comment(bytes: &[u8], i: usize) -> usize {
+    match bytes[i..].iter().position(|&b| b == b'\n') {
+        Some(n) => i + n + 1,
+        None => bytes.len(),
+    }
+}
+
+/// Offset just past the end of the `/* … */` comment starting at `i`.
+fn skip_block_comment(bytes: &[u8], i: usize) -> usize {
+    let mut k = i + 2;
+    while k + 1 < bytes.len() {
+        if bytes[k] == b'*' && bytes[k + 1] == b'/' {
+            return k + 2;
+        }
+        k += 1;
+    }
+    bytes.len()
+}
+
+/// Offset just past the closing `]` of the `#[…]` attribute at `i`,
+/// tracking nested brackets and string literals.
+fn skip_attribute(bytes: &[u8], i: usize) -> usize {
+    let mut k = i + 1;
+    let mut brackets = 0usize;
+    while k < bytes.len() {
+        match bytes[k] {
+            b'\'' | b'"' => {
+                k = skip_quoted(bytes, k);
+                continue;
+            }
+            b'[' => brackets += 1,
+            b']' => {
+                brackets -= 1;
+                if brackets == 0 {
+                    return k + 1;
+                }
+            }
+            _ => {}
+        }
+        k += 1;
+    }
+    bytes.len()
+}
+
+/// Offset just past the closing quote of the string literal at `i`.
+fn skip_quoted(bytes: &[u8], i: usize) -> usize {
+    let quote = bytes[i];
+    let mut k = i + 1;
+    while k < bytes.len() {
+        match bytes[k] {
+            b'\\' => k += 1,
+            b if b == quote => return k + 1,
+            _ => {}
+        }
+        k += 1;
+    }
+    bytes.len()
+}
+
+/// Offset just past the terminator of the heredoc/nowdoc starting at `i`
+/// (which points at `<<<`).
+fn skip_heredoc(bytes: &[u8], i: usize) -> usize {
+    let mut k = i + 3;
+    while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+        k += 1;
+    }
+    let quote = matches!(bytes.get(k), Some(b'\'') | Some(b'"')).then(|| bytes[k]);
+    if quote.is_some() {
+        k += 1;
+    }
+    let label_start = k;
+    while k < bytes.len() && is_ident_byte(bytes[k]) {
+        k += 1;
+    }
+    let label = &bytes[label_start..k];
+    if label.is_empty() {
+        return bytes.len();
+    }
+    // Scan line by line for the closing label, which PHP 7.3+ allows to
+    // be indented and followed by any non-identifier byte.
+    while k < bytes.len() {
+        let Some(n) = bytes[k..].iter().position(|&b| b == b'\n') else {
+            return bytes.len();
+        };
+        k += n + 1;
+        let mut line = k;
+        while line < bytes.len() && (bytes[line] == b' ' || bytes[line] == b'\t') {
+            line += 1;
+        }
+        if bytes[line..].starts_with(label)
+            && !bytes
+                .get(line + label.len())
+                .is_some_and(|&b| is_ident_byte(b))
+        {
+            return line + label.len();
+        }
+    }
+    bytes.len()
 }
 
 /// Property name after `$` on a property declaration line (not a parameter).
@@ -990,7 +1365,7 @@ mod tests {
                 None
             }
         };
-        let consts = collect_overridable_constants(&child, "", &loader);
+        let consts = collect_overridable_constants(&child, "", PhpVersion::new(8, 4), &loader);
         let names: Vec<_> = consts.iter().map(|(c, _)| c.name.as_str()).collect();
         assert!(names.contains(&"STATUS_OK"), "got {names:?}");
         assert!(!names.contains(&"SECRET"), "got {names:?}");

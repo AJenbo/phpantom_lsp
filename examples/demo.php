@@ -3186,6 +3186,25 @@ class UnknownMemberDemo
 }
 
 
+// ── Class-Body Root Member Completion ───────────────────────────────────────
+// Triggering completion directly inside a class body (no modifier typed yet)
+// suggests every parent/interface/trait member the class can still override
+// or implement, inserting the complete declaration: visibility, static, type,
+// default value, and full method signatures.  Class names, functions, and
+// global constants are invalid at that position and are not offered.
+
+class ClassRootCompletionDemo extends OverridableWidget
+{
+    // Try: type `o` on the line below and trigger completion.  Both
+    // `$oneTimeToken` and `onChange()` appear with full declarations,
+    // even though this comment sits between them and the class brace.
+
+    // Try: type `O` for the inherited constant — `ONE_TIME_TTL` is offered
+    // as `public const string ONE_TIME_TTL = '15m';`, keeping its type.
+
+}
+
+
 // ── PHPDoc Block Generation ─────────────────────────────────────────────────
 // Typing `/**` above a declaration generates a docblock skeleton.  Tags are
 // only emitted when the native type hint needs enrichment: missing types get
@@ -4333,6 +4352,19 @@ class ReflectionInstantiationDemo
 class ReflectedWidget
 {
     public function label(): string { return 'widget'; }
+}
+
+// ── Class-body root member completion scaffolding ───────────────────────────
+
+class OverridableWidget
+{
+    public const string ONE_TIME_TTL = '15m';
+
+    public ?string $oneTimeToken = null;
+    protected int $override = 0;
+
+    public function onChange(callable $callback): static { return $this; }
+    protected function onInitialize(): void {}
 }
 
 // ── @phpstan-require-extends scaffolding ────────────────────────────────────
