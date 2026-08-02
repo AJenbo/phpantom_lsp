@@ -482,9 +482,8 @@ fn return_type_multiline_brace_shape() {
 
 #[test]
 fn return_type_unclosed_angle_recovers_base() {
-    // `extract_return_type` now returns PhpType directly. For broken
-    // docblocks with unclosed `<`, the internal sanitisation recovers
-    // the base type.
+    // For broken docblocks with unclosed `<`, the internal sanitisation
+    // recovers the base type.
     let doc = concat!("/**\n", " * @return SomeType<\n", " */",);
     let raw = extract_return_type(doc);
     assert_eq!(raw, Some(PhpType::parse("SomeType")));
@@ -1849,7 +1848,7 @@ fn enclosing_return_type_deeply_nested_control_flow() {
     //
     // The correct usage from the AST walker is to pass the method body's
     // opening brace offset + 1 so that the scan immediately finds the
-    // function brace.  Here we verify both behaviors:
+    // function brace. That is the only behavior this test verifies.
 
     // Passing the method body's `{` offset + 1 should work.
     let func_brace =

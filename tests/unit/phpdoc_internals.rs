@@ -1,8 +1,8 @@
 //! Tests for PHPDoc internal helpers.
 //!
-//! These tests were moved from the inline `#[cfg(test)] mod tests` block
-//! in `src/completion/phpdoc.rs` to keep the project's convention of
-//! placing tests in the `tests/` directory.
+//! These tests exercise `phpantom_lsp::completion::phpdoc` — docblock
+//! context detection, tag prefix extraction, and PHPDoc completion
+//! generation.
 
 use std::sync::Arc;
 

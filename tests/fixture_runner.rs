@@ -41,8 +41,8 @@ interface BackedEnum extends UnitEnum
 // ─── Function stubs ─────────────────────────────────────────────────────────
 // Minimal function stubs so that fixture tests can resolve return types of
 // built-in functions.  These mirror the phpstorm-stubs signatures; the
-// stub patch system (stub_patches.rs) upgrades them at load time (e.g.
-// adding @template annotations to array_reduce).
+// stub patch system (stub_patches.rs) upgrades some of them at load time
+// (e.g. linking array_map's callback parameter to the array's element type).
 
 static ARRAY_FUNC_STUB: &str = "\
 <?php
@@ -452,7 +452,6 @@ async fn run_completion(fixture: &ParsedFixture) -> Result<(), String> {
 
     let labels: Vec<String> = items.iter().map(|item| item.label.clone()).collect();
 
-    // Check expected items are present.
     for expected in &fixture.meta.expect {
         let found = labels
             .iter()
@@ -464,7 +463,6 @@ async fn run_completion(fixture: &ParsedFixture) -> Result<(), String> {
         }
     }
 
-    // Check absent items are not present.
     for absent in &fixture.meta.expect_absent {
         let found = labels
             .iter()
@@ -720,7 +718,6 @@ async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
         .first()
         .ok_or("Signature help returned no signatures")?;
 
-    // Check label.
     if let Some(expected_label) = &fixture.meta.expect_sig_label
         && sig.label != *expected_label
     {
@@ -730,7 +727,6 @@ async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
         ));
     }
 
-    // Check active parameter.
     if let Some(expected_active) = fixture.meta.expect_sig_active {
         let actual_active = sh.active_parameter.unwrap_or(0);
         if actual_active != expected_active {
@@ -740,7 +736,6 @@ async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
         }
     }
 
-    // Check parameter labels.
     if !fixture.meta.expect_sig_params.is_empty() {
         let param_labels: Vec<String> = sig
             .parameters

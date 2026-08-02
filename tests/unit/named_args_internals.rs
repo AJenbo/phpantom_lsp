@@ -1,8 +1,7 @@
-//! Tests for named-argument internal helpers.
-//!
-//! These tests were moved from the inline `#[cfg(test)] mod tests` block
-//! in `src/completion/named_args.rs` to keep the project's convention of
-//! placing tests in the `tests/` directory.
+//! Tests for the named-argument completion helpers in
+//! `src/completion/named_args.rs`: locating the enclosing call
+//! expression, parsing already-typed arguments, and building the
+//! resulting completion items.
 
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::completion::named_args::*;
