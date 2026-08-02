@@ -1014,6 +1014,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b18-override-completion-offers-final-parent-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B18. Override completion offers <code>final</code> parent methods
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b19-override-completion-drops-readonly-from-a-redeclared-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B19. Override completion drops <code>readonly</code> from a redeclared property
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1668,6 +1690,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b18-override-completion-offers-final-parent-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B18. Override completion offers <code>final</code> parent methods
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b19-override-completion-drops-readonly-from-a-redeclared-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B19. Override completion drops <code>readonly</code> from a redeclared property
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2218,6 +2262,43 @@ against parallel type-resolution paths. Add a regression test with a
 short <code>@extends</code>/<code>@implements</code> argument list against an interface with
 a key-like leading template param, reached via <code>@mixin</code>/<code>@implements</code>
 tag merging rather than the main inheritance chain.</p>
+<h4 id="b18-override-completion-offers-final-parent-methods">B18. Override completion offers <code>final</code> parent methods<a class="headerlink" href="#b18-override-completion-offers-final-parent-methods" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><code>collect_overridable_methods</code> in
+<code>completion/context/override_completion.rs</code> filters private, magic, and
+virtual methods, but nothing filters <code>final</code>. A <code>final public function
+onLock()</code> on a parent is therefore offered as an override candidate, and
+accepting the completion inserts a declaration PHP rejects outright
+("Cannot override final method Base::onLock()").</p>
+<p>Both override entry points are affected: the <code>function get|</code> path and
+the class-body-root path, where it is more visible because the inserted
+snippet is a complete declaration rather than just a name.</p>
+<p><strong>Where to look:</strong> <code>MethodInfo</code> has no <code>is_final</code> field — <code>is_final</code>
+exists only on <code>ClassInfo</code>. The fix is to record the method modifier
+during parsing (<code>method.modifiers</code> is already read for <code>is_abstract</code> and
+<code>is_static</code> at <code>parser/classes.rs:1298</code>) and skip final methods in
+<code>MethodCollector::push_from_class</code>. Adding the field touches every
+<code>MethodInfo</code> construction site (~30 in <code>src/</code>, plus test fixtures), so
+it is a mechanical but wide change; keep it a task of its own.</p>
+<p>Note that a <code>final</code> parent method should still be offered by <em>member
+access</em> completion (<code>$obj-&gt;onL|</code>) — only override candidates need the
+filter.</p>
+<h4 id="b19-override-completion-drops-readonly-from-a-redeclared-property">B19. Override completion drops <code>readonly</code> from a redeclared property<a class="headerlink" href="#b19-override-completion-drops-readonly-from-a-redeclared-property" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p>At the class-body root, a parent's <code>public readonly string $onName</code> is
+offered with the inserted declaration <code>public string $onName;</code>. PHP
+rejects that: "Cannot redeclare readonly property A::$x as non-readonly
+B::$x". Redeclaring it <em>as</em> readonly is legal (verified on PHP 8.5), so
+the fix is to carry the modifier through, not to filter the property
+out.</p>
+<p><strong>Where to look:</strong> <code>PropertyInfo</code> has no <code>is_readonly</code> field. The
+modifier is currently recovered by a local re-parse in
+<code>code_actions/generate_getter_setter.rs</code> (<code>has_readonly</code>), which shows
+where to read it from during parsing. Once <code>PropertyInfo</code> carries it,
+<code>build_property_override_completions</code> should emit <code>readonly</code> after the
+visibility keyword whenever <code>include_declaration</code> is set. Same blast
+radius caveat as <a href="#b18-override-completion-offers-final-parent-methods">B18</a>:
+adding the field touches every <code>PropertyInfo</code> construction site.</p>
 
 
 
