@@ -8488,6 +8488,54 @@ class UserFactory extends Factory {
     );
 }
 
+/// A factory reached through a variable carries no count state we can
+/// read, so the declared `Collection<int, TModel>|TModel` stands rather
+/// than being narrowed to one branch.  Narrowing it to the model would
+/// make `create()->first()` a false positive for every caller that did
+/// set a count before assigning.
+#[tokio::test]
+async fn test_factory_through_a_variable_keeps_both_branches() {
+    let annotated_factory_php = "\
+<?php
+namespace Database\\Factories;
+use App\\Models\\User;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+/**
+ * @extends Factory<User>
+ */
+class UserFactory extends Factory {
+    public function definition(): array { return []; }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", COUNT_USER_PHP),
+        ("database/factories/UserFactory.php", annotated_factory_php),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        concat!(
+            "<?php\n",
+            "use App\\Models\\User;\n",
+            "$factory = User::factory()->count(3);\n",
+            "$factory->create()->\n",
+        ),
+        3,
+        20,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"all"),
+        "a variable-held factory should keep the collection branch, got: {:?}",
+        methods
+    );
+}
+
 /// A model with a custom Eloquent collection gets that collection back,
 /// not the base `Illuminate\Database\Eloquent\Collection`.
 #[tokio::test]
@@ -8617,6 +8665,24 @@ class WidgetFactory extends Factory {
         methods.contains(&"describe"),
         "a model-less factory should still chain on itself, got: {:?}",
         methods
+    );
+
+    // And a counted create() on it must not borrow some other model.
+    let created = complete_at(
+        &backend,
+        &dir,
+        "src/test2.php",
+        "<?php\nuse Database\\Factories\\WidgetFactory;\nWidgetFactory::new()->count(3)->create()->\n",
+        2,
+        42,
+    )
+    .await;
+
+    let created = method_names(&created);
+    assert!(
+        !created.contains(&"greet"),
+        "a model-less factory must not resolve create() to another model, got: {:?}",
+        created
     );
 }
 

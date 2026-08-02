@@ -64,10 +64,9 @@ fn factory_with_null_builds_one() {
 }
 
 #[test]
-fn factory_with_variable_count_builds_one() {
-    // A variable could hold state just as easily as an integer, so the
-    // single-model branch is the safe reading.
-    assert_eq!(count_of("User::factory($count)"), FactoryCount::One);
+fn factory_with_a_boolean_builds_one() {
+    // `is_numeric(true)` is false, so this is state rather than a count.
+    assert_eq!(count_of("User::factory(true)"), FactoryCount::One);
 }
 
 #[test]
@@ -97,10 +96,55 @@ fn count_without_arguments_builds_one() {
     assert_eq!(count_of("User::factory()->count()"), FactoryCount::One);
 }
 
+// ── chain_count: chains that settle nothing ─────────────────────────
+
+/// A receiver that is not a chain carries no visible count state.  The
+/// caller leaves the declared return type alone rather than picking a
+/// branch, so a factory held in a variable *with* a count set does not
+/// become a single model.
 #[test]
-fn non_call_receiver_builds_one() {
-    assert_eq!(count_of("$factory"), FactoryCount::One);
-    assert_eq!(count_of("$this->factory"), FactoryCount::One);
+fn a_non_call_receiver_is_unknown() {
+    assert_eq!(count_of("$factory"), FactoryCount::Unknown);
+    assert_eq!(count_of("$this->factory"), FactoryCount::Unknown);
+    assert_eq!(count_of("$factory->state([])"), FactoryCount::Unknown);
+}
+
+/// `new UserFactory(3)` sets a count through the constructor, and the
+/// subject parser does not keep the arguments to tell it from
+/// `new UserFactory()`.
+#[test]
+fn a_new_expression_head_is_unknown() {
+    assert_eq!(count_of("new UserFactory()"), FactoryCount::Unknown);
+    assert_eq!(
+        count_of("new UserFactory()->state([])"),
+        FactoryCount::Unknown
+    );
+}
+
+/// A static call other than `factory()`/`times()`/`new()` hands back a
+/// factory built somewhere else, so its count is not visible here.
+#[test]
+fn an_unrelated_static_head_is_unknown() {
+    assert_eq!(
+        count_of("UserFactory::forTesting()->state([])"),
+        FactoryCount::Unknown
+    );
+}
+
+/// A variable argument to `factory()` could be the integer Laravel reads
+/// as a count or the array it reads as state, and guessing wrong would
+/// swap a model for a collection.
+#[test]
+fn factory_with_a_non_literal_argument_is_unknown() {
+    assert_eq!(count_of("User::factory($count)"), FactoryCount::Unknown);
+    assert_eq!(
+        count_of("User::factory(self::COUNT)"),
+        FactoryCount::Unknown
+    );
+    assert_eq!(
+        count_of("User::factory(count($rows))"),
+        FactoryCount::Unknown
+    );
 }
 
 // ── chain_count: collection chains ──────────────────────────────────
@@ -164,14 +208,38 @@ fn last_count_call_wins() {
     );
 }
 
+/// A count-setting call is read where it stands, without needing to walk
+/// back to the head of the chain.
 #[test]
 fn count_on_a_new_factory_instance_builds_many() {
     assert_eq!(count_of("new UserFactory()->count(3)"), FactoryCount::Many);
+    assert_eq!(count_of("$factory->count(3)"), FactoryCount::Many);
 }
 
+/// The chain head can be something other than a static call — the legacy
+/// global `factory()` helper, or an invoked callable.  Neither says
+/// anything about the count, whatever it was handed.
 #[test]
-fn a_new_expression_head_without_a_count_builds_one() {
-    assert_eq!(count_of("new UserFactory()->state([])"), FactoryCount::One);
+fn a_non_static_chain_head_is_unknown() {
+    assert_eq!(count_of("factory(3)"), FactoryCount::Unknown);
+    assert_eq!(count_of("$makeFactory()"), FactoryCount::Unknown);
+    assert_eq!(count_of("$makeFactory()->state([])"), FactoryCount::Unknown);
+}
+
+/// The walk descends into a strictly smaller sub-expression each step, so
+/// a chain far longer than anything real still finds the count it set.
+#[test]
+fn a_very_long_chain_still_finds_the_count() {
+    let counted = |links: usize| {
+        let mut expr = String::from("User::factory()->count(3)");
+        for _ in 0..links {
+            expr.push_str("->state([])");
+        }
+        count_of(&expr)
+    };
+
+    assert_eq!(counted(10), FactoryCount::Many);
+    assert_eq!(counted(200), FactoryCount::Many);
 }
 
 // ── factory_model_type ──────────────────────────────────────────────
