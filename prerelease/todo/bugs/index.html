@@ -915,17 +915,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b9-a-relative-qualified-class-name-is-not-resolved-against-the-current-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B9. A relative qualified class name is not resolved against the current namespace
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1481,17 +1470,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b9-a-relative-qualified-class-name-is-not-resolved-against-the-current-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B9. A relative qualified class name is not resolved against the current namespace
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1760,38 +1738,6 @@ matching the pattern already used for <code>in_implements_declaration_header</co
 No existing test exercises this path; add one for <code>enum Foo ext|</code> (no
 completion) and <code>interface Foo ext|</code> (completion offered, extends
 existing coverage of the Class case).</p>
-<h4 id="b9-a-relative-qualified-class-name-is-not-resolved-against-the-current-namespace">B9. A relative qualified class name is not resolved against the current namespace<a class="headerlink" href="#b9-a-relative-qualified-class-name-is-not-resolved-against-the-current-namespace" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p><code>new View\Event()</code> inside <code>namespace Site</code> resolves to the global
-<code>Event</code> class instead of <code>Site\View\Event</code>, so every member declared on
-the project class is flagged as unknown ("Method 'siteOnly' not found
-on class 'Event'"). PHP resolves a <em>qualified</em> name (one containing a
-separator but no leading <code>\</code>) by prefixing the current namespace,
-exactly as it does an unqualified name; only a leading <code>\</code> escapes to
-the global scope.</p>
-<p>This is the same defect class as the already-fixed unqualified case
-(<code>B::x()</code> picking the global <code>B</code> over a sibling <code>Src\B</code>), and it was
-reported against the same issue (#299) by a second commenter, whose
-namespace <code>Site\View</code> and class <code>Event</code> collided with a global stub.
-A likely third report ("redeclaring a type with docblocks is ignored",
-using <code>/** @var Object\FirstOne $obj */</code>) is probably this bug too: the
-<code>@var</code> docblock path resolves relative qualified names correctly, so
-the mis-resolution the reporter saw most likely came from the
-class-reference path instead.</p>
-<p><strong>Where to look:</strong> <code>resolve_source_class_name</code> in <code>src/util.rs</code> bails
-out of the namespace preference entirely when the name contains a
-separator (<code>if !name.contains('\\')</code>), so only unqualified names get
-the current-namespace-first treatment. Extend it to qualified names:
-a name that does not start with <code>\</code> should try <code>{current_ns}\{name}</code>
-before the global fallback. Watch the import interaction — a leading
-segment matching a <code>use</code> import (<code>use Other\View;</code> + <code>View\Event</code>)
-must resolve to <code>Other\View\Event</code>, not <code>{current_ns}\View\Event</code>, so
-the import prefix has to be checked before applying the namespace
-prefix.</p>
-<p>Reproduce with a PSR-4 workspace mapping <code>Site\</code> to <code>src/</code>, a project
-<code>src/View/Event.php</code> declaring <code>Site\View\Event::siteOnly()</code>, a global
-<code>Event</code> stub without it, and a consumer in <code>namespace Site</code> calling
-<code>(new View\Event())-&gt;siteOnly()</code>.</p>
 
 
 
