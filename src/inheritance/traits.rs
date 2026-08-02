@@ -156,7 +156,6 @@ pub(crate) fn merge_traits_into(
                 );
             }
 
-            // Merge parent methods (skip private, skip duplicates)
             for method in &parent.methods {
                 if method.visibility == Visibility::Private {
                     continue;
@@ -170,7 +169,6 @@ pub(crate) fn merge_traits_into(
                 merged.methods.push(Arc::clone(method));
             }
 
-            // Merge parent properties
             for property in &parent.properties {
                 if property.visibility == Visibility::Private {
                     continue;
@@ -181,7 +179,6 @@ pub(crate) fn merge_traits_into(
                 merged.properties.push(Arc::clone(property));
             }
 
-            // Merge parent constants
             for constant in &parent.constants {
                 if constant.visibility == Visibility::Private {
                     continue;
@@ -234,8 +231,7 @@ pub(crate) fn merge_traits_into(
             // Visibility-only `as` change (no alias name) that applies
             // to this method.  For example, `TraitA::method as protected`
             // changes the visibility of `method` without creating an
-            // alias.  The last matching declaration wins, matching the
-            // in-order application this replaced.
+            // alias.  The last matching declaration wins.
             let vis_change = ctx
                 .aliases
                 .iter()

@@ -60,31 +60,6 @@ pub(crate) fn walk_body_for_diagnostics<'b>(
     }
 }
 
-/// Scan a statement for closure/arrow function expressions and walk
-/// their bodies with properly seeded scopes.
-///
-/// For each closure found, a fresh scope is created and seeded with
-/// `use()` variables from the outer scope plus the closure's own
-/// parameters.  For each arrow function, the outer scope is cloned
-/// and the arrow's parameters are added on top.  The body is then
-/// fully walked so that scope snapshots are recorded for every
-/// statement inside the closure/arrow function.
-/// Scan a statement for closure/arrow function expressions and record
-/// scope "shadow" snapshots inside their bodies.
-///
-/// When a closure/arrow function parameter shadows an outer variable
-/// (e.g. `fn(Request $request)` where the outer scope has a different
-/// `$request`), the scope cache would return the outer type for lookups
-/// inside the closure body.  We fix this by recording a scope snapshot
-/// at the closure body's start offset that removes shadowed variables.
-/// The scope cache lookup then returns `None` for those variables,
-/// calling `resolve_variable_types` which would re-enter the forward
-/// walker.
-///
-/// This approach avoids walking the entire closure body (which would
-/// override `resolve_variable_types` for ALL variables, including those
-/// from foreach bindings over generic collections where the outer
-/// resolver produces better types).
 /// Scan a **single** statement's direct expressions for closure/arrow
 /// function literals and walk their bodies with properly seeded scopes.
 ///
@@ -578,13 +553,6 @@ pub(crate) fn walk_closure_in_partial_call_args<'b, F>(
     }
 }
 
-/// Seed a closure/arrow function scope with parameter types, using
-/// inferred callable types as fallback for untyped parameters.
-///
-/// This mirrors [`seed_params`] but additionally accepts `inferred_types`
-/// from the enclosing call's callable signature.  When a parameter has
-/// no explicit type hint, the corresponding inferred type (matched by
-/// positional index) is used instead.
 /// Check whether a `/** … */` docblock is directly attached to the
 /// code at `fn_offset` — i.e. only whitespace separates the closing
 /// `*/` from `fn_offset`.  This prevents `@param` annotations from
@@ -611,6 +579,13 @@ pub(crate) fn is_docblock_adjacent(content: &str, fn_offset: usize) -> bool {
     trimmed.ends_with("*/")
 }
 
+/// Seed a closure/arrow function scope with parameter types, using
+/// inferred callable types as fallback for untyped parameters.
+///
+/// This mirrors [`seed_params`] but additionally accepts `inferred_types`
+/// from the enclosing call's callable signature.  When a parameter has
+/// no explicit type hint, the corresponding inferred type (matched by
+/// positional index) is used instead.
 pub(crate) fn seed_closure_params(
     scope: &mut ScopeState,
     parameter_list: &FunctionLikeParameterList<'_>,

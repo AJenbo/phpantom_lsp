@@ -222,13 +222,8 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
             .then(a.offset.cmp(&b.offset))
     });
 
-    // Sort scopes by start offset.
     ctx.scopes.sort_by_key(|s| s.0);
-
-    // Sort narrowing blocks by start offset.
     ctx.narrowing_blocks.sort_by_key(|s| s.0);
-
-    // Sort assert-narrowing offsets.
     ctx.assert_narrowing_offsets.sort();
 
     // Sort template_defs by name_offset for binary search / reverse scan.

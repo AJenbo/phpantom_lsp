@@ -11,9 +11,6 @@ impl PhpType {
     /// fully-qualified name. Names that are keywords/scalars are
     /// never passed to the callback.
     ///
-    /// This replaces the character-by-character `resolve_type_string`
-    /// function in `ast_update.rs` with a clean tree traversal.
-    ///
     /// # Examples
     ///
     /// ```ignore
@@ -689,12 +686,9 @@ impl PhpType {
     /// Substitute template parameter names throughout this type tree.
     ///
     /// Walks the entire type tree and replaces any `Named(s)` node whose
-    /// name appears as a key in `subs` with `PhpType::parse(replacement)`.
+    /// name appears as a key in `subs` with the corresponding `PhpType`.
     /// All other nodes are recursively rebuilt with their children
     /// substituted.
-    ///
-    /// This is the structured-type equivalent of the string-surgery
-    /// `apply_substitution` function in `inheritance.rs`.
     ///
     /// # Examples
     ///
@@ -906,10 +900,9 @@ impl PhpType {
     /// For `User[]`, returns `["User"]`.
     /// For `int|string`, returns `[]`.
     ///
-    /// This is the correct replacement for the string-based
-    /// `extract_class_names_from_type_string` in
-    /// `definition/type_definition.rs`, where go-to-type-definition
-    /// should jump to the container class, not its type arguments.
+    /// Go-to-type-definition uses this rather than [`extract_class_names`]
+    /// because it should jump to the container class, not its type
+    /// arguments.
     pub fn top_level_class_names(&self) -> Vec<String> {
         let mut names = Vec::new();
         self.collect_top_level_class_names(&mut names);

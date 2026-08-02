@@ -41,7 +41,6 @@ impl Backend {
                     };
                 }
 
-                // Try to resolve as a class or class::member reference.
                 let location_uri = self.resolve_see_target(target, uri, content);
 
                 ResolvedSeeRef {
@@ -60,15 +59,12 @@ impl Backend {
     /// - `ClassName::$property` → property name offset
     /// - `ClassName::CONSTANT` → constant name offset
     fn resolve_see_target(&self, target: &str, uri: &str, content: &str) -> Option<String> {
-        // Check for Class::member syntax.
         if let Some(sep) = target.find("::") {
             let class_name = &target[..sep];
             let mut member_part = target[sep + 2..].to_string();
-            // Strip trailing "()" from method references.
             if member_part.ends_with("()") {
                 member_part.truncate(member_part.len() - 2);
             }
-            // Strip leading "$" from property references.
             let member_name = member_part.strip_prefix('$').unwrap_or(&member_part);
 
             let cls = self.find_or_load_class(class_name)?;
@@ -97,7 +93,6 @@ impl Backend {
             let parsed_uri = Url::parse(&class_uri).ok()?;
             Some(format!("{}#L{}", parsed_uri, pos.line + 1))
         } else {
-            // Plain class name.
             let cls = self.find_or_load_class(target)?;
             let (class_uri, class_content) =
                 self.find_class_file_content(&cls.name, uri, content)?;

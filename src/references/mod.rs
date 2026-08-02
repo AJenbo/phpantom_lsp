@@ -244,7 +244,6 @@ pub(super) fn class_names_match(resolved: &str, target: &str, target_short: &str
     if resolved == target {
         return true;
     }
-    // When neither name is qualified, compare short names.
     if !resolved.contains('\\') && !target.contains('\\') {
         return resolved == target_short;
     }

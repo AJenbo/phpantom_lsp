@@ -1,9 +1,8 @@
 //! Autoload and vendor scanning.
 //!
-//! Relocated from `server.rs`: these `impl Backend` methods register
-//! vendor directories, (re)build the Composer-derived indexes, scan
-//! autoload files and PHAR archives, and populate the function/constant
-//! indices from a workspace scan.
+//! These `impl Backend` methods register vendor directories, (re)build
+//! the Composer-derived indexes, scan autoload files and PHAR archives,
+//! and populate the function/constant indices from a workspace scan.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -72,7 +71,6 @@ impl Backend {
     /// [`did_change_watched_files`](Self::did_change_watched_files)'s
     /// composer branch, factored out so it can run on a blocking thread.
     pub(crate) fn rescan_composer_indexes(&self, root: &std::path::Path) {
-        // Re-read composer.json for updated PSR-4 mappings.
         if let Some(pkg) = composer::read_composer_package(root) {
             let mut mappings = composer::extract_psr4_mappings_from_package(&pkg);
             let vendor_dir = composer::get_vendor_dir(&pkg);
@@ -225,7 +223,6 @@ impl Backend {
                 // without building a full AST.
                 let scan = classmap_scanner::find_symbols(&content);
 
-                // Populate function index.
                 {
                     let mut idx = self.symbols.autoload_function_index.write();
                     for fqn in &scan.functions {
@@ -233,7 +230,6 @@ impl Backend {
                     }
                 }
 
-                // Populate constant index.
                 {
                     let mut idx = self.symbols.autoload_constant_index.write();
                     for name in &scan.constants {
@@ -253,8 +249,6 @@ impl Backend {
                 let content_str = String::from_utf8_lossy(&content);
 
                 // ── Phar detection ──────────────────────────────────
-                // If this autoload file references a .phar archive,
-                // parse the phar and scan its PHP files for classes.
                 if let Some(file_dir) = canonical.parent() {
                     let phar_paths = composer::detect_phar_references(&content_str, file_dir);
                     for phar_path in phar_paths {
@@ -432,7 +426,6 @@ impl Backend {
 
         let class_count = classmap_entries.len();
 
-        // Register classes in the fqn_uri_index.
         {
             let mut idx = self.symbols.fqn_uri_index.write();
             for (fqn, path) in classmap_entries {

@@ -4,7 +4,8 @@
 /// class name.
 ///
 /// This is a superset of [`is_scalar_name`] that also includes PHPDoc-only
-/// pseudo-types and special names that `resolve_type_string` skips.
+/// pseudo-types and special names that should never be treated as class
+/// references.
 pub(crate) fn is_keyword_type(name: &str) -> bool {
     if is_scalar_name(name) {
         return true;
@@ -53,8 +54,12 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
     )
 }
 
-/// Whether a type name refers to a scalar / built-in type.
-/// Narrow primitive scalar check matching built-in PHP types.
+/// Whether a type name is a primitive scalar / built-in type: `int`,
+/// `float`, `string`, `bool`, `void`, `never`, `null`, `false`, `true`,
+/// `array`, `callable`, `iterable`, `resource` (and PHP aliases).
+///
+/// Unlike [`is_scalar_name`], this excludes `mixed`, `object`, `self`,
+/// `static`, `parent`, `class-string`, and other PHPDoc pseudo-types.
 pub(crate) fn is_primitive_scalar_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -248,12 +253,6 @@ pub(crate) fn is_class_like_name(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
 }
 
-/// Map a PHPStan/docblock type name to its native PHP equivalent.
-///
-/// Returns `Some("int")` for `positive-int`, `Some("string")` for
-/// `class-string`, `Some("array")` for `list`, etc.  Returns `None`
-/// for names that have no single native PHP type (`scalar`, `numeric`,
-/// `array-key`, `number`).  Class names pass through unchanged.
 /// Normalize keyword type casing and PHP aliases to their canonical forms.
 ///
 /// Unlike [`native_scalar_name`], this does **not** collapse PHPStan
@@ -290,12 +289,16 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
         | "array-key" | "scalar" | "numeric" => lower,
         // `number` is a pseudo-type only in lowercase; fall through so a
         // `Number` class keeps its casing and lowercase `number` stays as-is.
-        // Not a keyword — return the original name unchanged
-        // (preserving class name casing).
         _ => name.to_string(),
     }
 }
 
+/// Map a PHPStan/docblock type name to its native PHP equivalent.
+///
+/// Returns `Some("int")` for `positive-int`, `Some("string")` for
+/// `class-string`, `Some("array")` for `list`, etc.  Returns `None`
+/// for names that have no single native PHP type (`scalar`, `numeric`,
+/// `array-key`, `number`).  Class names pass through unchanged.
 pub(crate) fn native_scalar_name(name: &str) -> Option<&str> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {

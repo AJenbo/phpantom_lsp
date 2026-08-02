@@ -78,7 +78,6 @@ pub(crate) type VarClassStringResolver<'a> = Option<&'a dyn Fn(&str) -> Vec<Stri
 /// For method / static-method calls the arguments are currently not
 /// preserved by the extractors, so they always arrive as `""`.
 pub(crate) fn split_call_subject(subject: &str) -> Option<(&str, &str)> {
-    // Subject must end with ')'.
     let inner = subject.strip_suffix(')')?;
     // Find the matching '(' for the stripped ')' by scanning backwards
     // and tracking balanced parentheses.  This correctly handles nested
@@ -174,7 +173,6 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 return Some(resolved);
             }
 
-            // Find which parameter index corresponds to $param_name
             let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
             let is_variadic = params
                 .get(param_idx)
@@ -201,20 +199,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // the condition and the template param is substituted with
                 // the concrete class name — this is the existing behavior.
                 //
-                // We distinguish template params from real classes by
-                // attempting to resolve the bound via the class loader.
-                // Template params like `T` won't resolve; real classes
-                // like `FormFlowTypeInterface` will.
-                //
-                // We distinguish template params from concrete class
-                // bounds by comparing the bound name to `then_type`.
-                // When both match (e.g. condition=`class-string<T>`,
-                // then=`T`), the bound is a template parameter and any
-                // `::class` literal satisfies the condition — the
-                // template is substituted with the concrete class name.
-                // When they differ (e.g. condition=`class-string<FormFlowTypeInterface>`,
-                // then=`FormFlowInterface`), the bound is a concrete
-                // class and a subtype check is required.
+                // We distinguish the two by checking whether the bound name
+                // is one of the method/function's own `@template` parameter
+                // names (`tpl.params`), not by resolving it as a class:
+                // `class_loader` resolution below determines whether a
+                // *concrete* bound exists in the project, but a bare
+                // template name like `T` would never appear there anyway,
+                // so membership in `tpl.params` is the only reliable signal
+                // for which case we're in.
                 let class_string_bound_name: Option<&str> = match condition.kind() {
                     TypeKind::ClassString(Some(inner)) => match inner.kind() {
                         TypeKind::Named(name) => Some(name.as_str()),
@@ -223,10 +215,6 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     _ => None,
                 };
 
-                // Check if the bound is a template parameter by comparing
-                // it to then_type.  `class-string<T> ? T : mixed` is a
-                // template pattern; `class-string<X> ? Y : Z` where X≠Y
-                // is a concrete bound check.
                 let bound_is_template = class_string_bound_name
                     .is_some_and(|name| tpl.params.iter().any(|tp| tp.as_str() == name));
 
@@ -598,7 +586,6 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 )
             }
         }
-        // Non-Conditional PhpType variant (replaces Concrete)
         _ => {
             if conditional.is_uninformative_return() {
                 return None;
@@ -1018,13 +1005,10 @@ pub fn split_text_args(text: &str) -> Vec<&str> {
     result
 }
 
-/// Extract a class name from textual `X::class` syntax.
-///
-/// Matches strings like `"SessionManager::class"`, `"\\App\\Foo::class"`,
-/// returning the class name portion (`"SessionManager"`, `"\\App\\Foo"`).
 /// If `name` is `"self"`, `"static"`, or `"parent"`, substitute the
 /// calling-site class name so that the resolved type is concrete rather
-/// than relative to the method-owner class.
+/// than relative to the method-owner class. Returns `None` for any other
+/// name.
 fn resolve_self_keyword(name: &str, calling_class_name: Option<&str>) -> Option<String> {
     match name {
         "self" | "static" | "parent" => calling_class_name.map(|n| n.to_string()),
@@ -1045,6 +1029,10 @@ fn default_class_string_name(param: Option<&ParameterInfo>) -> Option<String> {
     extract_class_name_from_text(param?.default_value.as_deref()?)
 }
 
+/// Extract a class name from textual `X::class` syntax.
+///
+/// Matches strings like `"SessionManager::class"`, `"\\App\\Foo::class"`,
+/// returning the class name portion (`"SessionManager"`, `"\\App\\Foo"`).
 fn extract_class_name_from_text(text: &str) -> Option<String> {
     let trimmed = text.trim();
     let name = trimmed.strip_suffix("::class")?;
@@ -1200,7 +1188,6 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 return Some(resolved);
             }
 
-            // Find which parameter index corresponds to param
             let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
 
             // Bind arguments to parameters following PHP's rules (positional
@@ -1523,7 +1510,6 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 )
             }
         }
-        // Non-Conditional PhpType variant (replaces Concrete)
         _ => {
             if conditional.is_uninformative_return() {
                 return None;
@@ -1595,7 +1581,6 @@ pub fn resolve_conditional_without_args_and_defaults(
                 resolve_conditional_without_args_and_defaults(else_type, params, template_defaults)
             }
         }
-        // Non-Conditional PhpType variant (replaces Concrete)
         _ => {
             if conditional.is_uninformative_return() {
                 return None;

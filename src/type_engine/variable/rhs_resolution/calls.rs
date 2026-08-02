@@ -120,7 +120,6 @@ pub(crate) fn build_function_template_subs(
             }
             TemplateBindingMode::ArrayElement => {
                 // `@param T[] $items` — resolve individual array elements.
-                // Empty array `[]` → element type is `never`.
                 if arg_text.starts_with('[') && arg_text.ends_with(']') {
                     let inner = arg_text[1..arg_text.len() - 1].trim();
                     if inner.is_empty() {
@@ -617,13 +616,11 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         _ => String::new(),
                     };
                     if !method_name.is_empty() {
-                        // Check current class first, then walk parent chain.
                         let method_ret = ctx
                             .current_class
                             .get_method_ci(&method_name)
                             .and_then(|m| m.return_type.clone());
                         let method_ret = method_ret.or_else(|| {
-                            // Walk parent chain to find the method.
                             let mut parent_name = ctx
                                 .current_class
                                 .parent_class
@@ -1139,9 +1136,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
     vec![]
 }
 
-/// Resolve an instance method call: `$this->method()`, `$var->method()`,
-/// chained calls, and other object expressions via AST-based resolution.
-/// Resolve a method call (regular or null-safe) from its constituent parts.
+/// Resolve a method call (regular or null-safe) from its constituent parts:
+/// the object expression (`$this`, a variable, or an arbitrary chained
+/// expression), the method selector, and the argument list.
 ///
 /// Both `$obj->method()` and `$obj?->method()` share the same resolution
 /// logic — the null-safe operator only affects whether `null` propagates
@@ -1902,7 +1899,6 @@ pub(super) fn resolve_rhs_static_call(
                                 union_types.push(resolved);
                             }
                         } else {
-                            // Try to resolve through resolve_method_return_types_with_args
                             let results = Backend::resolve_method_return_types_with_args(
                                 target,
                                 &method_name_str,
@@ -1942,7 +1938,7 @@ pub(super) fn resolve_rhs_static_call(
                         return vec![ResolvedType::from_type_string(combined)];
                     }
                 }
-                // Fallback: use first target.
+                // None of the targets yielded a return type.
                 return vec![];
             }
             if let Some(first) = targets.first() {
@@ -2146,8 +2142,9 @@ fn try_resolve_validated_shape(
 /// The request class behind a `ValidatedInput` receiver.
 ///
 /// Covers both the direct chain (`$request->safe()->only(…)`) and the
-/// two-step form (`$safe = $request->safe(); $safe->only(…)`), which L37's
-/// assignment tracing already resolves back to the request variable.
+/// two-step form (`$safe = $request->safe(); $safe->only(…)`), which
+/// `resolve_var_types`'s assignment tracing already resolves back to the
+/// request variable.
 fn safe_source_owner(
     object: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,

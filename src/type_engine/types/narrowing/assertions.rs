@@ -250,13 +250,6 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
     None
 }
 
-/// Apply narrowing from `@phpstan-assert` / `@psalm-assert` annotations
-/// on a function or static method called as a standalone expression statement.
-///
-/// Only `AssertionKind::Always` assertions are applied here — the
-/// `IfTrue` / `IfFalse` variants are handled by
-/// `try_apply_assert_condition_narrowing`.
-///
 /// Map a bare scalar / pseudo-type to the type-guard kind that narrows it.
 ///
 /// So `@phpstan-assert string $x` (PHPUnit's `assertIsString`) narrows like

@@ -152,7 +152,6 @@ pub fn build_scope_methods_for_builder(
         }
     };
 
-    // Only synthesize scopes for actual Eloquent models.
     if !extends_eloquent_model(&model_class, class_loader) {
         return Vec::new();
     }
@@ -199,7 +198,6 @@ pub fn build_scope_methods_for_builder(
 
             let mut m = instance_method;
 
-            // Apply substitutions to the return type.
             if let Some(ref mut ret) = m.return_type {
                 *ret = ret.substitute(&subs);
 

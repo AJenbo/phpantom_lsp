@@ -152,7 +152,6 @@ impl Backend {
             }
         }
 
-        // Sort: by URI, then by position.
         locations.sort_by(|a, b| {
             a.uri
                 .as_str()

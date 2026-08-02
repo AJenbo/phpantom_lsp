@@ -193,11 +193,9 @@ pub(in crate::type_engine) fn statement_unconditionally_exits(stmt: &Statement<'
 fn if_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
     match body {
         IfBody::Statement(stmt_body) => {
-            // Then-body must exit
             if !statement_unconditionally_exits(stmt_body.statement) {
                 return false;
             }
-            // All elseif bodies must exit
             if !stmt_body
                 .else_if_clauses
                 .iter()
@@ -205,14 +203,12 @@ fn if_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
             {
                 return false;
             }
-            // Else must exist and exit
             stmt_body
                 .else_clause
                 .as_ref()
                 .is_some_and(|ec| statement_unconditionally_exits(ec.statement))
         }
         IfBody::ColonDelimited(colon_body) => {
-            // Then-body: last statement must exit
             if !colon_body
                 .statements
                 .last()
@@ -220,7 +216,6 @@ fn if_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
             {
                 return false;
             }
-            // All elseif bodies must exit
             if !colon_body.else_if_clauses.iter().all(|ei| {
                 ei.statements
                     .last()
@@ -228,7 +223,6 @@ fn if_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
             }) {
                 return false;
             }
-            // Else must exist and exit
             colon_body.else_clause.as_ref().is_some_and(|ec| {
                 ec.statements
                     .last()
@@ -270,8 +264,6 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
-    // Only applies when the then-body exits and there are no
-    // elseif/else branches (simple guard clause pattern).
     if !then_body_unconditionally_exits(&if_stmt.body) {
         return;
     }
@@ -370,7 +362,7 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
         && let Some(info) = extract_call_assertions(call, ctx)
     {
         // The then-body exits, so we're in the "else" conceptually.
-        // inverted=true, same logic as try_apply_assert_condition_narrowing
+        // inverted=true, same logic as apply_phpstan_assert_condition_narrowing.
         let function_returned_true = condition_negated;
 
         for assertion in &info.assertions {
@@ -434,7 +426,6 @@ pub(in crate::type_engine) fn try_extract_in_array<'b>(
         return None;
     }
 
-    // Third argument must be the literal `true` (strict mode).
     let third_expr = match &args[2] {
         Argument::Positional(pos) => pos.value,
         Argument::Named(named) => named.value,
@@ -443,7 +434,6 @@ pub(in crate::type_engine) fn try_extract_in_array<'b>(
         return None;
     }
 
-    // First argument must be our variable.
     let first_expr = match &args[0] {
         Argument::Positional(pos) => pos.value,
         Argument::Named(named) => named.value,
@@ -456,7 +446,6 @@ pub(in crate::type_engine) fn try_extract_in_array<'b>(
         return None;
     }
 
-    // Second argument is the haystack expression.
     let second_expr = match &args[1] {
         Argument::Positional(pos) => pos.value,
         Argument::Named(named) => named.value,

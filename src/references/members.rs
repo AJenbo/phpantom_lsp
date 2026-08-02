@@ -382,7 +382,6 @@ impl Backend {
             // pick up property declaration sites.
             if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
                 for class in &classes {
-                    // Filter by hierarchy when available.
                     if let Some(hier) = declaration_scope.or(hierarchy) {
                         let class_fqn = class.fqn().to_string();
                         if !hier.contains(&class_fqn) {
@@ -433,8 +432,13 @@ impl Backend {
 
     /// Resolve the class hierarchy for a `MemberAccess` subject.
     ///
-    /// Returns `Some(set_of_fqns)` when the subject can be resolved to at
-    /// least one class, or `None` when resolution fails entirely.
+    /// Returns `(hierarchy, declaration_scope)`, both `None` when the
+    /// subject cannot be resolved to at least one class.  `hierarchy` scopes
+    /// member *access* sites (the seed FQNs' full ancestor/descendant/
+    /// Laravel-builder closure); `declaration_scope` additionally narrows
+    /// *declaration* sites to the classes that actually declare
+    /// `member_name`.  The two coincide except for Laravel macros, where the
+    /// macro's registered target is narrower than the full class hierarchy.
     pub(super) fn resolve_member_access_scopes(
         &self,
         uri: &str,
@@ -540,12 +544,10 @@ impl Backend {
         )
     }
 
-    /// Resolve a member access subject to zero or more class FQNs.
-    ///
-    /// This is a lightweight resolution path used during reference scanning.
-    /// It handles the common cases (`self`, `static`, `$this`, `parent`,
-    /// Resolve a member-access subject to the FQN(s) of its type(s)
-    /// using the shared subject resolution utility.
+    /// Resolve a member-access subject to the FQN(s) of its type(s), using
+    /// the shared subject-resolution utility.  Falls back to a Laravel
+    /// static-builder-entrypoint heuristic (e.g. `Model::where(...)`) when
+    /// the general resolver returns nothing.
     pub(super) fn resolve_subject_to_fqns(
         &self,
         subject_text: &str,
@@ -649,7 +651,6 @@ impl Backend {
         let mut hierarchy = HashSet::new();
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
 
-        // Insert the seeds.
         for fqn in seed_fqns {
             hierarchy.insert(normalize_fqn(fqn).to_string());
         }
@@ -1051,7 +1052,6 @@ impl Backend {
             None => return,
         };
 
-        // Parent class chain.
         if let Some(ref parent) = cls.parent_class {
             let parent_fqn = normalize_fqn(parent);
             if hierarchy.insert(parent_fqn.clone()) {
@@ -1059,7 +1059,6 @@ impl Backend {
             }
         }
 
-        // Interfaces.
         for iface in &cls.interfaces {
             let iface_fqn = normalize_fqn(iface);
             if hierarchy.insert(iface_fqn.clone()) {
@@ -1067,7 +1066,6 @@ impl Backend {
             }
         }
 
-        // Used traits.
         for trait_name in &cls.used_traits {
             let trait_fqn = normalize_fqn(trait_name);
             if hierarchy.insert(trait_fqn.clone()) {
@@ -1075,7 +1073,6 @@ impl Backend {
             }
         }
 
-        // Mixins.
         for mixin in &cls.mixins {
             let mixin_fqn = normalize_fqn(mixin);
             if hierarchy.insert(mixin_fqn.clone()) {

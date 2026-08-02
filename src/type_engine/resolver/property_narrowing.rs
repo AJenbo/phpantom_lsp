@@ -8,6 +8,17 @@ use crate::types::ClassInfo;
 
 use super::{Loaders, ResolutionCtx, VarResolutionCtx};
 
+/// Apply instanceof / assert narrowing for a property-access path.
+///
+/// This is the property-level analog of the narrowing that
+/// [`crate::type_engine::variable::resolution::resolve_variable_in_statements`]
+/// performs for plain variables.  It re-parses the source, locates
+/// the enclosing method body, and walks its statements with a
+/// [`VarResolutionCtx`] whose `var_name` is the full property path
+/// (e.g. `$this->timeline`).  The existing narrowing functions in
+/// [`crate::type_engine::types::narrowing`] already support property paths
+/// via [`crate::type_engine::types::narrowing::expr_to_subject_key`], so no
+/// changes to those functions are required.
 pub(crate) fn apply_property_narrowing(
     property_path: &str,
     current_class: &ClassInfo,

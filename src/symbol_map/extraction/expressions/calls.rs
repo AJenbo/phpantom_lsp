@@ -47,7 +47,6 @@ pub(super) fn extract_instantiation_expr<'a>(
         }
     }
     if let Some(ref args) = inst.argument_list {
-        // Emit call site for constructor: `new ClassName(...)`
         let class_text = expr_to_subject_text(inst.class);
         if !class_text.is_empty() {
             emit_call_site(
@@ -125,7 +124,6 @@ pub(super) fn extract_call_expr<'a>(
                     extract_from_expression(func_call.function, ctx, scope_start);
                 }
             }
-            // Emit call site for function call
             let func_text = expr_to_subject_text(func_call.function);
             if !func_text.is_empty() {
                 emit_call_site(
@@ -207,7 +205,6 @@ pub(super) fn extract_call_expr<'a>(
                         &mut ctx.spans,
                     );
                 }
-                // Emit call site for method call: `$subject->method(...)`
                 emit_call_site(
                     format!("{}->{}", subject_text, member_name),
                     &method_call.argument_list,
@@ -265,7 +262,6 @@ pub(super) fn extract_call_expr<'a>(
                         &mut ctx.spans,
                     );
                 }
-                // Emit call site for null-safe method call.
                 // Use `->` so resolve_callable handles it the same
                 // as regular method calls.
                 emit_call_site(
@@ -308,7 +304,6 @@ pub(super) fn extract_call_expr<'a>(
                         &mut ctx.spans,
                     );
                 }
-                // Emit call site for static method call: `Class::method(...)`
                 emit_call_site(
                     format!("{}::{}", subject_text, member_name),
                     &static_call.argument_list,

@@ -24,13 +24,9 @@ use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 /// Resolve a `$variable` that holds a class-string (e.g. `$cls = User::class`)
 /// to the referenced class(es).
 ///
-/// This is used when the access kind is `::` (`$cls::`) — instead of
-/// resolving the variable to its *value type* (`string`), we resolve it
-/// to the *referenced class* so that static members are offered.
-///
-/// Handles simple assignments (`$cls = User::class`), match expressions
-/// (`$cls = match(...) { ... => A::class, ... => B::class }`), and
-/// ternary / null-coalescing branches.
+/// Instead of resolving the variable to its *value type* (`string`),
+/// this resolves it to the *referenced class* so that static members
+/// are offered — see the module docs for the supported patterns.
 pub(in crate::type_engine) fn resolve_class_string_targets(
     var_name: &str,
     current_class: &ClassInfo,

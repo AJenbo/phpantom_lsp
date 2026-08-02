@@ -23,20 +23,8 @@ use crate::virtual_members::ResolvedClassCache;
 use super::ELOQUENT_BUILDER_FQN;
 
 /// Build static virtual methods by forwarding Eloquent Builder's public
-/// instance methods onto the model class.
-///
-/// Laravel's `Model::__callStatic()` delegates static calls to
-/// `static::query()`, which returns a `Builder<static>`.  This function
-/// loads the Builder class, fully resolves it (including `@mixin`
-/// `Query\Builder` members), and converts each public instance method
-/// into a static virtual method on the model.
-///
-/// Return type mapping:
-/// - `static`, `$this`, `self` → `\Illuminate\Database\Eloquent\Builder<ConcreteModel>`
-///   (the chain continues on the builder, not the model).
-/// - Template parameters (e.g. `TModel`) → the concrete model class name.
-///
-/// Methods whose name starts with `__` (magic methods) are skipped.
+/// instance methods onto the model class. See the module docs for the
+/// return-type mapping.
 pub(super) fn build_builder_forwarded_methods(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -127,7 +115,6 @@ pub(super) fn build_builder_forwarded_methods(
         if method.visibility != Visibility::Public {
             continue;
         }
-        // Skip magic methods (__construct, __call, etc.).
         if method.name.starts_with("__") {
             continue;
         }

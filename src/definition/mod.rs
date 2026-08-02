@@ -32,15 +32,15 @@
 ///   - **Function calls**: `foo()` jumps to the return type's class
 ///   - For union types, multiple locations are returned (one per class)
 ///
-/// - [`resolve`]: Core entry points — word extraction, name resolution,
+/// - [`resolve`]: Core entry points — symbol-map lookup, name resolution,
 ///   same-file / PSR-4 definition lookup, `self`/`static`/`parent` handling,
-///   and standalone function definition resolution.
+///   standalone function definition resolution, and variable definition
+///   resolution (`$var` jump-to-definition, assignment / parameter /
+///   foreach / catch detection, and type-hint resolution at definition
+///   sites).
 /// - [`member`]: Member-access resolution — `->`, `?->`, `::` operator
 ///   detection, subject extraction, member classification, inheritance-chain
 ///   walking (parent classes, traits, mixins), and member position lookup.
-/// - [`variable`]: Variable definition resolution — `$var` jump-to-definition,
-///   assignment / parameter / foreach / catch detection, and type-hint
-///   resolution at definition sites.
 /// - [`implementation`]: Go-to-implementation — finding concrete classes that
 ///   implement an interface or extend an abstract class, and locating the
 ///   concrete method definitions within those classes.

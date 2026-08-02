@@ -67,14 +67,11 @@ pub(super) fn enrich_builder_type_in_scope(
 ) -> Option<PhpType> {
     use crate::virtual_members::laravel::{ELOQUENT_BUILDER_FQN, extends_eloquent_model};
 
-    // Only applies inside scope methods: either the scopeX naming
-    // convention or the #[Scope] attribute.
     let is_convention_scope = method_name.starts_with("scope") && method_name.len() > 5;
     if !is_convention_scope && !has_scope_attr {
         return None;
     }
 
-    // Only applies when the enclosing class extends Eloquent Model.
     if !extends_eloquent_model(current_class, class_loader) {
         return None;
     }
@@ -96,7 +93,6 @@ pub(super) fn enrich_builder_type_in_scope(
         return None;
     }
 
-    // Build the enriched type with the enclosing model as the generic arg.
     Some(PhpType::generic(
         type_name,
         vec![PhpType::named(atom(current_class.name.as_ref()))],
@@ -580,8 +576,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         ctx.top_level_scope.clone()
     };
 
-    // Shadow ctx with one that carries the top-level scope, reusing
-    // the existing `with_cursor_offset` helper to copy all fields.
+    // Shadow ctx with one that carries the pre-computed top-level
+    // scope, copying all other fields unchanged.
     let ctx_with_tls;
     let ctx: &VarResolutionCtx<'_> = if top_level_scope.is_some() && ctx.top_level_scope.is_none() {
         ctx_with_tls = VarResolutionCtx {
@@ -1950,7 +1946,6 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
 /// `foo($bar)`, this function detects that `$bar` is passed to a `&`
 /// parameter typed as `Baz` and resolves `$bar` to `Baz`.
 ///
-/// Currently handles standalone function calls (via `function_loader`).
 /// Handles standalone function calls, instance method calls, static
 /// method calls, and constructor calls.
 pub(super) fn try_apply_pass_by_reference_type(

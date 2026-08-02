@@ -509,10 +509,8 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
             let id_start = id_span.start.offset;
             let id_end = id_span.end.offset;
 
-            // Emit a span for the identifier itself.
             emit_identifier_span(name, id_start, id_end, sink.spans);
 
-            // Recurse into generic parameters if present.
             if let Some(params) = &r.parameters {
                 emit_generic_params(params, sink);
             }
@@ -580,7 +578,6 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
             let kw_end = c.keyword.span.end.offset;
             emit_identifier_span(kw_name, kw_start, kw_end, sink.spans);
 
-            // Recurse into parameter types and return type.
             if let Some(spec) = &c.specification {
                 for param in &spec.parameters.entries {
                     if let Some(param_type) = &param.parameter_type {
@@ -725,8 +722,6 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
         | type_ast::Type::UnspecifiedLiteralString(k)
         | type_ast::Type::UnspecifiedLiteralFloat(k)
         | type_ast::Type::NonEmptyUnspecifiedLiteralString(k) => {
-            // `static`, `self`, and `parent` are parsed as keywords by
-            // mago but should still produce SelfStaticParent spans.
             let name = bytes_to_str(k.value);
             if let Some(ssp_kind) = self_static_parent_kind(name) {
                 let start = k.span.start.offset;
@@ -737,7 +732,6 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
                     kind: SymbolKind::SelfStaticParent(ssp_kind),
                 });
             }
-            // All other keywords (int, string, void, etc.) are non-navigable.
         }
 
         // ── Literal types ───────────────────────────────────────────
@@ -759,7 +753,7 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
 
 /// Emit a span for a type identifier (class name, or self/static/parent).
 ///
-/// Checks the `NON_NAVIGABLE` list and emits either a `ClassReference` or
+/// Checks [`is_navigable_type`] and emits either a `ClassReference` or
 /// `SelfStaticParent` span as appropriate.
 fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<SymbolSpan>) {
     // Handle `self`, `static`, `parent` — they're class-like but get
@@ -911,7 +905,6 @@ fn tag_description<'a>(value: &TagValue<'a>) -> Option<Text<'a>> {
 /// - `function()` → `FunctionCall` (standalone function, no `::` or `#`)
 /// - `http://...` / `https://...` → skipped (URLs)
 fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolSpan>) {
-    // Skip URLs.
     if reference.starts_with("http://") || reference.starts_with("https://") {
         return;
     }
@@ -937,7 +930,6 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         (reference, 0u32)
     };
 
-    // Check for `Class::member` form.
     if let Some(sep_pos) = reference.find("::") {
         let class_part = &reference[..sep_pos];
         let member_part = &reference[sep_pos + 2..];
@@ -946,7 +938,6 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             return;
         }
 
-        // Accept regular class names and self/static/parent.
         let clean_class = class_part.trim_start_matches('\\');
         let is_self_like = self_static_parent_kind(clean_class).is_some();
         if !is_self_like && !is_navigable_type(clean_class) {
@@ -966,7 +957,6 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         // consumers re-prefix the current namespace, doubling it.
         emit_identifier_span(class_part, class_start, class_end, spans);
 
-        // Emit a MemberAccess span for the member portion.
         let member_start = file_offset + sep_pos as u32 + 2 - prefix_len;
         let is_property = member_part.starts_with('$');
         let member_name = if is_property {
@@ -1025,8 +1015,9 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         });
     } else {
         // No `::` or `#` — either a class name or a standalone function.
-        // If it looks like a class (starts with uppercase or `\`),
-        // emit as ClassReference; otherwise skip.
+        // Bail out unless this is self/static/parent or a navigable type
+        // name; the uppercase/lowercase heuristic below then decides
+        // which of the two it is.
         let clean = reference.trim_start_matches('\\');
         let self_like = self_static_parent_kind(clean);
         if clean.is_empty() || (self_like.is_none() && !is_navigable_type(clean)) {
@@ -1048,7 +1039,6 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             let end = file_offset + reference.len() as u32 - prefix_len;
             spans.push(class_ref_span(start, end, reference));
         } else {
-            // Lowercase first char — treat as function reference.
             let start = file_offset;
             let end = file_offset + reference.len() as u32 - prefix_len;
             spans.push(SymbolSpan {

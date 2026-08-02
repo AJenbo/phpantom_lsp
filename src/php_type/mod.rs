@@ -1461,7 +1461,6 @@ impl PhpType {
                 if native.len() != members.len() {
                     return None;
                 }
-                // Deduplicate
                 let mut deduped = Vec::new();
                 for ty in native {
                     if !deduped
@@ -1497,8 +1496,6 @@ impl PhpType {
 
     /// Return the top-level union members if this is a union type,
     /// or a single-element slice containing `self` otherwise.
-    ///
-    /// This replaces `split_top_level_union` for structured types.
     pub fn union_members(&self) -> Vec<&PhpType> {
         match self.kind() {
             TypeKind::Union(members) => members.iter().collect(),
@@ -2163,13 +2160,6 @@ impl PhpType {
         }
     }
 
-    /// Check whether two `PhpType` values refer to the same type,
-    /// ignoring namespace qualification differences.
-    ///
-    /// Returns `true` when the only difference is that one uses a
-    /// fully-qualified class name (e.g. `App\Models\User`) while the
-    /// other uses the short name (`User`). Handles unions, intersections,
-    /// nullable types, and generic parameters.
     /// Whether this type carries structural information beyond a bare
     /// class name or scalar keyword.
     ///
@@ -2177,10 +2167,6 @@ impl PhpType {
     /// class-string, key-of, value-of, conditionals, index access,
     /// int ranges, and literals.  Returns `false` for plain `Named`,
     /// `Raw`, and `Nullable(Named(_))`.
-    ///
-    /// This replaces the `has_type_structure` helper in
-    /// `foreach_resolution.rs` and the string-based checks like
-    /// `.contains('<')` scattered across the codebase.
     pub fn has_type_structure(&self) -> bool {
         match self.kind() {
             TypeKind::Named(_) | TypeKind::Raw(_) => false,
@@ -2203,9 +2189,8 @@ impl PhpType {
     /// Returns `false` for those vague keywords and for `Raw` types
     /// that lack structural markers.
     ///
-    /// This replaces `is_informative_type_string()` in
-    /// `rhs_resolution.rs`, avoiding a parse→check round-trip when the
-    /// caller already has a `PhpType`.
+    /// Operates on the structured type directly, avoiding a
+    /// parse→check round-trip when the caller already has a `PhpType`.
     pub fn is_informative(&self) -> bool {
         match self.kind() {
             TypeKind::Generic(..) => true,

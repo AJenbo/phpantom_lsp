@@ -279,12 +279,11 @@ impl Backend {
     /// [`SubjectExpr::Variable`], or [`SubjectExpr::NewExpr`].
     /// Any other variant falls through to `resolve_target_classes_expr`.
     ///
-    /// Resolves the return type of a structured [`SubjectExpr`] callee +
-    /// argument text.  Optionally captures the raw return type hint
-    /// (with template substitutions applied) into `return_type_hint_out`
-    /// when provided.  This preserves generic
-    /// type parameters (e.g. `HasMany<Translation, Tag>`) that would
-    /// otherwise be lost when converting to `Vec<Arc<ClassInfo>>`.
+    /// Optionally captures the raw return type hint (with template
+    /// substitutions applied) into `return_type_hint_out` when provided.
+    /// This preserves generic type parameters (e.g. `HasMany<Translation,
+    /// Tag>`) that would otherwise be lost when converting to
+    /// `Vec<Arc<ClassInfo>>`.
     pub(crate) fn resolve_call_return_types_expr_with_hint(
         callee: &SubjectExpr,
         text_args: &str,
@@ -540,7 +539,6 @@ impl Backend {
                         ctx.resolved_class_cache,
                     );
 
-                    // Capture return type hint for static method calls.
                     if let Some(ref mut hint_out) = return_type_hint_out
                         && let Some(m) = merged.get_method_ci(method_name)
                         && let Some(ref ret) = m.return_type
@@ -653,7 +651,6 @@ impl Backend {
                     return vec![cls];
                 }
 
-                // Check for array element/preserving functions first.
                 let is_array_element_func = ARRAY_ELEMENT_FUNCS
                     .iter()
                     .any(|f| f.eq_ignore_ascii_case(func_name));
@@ -684,7 +681,6 @@ impl Backend {
                     }
                 }
 
-                // Regular function lookup.
                 if let Some(fl) = ctx.function_loader
                     && let Some(func_info) = fl(func_name, 0)
                 {
@@ -757,7 +753,6 @@ impl Backend {
                     }
 
                     if let Some(ref ret) = func_info.return_type {
-                        // Capture the function's return type hint.
                         if let Some(ref mut hint_out) = return_type_hint_out {
                             **hint_out = Some(ret.clone());
                         }
@@ -1085,7 +1080,6 @@ impl Backend {
             //    ClassName that SubjectExpr::parse couldn't distinguish
             //    from a function name) ───────────────────────────────
             _ => {
-                // Resolve the callee expression to class(es).
                 let callee_classes = ResolvedType::into_arced_classes(
                     crate::type_engine::resolver::resolve_target_classes_expr(
                         callee,
@@ -1633,9 +1627,8 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
         return Some(PhpType::named(cls.fqn()));
     }
 
-    // Class constants: look up the constant and use its type hint
-    // when available.  Fall back to the owning class type (which is
-    // conservative but avoids leaving the raw template param name).
+    // Class constants: use the declared type hint when available,
+    // otherwise infer a type from the initializer value.
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         &cls,
         ctx.class_loader,

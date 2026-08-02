@@ -120,7 +120,6 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing_inverse(
     }
 }
 
-/// Replace `results` with only the resolved classes for `cls_name`.
 /// Narrow `results` to include only classes matching `cls_name`.
 ///
 /// When `exact` is `false` (the common `instanceof` / `is_a()` case),
@@ -641,7 +640,6 @@ fn try_extract_assert_instanceof<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
 ) -> Option<InstanceofExtraction> {
-    // Unwrap parenthesised wrapper on the whole expression
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,

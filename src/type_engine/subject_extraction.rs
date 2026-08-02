@@ -40,8 +40,7 @@ use crate::util::strip_fqn_prefix;
 
 // ─── Character-level helpers ────────────────────────────────────────────────
 //
-// These were previously in `util.rs` but are only consumed by the
-// subject-extraction logic in this module, so they live here now.
+// Only consumed by the subject-extraction logic in this module.
 
 /// Skip backwards past a balanced parenthesised group `(…)` in a char slice.
 ///

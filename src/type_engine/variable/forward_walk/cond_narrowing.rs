@@ -897,11 +897,6 @@ pub(crate) fn resolve_in_array_element_type_fw(
     raw_type.and_then(|t| t.extract_element_type().cloned())
 }
 
-/// Apply null narrowing for the truthy branch.
-/// Build a [`VarResolutionCtx`] from a variable name and forward-walk context.
-///
-/// Shared helper used by the narrowing functions in this module to avoid
-/// repeating the struct construction at every call site.
 /// Apply `@phpstan-assert-if-true` / `@phpstan-assert-if-false` narrowing
 /// from a function or static/instance method call used as a condition.
 ///
@@ -1166,6 +1161,10 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
     }
 }
 
+/// Build a [`VarResolutionCtx`] from a variable name and forward-walk context.
+///
+/// Shared helper used by the narrowing functions in this module to avoid
+/// repeating the struct construction at every call site.
 pub(crate) fn build_var_ctx<'a>(
     var_name: &'a str,
     ctx: &'a ForwardWalkCtx<'_>,
@@ -1188,9 +1187,6 @@ pub(crate) fn build_var_ctx<'a>(
     }
 }
 
-///
-/// Handles `$x !== null`, `$x != null`, `isset($x)`, `!empty($x)`,
-/// `!is_null($x)`, and truthiness checks.
 /// Apply type-guard narrowing in the truthy branch.
 ///
 /// When `is_object($var)` (or `is_array`, `is_string`, etc.) appears
@@ -1349,6 +1345,10 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
     }
 }
 
+/// Apply null narrowing for the truthy branch.
+///
+/// Handles `$x !== null`, `$x != null`, `isset($x)`, `!empty($x)`,
+/// `!is_null($x)`, and truthiness checks.
 pub(crate) fn apply_null_narrowing_truthy<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,

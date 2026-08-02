@@ -1,15 +1,11 @@
-/// Foreach and destructuring variable type resolution.
+/// Iterable element/key type extraction from a class's generic
+/// annotations (`@extends Collection<int, User>`,
+/// `@implements IteratorAggregate<int, User>`), plus
+/// [`resolve_expression_type`], a thin wrapper over the unified RHS
+/// pipeline.
 ///
-/// This submodule handles resolving types for variables that appear as:
-///
-///   - **Foreach value/key variables:** `foreach ($items as $key => $item)`
-///     where the iterated expression has a generic iterable type annotation.
-///   - **Array/list destructuring:** `[$a, $b] = getUsers()` or
-///     `['name' => $name] = $data` where the RHS has a generic iterable
-///     or array shape type annotation.
-///
-/// These functions are self-contained: they receive a [`VarResolutionCtx`]
-/// and push resolved [`ResolvedType`] values into a results vector.
+/// Consumed by the forward walker's foreach/destructuring handling,
+/// array-access resolution, and raw type inference.
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -35,10 +31,6 @@ pub(crate) fn resolve_expression_type<'b>(
     Some(ResolvedType::types_joined(&resolved))
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
-
-// ─── Foreach Resolution ─────────────────────────────────────────────
-
 /// Known interface/class names whose generic parameters describe
 /// iteration types in PHP's `foreach`.
 const ITERABLE_IFACE_NAMES: &[&str] = &[
@@ -52,10 +44,10 @@ const ITERABLE_IFACE_NAMES: &[&str] = &[
 /// Extract the iterable **value** (element) type from a class's generic
 /// annotations.
 ///
-/// When a collection class like `PaymentOptionLocaleCollection` has
-/// `@extends Collection<int, PaymentOptionLocale>` or
-/// `@implements IteratorAggregate<int, PaymentOptionLocale>`, this
-/// function returns `Some("PaymentOptionLocale")`.
+/// When a collection class like `UserCollection` has
+/// `@extends Collection<int, User>` or
+/// `@implements IteratorAggregate<int, User>`, this
+/// function returns `Some("User")`.
 ///
 /// Checks (in order of priority):
 /// 1. `implements_generics` for known iterable interfaces
@@ -192,9 +184,9 @@ fn resolve_own_template_arg(value: &PhpType, class: &ClassInfo) -> PhpType {
 /// params through `@template-extends Traversable<TKey, TValue>` even when
 /// the implementing class never annotates concrete types; in that case
 /// the merge falls back to substituting each param with `mixed` (see
-/// `resolve_class_fully_inner` in `virtual_members/mod.rs`). Treating that
-/// placeholder as a "found" element type would shadow the more precise
-/// `current()`/`key()` fallback below.
+/// `resolve_class_fully_inner` in `virtual_members/resolve.rs`). Treating
+/// that placeholder as a "found" element type would shadow the callers'
+/// more precise `current()`/`key()` fallbacks.
 fn is_unbounded_template_placeholder(ty: &PhpType) -> bool {
     matches!(ty.kind(), TypeKind::Named(name) if name.eq_ignore_ascii_case("mixed"))
 }
@@ -206,7 +198,7 @@ fn is_unbounded_template_placeholder(ty: &PhpType) -> bool {
 /// The transitive check matters for SPL classes like `DirectoryIterator`,
 /// which declare `implements SeekableIterator` (and `SeekableIterator`
 /// extends `Iterator`) rather than naming `Iterator` outright. Without it,
-/// the `current()`/`key()` fallbacks below never fire for such classes.
+/// the callers' `current()`/`key()` fallbacks never fire for such classes.
 fn class_directly_implements(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -288,7 +280,7 @@ fn interface_extends_named_inner(
 /// Extract the iterable **key** type from a class's generic annotations.
 ///
 /// Mirrors `extract_iterable_element_type_from_class` but returns the
-/// first generic parameter (key) instead of the last (value).  Only
+/// first generic parameter (key) instead of the value argument.  Only
 /// returns a key type when the iterable interface has 2+ generic
 /// parameters (so `list<User>` returns `None` → fallback to `int`).
 pub(in crate::type_engine) fn extract_iterable_key_type_from_class(

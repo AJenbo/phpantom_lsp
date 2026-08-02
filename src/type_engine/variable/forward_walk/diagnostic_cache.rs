@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::atom::{AtomMap, atom};
 use crate::types::ResolvedType;
 
-// ─── Hover scope cache (Phase 3) ────────────────────────────────────────────
+// ─── Hover scope cache ──────────────────────────────────────────────────────
 //
 // When multiple hover requests arrive for the same file content (e.g. a
 // test file with 80+ `assertType()` calls), each request would otherwise
@@ -111,8 +111,9 @@ pub(crate) fn populate_hover_scope_cache_for_method(
 /// Extract and return the current contents of the diagnostic scope cache,
 /// replacing it with an empty map.
 ///
-/// Used by `build_method_snapshots_via_diag_cache` to harvest the
-/// snapshots that were recorded by a temporary diagnostic-scope walk.
+/// Used by the hover-cache population walk in `resolve_in_method_body`
+/// to harvest the snapshots that were recorded by a temporary
+/// diagnostic-scope walk.
 pub(crate) fn take_diagnostic_scope_map() -> ScopeSnapshotMap {
     DIAGNOSTIC_SCOPE.with(|cell| {
         let mut borrow = cell.borrow_mut();
@@ -123,7 +124,7 @@ pub(crate) fn take_diagnostic_scope_map() -> ScopeSnapshotMap {
     })
 }
 
-// ─── Diagnostic scope cache (Phase 2) ───────────────────────────────────────
+// ─── Diagnostic scope cache ─────────────────────────────────────────────────
 //
 // During a diagnostic pass, `build_diagnostic_scopes` walks every
 // function/method body in the file once and records a scope snapshot at
@@ -206,9 +207,7 @@ pub(crate) fn lookup_diagnostic_scope(var_name: &str, offset: u32) -> Option<Vec
     DIAGNOSTIC_SCOPE.with(|cell| {
         let borrow = cell.borrow();
         let map = borrow.as_ref()?;
-        // Find the snapshot at-or-before `offset`.
         let (_snap_offset, snap) = map.range(..=offset).next_back()?;
-        // If the variable is in the snapshot, return its types.
         // If the snapshot exists but the variable is absent, the
         // forward walker has already walked this scope region and
         // determined the variable has no known type here.  Return

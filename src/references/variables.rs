@@ -144,7 +144,6 @@ impl Backend {
             }
         }
 
-        // Sort by position for stable output.
         locations.sort_by(|a, b| {
             a.range
                 .start

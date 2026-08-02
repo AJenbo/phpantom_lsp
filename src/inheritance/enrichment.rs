@@ -337,12 +337,6 @@ pub(crate) fn enrich_single_parameter(
     }
 }
 
-/// Enrich a child property with docblock information from an ancestor
-/// property.
-///
-/// Propagates type hints and descriptions from the ancestor when the
-/// child lacks its own docblock overrides.  The same
-/// effective-vs-native comparison is used as for method return types.
 /// Copy-on-write wrapper around [`enrich_property_from_ancestor`].
 ///
 /// The property analogue of [`enrich_method_arc_from_ancestor`]: the
@@ -375,6 +369,12 @@ fn property_enrichment_would_change(existing: &PropertyInfo, ancestor: &Property
     existing.description.is_none() && ancestor.description.is_some()
 }
 
+/// Enrich a child property with docblock information from an ancestor
+/// property.
+///
+/// Propagates type hints and descriptions from the ancestor when the
+/// child lacks its own docblock overrides.  The same
+/// effective-vs-native comparison is used as for method return types.
 pub(crate) fn enrich_property_from_ancestor(existing: &mut PropertyInfo, ancestor: &PropertyInfo) {
     // ── Type hint ───────────────────────────────────────────────
     // Same logic as method return types: propagate when the child

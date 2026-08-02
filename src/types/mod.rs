@@ -669,11 +669,6 @@ pub struct PropertyInfo {
     /// A value of `0` means "not available" — callers should fall back to
     /// text search.
     pub name_offset: u32,
-    /// Effective type hint string after docblock override (e.g. "list<User>").
-    ///
-    /// When a `@var` tag is present in the docblock and is more specific
-    /// than the native PHP type hint, this holds the docblock type.
-    /// Otherwise it holds the native type hint unchanged.
     /// Effective type hint after docblock override (e.g. `list<User>`).
     ///
     /// When a `@var` tag is present in the docblock and is more specific
@@ -1848,9 +1843,9 @@ pub struct ClassInfo {
     /// class-level docblock, and imported via `@phpstan-import-type` /
     /// `@psalm-import-type`.
     ///
-    /// Maps alias name → type definition string.
-    /// For example, `@phpstan-type UserData array{name: string, email: string}`
-    /// produces `("UserData", "array{name: string, email: string}")`.
+    /// Maps alias name → [`TypeAliasDef`]. For example,
+    /// `@phpstan-type UserData array{name: string, email: string}` produces
+    /// `("UserData", TypeAliasDef::Local(PhpType::parse("array{name: string, email: string}")))`.
     ///
     /// These are consulted during type resolution so that a method returning
     /// `UserData` resolves to the underlying `array{name: string, email: string}`.
@@ -2124,11 +2119,11 @@ impl ClassInfo {
     /// Returns `true` when the two classes have identical signatures,
     /// meaning the resolved-class cache entry for this FQN does not need
     /// to be evicted.  This is the key predicate for signature-level
-    /// cache invalidation (§33 in the roadmap).
+    /// cache invalidation.
     ///
     /// **Ignored fields** (change on every keystroke or are display-only):
     /// - `start_offset`, `end_offset`, `keyword_offset`
-    /// - `link` (display-only URL from `@link`)
+    /// - `links`, `see_refs` (display-only `@link`/`@see` references)
     ///
     /// **Compared fields** (affect resolution, inheritance, or virtual
     /// member injection):

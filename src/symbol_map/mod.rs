@@ -12,9 +12,10 @@
 //! answered entirely from precomputed data without re-parsing.
 //!
 //! Docblock type references (from `@param`, `@return`, `@var`,
-//! `@template`, `@method`, etc.) are extracted by a dedicated string
-//! scanner during the AST walk, since docblocks are trivia in the
-//! `mago_syntax` AST and produce no expression/statement nodes.
+//! `@template`, `@method`, etc.) are extracted by parsing each
+//! docblock's own PHPDoc CST during the AST walk, since docblocks are
+//! trivia in the `mago_syntax` AST and produce no expression/statement
+//! nodes.
 //!
 //! The module is split into submodules:
 //!
@@ -31,7 +32,6 @@ mod extraction;
 use crate::atom::Atom;
 use crate::php_type::PhpType;
 
-// Re-export the public entry point from extraction.
 pub(crate) use extraction::extract_symbol_map;
 
 // ─── Data structures ────────────────────────────────────────────────────────
@@ -396,16 +396,16 @@ pub(crate) struct TemplateParamDef {
     pub bound: Option<PhpType>,
     /// Variance annotation from the `@template` tag.
     pub variance: crate::types::TemplateVariance,
-    /// Start of the scope where this template parameter is visible.
-    /// For class-level templates this is the docblock start offset;
-    /// for method/function-level templates it is the docblock start offset.
+    /// Start of the scope where this template parameter is visible: the
+    /// docblock's own start offset, whether the template is declared at
+    /// class level or method/function level.
     pub scope_start: u32,
     /// End of the scope where this template parameter is visible.
     /// For class-level templates this is the class closing-brace offset;
     /// for method-level templates it is the method closing-brace offset;
     /// for function-level templates it is the function closing-brace offset.
-    /// When the scope end cannot be determined (e.g. abstract method), this
-    /// is set to `u32::MAX` so the parameter is visible to end-of-file.
+    /// For an abstract or interface method (no body), this is the end of
+    /// the method's own signature span instead.
     pub scope_end: u32,
 }
 

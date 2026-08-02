@@ -1,7 +1,6 @@
 //! Workspace initialization and indexing.
 //!
-//! This module owns the "scan the workspace into symbol indexes" pipeline
-//! that was previously scattered across `server.rs` and `references/mod.rs`.
+//! This module owns the "scan the workspace into symbol indexes" pipeline.
 //! It has nothing to do with LSP dispatch (`server.rs`) or reference finding
 //! (`references/`); those modules delegate here.
 //!

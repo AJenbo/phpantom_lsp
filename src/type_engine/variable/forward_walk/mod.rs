@@ -9,12 +9,10 @@
 ///
 /// # Architecture
 ///
-/// The old backward scanner (now removed) resolved one variable at a
-/// time by walking backward from the cursor, recursively calling itself
-/// for each RHS variable reference.  That caused O(depth × file_size)
-/// work per variable lookup.
-///
-/// This forward walker replaces that recursion with a single forward pass:
+/// A backward scanner that resolves one variable at a time from the
+/// cursor, recursively resolving each RHS variable reference, costs
+/// O(depth × file_size) per lookup.  The forward walker replaces that
+/// recursion with a single forward pass:
 ///
 /// 1. Seed `ScopeState` with parameter types.
 /// 2. Walk statements top-to-bottom.  At each assignment `$a = expr`,
@@ -26,19 +24,19 @@
 /// every variable resolved during the walk is available to subsequent
 /// statements for free.
 ///
-/// # Phases
+/// # Consumers
 ///
-/// - **Phase 1** (completion): wired into the completion path.  The
-///   forward walker is called per-request with `cursor_offset` set to
-///   the cursor position.  Only the target variable's type is read.
-/// - **Phase 2** (diagnostics): [`build_diagnostic_scopes`] walks every
+/// - **Per-request lookups** (completion, hover, go-to-definition,
+///   signature help): the walker is called with `cursor_offset` set to
+///   the request position and only the target variable's type is read.
+/// - **Diagnostics**: [`build_diagnostic_scopes`] walks every
 ///   function/method body in the file once (`cursor_offset = u32::MAX`)
 ///   and records scope snapshots at each statement boundary in a
 ///   thread-local [`DIAGNOSTIC_SCOPE`] cache.  When
 ///   `resolve_variable_types` is called for a diagnostic span, it
 ///   checks the cache first via [`lookup_diagnostic_scope`] and returns
-///   the pre-computed types in O(log N) time, eliminating the
-///   O(N x depth x file_size) cost of per-span backward scanning.
+///   the pre-computed types in O(log N) time instead of re-walking the
+///   body for every span.
 use std::cell::{Cell, RefCell};
 
 use mago_span::HasSpan;
@@ -109,9 +107,6 @@ pub(crate) fn walk_body_forward<'b>(
             return;
         }
 
-        // On the completion path, when the cursor is inside a ternary
-        // instanceof branch or match(true) arm, apply narrowing to the
-        // scope so the variable lookup sees the narrowed type.
         let cursor_inside_stmt = ctx.cursor_offset >= stmt_span.start.offset
             && ctx.cursor_offset <= stmt_span.end.offset;
 
@@ -132,6 +127,9 @@ pub(crate) fn walk_body_forward<'b>(
 
         process_statement(stmt, scope, ctx);
 
+        // On the per-request path, when the cursor is inside a ternary
+        // instanceof branch or match(true) arm, apply narrowing to the
+        // scope so the variable lookup sees the narrowed type.
         if cursor_inside_stmt && !record_snapshots {
             let expr_opt = match stmt {
                 Statement::Expression(es) => Some(es.expression),
@@ -142,7 +140,7 @@ pub(crate) fn walk_body_forward<'b>(
                 apply_cursor_ternary_narrowing(expr, scope, ctx);
             }
 
-            // Also apply narrowing inside if/while/for conditions.
+            // Also apply narrowing inside if/while conditions.
             // E.g. `if ($e instanceof Foo && $e->errorInfo)` — the
             // cursor on `$e->errorInfo` needs instanceof narrowing.
             match stmt {
@@ -257,13 +255,11 @@ pub(crate) fn resolve_in_method_body<'b>(
             &full_ctx,
         );
 
-        // Record the scope at the method body start.
         record_scope_snapshot(method_span_start, &scope);
 
         // Walk the full body to populate DIAGNOSTIC_SCOPE with snapshots.
         walk_body_for_diagnostics(stmts_vec.iter().copied(), &mut scope, &full_ctx);
 
-        // Harvest the snapshots from the temporary diagnostic scope.
         let snapshots = take_diagnostic_scope_map();
 
         // The _diag_guard drop will clear DIAGNOSTIC_SCOPE; store
@@ -277,12 +273,10 @@ pub(crate) fn resolve_in_method_body<'b>(
     // ── Standard walk (diagnostics path or hover cache not active) ───────
     let mut scope = ScopeState::new();
 
-    // Seed `$this` for non-static class methods.
     if !is_static {
         seed_this(&mut scope, ctx.current_class);
     }
 
-    // Seed scope with parameter types.
     let method_name = method_ctx.map(|(n, _)| n);
     let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
     seed_params(
@@ -294,15 +288,14 @@ pub(crate) fn resolve_in_method_body<'b>(
         ctx,
     );
 
-    // Walk the body forward.  Suspend snapshot recording: this is a
-    // transient lookup of `var_name`'s type, not the authoritative scope
-    // build, so it must not write into an active diagnostic scope cache.
+    // Suspend snapshot recording: this is a transient lookup of
+    // `var_name`'s type, not the authoritative scope build, so it must
+    // not write into an active diagnostic scope cache.
     {
         let _suspend = suspend_snapshot_recording();
         walk_body_forward(stmts_vec.iter().copied(), &mut scope, ctx);
     }
 
-    // Read the target variable from the scope.
     // Return `Some(types)` when the variable exists in scope (even if
     // the type list is empty — that means "unknown/narrowed-away"),
     // and `None` when the variable was never seen by the forward walker.
@@ -329,8 +322,6 @@ pub(crate) fn resolve_in_method_body<'b>(
     }
 }
 
-/// Resolve the target variable from a standalone function body using
-/// the forward walker.
 /// Detect whether a method has a `#[Scope]` attribute by scanning the
 /// source text around the method span.  The attribute list precedes or
 /// is part of the method node, so we search a window around the offset.
@@ -363,6 +354,8 @@ fn detect_scope_attribute_from_source(content: &str, method_offset: usize) -> bo
     false
 }
 
+/// Resolve the target variable from a standalone function body using
+/// the forward walker.
 pub(crate) fn resolve_in_function_body<'b>(
     var_name: &str,
     func: &'b Function<'b>,
@@ -370,7 +363,6 @@ pub(crate) fn resolve_in_function_body<'b>(
 ) -> Option<Vec<ResolvedType>> {
     let mut scope = ScopeState::new();
 
-    // Seed scope with parameter types.
     seed_params(
         &mut scope,
         func.parameter_list.parameters.iter(),
@@ -380,15 +372,13 @@ pub(crate) fn resolve_in_function_body<'b>(
         ctx,
     );
 
-    // Walk the body forward.  Suspend snapshot recording (see
-    // `resolve_in_method_body`): this transient lookup must not pollute
-    // an active diagnostic scope cache.
+    // Suspend snapshot recording (see `resolve_in_method_body`): this
+    // transient lookup must not pollute an active diagnostic scope cache.
     {
         let _suspend = suspend_snapshot_recording();
         walk_body_forward(func.body.statements.iter(), &mut scope, ctx);
     }
 
-    // Read the target variable.
     // Return `Some` when the variable exists in scope (even with
     // empty types), `None` when it was never seen.
     if scope.contains(var_name) {
@@ -420,14 +410,13 @@ pub(crate) fn resolve_in_top_level<'b>(
 ) -> Option<Vec<ResolvedType>> {
     let mut scope = ScopeState::new();
 
-    // Seed superglobals so that `$_GET`, `$_POST`, etc. resolve.
     seed_superglobals(&mut scope);
 
-    // Walk the top-level statements forward.  Suspend snapshot recording
-    // (see `resolve_in_method_body`): this transient lookup must not
-    // pollute an active diagnostic scope cache.  Its statements can even
-    // belong to another file (return-type inference of a called function),
-    // whose offsets would otherwise collide with the outer file's.
+    // Suspend snapshot recording (see `resolve_in_method_body`): this
+    // transient lookup must not pollute an active diagnostic scope
+    // cache.  Its statements can even belong to another file (return-type
+    // inference of a called function), whose offsets would otherwise
+    // collide with the outer file's.
     {
         let _suspend = suspend_snapshot_recording();
         walk_body_forward(statements, &mut scope, ctx);
@@ -443,9 +432,9 @@ pub(crate) fn resolve_in_top_level<'b>(
 }
 
 /// Walk top-level statements to build a scope of variable types for
-/// `global` keyword resolution.  This is a lightweight walk that only
-/// processes expression-level assignments (and skips class/function/
-/// interface/enum/trait bodies, which have isolated scopes).
+/// `global` keyword resolution.  This runs the standard forward walk
+/// over the top-level statements (skipping class/function/interface/
+/// enum/trait bodies, which have isolated scopes).
 pub(crate) fn walk_top_level_for_globals<'b>(
     statements: impl Iterator<Item = &'b Statement<'b>>,
     scope: &mut ScopeState,
@@ -473,8 +462,6 @@ fn try_generator_yield_inference(
     let return_type = ctx.enclosing_return_type.as_ref()?;
     let value_type = return_type.extract_value_type(false)?;
 
-    // Scan the source text for `yield $varName` within the enclosing
-    // function body.  We search a window around the cursor.
     let cursor = ctx.cursor_offset as usize;
     let content = ctx.content;
 

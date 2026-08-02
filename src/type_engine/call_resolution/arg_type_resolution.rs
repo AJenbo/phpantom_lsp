@@ -73,7 +73,7 @@ impl Backend {
                 _ => {}
             }
         }
-        // Single (or last) argument.
+        // No top-level comma: the whole text is a single argument.
         let arg = trimmed.trim();
         if !arg.is_empty() {
             Some(arg.to_string())

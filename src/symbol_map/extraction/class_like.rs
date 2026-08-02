@@ -14,10 +14,8 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
         kind: SymbolKind::ClassDeclaration { name },
     });
 
-    // Attributes (PHP 8).
     extract_from_attribute_lists(&class.attribute_lists, ctx, 0);
 
-    // Extends.
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
             let raw = bytes_to_str(ident.value()).to_string();
@@ -30,7 +28,6 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
         }
     }
 
-    // Implements.
     if let Some(ref implements) = class.implements {
         for ident in implements.types.iter() {
             let raw = bytes_to_str(ident.value()).to_string();
@@ -43,7 +40,6 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
         }
     }
 
-    // Docblock.
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, class)
     {
@@ -71,7 +67,6 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     let prev_in_console_command = ctx.in_console_command;
     ctx.in_console_command = class_is_console_command(class);
 
-    // Members.
     for member in class.members.iter() {
         extract_from_class_member(member, ctx);
     }
@@ -123,7 +118,6 @@ pub(super) fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut Ext
         kind: SymbolKind::ClassDeclaration { name },
     });
 
-    // Attributes (PHP 8).
     extract_from_attribute_lists(&iface.attribute_lists, ctx, 0);
 
     if let Some(ref extends) = iface.extends {
@@ -169,7 +163,6 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
         kind: SymbolKind::ClassDeclaration { name },
     });
 
-    // Attributes (PHP 8).
     extract_from_attribute_lists(&trait_def.attribute_lists, ctx, 0);
 
     if let Some((doc_text, doc_offset)) =
@@ -203,7 +196,6 @@ pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut Extraction
         kind: SymbolKind::ClassDeclaration { name },
     });
 
-    // Attributes (PHP 8).
     extract_from_attribute_lists(&enum_def.attribute_lists, ctx, 0);
 
     if let Some(ref implements) = enum_def.implements {
@@ -369,7 +361,6 @@ pub(super) fn extract_from_class_member<'a>(
             }
         }
         ClassLikeMember::EnumCase(enum_case) => {
-            // Attributes (PHP 8) on the enum case.
             extract_from_attribute_lists(&enum_case.attribute_lists, ctx, 0);
 
             // Enum case name — declaration site span for find-references,
@@ -412,14 +403,12 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
 ) {
     match &alias_adapt.method_reference {
         TraitUseMethodReference::Absolute(abs) => {
-            // Emit ClassReference for the trait name.
             let trait_raw = bytes_to_str(abs.trait_name.value()).to_string();
             ctx.spans.push(class_ref_span(
                 abs.trait_name.span().start.offset,
                 abs.trait_name.span().end.offset,
                 &trait_raw,
             ));
-            // Emit MemberAccess for the original method name.
             let method_name = crate::atom::atom_bytes(abs.method_name.value);
             let trait_span = abs.trait_name.span();
             ctx.spans.push(SymbolSpan {
@@ -441,8 +430,6 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
             });
         }
         TraitUseMethodReference::Identifier(ident) => {
-            // Unqualified reference: use the first trait name from the
-            // `use` list, or fall back to `self`.
             let subject = first_trait_name.unwrap_or("self").to_string();
             let method_name = crate::atom::atom_bytes(ident.value);
             ctx.spans.push(SymbolSpan {
@@ -460,7 +447,6 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
         }
     }
 
-    // Emit MemberAccess for the alias name (the `as` target).
     // Using `self` as the subject so that `resolve_trait_alias` on
     // the owning class maps the alias back to the original method.
     if let Some(ref alias_ident) = alias_adapt.alias {
@@ -490,7 +476,6 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
     prec: &'a TraitUsePrecedenceAdaptation<'a>,
     ctx: &mut ExtractionCtx<'a>,
 ) {
-    // Emit ClassReference for the trait name in the method reference.
     let trait_raw = bytes_to_str(prec.method_reference.trait_name.value()).to_string();
     ctx.spans.push(class_ref_span(
         prec.method_reference.trait_name.span().start.offset,
@@ -498,7 +483,6 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
         &trait_raw,
     ));
 
-    // Emit MemberAccess for the method name.
     let method_name = crate::atom::atom_bytes(prec.method_reference.method_name.value);
     let trait_span = prec.method_reference.trait_name.span();
     ctx.spans.push(SymbolSpan {
@@ -519,7 +503,6 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
         },
     });
 
-    // Emit ClassReference for each `insteadof` trait name.
     for ident in prec.trait_names.iter() {
         let raw = bytes_to_str(ident.value()).to_string();
         ctx.spans.push(class_ref_span(
@@ -542,7 +525,6 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         },
     });
 
-    // Attributes (PHP 8) on the method.
     extract_from_attribute_lists(&method.attribute_lists, ctx, 0);
 
     // Docblock on the method.  We extract type spans and template params
@@ -619,7 +601,6 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
 
     // Parameter type hints, variable spans, and variable definition sites.
     for param in method.parameter_list.parameters.iter() {
-        // Attributes (PHP 8) on the parameter.
         extract_from_attribute_lists(&param.attribute_lists, ctx, 0);
         if let Some(ref hint) = param.hint {
             extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
@@ -659,12 +640,10 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         }
     }
 
-    // Return type hint.
     if let Some(ref return_type) = method.return_type_hint {
         extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
 
-    // Method body.
     if let MethodBody::Concrete(body) = &method.body {
         for stmt in body.statements.iter() {
             extract_from_statement(stmt, ctx, method_scope_start);
@@ -712,13 +691,11 @@ pub(super) fn extract_inline_docblock(
 }
 
 pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut ExtractionCtx<'a>) {
-    // Attributes (PHP 8) on the property.
     match property {
         Property::Plain(plain) => extract_from_attribute_lists(&plain.attribute_lists, ctx, 0),
         Property::Hooked(hooked) => extract_from_attribute_lists(&hooked.attribute_lists, ctx, 0),
     }
 
-    // Docblock.
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, property)
     {
@@ -727,7 +704,6 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
         let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
     }
 
-    // Property type hint.
     if let Some(hint) = property.hint() {
         extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
@@ -800,7 +776,6 @@ pub(super) fn extract_from_class_constant<'a>(
     constant: &'a ClassLikeConstant<'a>,
     ctx: &mut ExtractionCtx<'a>,
 ) {
-    // Attributes (PHP 8) on the constant.
     extract_from_attribute_lists(&constant.attribute_lists, ctx, 0);
 
     // Constant name(s) — declaration site spans for find-references and rename.
@@ -816,7 +791,6 @@ pub(super) fn extract_from_class_constant<'a>(
         });
     }
 
-    // Docblock.
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, constant)
     {
@@ -828,7 +802,6 @@ pub(super) fn extract_from_class_constant<'a>(
         extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
 
-    // Constant value expressions.
     for item in constant.items.iter() {
         extract_from_expression(item.value, ctx, 0);
     }
@@ -837,7 +810,6 @@ pub(super) fn extract_from_class_constant<'a>(
 // ─── Function extractor ─────────────────────────────────────────────────────
 
 pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>) {
-    // Attributes (PHP 8) on the function.
     extract_from_attribute_lists(&func.attribute_lists, ctx, 0);
 
     // Function name as a navigable reference.
@@ -906,7 +878,6 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
 
     // Parameter type hints, variable spans, and variable definition sites.
     for param in func.parameter_list.parameters.iter() {
-        // Attributes (PHP 8) on the parameter.
         extract_from_attribute_lists(&param.attribute_lists, ctx, 0);
         if let Some(ref hint) = param.hint {
             extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
@@ -917,7 +888,6 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
         {
             let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
         }
-        // Emit VarDefSite for each parameter.
         let pname = {
             let s = bytes_to_str(param.variable.name);
             s.strip_prefix('$').unwrap_or(s).to_string()
@@ -946,12 +916,10 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
         }
     }
 
-    // Return type hint.
     if let Some(ref return_type) = func.return_type_hint {
         extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
 
-    // Function body.
     for stmt in func.body.statements.iter() {
         extract_from_statement(stmt, ctx, func_scope_start);
     }

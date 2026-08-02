@@ -101,7 +101,6 @@ impl Backend {
             uris.into_iter().collect()
         };
 
-        // Skip vendor files.
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
         for file_uri in &all_uris {
@@ -249,7 +248,6 @@ impl Backend {
                 continue;
             };
             let rest = rest.trim();
-            // Strip trailing `;` or `{`.
             let ns_name = rest.trim_end_matches(';').trim_end_matches('{').trim();
 
             if ns_name.is_empty() {
@@ -264,14 +262,12 @@ impl Backend {
                 continue;
             }
 
-            // Build the new namespace name by replacing the prefix.
             let new_ns = if ns_name.len() == old_prefix.len() {
                 new_prefix.to_string()
             } else {
                 format!("{}{}", new_prefix, &ns_name[old_prefix.len()..])
             };
 
-            // Find the byte range of the namespace name within the line.
             let line_start_byte = line_start_byte_offset(content, line_idx);
             let ns_offset_in_line = line.find(ns_name).unwrap_or(0);
             let ns_start = line_start_byte + ns_offset_in_line;
@@ -517,7 +513,6 @@ impl Backend {
                 suffix.to_string()
             };
 
-            // Build old and new directory paths.
             let base_dir = workspace_root.join(&mapping.base_path);
             let old_dir = if relative_ns.is_empty() {
                 base_dir.clone()
@@ -535,7 +530,6 @@ impl Backend {
                 continue;
             }
 
-            // Only emit if the old directory actually exists.
             if !old_dir.is_dir() {
                 continue;
             }

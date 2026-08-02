@@ -20,7 +20,7 @@
 //! 2. **`Conditionable::when()` / `unless()` return type.**
 //!    The trait declares `@return $this|TWhenReturnType` (or a conditional
 //!    form in Larastan stubs).  The unresolved `TWhenReturnType` template
-//!    parameter breaks `is_self_like_type` checks, degrading Builder chains.
+//!    parameter breaks `is_self_like` checks, degrading Builder chains.
 //!    The patch replaces the return type with `$this` so that chained
 //!    `when()` / `unless()` calls preserve the receiver type.
 //!
@@ -251,7 +251,7 @@ fn patch_eloquent_builder_call_return_type(class: &mut ClassInfo) {
 /// like `$this|TWhenReturnType` or the Larastan conditional form
 /// `(TWhenReturnType is void|null ? $this : TWhenReturnType)`.  In
 /// either case the unresolved method-level template parameter
-/// `TWhenReturnType` / `TUnlessReturnType` prevents `is_self_like_type`
+/// `TWhenReturnType` / `TUnlessReturnType` prevents `is_self_like`
 /// from recognizing the return as self-referential, which breaks method
 /// chain resolution on Builder and Collection.
 ///
@@ -278,7 +278,7 @@ fn patch_conditionable_when_unless(class: &mut ClassInfo) {
 }
 
 /// Check whether a return type contains an unresolved template parameter
-/// that would prevent `is_self_like_type` from matching.
+/// that would prevent `is_self_like` from matching.
 ///
 /// Recognizes patterns like:
 /// - `$this|TWhenReturnType` (union with an unknown non-self member)

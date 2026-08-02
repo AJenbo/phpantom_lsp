@@ -6,7 +6,6 @@ use super::*;
 // ─── Closures ────────────────────────────────────────────────────────────────
 
 pub(super) fn extract_closure_expr<'a>(closure: &'a Closure<'a>, ctx: &mut ExtractionCtx<'a>) {
-    // Closure introduces a new scope.
     let closure_scope_start = closure.body.left_brace.start.offset;
     let closure_scope_end = closure.body.right_brace.end.offset;
     ctx.scopes.push((closure_scope_start, closure_scope_end));
@@ -30,7 +29,6 @@ pub(super) fn extract_closure_expr<'a>(closure: &'a Closure<'a>, ctx: &mut Extra
                 name: crate::atom::atom(&name),
             },
         });
-        // Emit VarDefSite for closure parameter.
         let cp_offset = param.variable.span.start.offset;
         ctx.var_defs.push(VarDefSite {
             offset: cp_offset,
@@ -114,7 +112,6 @@ pub(super) fn extract_arrow_function_expr<'a>(
                 name: crate::atom::atom(&name),
             },
         });
-        // Emit VarDefSite for arrow function parameter.
         let ap_offset = param.variable.span.start.offset;
         ctx.var_defs.push(VarDefSite {
             offset: ap_offset,

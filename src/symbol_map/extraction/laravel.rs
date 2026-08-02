@@ -4,17 +4,9 @@ use mago_syntax::cst::*;
 
 use super::*;
 
-/// Check whether an attribute class name refers to a Laravel container
-/// attribute (`Config`, `Database`, `Cache`, `Log`, `Storage`, `Auth`,
-/// `Authenticated`).  Returns the corresponding [`LaravelStringKind`] if
-/// so — always `Config` since all container attributes resolve to config
-/// sub-keys.
-///
-/// FQN names (containing `\`) are matched directly against
-/// `Illuminate\Container\Attributes\*`.  Short names require the file to
-/// import from that namespace; the result of that check is cached in
-/// `import_cache` to avoid repeated linear scans of the file content.
+/// Namespace prefix for Laravel's container-injection attributes.
 pub(super) const LARAVEL_CONTAINER_ATTR_NS: &str = "Illuminate\\Container\\Attributes\\";
+/// Short (non-FQN) names of the container-injection attributes.
 pub(super) const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
     "Config",
     "Database",
@@ -26,6 +18,16 @@ pub(super) const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
     "Authenticated",
 ];
 
+/// Check whether an attribute class name refers to a Laravel container
+/// attribute (`Config`, `Database`, `Cache`, `Log`, `Storage`, `Auth`,
+/// `Authenticated`).  Returns the corresponding [`LaravelStringKind`] if
+/// so — always `Config` since all container attributes resolve to config
+/// sub-keys.
+///
+/// FQN names (containing `\`) are matched directly against
+/// `Illuminate\Container\Attributes\*`.  Short names require the file to
+/// import from that namespace; the result of that check is cached in
+/// `import_cache` to avoid repeated linear scans of the file content.
 pub(super) fn resolve_laravel_container_attr(
     class_name: &str,
     import_cache: &mut Option<bool>,

@@ -41,7 +41,7 @@ use super::{ELOQUENT_BUILDER_FQN, build_scope_methods_for_builder, self_ref_subs
 ///    Return types containing `static` are remapped to
 ///    `Builder<ConcreteModel>` to keep the chain on the builder.
 ///
-/// The `cls` parameter is the Builder **after** generic substitution has
+/// The `result` parameter is the Builder **after** generic substitution has
 /// been applied.  `raw_cls` is the pre-substitution class (needed to
 /// check the FQN via `file_namespace`).
 pub(crate) fn try_inject_builder_scopes(
@@ -119,7 +119,6 @@ pub(crate) fn try_inject_mixin_builder_scopes(
 
     // Also check the class itself (it might directly declare @mixin Builder<X>).
     loop {
-        // Check for Builder mixin on the current class.
         if let Some(model_name) =
             find_builder_mixin_model(&current, &active_subs, raw_cls, class_loader)
         {
@@ -127,7 +126,6 @@ pub(crate) fn try_inject_mixin_builder_scopes(
             return;
         }
 
-        // Move to the parent class.
         let parent_name = match current.parent_class {
             Some(name) => name,
             None => break,
@@ -196,7 +194,6 @@ fn find_builder_mixin_model(
             }
         }
 
-        // Find the generic args for this mixin from mixin_generics.
         let mixin_short = short_name(mixin_name);
         let mixin_args = class
             .mixin_generics
@@ -333,7 +330,6 @@ fn inject_model_virtual_methods(
             continue;
         }
 
-        // Convert to an instance method on the builder.
         let forwarded = crate::virtual_members::intern_transformed_method(method, fp, || {
             let mut forwarded = (**method).clone();
             forwarded.is_static = false;

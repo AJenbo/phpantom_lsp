@@ -30,7 +30,6 @@ pub(super) fn is_legacy_accessor(method: &MethodInfo) -> bool {
     if middle.is_empty() {
         return false;
     }
-    // The first character of the middle portion must be uppercase.
     middle.starts_with(|c: char| c.is_uppercase())
 }
 

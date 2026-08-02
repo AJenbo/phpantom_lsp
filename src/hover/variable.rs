@@ -12,7 +12,6 @@ use tower_lsp::lsp_types::Hover;
 use crate::Backend;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, FileContext, FunctionInfo};
-use crate::util::strip_fqn_prefix;
 
 use super::formatting::{make_hover, namespace_line};
 
@@ -193,11 +192,8 @@ fn resolve_type_namespace_structured(
 
     // Fallback: parse the namespace from the FQN string itself.
     // E.g. `App\Models\User` → `App\Models`.
-    // Strip leading `\` — input may be a raw docblock type like
-    // `\App\Models\User` that hasn't been through resolve_type_string.
-    let canonical = strip_fqn_prefix(base);
-    if let Some(pos) = canonical.rfind('\\') {
-        let ns = &canonical[..pos];
+    if let Some(pos) = base.rfind('\\') {
+        let ns = &base[..pos];
         if !ns.is_empty() {
             return Some(ns.to_string());
         }

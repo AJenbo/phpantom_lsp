@@ -44,7 +44,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
     let access_offset = expr.span().start.offset as usize;
 
-    // Resolve the base expression's raw type string.
+    // Resolve the base expression's type.
     // For bare variables (`$var['key']`), use docblock or assignment scanning.
     // For property chains (`$obj->prop['key']`), resolve the property type.
     let raw_type: Option<PhpType> = if let Expression::Variable(Variable::Direct(base_dv)) =
@@ -83,7 +83,6 @@ pub(super) fn resolve_rhs_array_access<'b>(
     } else {
         // Non-variable base (e.g. property access `$obj->prop['key']`,
         // method call `$obj->getItems()['key']`, etc.).
-        // Resolve the base expression to get its type.
         let base_resolved = resolve_rhs_expression(current_expr, ctx);
         if base_resolved.is_empty() {
             None

@@ -1,5 +1,4 @@
-/// Array literal inference, array function helpers, and generator yield
-/// reverse-inference.
+/// Array literal inference and array function helpers.
 ///
 /// These are utility helpers that support the forward-walking variable
 /// resolver in [`super::forward_walk`] and the foreach/destructuring
@@ -17,9 +16,8 @@ use crate::php_type::PhpType;
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::types::ResolvedType;
 
-/// Infer the raw PHPStan-style type string for an array literal
-/// (`[…]` or `array(…)`) by examining its keys and resolving value
-/// elements by resolving each value expression.
+/// Infer the raw PHPStan-style type for an array literal (`[…]` or
+/// `array(…)`) from its keys and value expressions.
 pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
@@ -127,7 +125,7 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
 fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> String {
     match key {
         Expression::Literal(Literal::String(s)) => {
-            // `value` is the unquoted content; fall back to `raw` trimmed.
+            // `value` is the unquoted content; fall back to unquoting `raw`.
             s.value
                 .map(|v| bytes_to_str(v).to_string())
                 .unwrap_or_else(|| {
@@ -237,8 +235,8 @@ fn infer_element_type_precise<'b>(
     }
 }
 
-/// For known array functions, resolve the **raw output type** string
-/// (e.g. `"list<User>"`) from the input arguments.
+/// For known array functions, resolve the **raw output type**
+/// (e.g. `list<User>`) from the input arguments.
 ///
 /// Used by foreach and destructuring resolution so that iterating over
 /// `array_filter(...)` etc. preserves element types.
@@ -298,8 +296,9 @@ pub(in crate::type_engine) fn resolve_array_func_raw_type(
         };
     }
 
-    // Element-extracting functions: wrap element type in list<> so
-    // it can be used as an iterable raw type.
+    // Element-extracting functions: return the input container type so
+    // it can be used as an iterable raw type (its element type is the
+    // extracted element).
     if ARRAY_ELEMENT_FUNCS
         .iter()
         .any(|f| f.eq_ignore_ascii_case(func_name))
@@ -314,8 +313,8 @@ pub(in crate::type_engine) fn resolve_array_func_raw_type(
     None
 }
 
-/// For known array functions, resolve the **element type** string
-/// (e.g. `"User"`) for the output.
+/// For known array functions, resolve the **element type**
+/// (e.g. `User`) of the output.
 ///
 /// Used by `resolve_rhs_expression` so that `$item = array_pop($users)`
 /// resolves `$item` to `User`.  This only covers true element-extracting

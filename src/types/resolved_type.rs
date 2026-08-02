@@ -388,13 +388,13 @@ impl ResolvedType {
     ///
     /// When there is exactly one entry, returns its `type_string` directly.
     /// When there are multiple entries, wraps them in a [`TypeKind::Union`].
-    /// When the slice is empty, returns `PhpType::named("mixed")` as a
-    /// safe fallback (callers should check emptiness beforehand).
+    /// When the slice is empty, returns `PhpType::mixed()` as a safe
+    /// fallback (callers should check emptiness beforehand).
     ///
-    /// Callers that need a display string can use `.to_string()` on the
-    /// result, which produces the same `|`-joined output that the former
-    /// `type_strings_joined` helper returned, but preserves the structured
-    /// [`PhpType`] for any intermediate consumers that benefit from it.
+    /// Callers that need a display string can call `.to_string()` on the
+    /// result, which produces a `|`-joined string while preserving the
+    /// structured [`PhpType`] for any intermediate consumers that benefit
+    /// from it.
     pub(crate) fn types_joined(resolved: &[ResolvedType]) -> PhpType {
         match resolved.len() {
             0 => PhpType::mixed(),

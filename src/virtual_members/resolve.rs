@@ -75,7 +75,7 @@ impl Drop for InFlightGuard<'_> {
 ///
 /// This function should be called once after initial indexing is complete
 /// (all files parsed into `uri_classes_index`) and again incrementally when files
-/// change (see ER4 in `docs/todo/eager-resolution.md`).
+/// change.
 ///
 /// The list is consumed by a pool of scoped workers on
 /// [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE) stacks, so
@@ -169,14 +169,6 @@ fn populate_one(
         return;
     };
 
-    // resolve_class_fully_inner will:
-    // 1. Check cache (miss for this class, but hits for deps)
-    // 2. Run resolve_class_with_inheritance (parent chain walk —
-    //    parents are raw, but the walk is bounded by MAX_INHERITANCE_DEPTH)
-    // 3. Run apply_virtual_members — providers call resolve_class_fully
-    //    for related classes, which hit the cache (already populated)
-    // 4. Merge interfaces — also hit cache for resolved interfaces
-    // 5. Store result in cache
     resolve_class_fully_inner(&raw_class, class_loader, Some(cache));
 }
 
@@ -329,7 +321,7 @@ pub fn resolve_class_fully_with_generics(
     generic_arg_strings: &[String],
     generic_args: &[crate::php_type::PhpType],
 ) -> Arc<ClassInfo> {
-    // Fast path: no generics — just do the base resolution.
+    // Fast path: no generic arguments to substitute.
     if generic_args.is_empty() {
         return resolve_class_fully_inner(class, class_loader, cache);
     }
@@ -349,7 +341,6 @@ pub fn resolve_class_fully_with_generics(
     // Resolve the base class (cached at (FQN, [])).
     let base = resolve_class_fully_inner(class, class_loader, cache);
 
-    // Apply generic substitution.
     let mut result = if !base.template_params.is_empty() {
         Arc::new(crate::inheritance::apply_generic_args(&base, generic_args))
     } else {
@@ -370,7 +361,6 @@ pub fn resolve_class_fully_with_generics(
         result = Arc::new(proxy);
     }
 
-    // Store the substituted result.
     if let Some(c) = cache {
         c.write().insert(cache_key, Arc::clone(&result));
     }
@@ -416,8 +406,7 @@ pub fn resolve_class_fully_with_type_args(
     )
 }
 
-/// Shared implementation behind [`resolve_class_fully`] and
-/// [`resolve_class_fully_cached`].
+/// Shared implementation behind the `resolve_class_fully*` entry points.
 ///
 /// This always produces the *base* resolution, cached under the bare
 /// FQN key `(FQN, [])`. Generic specialisation is a separate, much
@@ -558,21 +547,21 @@ fn resolve_class_fully_inner(
         apply_virtual_members(&mut merged, class_loader, &providers, Some(cache));
     }
 
-    // 3. Merge members from implemented interfaces.
-    //    Interfaces can declare `@method` / `@property` / `@property-read`
-    //    tags that should be visible on implementing classes.  We collect
-    //    interfaces from the class itself and from every parent in the
-    //    extends chain, then fully resolve each interface (which applies
-    //    its own virtual member providers) and merge any members that
-    //    don't already exist.
+    // ── Interface member merging ────────────────────────────────────
+    // Interfaces can declare `@method` / `@property` / `@property-read`
+    // tags that should be visible on implementing classes.  We collect
+    // interfaces from the class itself and from every parent in the
+    // extends chain, then fully resolve each interface (which applies
+    // its own virtual member providers) and merge any members that
+    // don't already exist.
     //
-    //    When a class declares `@implements SomeInterface<ConcreteType>`,
-    //    the interface's template parameters are substituted with the
-    //    concrete types before merging.  This mirrors how `@extends`
-    //    generics are handled in the parent chain walk.  Substitutions
-    //    from `@implements` on parent classes are also collected, with
-    //    the `@extends` chain substitutions applied so that template
-    //    parameters from intermediate classes resolve correctly.
+    // When a class declares `@implements SomeInterface<ConcreteType>`,
+    // the interface's template parameters are substituted with the
+    // concrete types before merging.  This mirrors how `@extends`
+    // generics are handled in the parent chain walk.  Substitutions
+    // from `@implements` on parent classes are also collected, with
+    // the `@extends` chain substitutions applied so that template
+    // parameters from intermediate classes resolve correctly.
     let mut all_iface_names: Vec<String> = effective_class
         .interfaces
         .iter()
@@ -600,10 +589,6 @@ fn resolve_class_fully_inner(
         let mut current: ClassRef<'_> = ClassRef::Borrowed(effective_class);
         let mut depth = 0u32;
         let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-
-        // Seed initial subs from the root class's @extends generics
-        // so that if the root class itself has template params referenced
-        // in its @implements, they can be resolved.
 
         while let Some(ref parent_name) = current.parent_class {
             depth += 1;
@@ -884,7 +869,6 @@ fn merge_interface_members_into(
     };
 
     for iface_method in resolved_iface.methods.into_vec() {
-        // Find the existing method index — O(1) via HashMap or O(N) linear scan.
         let existing_idx = if let Some(ref index) = method_index {
             index.get(&iface_method.name.to_string()).copied()
         } else {
@@ -896,15 +880,11 @@ fn merge_interface_members_into(
 
         if let Some(idx) = existing_idx {
             let existing = &mut merged.methods.make_mut()[idx];
-            // Delegate to the shared enrichment helper which handles
-            // return types, parameters, descriptions, template params,
-            // conditional returns, and type assertions uniformly.
             enrich_method_arc_from_ancestor(existing, &iface_method);
         } else {
             merged.methods.push(iface_method);
         }
     }
-    // Merge interface properties — enrich existing ones, add new ones.
     for property in resolved_iface.properties.into_vec() {
         if let Some(existing) = merged
             .properties

@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-use std::path::PathBuf;
 /// Go-to-implementation support (`textDocument/implementation`).
 ///
 /// When the cursor is on an interface name, abstract class name, or any
@@ -30,6 +28,8 @@ use std::path::PathBuf;
 /// 5. **Reverse jump** — for `MemberDeclaration` symbols on a concrete class,
 ///    walk the class's interfaces and parent abstract classes to find the
 ///    prototype method declaration and return its location.
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -594,9 +594,6 @@ impl Backend {
             }
         }
 
-        // If no interface/abstract candidate was found, try treating the
-        // request as a regular "find all overrides" — useful for concrete
-        // base-class methods too.
         if all_locations.is_empty() {
             return None;
         }

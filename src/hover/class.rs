@@ -119,8 +119,6 @@ impl Backend {
             }
         }
 
-        // For enums, show cases inside the code block.
-        // For traits, show public method signatures inside the code block.
         let body_lines = if cls.kind == ClassLikeKind::Enum {
             build_enum_case_body(cls)
         } else if cls.kind == ClassLikeKind::Trait {
@@ -200,7 +198,6 @@ fn build_enum_case_body(cls: &ClassInfo) -> String {
 fn build_trait_summary_body(cls: &ClassInfo) -> String {
     let mut member_lines: Vec<String> = Vec::new();
 
-    // Public constants.
     for constant in &cls.constants {
         if constant.visibility != Visibility::Public {
             continue;
@@ -221,7 +218,6 @@ fn build_trait_summary_body(cls: &ClassInfo) -> String {
         ));
     }
 
-    // Public properties.
     for prop in &cls.properties {
         if prop.visibility != Visibility::Public {
             continue;
@@ -238,7 +234,6 @@ fn build_trait_summary_body(cls: &ClassInfo) -> String {
         ));
     }
 
-    // Public methods.
     for method in &cls.methods {
         if method.visibility != Visibility::Public {
             continue;

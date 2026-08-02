@@ -5,24 +5,12 @@
 /// - **`@param-closure-this` resolution:** detects when the cursor is
 ///   inside a closure whose enclosing call site declares a
 ///   `@param-closure-this` tag and overrides `$this` accordingly.
-/// - **Closure `$this` binding:** resolves `$this` inside closures
-///   re-bound via `Closure::bind`, `Closure::call`, or `->bindTo()`.
-/// - **Callable parameter inference helpers:** shared logic for
-///   inferring untyped closure/arrow-function parameter types from
-///   the enclosing callable signature (e.g. `$users->map(fn($u) => …)`
-///   infers `$u` from the `map` method's parameter type).
-///
-/// ## Callable parameter inference
-///
-/// When a closure or arrow function is passed as an argument to a method
-/// or function call, and its parameters have no explicit type hints, the
-/// resolver attempts to infer the parameter types from the called
-/// method/function's signature.  For example, in
-/// `$users->map(fn($u) => $u->name)`, the resolver looks up the `map`
-/// method on the resolved type of `$users`, finds that its parameter is
-/// typed as `callable(TValue): mixed` (with `TValue` already substituted
-/// through generic resolution), and infers `$u` as the concrete element
-/// type.
+/// - **Callable parameter inference helpers:** shared receiver
+///   resolution and generic-argument recovery used by
+///   `forward_walk/callable_inference.rs` to infer untyped
+///   closure/arrow-function parameter types from the enclosing callable
+///   signature (e.g. `$users->map(fn($u) => …)` infers `$u` from the
+///   `map` method's parameter type).
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -44,8 +32,9 @@ thread_local! {
     /// receiver of the enclosing call expression.  If the receiver
     /// is `$this`, that triggers `resolve_target_classes_expr` →
     /// `SubjectExpr::This` → `find_closure_this_override` again,
-    /// creating an infinite cycle.  This flag breaks the cycle by
-    /// returning `None` on re-entry.
+    /// creating an infinite cycle.  Returning `None` on re-entry
+    /// breaks the cycle and leaves the receiver on the normal
+    /// `current_class` fallback.
     static IN_CLOSURE_THIS_OVERRIDE: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -65,11 +54,6 @@ use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType
 /// `@param-closure-this` PHPDoc tag declares what `$this` should
 /// resolve to.
 pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
-    // Re-entrancy guard: when resolving the receiver of the enclosing
-    // call (e.g. `$this->group(…)`), `resolve_target_classes` will hit
-    // `SubjectExpr::This` and call us again.  Return `None` on the
-    // second entry so the normal `current_class` fallback is used for
-    // the receiver, avoiding infinite recursion.
     let already_inside = IN_CLOSURE_THIS_OVERRIDE.with(|f| f.get());
     if already_inside {
         return None;
@@ -440,7 +424,6 @@ fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Optio
     }
 }
 
-/// Check whether an expression is a closure or arrow function.
 fn is_closure_like(expr: &Expression<'_>) -> bool {
     matches!(expr, Expression::Closure(_) | Expression::ArrowFunction(_))
 }
@@ -646,7 +629,6 @@ fn resolve_closure_this_type(
     owner: Option<&ClassInfo>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<ClassInfo> {
-    // `$this`, `static`, and `self` all refer to the declaring class.
     if php_type.is_self_like() {
         return owner.cloned().or_else(|| ctx.current_class.cloned());
     }
@@ -716,7 +698,6 @@ fn try_relation_query_override(
     first_arg_text: Option<&str>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
-    // Only applies to the known relation-query methods.
     if !RELATION_QUERY_METHODS.contains(&method_name) {
         return None;
     }
@@ -734,7 +715,6 @@ fn try_relation_query_override(
     // Walk the dot-separated relation chain to find the final related model.
     let related_fqn = resolve_relation_chain(&model, relation_name, class_loader, None)?;
 
-    // Return `Builder<RelatedModel>` as the closure parameter type.
     let builder_type = PhpType::generic(
         ELOQUENT_BUILDER_FQN,
         vec![PhpType::named(atom(&related_fqn))],
@@ -743,12 +723,6 @@ fn try_relation_query_override(
     Some(vec![builder_type])
 }
 
-/// Given a list of receiver classes, find the underlying Eloquent model.
-///
-/// If the receiver is a model class directly, return it.  If it's
-/// `Builder<Model>`, extract the model from the Builder's method return
-/// types (which contain the substituted generic arg, e.g.
-/// `Builder<Brand>` → `Brand`).
 /// Build a `PhpType` representing the receiver class for `$this`/`static`
 /// replacement in callable parameter inference.
 ///
@@ -842,6 +816,9 @@ fn extract_generic_args_from_methods(class: &ClassInfo, class_fqn: &str) -> Opti
     None
 }
 
+/// Given a list of receiver classes, find the underlying Eloquent model:
+/// the receiver itself when it is a model class, or the model extracted
+/// from a `Builder<Model>` receiver.
 fn find_model_from_receivers(
     receiver_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -889,14 +866,9 @@ fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
 // ─── Public wrappers for forward walker ─────────────────────────────────────
 //
 // These thin wrappers expose internal helpers to the forward walker
-// (`forward_walk.rs`) so it can perform callable parameter inference
-// during diagnostic scope building without duplicating the logic.
+// (`forward_walk/callable_inference.rs` and `diagnostic_walk.rs`) so it
+// can perform callable parameter inference without duplicating the logic.
 
-/// Public wrapper for [`try_relation_query_override`].
-///
-/// Checks whether `method_name` is a relation-query method and the
-/// receiver is an Eloquent model or `Builder<Model>`.  If so, returns
-/// `Builder<FinalRelatedModel>` as the closure parameter type.
 pub(in crate::type_engine) fn try_relation_query_override_pub(
     receiver_classes: &[Arc<ClassInfo>],
     method_name: &str,
@@ -906,11 +878,6 @@ pub(in crate::type_engine) fn try_relation_query_override_pub(
     try_relation_query_override(receiver_classes, method_name, first_arg_text, class_loader)
 }
 
-/// Public wrapper for [`build_receiver_self_type`].
-///
-/// Builds a `PhpType` representing the receiver class, reconstructing
-/// generic args from method return types when the class has template
-/// parameters.
 pub(in crate::type_engine) fn build_receiver_self_type_pub(
     receiver: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -918,11 +885,6 @@ pub(in crate::type_engine) fn build_receiver_self_type_pub(
     build_receiver_self_type(receiver, class_loader)
 }
 
-/// Public wrapper for [`inferred_type_is_more_specific`].
-///
-/// Returns `true` when the inferred type is a generic version of the
-/// same class as the explicit hint (e.g. `Collection` vs
-/// `Collection<int, User>`).
 pub(in crate::type_engine) fn inferred_type_is_more_specific_pub(
     explicit_hint: &PhpType,
     inferred: &PhpType,

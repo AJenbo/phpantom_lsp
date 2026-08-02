@@ -90,7 +90,6 @@ impl PhpType {
             return true;
         }
 
-        // Everything is a subtype of `mixed`.
         if supertype.is_mixed() {
             return true;
         }
@@ -163,7 +162,6 @@ impl PhpType {
         // ── IntRange <: int / refined-int / IntRange ────────────────
         if let TypeKind::IntRange(sub_min, sub_max) = self.kind() {
             match supertype.kind() {
-                // IntRange <: int, numeric, scalar, array-key
                 TypeKind::Named(sup) => {
                     let sup_l = sup.to_ascii_lowercase();
                     if matches!(
@@ -409,7 +407,8 @@ pub(crate) fn is_self_ref_name(name: &str) -> bool {
 /// - `int <: scalar`, `float <: scalar`, `string <: scalar`, `bool <: scalar`
 /// - `int <: array-key`, `string <: array-key`
 /// - Refinement subtypes: `positive-int <: int`, `non-empty-string <: string`, etc.
-/// - `list <: array`, `non-empty-list <: array`, `non-empty-array <: array`
+/// - `list <: array`, `non-empty-list <: array`, `non-empty-array <: array`,
+///   `associative-array <: array`
 /// - `callable <: object` is NOT true (callables can be strings/arrays)
 pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
     let sub_raw = sub.strip_prefix('\\').unwrap_or(sub);

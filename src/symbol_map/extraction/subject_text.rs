@@ -110,9 +110,9 @@ pub(super) fn expr_to_subject_expr(expr: &Expression<'_>) -> Option<SubjectExpr>
             })
         }
 
-        // `new Foo(...)` as a subject lowers to just the class name, matching
-        // the historical behaviour where the constructed instance resolves
-        // through its class.
+        // `new Foo(...)` as a subject lowers to just the class name: the
+        // constructed instance resolves through its own class regardless
+        // of the constructor arguments.
         Expression::Instantiation(inst) => expr_to_subject_expr(inst.class),
 
         Expression::Parenthesized(paren) => expr_to_subject_expr(paren.expression),
@@ -302,11 +302,10 @@ pub(super) fn format_all_call_args(args: &TokenSeparatedSequence<'_, Argument<'_
 
 /// Format a single argument expression to text.
 ///
-/// Handles the same cases as the old `format_first_class_arg` plus
-/// closure and arrow-function expressions.  For closures the full body
-/// is replaced with a placeholder (`=> ...` or `{ ... }`) to keep the
-/// subject text compact while preserving parameter types and return
-/// type annotations that template inference depends on.
+/// For closures and arrow functions the full body is replaced with a
+/// placeholder (`=> ...` or `{ ... }`) to keep the subject text compact
+/// while preserving parameter types and return type annotations that
+/// template inference depends on.
 pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
     match expr {
         // Foo::class

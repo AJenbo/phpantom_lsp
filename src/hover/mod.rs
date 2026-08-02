@@ -91,7 +91,6 @@ impl Backend {
         let _validation_rules_guard = self.activate_validation_rules_resolver();
         let offset = crate::text_position::position_to_offset(content, position);
 
-        // Try the exact cursor offset first.
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)
             && let Some(Some(mut hover)) =
                 crate::util::catch_panic_unwind_safe("hover", uri, Some(position), || {
@@ -499,7 +498,6 @@ impl Backend {
 
         let (label, detail) = match kind {
             LaravelStringKind::Route => {
-                // Try to resolve the route to show where it's defined.
                 let locations =
                     crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
                 let detail = if let Some(loc) = locations.first() {
@@ -516,7 +514,6 @@ impl Backend {
                 ("Route", detail)
             }
             LaravelStringKind::Config => {
-                // Try to resolve the config key to show its value.
                 let locations =
                     crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
                 let detail = if let Some(loc) = locations.first() {
@@ -533,7 +530,6 @@ impl Backend {
                 ("Config", detail)
             }
             LaravelStringKind::View => {
-                // Show the resolved file path.
                 let locations =
                     crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
                 let detail = if let Some(loc) = locations.first() {

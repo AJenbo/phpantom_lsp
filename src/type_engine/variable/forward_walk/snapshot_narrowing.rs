@@ -141,7 +141,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                 record_scope_snapshot_recursive(conditional.r#else, &else_scope);
                 record_match_ternary_snapshots(conditional.r#else, &else_scope, ctx);
             } else {
-                // No instanceof — just recurse for nested patterns.
+                // No applicable narrowing — just recurse for nested patterns.
                 if let Some(then_expr) = conditional.then {
                     record_match_ternary_snapshots(then_expr, scope, ctx);
                 }
@@ -363,7 +363,6 @@ pub(crate) fn record_scope_snapshot_recursive(expr: &Expression<'_>, scope: &Sco
         Expression::Call(call) => {
             let args = match call {
                 Call::Function(fc) => {
-                    // Record at the function call's argument list.
                     for arg in fc.argument_list.arguments.iter() {
                         let arg_expr = match arg {
                             Argument::Positional(a) => a.value,

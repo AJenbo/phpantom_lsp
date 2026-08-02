@@ -133,9 +133,6 @@ impl<T> SharedVec<T> {
     }
 }
 
-// Allow `SharedVec` to be used with serde if ever needed in the future,
-// and support `From` conversions for ergonomic construction.
-
 impl<T> From<Vec<T>> for SharedVec<T> {
     #[inline]
     fn from(v: Vec<T>) -> Self {

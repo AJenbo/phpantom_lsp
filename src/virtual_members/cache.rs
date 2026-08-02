@@ -26,8 +26,9 @@ use crate::virtual_members::laravel::database_schema::SchemaIndex;
 /// `Illuminate\Database\Eloquent\Builder<App\Models\User>`, the key
 /// would be `("Illuminate\\Database\\Eloquent\\Builder", vec!["App\\Models\\User"])`.
 ///
-/// Generic args are stored normalized (fully qualified, sorted when
-/// order-independent) to avoid near-miss cache entries.
+/// Generic args are the display strings of the concrete type arguments
+/// in positional order; two lookups share an entry only when they spell
+/// the arguments identically.
 pub type ResolvedClassCacheKey = (Atom, Vec<String>);
 
 /// The inner store behind a [`ResolvedClassCache`].
@@ -130,10 +131,11 @@ struct SubstitutedPropertyEntry {
     value: Arc<PropertyInfo>,
 }
 
-/// Ceiling on the interned-method map.  Reaching it clears the map (the
-/// merge simply stops sharing until it refills); it exists only as a
-/// backstop against unbounded growth across many edit/evict cycles,
-/// far above what a full workspace resolution produces.
+/// Ceiling on each interned-member map (methods and properties).
+/// Reaching it clears the map (the merge simply stops sharing until it
+/// refills); it exists only as a backstop against unbounded growth
+/// across many edit/evict cycles, far above what a full workspace
+/// resolution produces.
 const SUBSTITUTED_METHODS_CAP: usize = 1 << 20;
 
 impl Default for ResolvedCacheInner {
@@ -616,8 +618,8 @@ pub(crate) fn intern_transformed_property(
 
 /// Evict all cache entries whose FQN matches the given name, then
 /// transitively evict any cached class that depends on the evicted
-/// FQN through `parent_class`, `used_traits`, `interfaces`, or
-/// `mixins`.
+/// FQN through `parent_class`, `used_traits`, `interfaces`, `mixins`,
+/// or Eloquent cast classes.
 ///
 /// Because the cache is keyed by `(FQN, generic_args)`, a single FQN
 /// may have multiple entries (one per distinct generic instantiation).
@@ -636,7 +638,6 @@ pub(crate) fn intern_transformed_property(
 /// The returned vector lists the seed FQN followed by every transitively
 /// evicted dependent, or is empty when nothing matched.
 pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
-    // Fast path: nothing to evict from an empty cache.
     if cache.map.is_empty() {
         return vec![];
     }
@@ -651,7 +652,7 @@ pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
 
     while let Some(current) = frontier.pop() {
         // A dependent class stores the dependency either as the FQN or as the
-        // short name, so look under both (mirroring the previous dual match).
+        // short name, so look under both.
         let short = crate::util::short_name(&current);
         let mut dependents: Vec<String> = Vec::new();
         if let Some(set) = cache.reverse_deps.get(current.as_str()) {
@@ -673,8 +674,7 @@ pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
 
     // Remove every generic-arg variant of each collected FQN.  All dependents
     // come from the reverse index (so they are present), but the seed may not
-    // have been cached — when nothing was actually removed, report no eviction
-    // to match the previous "return empty when nothing matched" behaviour.
+    // have been cached — when nothing was actually removed, report no eviction.
     let mut any_removed = false;
     for f in &evicted {
         if cache.remove_all_variants(f) {

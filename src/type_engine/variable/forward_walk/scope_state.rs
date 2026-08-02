@@ -30,7 +30,6 @@ pub(crate) struct ScopeState {
 }
 
 impl ScopeState {
-    /// Create an empty scope.
     pub fn new() -> Self {
         Self {
             locals: AtomMap::default(),
@@ -50,7 +49,9 @@ impl ScopeState {
         self.locals.contains_key(&atom(var_name))
     }
 
-    /// Insert or overwrite a variable's types.
+    /// Insert or overwrite a variable's types.  An empty type list is
+    /// ignored, leaving any existing entry untouched; use
+    /// [`Self::set_empty`] to record existence without types.
     pub fn set(&mut self, var_name: &str, types: Vec<ResolvedType>) {
         if types.is_empty() {
             return;
@@ -58,9 +59,9 @@ impl ScopeState {
         self.locals.insert(atom(var_name), types);
     }
 
-    /// Record that a variable exists in scope with an empty type list.
-    /// This prevents the variable from appearing unseen by the forward
-    /// walker.
+    /// Record that a variable exists in scope with an empty type list,
+    /// so passes that iterate the scope's keys (e.g. condition
+    /// narrowing) can see it even though no type is known yet.
     pub fn set_empty(&mut self, var_name: &str) {
         self.locals.entry(atom(var_name)).or_default();
     }
@@ -293,7 +294,6 @@ pub(crate) fn simplify_class_hierarchy_unions(
             _ => continue,
         };
 
-        // Extract class names from the two ResolvedType entries.
         let name_a = match types[0].type_string.class_name() {
             Some(n) => n,
             None => continue,
@@ -303,7 +303,6 @@ pub(crate) fn simplify_class_hierarchy_unions(
             None => continue,
         };
 
-        // Check if one is a subclass of the other.
         if is_subclass_of(name_a, name_b, class_loader) {
             // A extends B → keep B (the parent).
             scope.locals.get_mut(&key).unwrap().remove(0);

@@ -380,7 +380,6 @@ impl Backend {
                 return Some(point_location(parsed_uri, entry_position));
             }
 
-            // Check that the member is actually present on the declaring class.
             let member_kind =
                 match Self::classify_member(&declaring_class, &search_name, access_hint) {
                     Some(k) => k,
@@ -397,7 +396,6 @@ impl Backend {
                 return Some(location);
             }
 
-            // Locate the file that contains the declaring class.
             if let Some((class_uri, class_content)) =
                 self.find_class_file_content(&declaring_fqn, uri, content)
                 && let Some(member_position) = Self::find_member_position(
@@ -427,10 +425,10 @@ impl Backend {
             }
 
             // ── Eloquent array entry fallback ───────────────────────
-            // Virtual properties from $casts, $attributes, $fillable,
-            // $guarded, $hidden, $visible, and $appends don't have a
-            // method or property declaration.  Jump to the string literal
-            // entry inside the array property instead.
+            // Virtual properties from $casts, $dates, $attributes,
+            // $fillable, $guarded, $hidden, $visible, and $appends don't
+            // have a method or property declaration.  Jump to the string
+            // literal entry inside the array property instead.
             if extends_eloquent_model(lookup_class, &class_loader)
                 && let Some((class_uri, class_content)) =
                     self.find_class_file_content(&declaring_fqn, uri, content)
@@ -697,7 +695,6 @@ impl Backend {
     ) -> Option<(String, AccessKind)> {
         let offset = position_to_offset(content, position);
 
-        // Try the symbol map (primary path).
         if let Some(result) = self.member_access_from_symbol_map(uri, content, offset) {
             return Some(result);
         }
@@ -905,7 +902,7 @@ impl Backend {
     /// we need to trace back to the `scopeXxx` method on the model.
     ///
     /// `resolved_candidate` is the fully-resolved Builder (with scope
-    /// methods injected by `type_hint_to_classes_depth`).  We use it to
+    /// methods injected by `type_hint_to_classes_typed`).  We use it to
     /// confirm the member exists and to extract the model name from the
     /// scope method's return type.
     ///

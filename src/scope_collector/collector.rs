@@ -17,8 +17,6 @@ pub(super) struct Collector<'a> {
     pub(super) frames: Vec<Frame>,
     pub(super) has_this_or_self: bool,
     pub(super) has_reference_params: bool,
-    /// Stack of frame start offsets for determining the current scope.
-    frame_stack: Vec<u32>,
     /// Optional callback that resolves by-reference parameter positions
     /// for function/static-method/constructor calls.
     by_ref_resolver: Option<ByRefResolver<'a>>,
@@ -34,7 +32,6 @@ impl<'a> Collector<'a> {
             frames: Vec::new(),
             has_this_or_self: false,
             has_reference_params: false,
-            frame_stack: Vec::new(),
             by_ref_resolver: None,
             enclosing_class_name: None,
         }
@@ -46,13 +43,11 @@ impl<'a> Collector<'a> {
             frames: Vec::new(),
             has_this_or_self: false,
             has_reference_params: false,
-            frame_stack: Vec::new(),
             by_ref_resolver: Some(resolver),
             enclosing_class_name: None,
         }
     }
 
-    /// Return the enclosing class name, if set.
     fn enclosing_class_name(&self) -> Option<&str> {
         self.enclosing_class_name.as_deref()
     }
@@ -62,13 +57,10 @@ impl<'a> Collector<'a> {
     }
 
     pub(super) fn push_frame(&mut self, frame: Frame) {
-        self.frame_stack.push(frame.start);
         self.frames.push(frame);
     }
 
-    pub(super) fn pop_frame(&mut self) {
-        self.frame_stack.pop();
-    }
+    pub(super) fn pop_frame(&mut self) {}
 }
 
 // ─── Statement walker ───────────────────────────────────────────────────────
@@ -534,9 +526,7 @@ pub(super) fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'
             }
         }
         // ── Constant access ──
-        Expression::ConstantAccess(_) => {
-            // No variable accesses in standalone constant references.
-        }
+        Expression::ConstantAccess(_) => {}
         // ── Pipe operator (PHP 8.5) ──
         Expression::Pipe(pipe) => {
             walk_expression(pipe.input, collector);
@@ -568,7 +558,6 @@ pub(super) fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'
         | Expression::Identifier(_)
         | Expression::Error(_) => {}
 
-        // Catch-all for any remaining expression types.
         _ => {}
     }
 }
@@ -1119,7 +1108,6 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
         parameters: param_names,
     });
 
-    // Record parameters as writes in the closure frame.
     for param in closure.parameter_list.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
@@ -1164,7 +1152,6 @@ fn walk_arrow_function(arrow: &ArrowFunction<'_>, collector: &mut Collector<'_>)
         parameters: param_names,
     });
 
-    // Record parameters as writes.
     for param in arrow.parameter_list.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;

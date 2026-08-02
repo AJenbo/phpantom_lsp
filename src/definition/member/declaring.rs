@@ -249,10 +249,9 @@ impl Backend {
     /// Search through `@mixin` class names for one that declares `member_name`.
     ///
     /// Mixin classes are resolved with their full inheritance chain (parent
-    /// classes, traits) so that inherited members are found.  Only public
-    /// members are considered since mixins proxy via magic methods.
-    /// Mixin classes can themselves declare `@mixin`, so this recurses up
-    /// to a depth limit.
+    /// classes, traits) so that inherited members are found.  Mixin classes
+    /// can themselves declare `@mixin`, so this recurses up to a depth
+    /// limit.
     ///
     /// Returns `(ClassInfo, fqn)` where `fqn` is the fully-qualified name
     /// that was used to load the declaring class from `class_loader`.

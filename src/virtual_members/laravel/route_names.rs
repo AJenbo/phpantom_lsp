@@ -785,9 +785,9 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> Vec<RouteEntry> {
         }
     }
 
-    // One entry per name, as the name enumeration has always been.  Sorting
-    // known URIs ahead of unknown ones means a name registered both with a
-    // literal URI and by `Route::resource()` keeps the URI it has.
+    // Sorting known URIs ahead of unknown ones, then deduping to one entry
+    // per name, means a name registered both with a literal URI and by
+    // `Route::resource()` keeps the URI it has.
     routes.sort_by(|a, b| {
         a.name
             .cmp(&b.name)
@@ -1038,7 +1038,7 @@ fn collect_names_from_group_body<'a>(
                     let sub_dir = included.parent().map(|d| d.to_path_buf());
                     // Scan the included file with the current prefix so
                     // routes inherit the parent group's name (e.g.
-                    // "eaglesys::").  Do NOT scan with empty prefix —
+                    // "admin::").  Do NOT scan with empty prefix —
                     // that produces unprefixed names that are incorrect.
                     let arena2 = LocalArena::new();
                     let fid2 = FileId::new(b"included.php");

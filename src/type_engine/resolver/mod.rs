@@ -12,15 +12,15 @@
 ///   calls, signature help, named-argument completion).
 /// - [`super::type_resolution`]: Type-hint string to `ClassInfo` mapping
 ///   (unions, intersections, generics, type aliases, object shapes).
-/// - [`super::source_helpers`]: Source-text scanning helpers (closure return
-///   types, first-class callable resolution, `new` expression parsing,
-///   array access segment walking).
-/// - [`super::variable_resolution`]: Variable type resolution via
+/// - [`crate::completion::source::helpers`]: Source-text scanning helpers
+///   (closure return types, first-class callable resolution, `new`
+///   expression parsing, array access segment walking).
+/// - [`super::variable::resolution`]: Variable type resolution via
 ///   assignment scanning and parameter type hints.
-/// - [`super::type_narrowing`]: instanceof / assert / custom type guard
+/// - [`super::types::narrowing`]: instanceof / assert / custom type guard
 ///   narrowing.
-/// - [`super::closure_resolution`]: Closure and arrow-function parameter
-///   resolution.
+/// - [`super::variable::closure_resolution`]: Closure and arrow-function
+///   parameter resolution.
 /// - [`crate::inheritance`]: Class inheritance merging (traits, mixins,
 ///   parent chain).
 /// - [`super::conditional_resolution`]: PHPStan conditional return type
@@ -1107,8 +1107,7 @@ fn scope_type_discriminator(vars: &[String], ctx: &ResolutionCtx<'_>) -> Option<
     Some(disc)
 }
 
-/// Shared variable-resolution logic extracted from the former
-/// bare-`$var` branch of `resolve_target_classes`.
+/// Resolve a bare `$var` subject to its classes.
 ///
 /// Resolves a variable to its classes by running the full variable
 /// resolution pipeline (including narrowing from instanceof, assert,
@@ -1337,31 +1336,6 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
     }
 }
 
-/// Apply instanceof / assert narrowing for a property-access path.
-///
-/// This is the property-level analog of the narrowing that
-/// [`super::variable::resolution::walk_statements_for_assignments`]
-/// performs for plain variables.  It re-parses the source, locates
-/// the enclosing method body, and walks its statements with a
-/// [`VarResolutionCtx`] whose `var_name` is the full property path
-/// (e.g. `$this->timeline`).  The existing narrowing functions in
-/// [`super::types::narrowing`] already support property paths via
-/// [`super::types::narrowing::expr_to_subject_key`], so no changes
-/// to those functions are required.
-/// Consult the forward-walker scope for a narrowed type for a compound
-/// subject key (property path like `$a->b->c` or array access like
-/// `$a["k"]`).
-///
-/// The forward walker seeds and narrows these keys while walking the
-/// enclosing method, capturing narrowing shapes the property-narrowing
-/// re-walk in [`apply_property_narrowing`] cannot express (compound
-/// `&&`/`||` conditions with mixed subjects, guard clauses whose De
-/// Morgan expansion narrows several distinct subjects, etc.).
-///
-/// Returns `Some(types)` only when the scope holds a non-empty narrowed
-/// type for `key`; the caller then trusts it and skips the re-walk.
-/// Returns `None` when no scope is active or the key was never seeded,
-/// so the caller falls back to normal resolution.
 /// Whether a subject expression transitively roots in a variable
 /// (`$var`, `$this`, `self`, `static`, or `parent`), possibly through
 /// array accesses or nested property chains.
@@ -1415,6 +1389,20 @@ fn subject_scope_key(expr: &SubjectExpr) -> String {
     }
 }
 
+/// Consult the forward-walker scope for a narrowed type for a compound
+/// subject key (property path like `$a->b->c` or array access like
+/// `$a["k"]`).
+///
+/// The forward walker seeds and narrows these keys while walking the
+/// enclosing method, capturing narrowing shapes the property-narrowing
+/// re-walk in [`apply_property_narrowing`] cannot express (compound
+/// `&&`/`||` conditions with mixed subjects, guard clauses whose De
+/// Morgan expansion narrows several distinct subjects, etc.).
+///
+/// Returns `Some(types)` only when the scope holds a non-empty narrowed
+/// type for `key`; the caller then trusts it and skips the re-walk.
+/// Returns `None` when no scope is active or the key was never seeded,
+/// so the caller falls back to normal resolution.
 fn lookup_scope_for_subject(key: &str, ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
     use crate::type_engine::variable::forward_walk;
 

@@ -175,7 +175,6 @@ fn raw_class_has_member(
     member_kind: &MemberKindForOrigin,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    // Build the FQN the same way the class loader expects.
     let fqn = owner.fqn();
 
     // Load the raw class.  If the loader returns None (e.g. the class
@@ -230,7 +229,6 @@ fn build_origin_lines(
     let declared_on_owner = raw_class_has_member(owner, member_name, &member_kind, class_loader);
 
     if declared_on_owner {
-        // Check parent class for override.
         if let Some(ref parent_name) = owner.parent_class
             && let Some(parent) = class_loader(parent_name)
         {
@@ -251,7 +249,6 @@ fn build_origin_lines(
             }
         }
 
-        // Check interfaces for implements.
         for iface_name in &owner.interfaces {
             if let Some(iface) = class_loader(iface_name) {
                 let has_member = match member_kind {
@@ -318,12 +315,10 @@ pub(crate) fn find_declaring_class(
     member_kind: &MemberKindForOrigin,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Arc<ClassInfo> {
-    // If the member is declared directly on the owner, no need to search.
     if raw_class_has_member(owner, member_name, member_kind, class_loader) {
         return Arc::new(owner.clone());
     }
 
-    // Check traits used by the owner.
     for trait_name in &owner.used_traits {
         if let Some(trait_class) = class_loader(trait_name) {
             let has = match member_kind {
@@ -344,7 +339,6 @@ pub(crate) fn find_declaring_class(
         }
     }
 
-    // Walk the parent chain.
     let mut ancestor_name = owner.parent_class;
     let mut depth = 0u32;
     while let Some(ref name) = ancestor_name {
@@ -353,7 +347,6 @@ pub(crate) fn find_declaring_class(
             break;
         }
         if let Some(ancestor) = class_loader(name) {
-            // Check traits on the ancestor first.
             for trait_name in &ancestor.used_traits {
                 if let Some(trait_class) = class_loader(trait_name) {
                     let has = match member_kind {
@@ -374,7 +367,6 @@ pub(crate) fn find_declaring_class(
                 }
             }
 
-            // Check the ancestor class itself.
             let has = match member_kind {
                 MemberKindForOrigin::Method => ancestor
                     .methods
@@ -396,7 +388,6 @@ pub(crate) fn find_declaring_class(
         }
     }
 
-    // Check @mixin classes.
     for mixin_name in &owner.mixins {
         if let Some(mixin_class) = class_loader(mixin_name) {
             let has = match member_kind {
@@ -417,7 +408,6 @@ pub(crate) fn find_declaring_class(
         }
     }
 
-    // Fallback: couldn't find the declaring class, use the owner.
     Arc::new(owner.clone())
 }
 
@@ -484,8 +474,6 @@ impl Backend {
             None
         };
 
-        // Use the inferred type as the effective return type when
-        // the method has no declared one.
         let effective_return = method
             .return_type
             .as_ref()
@@ -530,7 +518,6 @@ impl Backend {
             }
         }
 
-        // Origin indicator (override / implements / virtual).
         let origin = build_origin_lines(
             &method.name,
             owner,
@@ -559,7 +546,6 @@ impl Backend {
         let resolved_see = self.resolve_see_refs(&method.see_refs, uri, content);
         format_see_refs(&resolved_see, &method.links, &mut lines);
 
-        // Build the readable param/return section as markdown.
         let show_inferred = method.is_inferred_return || inferred_return_type.is_some();
         if let Some(section) = build_param_return_section(
             &method.parameters,
@@ -626,7 +612,6 @@ impl Backend {
             lines.push(tpl_line);
         }
 
-        // Origin indicator (override / implements / virtual).
         let origin = build_origin_lines(
             &property.name,
             owner,
@@ -707,7 +692,6 @@ impl Backend {
 
         let mut lines = Vec::new();
 
-        // Origin indicator (implements / virtual).
         let origin = build_origin_lines(
             &constant.name,
             owner,

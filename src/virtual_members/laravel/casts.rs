@@ -4,9 +4,9 @@
 //! `boolean`, `App\Casts\MoneyCast`) to their corresponding PHP types
 //! for virtual property synthesis.  It handles built-in cast strings,
 //! `decimal:N` and `datetime:format` variants, custom cast classes
-//! (via `get()` return type inspection), enum casts, `Castable`
-//! implementations, and `@implements CastsAttributes<TGet, TSet>`
-//! fallback resolution.
+//! (via `@implements CastsAttributes<TGet, TSet>` or, failing that,
+//! `get()` return type inspection), enum casts, and `Castable`
+//! implementations.
 
 use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
@@ -89,14 +89,14 @@ const CASTABLE_FQN: &str = "Illuminate\\Contracts\\Database\\Eloquent\\Castable"
 ///
 /// Handles built-in cast strings (`datetime`, `boolean`, `array`, etc.),
 /// `decimal:N` variants (e.g. `decimal:2` → `float`), custom cast
-/// classes (inspects the `get()` return type), enum classes (the
-/// property type is the enum itself), and `Castable` implementations
-/// (the property type is the class itself).
+/// classes, enum classes (the property type is the enum itself), and
+/// `Castable` implementations (the property type is the class itself).
 ///
-/// When a custom cast class's `get()` method has no return type (native
-/// or docblock), the resolver falls back to the first generic argument
-/// from an `@implements CastsAttributes<TGet, TSet>` annotation on the
-/// cast class.
+/// For custom cast classes, the first generic argument from an
+/// `@implements CastsAttributes<TGet, TSet>` annotation takes priority,
+/// since it is the developer's explicit contract.  When no such
+/// annotation is present, the resolver falls back to the `get()`
+/// method's return type.
 ///
 /// Class-based cast types may carry a `:argument` suffix (e.g.
 /// `Address::class.':nullable'`).  The suffix is stripped before

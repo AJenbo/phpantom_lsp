@@ -1,9 +1,8 @@
 //! Autoload preloading and the workspace-indexing pipeline.
 //!
-//! Relocated here from `server.rs` (the autoload preloaders) and
-//! `references/mod.rs` (the `ensure_workspace_indexed*` pipeline and its
-//! parallel parse workers). Consolidating them keeps all "parse the
-//! workspace into symbol maps" logic in one place.
+//! Keeps all "parse the workspace into symbol maps" logic in one place:
+//! autoload preloading and the `ensure_workspace_indexed*` pipeline with
+//! its parallel parse workers.
 //!
 //! Several methods spawn OS threads sized with
 //! [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE); see the
@@ -97,6 +96,7 @@ impl Backend {
     /// This lazily parses files that are in the workspace directory but
     /// have not been opened or indexed yet.  It also covers files known
     /// via the fqn_uri_index.  The vendor directory (read from
+    /// `composer.json`'s `config.vendor-dir`, defaulting to `vendor`) is
     /// skipped during the filesystem walk.
     pub(crate) fn ensure_workspace_indexed(&self) {
         self.ensure_workspace_indexed_with_progress(None);
@@ -193,7 +193,6 @@ impl Backend {
         let _workspace_index_guard = self.acquire_workspace_index_lock(progress);
         let start = std::time::Instant::now();
         self.report_workspace_index_progress(progress, 1, "Preparing workspace index");
-        // Collect URIs that already have symbol maps.
         let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
         // Build the vendor URI prefixes so we can skip vendor files in

@@ -40,9 +40,8 @@ impl Backend {
             return None;
         }
 
-        // Reject non-renameable symbols.
+        // self, static, parent, and $this are never renameable.
         if let SymbolKind::SelfStaticParent(_) = &span.kind {
-            // self, static, parent, and $this are never renameable.
             return None;
         }
 
@@ -108,12 +107,10 @@ impl Backend {
             return None;
         }
 
-        // Reject vendor symbols.
         if self.is_vendor_symbol(uri, content, position) {
             return None;
         }
 
-        // Namespace rename: delegate to the specialised handler.
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
             if new_name.contains('\\') {
                 return self.build_namespace_prefix_rename_edit(name, new_name);
@@ -125,7 +122,6 @@ impl Backend {
             return self.build_namespace_rename_edit(name, segment_idx, new_name);
         }
 
-        // Detect whether this is a class rename and resolve the FQN.
         let class_rename_fqn = self.resolve_class_rename_fqn(&span.kind, uri, span.start);
 
         // Find all references (including the declaration).
@@ -280,7 +276,6 @@ impl Backend {
             return false;
         }
 
-        // Try to resolve the definition location.
         for loc in self.resolve_definition(uri, content, position) {
             let def_uri = loc.uri.to_string();
             if vendor_prefixes

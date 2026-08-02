@@ -10,11 +10,6 @@
 //! over `@mixin` members: if a class declares both `@property int $id`
 //! and `@mixin SomeClass` where `SomeClass` also has an `$id` property,
 //! the `@property` tag wins.
-//!
-//! Previously `@method` / `@property` and `@mixin` were handled by two
-//! separate providers (`PHPDocProvider` and `MixinProvider`).  Since both
-//! are driven by PHPDoc tags, they are now unified into a single provider
-//! with internal precedence rules.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -92,8 +87,6 @@ fn ensure_mixin_cache_fresh() {
     });
 }
 
-/// Tracks member names already seen during mixin collection.
-///
 /// Accumulates mixin members during collection, grouping the output
 /// vectors and dedup sets into a single value to keep the argument
 /// count of [`collect_mixin_members`] within clippy's limit.
@@ -104,6 +97,8 @@ struct MixinCollector {
     dedup: MixinDedup,
 }
 
+/// Tracks member names already seen during mixin collection.
+///
 /// Passed through [`collect_mixin_members`] (including recursive calls)
 /// so that every addition is checked in O(1) instead of scanning the
 /// accumulated vectors and base class members.
@@ -254,8 +249,6 @@ impl VirtualMemberProvider for PHPDocProvider {
         }
 
         // Walk the parent chain to check for ancestor mixins or tags.
-        // Use a cheap Arc handle instead of cloning the entire ClassInfo
-        // at each level.
         let mut current_parent = class.parent_class;
         let mut depth = 0u32;
         while let Some(ref parent_name) = current_parent {
@@ -596,8 +589,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                 break;
             };
 
-            // Build the substitution map for this parent level,
-            // analogous to `build_substitution_map` in inheritance.rs.
+            // Build the substitution map for this parent level.
             let level_subs = build_mixin_substitution_map(
                 &current_ancestor,
                 &parent,
@@ -651,9 +643,10 @@ impl VirtualMemberProvider for PHPDocProvider {
 
 /// Recursively collect public members from mixin classes.
 ///
-/// For each mixin name, loads the class via `class_loader`, resolves its
-/// full inheritance chain (via [`crate::inheritance::resolve_class_with_inheritance`]),
-/// and adds its public members to the output vectors.  Only members whose
+/// For each mixin name, loads the class via `class_loader`, fully resolves
+/// it (via [`super::resolve_class_fully_maybe_cached`], so the mixin's own
+/// virtual members come through too — see the inline comment below), and
+/// adds its public members to the output vectors.  Only members whose
 /// names are not already present in `class` (the target class with base
 /// resolution already applied) or in the output vectors are added.
 /// This means `@method` / `@property` tags collected before this function
@@ -662,12 +655,12 @@ impl VirtualMemberProvider for PHPDocProvider {
 /// Recurses into mixins declared on the mixin classes themselves, up to
 /// [`MAX_MIXIN_DEPTH`] levels.
 ///
-/// Uses a thread-local cache so that `resolve_class_with_inheritance` is
-/// called at most once per unique mixin FQN across all `provide` calls
-/// within the same thread.  Without this cache, a mixin like
-/// `\Illuminate\Database\Eloquent\Builder` was fully re-resolved for
-/// every Eloquent model class (very expensive: deep inheritance chain
-/// with dozens of traits).
+/// Prefers the caller-supplied or thread-active [`super::ResolvedClassCache`]
+/// so repeat lookups of the same mixin FQN are cache hits; when neither is
+/// available, falls back to a thread-local cache so a mixin like
+/// `\Illuminate\Database\Eloquent\Builder` is still resolved at most once
+/// per thread instead of being fully re-resolved (very expensive: deep
+/// inheritance chain with dozens of traits) for every Eloquent model class.
 fn collect_mixin_members(
     mixin_names: &[Atom],
     mixin_generics: &[(Atom, Vec<PhpType>)],
@@ -1168,8 +1161,6 @@ pub fn resolve_template_param_mixins(
     }
 }
 
-/// Build a substitution map for mixin generic resolution by zipping the
-/// parent class's `@template` parameters with the type arguments provided
 /// Build a substitution map for a directly implemented interface.
 ///
 /// Maps the interface's template parameters to the concrete types provided
@@ -1287,9 +1278,13 @@ fn build_trait_substitution_map(
     map
 }
 
-/// This mirrors [`crate::inheritance::build_substitution_map`] but is
-/// scoped to the virtual-member provider so it does not need to be public
-/// on the inheritance module.
+/// Build a substitution map for mixin generic resolution by zipping the
+/// parent class's `@template` parameters with the type arguments the
+/// child provides via `@extends` / `@implements` generics.
+///
+/// Mirrors [`crate::inheritance::build_substitution_map`], with an extra
+/// fallback to template bounds when a `@mixin` names a template parameter
+/// (see the comment on `parent_has_template_param_mixin` below).
 fn build_mixin_substitution_map(
     current: &ClassInfo,
     parent: &ClassInfo,

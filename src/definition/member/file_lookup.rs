@@ -152,10 +152,8 @@ impl Backend {
         Some((uri, file_content))
     }
 
-    /// Find the position of a member declaration (method, property, or constant)
-    /// inside a PHP file.
-    ///
-    /// Find the position of a member declaration in source content.
+    /// Find the position of a member declaration (method, property, or
+    /// constant) in source content.
     ///
     /// When `name_offset` is `Some(off)` with `off > 0`, the position is
     /// computed directly from the stored byte offset (fast path).

@@ -14,6 +14,11 @@
 //!   `@return HasMany<Post, $this>` annotations) or, as a fallback,
 //!   from the first `::class` argument in the method body text.
 //!
+//! - **Relationship count properties.** For each relationship method, a
+//!   `{snake_name}_count` property typed `int` is synthesized, matching
+//!   the `withCount()`/`loadCount()` convention.  Skipped when a
+//!   property of that name already exists.
+//!
 //! - **Scope methods.** Methods whose name starts with `scope` (e.g.
 //!   `scopeActive`, `scopeVerified`) produce a virtual method with the
 //!   `scope` prefix stripped and the first letter lowercased (e.g.
@@ -24,6 +29,11 @@
 //!   The first `$query` parameter is removed.
 //!   Scope methods are available as both static and instance methods
 //!   so they resolve for `User::active()` and `$user->active()`.
+//!
+//! - **Accessor properties.** Legacy `getXAttribute()` methods and
+//!   modern (Laravel 9+) `Attribute`-returning accessors both produce a
+//!   virtual property named after the attribute, typed from the
+//!   accessor's return type.
 //!
 //! - **Builder-as-static forwarding.** Laravel's `Model::__callStatic()`
 //!   forwards static calls to `static::query()`, which returns an
@@ -41,39 +51,53 @@
 //!   `casts()` method body produce typed virtual properties.  Cast type
 //!   strings are mapped to PHP types (e.g. `datetime` → `\Carbon\Carbon`,
 //!   `boolean` → `bool`, `decimal:2` → `float`).  Custom cast classes
-//!   are resolved by loading the class and inspecting the `get()`
-//!   method's return type.  When the `get()` method has no return type,
-//!   the resolver falls back to the first generic argument from an
-//!   `@implements CastsAttributes<TGet, TSet>` annotation on the cast
-//!   class.  Enum casts resolve to the enum class itself.  Classes
-//!   implementing `Castable` also resolve to themselves.  A `:argument`
-//!   suffix (e.g. `Address::class.':nullable'`) is stripped before
-//!   resolution.
+//!   are resolved by loading the class and reading the first generic
+//!   argument from an `@implements CastsAttributes<TGet, TSet>`
+//!   annotation on the cast class.  When no such annotation is present,
+//!   the resolver falls back to the `get()` method's return type.  Enum
+//!   casts resolve to the enum class itself.  Classes implementing
+//!   `Castable` also resolve to themselves.  A `:argument` suffix (e.g.
+//!   `Address::class.':nullable'`) is stripped before resolution.  The
+//!   deprecated `$dates` property array is handled the same way, typed
+//!   as the configured Laravel date class.
 //!
 //! - **Attribute default properties.** Entries in the `$attributes`
 //!   property array produce typed virtual properties as a fallback.
 //!   Types are inferred from the literal default values: strings,
 //!   booleans, integers, floats, `null`, and arrays.  Columns that
-//!   already have a `$casts` entry are skipped, so casts always take
-//!   priority.
+//!   already have a `$casts` or `$dates` entry are skipped, so those
+//!   always take priority.
+//!
+//! - **Database schema columns.** When a schema dump or migration scan
+//!   is available, columns not already covered by `$casts`, `$dates`,
+//!   or `$attributes` produce properties typed from the actual column
+//!   type, carrying nullability and default-value metadata for hover.
+//!
+//! - **Implicit primary key.** Every model exposes a primary key column
+//!   (`id` by default, respecting `$primaryKey`/`$keyType` overrides)
+//!   even when no schema or cast entry describes it, unless the model
+//!   overrides `getKeyName()`.
+//!
+//! - **Timestamp properties.** `created_at`/`updated_at` (or their
+//!   configured names) are added as the configured Laravel date class,
+//!   unless timestamps are disabled or the columns are already covered.
 //!
 //! - **Column name properties.** Column names from `$fillable`,
 //!   `$guarded`, `$hidden`, and `$appends` produce `mixed`-typed
 //!   virtual properties as a last-resort fallback.  Columns already
-//!   covered by `$casts` or `$attributes` are skipped.
+//!   covered by any of the sources above are skipped.
 //!
 //! - **`where{PropertyName}()` dynamic methods.** Laravel's
 //!   `Builder::__call()` translates calls like `whereBrandId($value)`
 //!   into `where('brand_id', $value)`.  For each known column on the
-//!   model (from all property sources: `$casts`, `$attributes`,
-//!   `$fillable`/`$guarded`/`$hidden`/`$appends`, `$dates`, timestamps,
-//!   relationship `*_count` properties, `@property` annotations, and
-//!   accessor-derived properties), a virtual `where{StudlyCase}()`
-//!   method is synthesized.  The method accepts a `mixed` value
-//!   parameter and returns `Builder<ConcreteModel>`.  These methods
-//!   appear as both instance methods on the Builder (for chaining:
-//!   `$query->whereBrandId(42)`) and static methods on the model
-//!   (for `User::whereName('Alice')`).
+//!   model (from `$casts`, `$dates`, `$attributes` defaults,
+//!   `$fillable`/`$guarded`/`$hidden`/`$appends`, timestamps,
+//!   `@property` annotations, and properties declared on the class
+//!   itself), a virtual `where{StudlyCase}()` method is synthesized.
+//!   The method accepts a `mixed` value parameter and returns
+//!   `Builder<ConcreteModel>`.  These methods appear as both instance
+//!   methods on the Builder (for chaining: `$query->whereBrandId(42)`)
+//!   and static methods on the model (for `User::whereName('Alice')`).
 
 mod accessors;
 mod aliases;
@@ -242,11 +266,12 @@ pub(super) fn self_ref_subs(ty: PhpType) -> HashMap<String, PhpType> {
 
 // ─── Type-resolution helpers ────────────────────────────────────────────────
 //
-// Called from `completion/resolver.rs` (`type_hint_to_classes_depth`) to
-// apply Eloquent-specific post-processing after a class has been resolved
-// and generic substitution applied.  Keeping the framework logic here
-// rather than inline in the generic resolver avoids coupling the type
-// engine to Laravel conventions.
+// Called from `type_engine/types/resolution.rs`
+// (`type_hint_to_classes_typed_depth`) and the call/return-type resolvers
+// under `type_engine/` to apply Eloquent-specific post-processing after a
+// class has been resolved and generic substitution applied.  Keeping the
+// framework logic here rather than inline in the generic resolver avoids
+// coupling the type engine to Laravel conventions.
 
 /// Swap a resolved Eloquent Collection to a model's custom collection.
 ///
@@ -468,9 +493,11 @@ fn collection_type_for(
 /// Virtual member provider for Laravel Eloquent models.
 ///
 /// When a class extends `Illuminate\Database\Eloquent\Model` (directly
-/// or through an intermediate parent), this provider scans its methods
-/// for Eloquent relationship return types and synthesizes virtual
-/// properties for each one.
+/// or through an intermediate parent), this provider synthesizes the
+/// full set of virtual members described in the module documentation
+/// above: relationship properties, scope methods, builder-forwarded
+/// methods, cast/attribute/column properties, and `where{Property}()`
+/// dynamic methods.
 ///
 /// For example, a method `posts()` returning `HasMany<Post, $this>`
 /// produces a virtual property `$posts` with type
@@ -830,9 +857,9 @@ impl VirtualMemberProvider for LaravelModelProvider {
 
             // ── Scope methods ───────────────────────────────────────
             if is_scope_method(method) {
-                // Skip `#[Scope]`-attributed methods that also use
-                // the `scopeX` prefix — the attribute takes priority
-                // and the name is used as-is (no prefix stripping).
+                // A method that is both `#[Scope]`-attributed and named
+                // `scopeX` keeps the attribute's name as-is; the prefix
+                // is only stripped for convention-based scope methods.
                 let [instance_method, static_method] = build_scope_methods(method);
                 methods.push(Arc::new(instance_method));
                 methods.push(Arc::new(static_method));

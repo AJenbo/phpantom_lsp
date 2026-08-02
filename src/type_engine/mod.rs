@@ -1,9 +1,9 @@
 //! The shared type-resolution engine.
 //!
-//! Despite once living under `completion/`, this is the project's single
-//! type-resolution engine — the code that answers "what is the type of this
-//! expression here?" It is consumed by diagnostics, hover, go-to-definition,
-//! and signature help, not just completion.
+//! This is the project's single type-resolution engine — the code that
+//! answers "what is the type of this expression here?" It is consumed by
+//! diagnostics, hover, go-to-definition, and signature help, not just
+//! completion.
 //!
 //! ## Top-level modules
 //!

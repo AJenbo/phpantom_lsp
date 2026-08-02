@@ -15,8 +15,8 @@
 ///
 /// Replaces the string-shape dispatch (checking `starts_with('$')`,
 /// `contains("->")`, `ends_with(')')`, etc.) with a typed enum so that
-/// `resolve_target_classes` and `resolve_call_return_types_expr` can use
-/// exhaustive `match` instead of fragile if-else chains.
+/// `resolve_target_classes` and `resolve_call_return_types_expr_with_hint`
+/// can use exhaustive `match` instead of fragile if-else chains.
 ///
 /// Constructed via [`SubjectExpr::parse`] from the raw subject string
 /// that the symbol map or text scanner produces.
@@ -153,8 +153,8 @@ impl SubjectExpr {
     /// This is the bridge between the text-based world (symbol map
     /// `subject_text`, text scanner output) and the structured enum.
     /// The parser handles the same patterns that `resolve_target_classes`
-    /// and `resolve_call_return_types_expr` previously checked with
-    /// `starts_with`, `contains`, `rfind`, etc.
+    /// and `resolve_call_return_types_expr_with_hint` previously checked
+    /// with `starts_with`, `contains`, `rfind`, etc.
     pub fn parse(subject: &str) -> Self {
         let subject = subject.trim();
         if subject.is_empty() {
@@ -750,10 +750,10 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
     // Build up the result by alternating PropertyChain and ArrayAccess
     // nodes until the remaining text is consumed.
     while !rest.is_empty() {
-        let (arrow_len, is_nullsafe) = if rest.starts_with("?->") {
-            (3, true)
+        let arrow_len = if rest.starts_with("?->") {
+            3
         } else if rest.starts_with("->") {
-            (2, false)
+            2
         } else {
             // Unexpected continuation — bail out with what we have.
             break;
@@ -771,11 +771,9 @@ fn parse_variable_array_access(subject: &str) -> Option<SubjectExpr> {
             break;
         }
 
-        // Build PropertyChain (or NullSafe — but SubjectExpr doesn't
-        // distinguish at the PropertyChain level; the `?->` is already
-        // encoded in `to_subject_text` via the base's text, and the
-        // resolver handles both equally).
-        let _ = is_nullsafe; // reserved for future use
+        // PropertyChain doesn't distinguish `->` from `?->` — the operator
+        // is already encoded in `to_subject_text` via the base's text, and
+        // the resolver handles both equally.
         result = SubjectExpr::PropertyChain {
             base: Box::new(result),
             property: prop_name.to_string(),

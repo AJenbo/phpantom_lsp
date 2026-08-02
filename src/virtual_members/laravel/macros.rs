@@ -45,7 +45,7 @@ pub(crate) struct MacroRegistration {
     pub target: String,
     /// The synthesized method (name + parameters + return type).  Callers
     /// inject both a static and an instance variant so that `Str::slug()` and
-    /// `$collection->macro()` both resolve.
+    /// `$collection->toUpper()` both resolve.
     pub method: MethodInfo,
     /// Byte offset of the macro-name string literal (the `'name'` argument) in
     /// the file the registration was found in.  Go-to-definition on a macro
@@ -77,7 +77,6 @@ pub(crate) fn extract_macro_registrations(
     content: &str,
     php_version: Option<PhpVersion>,
 ) -> Vec<MacroRegistration> {
-    // Byte pre-filter: every registration contains the `macro(` call token.
     if memchr::memmem::find(content.as_bytes(), b"macro(").is_none() {
         return Vec::new();
     }
@@ -153,7 +152,6 @@ pub(crate) struct MixinRegistration {
 /// cheap byte pre-filter).  Non-literal arguments (a variable or computed
 /// value) are skipped, matching the scope of the `macro()` scanner.
 pub(crate) fn extract_mixin_registrations(content: &str) -> Vec<MixinRegistration> {
-    // Byte pre-filter: every registration contains the `mixin(` call token.
     if memchr::memmem::find(content.as_bytes(), b"mixin(").is_none() {
         return Vec::new();
     }
@@ -495,7 +493,7 @@ pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
 /// file, so an edit to a file can replace just that file's registrations);
 /// `merged` is the derived lookup map used when injecting members onto a
 /// loaded class.  Each macro is stored as both a static and an instance
-/// method so that `Str::slug()` and `$collection->macro()` both resolve.
+/// method so that `Str::slug()` and `$collection->toUpper()` both resolve.
 #[derive(Default)]
 pub(crate) struct LaravelMacroIndex {
     by_uri: HashMap<String, Vec<MacroRegistration>>,
@@ -1040,7 +1038,7 @@ fn expr_source_text(expr: Option<&Expression<'_>>, content: &str) -> Option<Stri
     (start < end && end <= content.len()).then(|| content[start..end].to_string())
 }
 
-/// Resolve the class written before `::macro` to a fully-qualified name via
+/// Resolve a class-name identifier expression to a fully-qualified name via
 /// the file's resolved `use` statements.  `self`/`static`/`parent` are
 /// skipped (a relative target carries no concrete FQN here).
 fn resolve_target_fqn(class: &Expression<'_>, resolved: &OwnedResolvedNames) -> Option<String> {

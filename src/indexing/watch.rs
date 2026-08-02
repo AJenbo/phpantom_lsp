@@ -1,7 +1,7 @@
 //! Watched-file change application.
 //!
-//! Relocated from `server.rs`: applies a `workspace/didChangeWatchedFiles`
-//! batch to the symbol indexes on a blocking thread.
+//! Applies a `workspace/didChangeWatchedFiles` batch to the symbol
+//! indexes on a blocking thread.
 
 use std::path::PathBuf;
 

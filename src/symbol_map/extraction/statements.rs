@@ -116,7 +116,6 @@ pub(super) fn extract_from_statement<'a>(
             // key and value are accessed via the target.
             if let Some(key_expr) = foreach_stmt.target.key() {
                 extract_from_expression(key_expr, ctx, scope_start);
-                // Emit VarDefSite for foreach key variable.
                 if let Expression::Variable(Variable::Direct(dv)) = key_expr {
                     let name = {
                         let s = bytes_to_str(dv.name);
@@ -136,7 +135,6 @@ pub(super) fn extract_from_statement<'a>(
             }
             let value_expr = foreach_stmt.target.value();
             extract_from_expression(value_expr, ctx, scope_start);
-            // Emit VarDefSite for foreach value variable.
             if let Expression::Variable(Variable::Direct(dv)) = value_expr {
                 let name = {
                     let s = bytes_to_str(dv.name);
@@ -200,9 +198,7 @@ pub(super) fn extract_from_statement<'a>(
             pop_cond_nesting(ctx);
             for catch in try_stmt.catch_clauses.iter() {
                 emit_keyword(&catch.r#catch, ctx);
-                // Catch type hint is a navigable class reference.
                 extract_from_hint_ctx(&catch.hint, &mut ctx.spans, ClassRefContext::Catch);
-                // The caught variable.
                 if let Some(ref var) = catch.variable {
                     let var_name = {
                         let s = bytes_to_str(var.name);
@@ -215,7 +211,6 @@ pub(super) fn extract_from_statement<'a>(
                             name: crate::atom::atom(&var_name),
                         },
                     });
-                    // Emit VarDefSite for catch variable.
                     let catch_var_offset = var.span.start.offset;
                     ctx.var_defs.push(VarDefSite {
                         offset: catch_var_offset,
@@ -261,7 +256,6 @@ pub(super) fn extract_from_statement<'a>(
                             name: crate::atom::atom(&name),
                         },
                     });
-                    // Emit VarDefSite for global variable.
                     let global_offset = dv.span.start.offset;
                     ctx.var_defs.push(VarDefSite {
                         offset: global_offset,
@@ -290,7 +284,6 @@ pub(super) fn extract_from_statement<'a>(
                         name: crate::atom::atom(&name),
                     },
                 });
-                // Emit VarDefSite for static variable.
                 let static_offset = dv.span.start.offset;
                 ctx.var_defs.push(VarDefSite {
                     offset: static_offset,
@@ -403,7 +396,6 @@ pub(super) fn extract_from_if_body<'a>(
 ) {
     match body {
         IfBody::Statement(stmt_body) => {
-            // Record then-body as a narrowing block.
             let then_span = stmt_body.statement.span();
             ctx.narrowing_blocks
                 .push((then_span.start.offset, then_span.end.offset));
@@ -413,7 +405,6 @@ pub(super) fn extract_from_if_body<'a>(
             for else_if in stmt_body.else_if_clauses.iter() {
                 emit_keyword(&else_if.elseif, ctx);
                 extract_from_expression(else_if.condition, ctx, scope_start);
-                // Record elseif-body as a narrowing block.
                 let ei_span = else_if.statement.span();
                 ctx.narrowing_blocks
                     .push((ei_span.start.offset, ei_span.end.offset));
@@ -423,7 +414,6 @@ pub(super) fn extract_from_if_body<'a>(
             }
             if let Some(ref else_clause) = stmt_body.else_clause {
                 emit_keyword(&else_clause.r#else, ctx);
-                // Record else-body as a narrowing block.
                 let el_span = else_clause.statement.span();
                 ctx.narrowing_blocks
                     .push((el_span.start.offset, el_span.end.offset));
@@ -433,7 +423,6 @@ pub(super) fn extract_from_if_body<'a>(
             }
         }
         IfBody::ColonDelimited(colon_body) => {
-            // Record the then-body span (first statement to last).
             if let (Some(first), Some(last)) =
                 (colon_body.statements.first(), colon_body.statements.last())
             {

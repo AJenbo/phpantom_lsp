@@ -126,12 +126,9 @@ impl<'a> Loaders<'a> {
 }
 
 /// Bundles the context needed by [`super::resolve_target_classes`] and
-/// the functions it delegates to.
-///
-/// Introduced to replace the 8-parameter signature of
-/// `resolve_target_classes` with a cleaner `(subject, access_kind, ctx)`
-/// triple.  Also used directly by `resolve_call_return_types_expr` and
-/// `resolve_arg_text_to_type` (formerly `CallResolutionCtx`).
+/// the functions it delegates to, avoiding an unwieldy multi-parameter
+/// signature. Also used directly by
+/// `resolve_call_return_types_expr_with_hint` and `resolve_arg_text_to_type`.
 pub(crate) struct ResolutionCtx<'a> {
     /// The class the cursor is inside, if any.
     pub current_class: Option<&'a ClassInfo>,
@@ -214,7 +211,7 @@ pub(crate) struct VarResolutionCtx<'a> {
     pub match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,
     /// Optional scope-based variable resolver from the forward walker.
     ///
-    /// When set, `resolve_var_types` in `rhs_resolution.rs` reads
+    /// When set, `resolve_var_types` in `rhs_resolution/mod.rs` reads
     /// variable types from this closure instead of re-entering
     /// `resolve_variable_types`, which would trigger a redundant
     /// forward walk of the method body.

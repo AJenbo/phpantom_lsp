@@ -61,25 +61,21 @@ impl Backend {
 
         let old_short = crate::util::short_name(old_fqn);
 
-        // Find the definition file URI from the fqn_uri_index.
         let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
 
         let def_url = Url::parse(&def_uri_str).ok()?;
         let def_path = def_url.to_file_path().ok()?;
 
-        // Check that the filename matches the old class name.
         let stem = def_path.file_stem()?.to_str()?;
         if stem != old_short {
             return None;
         }
 
-        // Check that the file contains exactly one class-like declaration.
         let classes = self.get_classes_for_uri(&def_uri_str)?;
         if classes.len() != 1 {
             return None;
         }
 
-        // Build the new file path: same directory, new name + .php.
         let mut new_path = def_path.clone();
         new_path.set_file_name(format!("{}.php", new_short_name));
 
@@ -114,7 +110,6 @@ impl Backend {
             },
         )));
 
-        // Convert each file's text edits into a TextDocumentEdit.
         for (uri, edits) in changes {
             // Edits that target the old file URI need to reference the
             // new URI instead, because the rename happens first.
@@ -160,14 +155,12 @@ impl Backend {
         let old_fqn_normalized = strip_fqn_prefix(old_fqn);
         let old_short_name = crate::util::short_name(old_fqn_normalized);
 
-        // Build the new FQN by replacing the last segment of the old FQN.
         let new_fqn = if let Some(ns_sep) = old_fqn_normalized.rfind('\\') {
             format!("{}\\{}", &old_fqn_normalized[..ns_sep], new_short_name)
         } else {
             new_short_name.to_string()
         };
 
-        // Group locations by file URI for per-file processing.
         let mut locations_by_file: HashMap<String, Vec<&Location>> = HashMap::new();
         for loc in locations {
             locations_by_file
@@ -185,7 +178,6 @@ impl Backend {
                 None => continue,
             };
 
-            // Get the file's use_map to understand import context.
             let file_use_map = self
                 .file_imports
                 .read()
@@ -203,7 +195,6 @@ impl Backend {
                 }
             };
 
-            // Find the alias (if any) that imports the old FQN.
             let import_info = find_import_for_fqn(&file_use_map, old_fqn_normalized);
 
             // Determine whether the new short name would collide with
@@ -296,7 +287,6 @@ impl Backend {
                 }
             }
 
-            // Generate a whole-line replacement for the `use` statement.
             if let Some(ref info) = import_info
                 && let Some(ref ul) = use_line_range
             {
@@ -317,7 +307,6 @@ impl Backend {
             return None;
         }
 
-        // Check whether the file should be renamed alongside the class.
         if let Some((old_file_uri, new_file_uri)) =
             self.should_rename_file(old_fqn_normalized, new_short_name)
         {

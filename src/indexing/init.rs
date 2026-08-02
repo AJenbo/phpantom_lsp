@@ -1,8 +1,8 @@
 //! Workspace initialization pipelines.
 //!
-//! Relocated from `server.rs`: given a resolved workspace root, these
-//! `impl Backend` methods build the initial symbol indexes for the three
-//! workspace shapes (single Composer project, monorepo, and no-Composer).
+//! Given a resolved workspace root, these `impl Backend` methods build
+//! the initial symbol indexes for the three workspace shapes (single
+//! Composer project, monorepo, and no-Composer).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -19,8 +19,7 @@ impl Backend {
     /// Initialize a single-project workspace (root `composer.json` exists).
     ///
     /// This is the standard fast path: read PSR-4 mappings, build the
-    /// classmap, scan autoload files.  Unchanged from the pre-monorepo
-    /// behaviour except that vendor fields are now collections.
+    /// classmap, scan autoload files.
     pub(crate) async fn init_single_project(
         &self,
         root: &std::path::Path,

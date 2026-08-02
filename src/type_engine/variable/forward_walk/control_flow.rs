@@ -27,11 +27,12 @@ pub(crate) fn process_if<'b>(
     record_and_chain_snapshots(if_stmt.condition, scope, ctx);
     record_or_chain_snapshots(if_stmt.condition, scope, ctx);
 
-    // Check if the cursor is inside the condition expression.
-    // If so, apply inline && narrowing.
+    // Cursor inside the condition: narrowing for member accesses there
+    // was already recorded above via the chain snapshots (diagnostics),
+    // or is applied by the caller after this returns (mod.rs's cursor
+    // narrowing pass for hover/completion), so leave scope untouched.
     let cond_span = if_stmt.condition.span();
     if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset {
-        // Cursor is in the condition — scope is already correct.
         return;
     }
 
@@ -77,13 +78,11 @@ pub(crate) fn process_if_statement_body<'b>(
     let cursor_in_then =
         ctx.cursor_offset >= then_span.start.offset && ctx.cursor_offset <= then_span.end.offset;
 
-    // Check if cursor is in any elseif body.
     let cursor_in_elseif = body.else_if_clauses.iter().any(|ei| {
         let sp = ei.statement.span();
         ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset
     });
 
-    // Check if cursor is in else body.
     let cursor_in_else = body.else_clause.as_ref().is_some_and(|ec| {
         let sp = ec.statement.span();
         ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset
@@ -319,7 +318,6 @@ pub(crate) fn process_if_colon_body<'b>(
         return;
     }
 
-    // Check elseif clauses.
     for ei in body.else_if_clauses.iter() {
         let ei_start = ei.colon.start.offset;
         let ei_end = ei
@@ -337,7 +335,6 @@ pub(crate) fn process_if_colon_body<'b>(
         }
     }
 
-    // Check else clause.
     if let Some(ref else_clause) = body.else_clause {
         let ec_start = else_clause.colon.start.offset;
         let ec_end = else_clause
@@ -719,10 +716,9 @@ pub(crate) fn collect_arglist_variables(
 /// fixed-point check that runs BEFORE a re-walk: if nothing changed,
 /// there's no point walking the body again.
 ///
-/// Unlike `scopes_equal`, this is asymmetric: new variables in
-/// `after` that weren't in `before` count as changes, but variables
-/// in `before` that aren't in `after` do not (they were just not
-/// assigned in the loop body).
+/// This is asymmetric: new variables in `after` that weren't in
+/// `before` count as changes, but variables in `before` that aren't
+/// in `after` do not (they were just not assigned in the loop body).
 pub(crate) fn scope_has_changes(before: &ScopeState, after: &ScopeState) -> bool {
     for (name, after_types) in &after.locals {
         match before.locals.get(name) {
@@ -1069,9 +1065,8 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 
     // Fallback: for simple `$variable` iterators, check for an inline
     // `/** @var Type $var */` or `@param` annotation near the foreach.
-    // This mirrors the backward scanner's `find_iterable_raw_type_in_source`
-    // fallback and handles cases where the variable's type comes from a
-    // docblock rather than an assignment.
+    // Handles cases where the variable's type comes from a docblock
+    // rather than an assignment.
     if let Expression::Variable(Variable::Direct(dv)) = foreach.expression {
         let var_name = bytes_to_str(dv.name).to_string();
         let foreach_offset = foreach.foreach.span().start.offset as usize;
@@ -1096,11 +1091,10 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 
     // Final fallback: resolve the foreach expression as a "subject"
     // through the full resolver pipeline (SubjectExpr::parse →
-    // property/method chain resolution).  This mirrors the backward
-    // scanner's `resolve_foreach_expression_to_classes` and handles
-    // cases like `$this->getItems()` or `self::fetchAll()` where
-    // the expression type wasn't captured by scope lookup or
-    // resolve_rhs_expression above.
+    // property/method chain resolution).  Handles cases like
+    // `$this->getItems()` or `self::fetchAll()` where the expression
+    // type wasn't captured by scope lookup or resolve_rhs_expression
+    // above.
     if let Some(iter_type) = resolve_foreach_expr_via_subject(foreach.expression, scope, ctx) {
         return Some(iter_type);
     }
@@ -1111,10 +1105,9 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 /// Resolve a foreach expression to a `PhpType` by treating it as a
 /// subject string and going through the full resolver pipeline.
 ///
-/// This is the forward walker's equivalent of the backward scanner's
-/// `resolve_foreach_expression_to_classes`.  It extracts the expression
-/// text, calls `resolve_target_classes` to get `ClassInfo` objects, and
-/// constructs a `TypeKind::Named` from the first resolved class.
+/// It extracts the expression text, calls `resolve_target_classes` to
+/// get `ClassInfo` objects, and constructs a `TypeKind::Named` from the
+/// first resolved class.
 pub(crate) fn resolve_foreach_expr_via_subject<'b>(
     expression: &'b Expression<'b>,
     scope: &ScopeState,
@@ -1192,8 +1185,7 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
 /// 2. Class-based fallback — when the type is a bare class name (e.g.
 ///    `OrderProductCollection`), resolve it to `ClassInfo`, merge
 ///    inheritance, and extract the element type from `@extends` /
-///    `@implements` generics.  This mirrors what
-///    `try_resolve_foreach_value_type` does in the backward scanner.
+///    `@implements` generics.
 pub(crate) fn bind_foreach_value<'b>(
     value_expr: &'b Expression<'b>,
     iter_type: &Option<PhpType>,
@@ -2003,18 +1995,15 @@ pub(crate) fn process_try<'b>(
 ) {
     let pre_try_scope = scope.clone();
 
-    // Check if cursor is inside the try body.
     let try_body_span = try_stmt.block.span();
     let cursor_in_try = ctx.cursor_offset >= try_body_span.start.offset
         && ctx.cursor_offset <= try_body_span.end.offset;
 
     if cursor_in_try {
-        // Walk only the try body.
         walk_body_forward(try_stmt.block.statements.iter(), scope, ctx);
         return;
     }
 
-    // Check if cursor is inside a catch block.
     for catch in try_stmt.catch_clauses.iter() {
         let catch_span = catch.block.span();
         if ctx.cursor_offset >= catch_span.start.offset
@@ -2046,7 +2035,6 @@ pub(crate) fn process_try<'b>(
         }
     }
 
-    // Check if cursor is inside the finally block.
     if let Some(ref finally) = try_stmt.finally_clause {
         let finally_span = finally.block.span();
         if ctx.cursor_offset >= finally_span.start.offset

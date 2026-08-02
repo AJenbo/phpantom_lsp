@@ -5,7 +5,7 @@
 /// tags) to resolved `ClassInfo` values that the completion, hover, and
 /// definition engines can work with.
 ///
-/// Split from [`super::resolver`] for navigability.  The entry points are:
+/// Split from [`crate::type_engine::resolver`] for navigability.  The entry points are:
 ///
 /// - [`type_hint_to_classes_typed`]: maps a parsed [`PhpType`] to all
 ///   matching `ClassInfo` values (handles unions, intersections, generics,
@@ -509,7 +509,6 @@ fn resolve_type_alias_once(
         _ => return None,
     };
 
-    // Find the owning class to check its type_aliases.
     let owning_class = all_classes.iter().find(|c| c.name == owning_class_name);
 
     if let Some(cls) = owning_class
@@ -565,7 +564,6 @@ pub(crate) fn resolve_imported_type_alias(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    // Try to find the source class.
     let lookup = source_class_name
         .rsplit('\\')
         .next()

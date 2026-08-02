@@ -31,10 +31,10 @@
 //! same class within a single request.  The full resolution (inheritance
 //! walk + virtual member providers + interface merging) is expensive, so
 //! [`resolve_class_fully_cached`] accepts a [`ResolvedClassCache`] that
-//! stores results keyed by fully-qualified class name.  The cache is
-//! stored on `Backend` and cleared whenever a file is re-parsed
-//! (`update_ast` / `parse_and_cache_content`), so stale entries never
-//! survive an edit.
+//! stores results keyed by fully-qualified class name plus concrete
+//! generic arguments.  The cache is stored on `Backend`; when a file is
+//! re-parsed, the classes it defines and their transitive dependents
+//! are evicted ([`evict_fqn`]), so stale entries never survive an edit.
 //!
 //! # Precedence model
 //!
@@ -128,11 +128,11 @@ pub trait VirtualMemberProvider {
     /// The returned members are merged into the class below all real
     /// declared members (own, trait, and parent chain).
     ///
-    /// `cache` is the shared resolved-class cache.  Providers that need
-    /// to fully resolve helper classes (e.g. the Laravel model provider
-    /// resolving the Eloquent Builder) should use
-    /// [`resolve_class_fully_cached`] via this cache to avoid redundant
-    /// work across requests.
+    /// `cache` is the shared resolved-class cache, as an `Option` since
+    /// not every caller has one available.  Providers that need to fully
+    /// resolve helper classes (e.g. the Laravel model provider resolving
+    /// the Eloquent Builder) should use [`resolve_class_fully_maybe_cached`]
+    /// with this cache to avoid redundant work across requests.
     fn provide(
         &self,
         class: &ClassInfo,
@@ -149,12 +149,15 @@ pub trait VirtualMemberProvider {
 /// variant of the same method (e.g. Laravel scope methods that are
 /// accessible via both `User::active()` and `$user->active()`).
 ///
-/// **Exception:** when the existing method has `has_scope_attribute: true`,
+/// **Exceptions:** when the existing method has `has_scope_attribute: true`,
 /// the virtual method **replaces** it.  `#[Scope]`-attributed methods
 /// share their name with the synthesized scope method, but the original
 /// is a `protected` implementation detail that should not appear in
 /// completion results.  The virtual replacement is `public` with the
 /// first `$query` parameter stripped, which is what callers actually see.
+/// The `query` / `newQuery` / `newModelQuery` methods are also replaced,
+/// so a model with a custom builder returns that builder rather than the
+/// base one from the framework declaration.
 ///
 /// Properties are deduplicated by name.  When a property with the same
 /// name already exists, the **more specific** type wins regardless of
@@ -169,7 +172,9 @@ pub trait VirtualMemberProvider {
 ///
 /// This allows PHPDoc `@property array<string> $tags` to override a
 /// bare `array` from `$casts`, and a `$casts` `array` to override
-/// `mixed` from `$fillable`.
+/// `mixed` from `$fillable`.  One tie-break: an explicit `@property`
+/// tag also overrides a type that was merely *inferred* (database
+/// schema, attribute defaults) at equal specificity.
 ///
 /// Constants are deduplicated by name only.
 ///
@@ -208,7 +213,6 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
         }
     }
 
-    // Build a property name → position index for O(1) dedup.
     let mut prop_index: HashMap<String, usize> = class
         .properties
         .iter()
@@ -286,26 +290,19 @@ fn type_specificity(hint: &Option<PhpType>) -> u8 {
     if hint.has_type_structure() { 2 } else { 1 }
 }
 
-/// Score a property's type by how specific it is, considering both
-/// native and effective type hints.
+/// Score a property's type by how specific it is, preferring the
+/// effective type hint (which may carry a docblock override) and
+/// falling back to the native type hint when the effective one scores
+/// zero.
 ///
-/// The function first checks the effective type hint (docblock override),
-/// then falls back to the native type hint if the effective type is
-/// absent or non-specific.
-///
-/// This ensures that properties with actual PHP type declarations
-/// (e.g., `public string $name`) are ranked higher than those without
-/// any type information, even when docblocks are absent.
+/// The fallback ensures that properties with actual PHP type
+/// declarations (e.g. `public string $name`) are ranked higher than
+/// those without any type information, even when docblocks are absent.
 fn property_type_specificity(property: &PropertyInfo) -> u8 {
-    // First check the effective type hint (may include docblock override)
     let effective_score = type_specificity(&property.type_hint);
-
-    // If effective type is specific enough, use it
     if effective_score > 0 {
         return effective_score;
     }
-
-    // Otherwise, fall back to native type hint
     type_specificity(&property.native_type_hint)
 }
 
@@ -346,14 +343,9 @@ pub fn apply_virtual_members(
 pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>> {
     let mut providers: Vec<Box<dyn VirtualMemberProvider>> = Vec::new();
     if is_laravel {
-        // Laravel model provider — relationship properties, scopes, Builder
-        // forwarding, convention-based factory() method.
         providers.push(Box::new(laravel::LaravelModelProvider));
-        // Laravel factory provider — convention-based create()/make() methods
-        // for factory classes extending Illuminate\Database\Eloquent\Factories\Factory.
         providers.push(Box::new(laravel::LaravelFactoryProvider));
     }
-    // PHPDoc provider — @method / @property / @mixin tags.
     providers.push(Box::new(phpdoc::PHPDocProvider));
     providers
 }

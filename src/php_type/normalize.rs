@@ -32,7 +32,6 @@ impl PhpType {
     pub fn simplified(&self) -> PhpType {
         match self.kind() {
             TypeKind::Union(members) => {
-                // Recursively simplify members first.
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
                 for m in members {
                     let s = m.simplified();
@@ -44,7 +43,6 @@ impl PhpType {
                     }
                 }
 
-                // If any member is `mixed`, the whole union is `mixed`.
                 if simplified.iter().any(|m| m.is_mixed()) {
                     return PhpType::mixed();
                 }
@@ -52,13 +50,9 @@ impl PhpType {
                 // Deduplicate without folding case-sensitive literal payloads.
                 dedup_types(&mut simplified);
 
-                // `true | false` → `bool`.
                 simplify_bool_union(&mut simplified);
-
-                // Scalar refinement absorption.
                 absorb_scalar_refinements(&mut simplified);
 
-                // Unwrap single-member union.
                 if simplified.len() == 1 {
                     return simplified.into_iter().next().unwrap();
                 }
@@ -82,7 +76,6 @@ impl PhpType {
 
                 dedup_types(&mut simplified);
 
-                // If any member is `never`, the intersection is `never`.
                 if simplified.iter().any(|m| m.is_never()) {
                     return PhpType::never();
                 }
@@ -251,7 +244,6 @@ impl PhpType {
     pub fn distribute_intersection(&self) -> PhpType {
         match self.kind() {
             TypeKind::Intersection(members) => {
-                // Check if any member is a union.
                 let has_union = members
                     .iter()
                     .any(|m| matches!(m.kind(), TypeKind::Union(_)));

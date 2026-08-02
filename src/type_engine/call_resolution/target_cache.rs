@@ -408,7 +408,6 @@ impl Backend {
                 // class could not be located (e.g. only known via the AST).
                 .or_else(|| backend.symbols.fqn_uri_index.read().get(class_fqn).cloned())?;
 
-            // Read the file content.
             let content = backend.get_file_content(&file_uri)?;
 
             // Convert method name_offset to a 0-based line number.

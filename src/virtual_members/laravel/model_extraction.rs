@@ -2,7 +2,7 @@
 //!
 //! This module builds the [`LaravelMetadata`] attached to every parsed
 //! class: `$casts`/`casts()`, `$attributes`, `$dates`,
-//! `$fillable`/`$guarded`/`$hidden`/`$appends`, `$timestamps` and the
+//! `$fillable`/`$guarded`/`$hidden`/`$visible`/`$appends`, `$timestamps` and the
 //! `CREATED_AT`/`UPDATED_AT` constants, the `#[Connection]`/`#[Table]`
 //! attributes (and their property fallbacks), custom builder/collection
 //! overrides, and `belongsToMany`/`morphToMany` pivot configuration.
@@ -207,12 +207,10 @@ fn extract_custom_builder(
     methods: &[MethodInfo],
     content: &str,
 ) -> Option<PhpType> {
-    // 1. Try the #[UseEloquentBuilder] attribute first.
     if let Some(name) = extract_use_eloquent_builder_attribute(attribute_lists, content) {
         return Some(PhpType::named(atom(&name)));
     }
 
-    // 2. Fall back to @use HasBuilder<X>.
     for (trait_name, args) in use_generics {
         let short = trait_name.rsplit('\\').next().unwrap_or(trait_name);
         if (short == "HasBuilder" || short == "CustomizeQueryBuilder") && !args.is_empty() {
@@ -220,7 +218,6 @@ fn extract_custom_builder(
         }
     }
 
-    // 3. Fall back to newEloquentBuilder() return type override.
     let method = methods.iter().find(|m| m.name == "newEloquentBuilder")?;
     let return_type = method.return_type.as_ref()?;
     let base = return_type.base_name()?;
@@ -247,12 +244,10 @@ fn extract_custom_collection(
     methods: &[MethodInfo],
     content: &str,
 ) -> Option<PhpType> {
-    // 1. Try the #[CollectedBy] attribute first.
     if let Some(name) = extract_collected_by_attribute(attribute_lists, content) {
         return Some(PhpType::named(atom(&name)));
     }
 
-    // 2. Fall back to @use HasCollection<X>.
     for (trait_name, args) in use_generics {
         let short = trait_name.rsplit('\\').next().unwrap_or(trait_name);
         if short == "HasCollection" && !args.is_empty() {
@@ -260,7 +255,6 @@ fn extract_custom_collection(
         }
     }
 
-    // 3. Fall back to newCollection() return type override.
     extract_custom_collection_from_new_collection(methods)
 }
 
@@ -350,7 +344,6 @@ fn extract_casts_definitions<'a>(
         }
     }
 
-    // Start with $casts property entries as the base.
     let mut merged: Vec<(String, String)> = Vec::new();
 
     if let Some(ref text) = property_text {
@@ -391,24 +384,21 @@ fn parse_casts_array(text: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
     let trimmed = text.trim();
 
-    // Must start with `[`
     let inner = if let Some(s) = trimmed.strip_prefix('[') {
-        // Strip trailing `]` if present
         s.strip_suffix(']').unwrap_or(s)
     } else {
         return results;
     };
 
-    // Split on commas, handling each `'key' => 'value'` pair.
-    // This simple approach works because cast arrays contain only
-    // string literals — no nested arrays or complex expressions.
+    // Splitting on commas works here because cast arrays contain only
+    // string literals — no nested arrays or complex expressions to trip
+    // up a naive split.
     for segment in inner.split(',') {
         let segment = segment.trim();
         if segment.is_empty() {
             continue;
         }
 
-        // Look for the `=>` arrow.
         let Some(arrow_pos) = segment.find("=>") else {
             continue;
         };
@@ -640,14 +630,15 @@ fn extract_timestamp_config<'a>(
     (timestamps, created_at, updated_at)
 }
 
-/// Extract column names from `$fillable`, `$guarded`, `$hidden`, and `$appends` arrays.
+/// Extract column names from `$fillable`, `$guarded`, `$hidden`, `$visible`,
+/// and `$appends` arrays.
 ///
 /// These properties contain simple string lists of column names without
 /// type information.  The `LaravelModelProvider` uses them as a
 /// last-resort fallback, synthesizing `mixed`-typed virtual properties
 /// for columns not already covered by `$casts` or `$attributes`.
 ///
-/// All four arrays are merged; duplicates are removed (first occurrence
+/// All five arrays are merged; duplicates are removed (first occurrence
 /// wins).
 fn extract_column_names<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,

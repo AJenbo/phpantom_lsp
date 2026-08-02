@@ -1,15 +1,8 @@
-//! Laravel helper utilities.
-//!
-//! This module contains:
-//!
-//! - **Case conversion:** `camel_to_snake`, `snake_to_camel`, `snake_to_pascal`.
-//! - **Model ancestry:** `extends_eloquent_model` and the generic
-//!   `walks_parent_chain` helper.
-//! - **Accessor mapping:** `legacy_accessor_method_name`,
-//!   `accessor_method_candidates` for go-to-definition on virtual properties.
-//! - **PHP AST walker:** `walk_all_php_expressions` traverses every
-//!   expression in a PHP source string, and `extract_string_literal`
-//!   pulls the raw value and byte span from a string literal node.
+//! Shared helpers for the Laravel virtual-member modules: case
+//! conversion, parent-chain ancestry checks, accessor/mutator name
+//! mapping, route group prefix extraction, English singularization
+//! (mirroring Doctrine's inflector), and a lightweight PHP expression
+//! walker.
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -21,10 +14,12 @@ use super::ELOQUENT_MODEL_FQN;
 /// Walk the parent chain of `class` checking whether any ancestor
 /// (including the class itself) satisfies `predicate`.
 ///
-/// This is the shared implementation behind [`extends_eloquent_model`]
-/// and `extends_eloquent_factory`.  The predicate receives a class name
-/// (without a leading backslash normalisation — callers handle that
-/// themselves) and returns `true` when the target base class is found.
+/// This is the shared implementation behind the module tree's base-class
+/// checks (`extends_eloquent_model`, `extends_eloquent_factory`, …).  The
+/// predicate sees the class's own `name` first (which may be a short name;
+/// callers that need it check `fqn()` separately), then each ancestor's
+/// `parent_class` name, which post-processing has already resolved to an
+/// FQN without a leading backslash.
 pub(in crate::virtual_members::laravel) fn walks_parent_chain(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -60,8 +55,6 @@ pub(in crate::virtual_members::laravel) fn walks_parent_chain(
 }
 
 /// Determine whether `class_name` is the Eloquent Model base class.
-///
-/// Checks against the FQN with and without a leading backslash.
 pub(in crate::virtual_members::laravel) fn is_eloquent_model(class_name: &str) -> bool {
     class_name == ELOQUENT_MODEL_FQN
 }
@@ -96,7 +89,14 @@ pub fn extends_eloquent_builder(
 /// Inserts an underscore before each uppercase letter that follows a
 /// lowercase letter or digit, and before an uppercase letter that is
 /// followed by a lowercase letter when preceded by another uppercase
-/// letter (to handle acronyms like `URL` → `u_r_l`).
+/// letter, so acronyms stay whole (`URLName` → `url_name`).
+///
+/// Note this deliberately differs from Laravel's `Str::snake`, which
+/// underscores every uppercase letter (`URLName` → `u_r_l_name`).  Both
+/// spellings reach the same accessor at runtime because Eloquent maps
+/// attribute names to methods via `Str::studly` + `method_exists`, and
+/// PHP method lookup is case-insensitive — this form just produces the
+/// friendlier property name.
 ///
 /// `FullName` → `full_name`
 /// `firstName` → `first_name`
@@ -113,7 +113,9 @@ pub(crate) fn camel_to_snake(s: &str) -> String {
                 if prev.is_lowercase() || prev.is_ascii_digit() {
                     result.push('_');
                 } else if prev.is_uppercase() {
-                    // Check next char for acronym boundary: "URL" + "Name" → "u_r_l_name"
+                    // Acronym boundary: the last capital of a run starts
+                    // a new word when followed by lowercase ("URLName" →
+                    // "url_name").
                     if let Some(&next) = chars.get(i + 1)
                         && next.is_lowercase()
                     {
@@ -194,9 +196,9 @@ pub(crate) fn legacy_mutator_method_name(property_name: &str) -> String {
 /// Return candidate accessor method names for a virtual property name.
 ///
 /// Go-to-definition uses this to map a snake_case virtual property back
-/// to the method that produces it.  Returns both the legacy
-/// (`getDisplayNameAttribute`) and modern (`displayName`) forms so the
-/// caller can try each one.
+/// to the method that produces it.  Returns the legacy accessor
+/// (`getDisplayNameAttribute`), legacy mutator (`setDisplayNameAttribute`),
+/// and modern (`displayName`) forms so the caller can try each one.
 pub(crate) fn accessor_method_candidates(property_name: &str) -> Vec<String> {
     vec![
         legacy_accessor_method_name(property_name),
@@ -910,8 +912,6 @@ pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Optio
     }
 }
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 // ─── Shared PHP AST walker ───────────────────────────────────────────────────
 
 use mago_allocator::LocalArena;
@@ -1267,7 +1267,7 @@ fn walk_array_el_depth(
 
 /// Try to extract a relative path from a `__DIR__ . '/path.php'` expression.
 ///
-/// Returns the string literal portion (e.g. `"/ems/accounting.php"`).
+/// Returns the string literal portion (e.g. `"/routes/api.php"`).
 pub(crate) fn extract_dir_concat_path<'a>(
     expr: &Expression<'a>,
     content: &'a str,

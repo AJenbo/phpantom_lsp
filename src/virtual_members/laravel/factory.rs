@@ -55,7 +55,6 @@ const SOFT_DELETES_FQN: &str = "Illuminate\\Database\\Eloquent\\SoftDeletes";
 /// the root with `Database\Factories\`, and append `Factory` to the
 /// class short name.
 pub(crate) fn model_to_factory_fqn(model_fqn: &str) -> String {
-    // Split into namespace + short name.
     let (ns, short) = match model_fqn.rsplit_once('\\') {
         Some((ns, short)) => (ns, short),
         None => return format!("Database\\Factories\\{model_fqn}Factory"),
@@ -88,7 +87,6 @@ pub(crate) fn factory_to_model_fqn(factory_fqn: &str) -> Option<String> {
         return None;
     }
 
-    // Extract the namespace after `Database\Factories\`.
     let ns = factory_fqn
         .rsplit_once('\\')
         .map(|(ns, _)| ns)
@@ -99,8 +97,8 @@ pub(crate) fn factory_to_model_fqn(factory_fqn: &str) -> Option<String> {
     } else if ns == "Database\\Factories" {
         None
     } else {
-        // Not in the standard factory namespace — still try to strip
-        // any `Factories` segment.
+        // Not in the standard factory namespace, so there is no
+        // sub-namespace to carry over.
         None
     };
 
@@ -149,7 +147,6 @@ fn build_factory_model_methods(
         None => return Vec::new(),
     };
 
-    // Verify the model class actually exists.
     if class_loader(&model_fqn).is_none() {
         return Vec::new();
     }
@@ -249,13 +246,9 @@ fn build_factory_relationship_methods(
         None => return Vec::new(),
     };
 
-    // Fully resolve the model so relationships declared on traits or
-    // parent classes are visible.
     let resolved =
         crate::virtual_members::resolve_class_fully_maybe_cached(&model, class_loader, cache);
 
-    // Factory relationship methods return the factory itself so the
-    // fluent chain continues (e.g. `->hasPosts(3)->create()`).
     let factory_type = PhpType::static_();
 
     let mut methods = Vec::new();

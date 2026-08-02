@@ -11,7 +11,8 @@
 /// `::`) is handled by the sibling [`super::member`] module.
 ///
 /// Variable definition resolution (`$var` → most recent assignment /
-/// declaration) is handled by the sibling [`super::variable`] module.
+/// declaration) is also handled here, against the precomputed symbol map's
+/// variable-definition index.
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -608,12 +609,12 @@ impl Backend {
         ))
     }
 
-    /// Resolve a `ClassReference` symbol to its definition.
+    /// Return the declaration's own location for a symbol that has nowhere
+    /// else to jump to.
     ///
-    /// Tries same-file lookup (uri_classes_index), then cross-file via PSR-4.
-    /// When `is_fqn` is `true`, the name is already fully-qualified
-    /// (the original PHP source used a leading `\`) and should be used
-    /// as-is without namespace resolution.
+    /// Editors detect "definition == current position" and offer Find
+    /// References as a fallback (e.g. VS Code's
+    /// `editor.gotoLocation.alternativeDefinitionCommand`).
     fn declaration_or_usages(
         &self,
         uri: &str,
@@ -621,10 +622,6 @@ impl Backend {
         cursor_offset: u32,
         name: &str,
     ) -> Option<Vec<Location>> {
-        // Return the declaration's own location.  Editors detect
-        // "definition == current position" and offer Find References
-        // as a fallback (e.g. VS Code's
-        // editor.gotoLocation.alternativeDefinitionCommand).
         let parsed_uri = Url::parse(uri).ok()?;
         let start = crate::text_position::offset_to_position(content, cursor_offset as usize);
         let end =
@@ -635,6 +632,12 @@ impl Backend {
         }])
     }
 
+    /// Resolve a `ClassReference` symbol to its definition.
+    ///
+    /// Tries same-file lookup (uri_classes_index), then cross-file via PSR-4.
+    /// When `is_fqn` is `true`, the name is already fully-qualified
+    /// (the original PHP source used a leading `\`) and should be used
+    /// as-is without namespace resolution.
     pub(super) fn resolve_class_reference(
         &self,
         uri: &str,

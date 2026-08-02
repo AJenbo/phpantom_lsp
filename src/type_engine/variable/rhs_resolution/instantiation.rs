@@ -72,7 +72,6 @@ pub(super) fn resolve_rhs_instantiation(
                 ctor_owner = cls;
                 Some(c)
             } else {
-                // Walk parent chain to find the raw ancestor that declares __construct.
                 let mut found: Option<std::sync::Arc<ClassInfo>> = None;
                 let mut cur = cls.parent_class.as_ref().map(|p| p.to_string());
                 for _ in 0..15 {
@@ -318,7 +317,6 @@ pub(super) fn extract_generic_arg_from_ancestor(
     tpl_position: usize,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    // Get the class name from the argument type.
     let class_name = match arg_type.kind() {
         TypeKind::Named(n) => n.as_str(),
         TypeKind::Generic(g) => g.name.as_str(),
@@ -338,21 +336,16 @@ pub(super) fn extract_generic_arg_from_ancestor(
     let class_loader = rctx.class_loader;
     let cls = class_loader(class_name)?;
 
-    // Check the class's own @extends generics for the wrapper.
     let wrapper_short = crate::util::short_name(wrapper_name);
     if let Some(arg) = find_extends_generic_arg(&cls, wrapper_short, tpl_position) {
         return Some(arg);
     }
 
-    // Walk parent chain.
     let mut current = cls;
     for _ in 0..15 {
         let parent_name = current.parent_class.as_ref()?;
         let parent = class_loader(parent_name)?;
 
-        // Check if the parent's @extends generics reference the wrapper.
-        // But first, build a substitution map from current → parent so
-        // template params in the parent's @extends are resolved.
         if let Some(arg) = find_extends_generic_arg(&parent, wrapper_short, tpl_position) {
             // The arg might reference the parent's template params — substitute
             // through the chain to get concrete types.
@@ -538,7 +531,6 @@ pub(super) fn build_constructor_template_subs(
     let bound = crate::call_args::bind_text_args_to_params(&ctor.parameters, &arg_refs);
 
     for (tpl_name, param_name) in &ctor.template_bindings {
-        // Find the parameter index for this binding.
         let param_idx = match ctor
             .parameters
             .iter()
@@ -548,12 +540,8 @@ pub(super) fn build_constructor_template_subs(
             None => continue,
         };
 
-        // Get the corresponding argument text.
         let provided_arg = bound.get(param_idx).and_then(|o| o.as_deref());
 
-        // Determine the binding mode by inspecting the parameter's
-        // docblock type hint.  The type hint tells us how the template
-        // param is embedded in the `@param` annotation.
         let param_hint = ctor
             .parameters
             .get(param_idx)
@@ -583,7 +571,6 @@ pub(super) fn build_constructor_template_subs(
 
         match binding_mode {
             TemplateBindingMode::Direct => {
-                // `@param T $bar` — the argument resolves directly to T.
                 if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
                     subs.insert(tpl_name.to_string(), resolved_type);
                 }
@@ -597,8 +584,6 @@ pub(super) fn build_constructor_template_subs(
                 }
             }
             TemplateBindingMode::CallableParamType(position) => {
-                // `@param Closure(T): void $cb` — extract the closure's
-                // parameter type annotation at the given position.
                 if let Some(param_type) =
                     crate::completion::source::helpers::extract_closure_param_type_from_text(
                         arg_text, position,
@@ -897,7 +882,6 @@ pub(super) fn resolve_generic_wrapper_template(
         wrapper_name,
         "array" | "list" | "non-empty-array" | "non-empty-list"
     ) {
-        // Try to infer from array literal first.
         if let Some(result) = resolve_array_literal_generic(tpl_position, arg_text, rctx) {
             return Some(result);
         }
@@ -909,7 +893,6 @@ pub(super) fn resolve_generic_wrapper_template(
         return None;
     }
 
-    // Load the wrapper class.
     let wrapper_cls = (ctx.class_loader)(wrapper_name)
         .map(Arc::unwrap_or_clone)
         .or_else(|| {
@@ -919,7 +902,6 @@ pub(super) fn resolve_generic_wrapper_template(
                 .map(|c| ClassInfo::clone(c))
         })?;
 
-    // Find the wrapper's constructor and its template bindings.
     let wrapper_ctor = wrapper_cls.get_method("__construct")?;
     if wrapper_ctor.template_bindings.is_empty() {
         return None;
@@ -938,8 +920,6 @@ pub(super) fn resolve_generic_wrapper_template(
     let wrapper_subs =
         build_constructor_template_subs(&wrapper_cls, wrapper_ctor, &wrapper_arg_texts, rctx, ctx);
 
-    // Find the wrapper's template param at the given position and
-    // look it up in the substitution map.
     let wrapper_tpl = wrapper_cls.template_params.get(tpl_position)?;
     wrapper_subs.get(wrapper_tpl.as_str()).cloned()
 }
@@ -958,7 +938,6 @@ pub(super) fn resolve_array_literal_generic(
 ) -> Option<PhpType> {
     let trimmed = arg_text.trim();
 
-    // Must be an array literal.
     let inner = if trimmed.starts_with('[') && trimmed.ends_with(']') {
         trimmed[1..trimmed.len() - 1].trim()
     } else {
@@ -972,8 +951,6 @@ pub(super) fn resolve_array_literal_generic(
 
     let elements = crate::type_engine::conditional_resolution::split_text_args(inner);
 
-    // Determine whether elements are key=>value pairs.
-    // Check the first element for `=>`.
     let first = elements.first()?.trim();
     let has_keys = first.contains("=>");
 
@@ -998,14 +975,8 @@ pub(super) fn resolve_array_literal_generic(
         // Position 0 in `array<TKey, TValue>` would be `int` (implicit key).
         // Position 1 in `array<TKey, TValue>` is the element type.
         match tpl_position {
-            0 => {
-                // Implicit integer keys.
-                Some(PhpType::named(atom("int")))
-            }
-            1 => {
-                // Element type from first element.
-                Backend::resolve_arg_text_to_type(first, rctx)
-            }
+            0 => Some(PhpType::named(atom("int"))),
+            1 => Backend::resolve_arg_text_to_type(first, rctx),
             _ => None,
         }
     }

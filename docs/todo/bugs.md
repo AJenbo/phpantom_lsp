@@ -307,3 +307,346 @@ matching the pattern already used for `in_implements_declaration_header`.
 No existing test exercises this path; add one for `enum Foo ext|` (no
 completion) and `interface Foo ext|` (completion offered, extends
 existing coverage of the Class case).
+
+#### B9. `class_level_signature_eq` never compares `template_param_defaults`
+
+**Impact: Low · Effort: Low**
+
+Found while cleaning up comments in `types/mod.rs`. `ClassInfo::template_param_defaults`
+(`@template T = default` clauses) feeds conditional-return-type default
+evaluation, per its own doc comment. `class_level_signature_eq` compares
+`template_params` and `template_param_bounds` but not
+`template_param_defaults`:
+
+```rust
+|| self.template_params != other.template_params
+|| self.template_param_bounds != other.template_param_bounds
+// template_param_defaults is missing here
+|| self.extends_generics != other.extends_generics
+```
+
+If only a `@template T = default` value changes (e.g.
+`@template TAsync of bool = false` → `= true`) with no other tracked
+field changing, `signature_eq` returns `true`, so a cache entry keyed on
+it is not evicted and conditional return types depending on that default
+can resolve stale. Unlike `links`/`see_refs` (legitimately excluded as
+display-only), there is no comment or rationale suggesting this
+exclusion is intentional.
+
+**Where to look:** `class_level_signature_eq` in `src/types/mod.rs`
+(~line 2165) — add `|| self.template_param_defaults != other.template_param_defaults`
+alongside the `template_param_bounds` comparison.
+
+#### B10. Extract Function's by-reference-write safety check can never trigger
+
+**Impact: Low-Medium · Effort: Medium**
+
+Found while cleaning up comments in `scope_collector/`. `RangeClassification::reference_writes`
+(`src/scope_collector/scope_map.rs:172`, documented as "Variables that
+are written by reference (`&$var`) inside the range") is declared,
+sorted at the end of `classify_range`, and consumed as a safety gate in
+Extract Function:
+
+```rust
+// code_actions/extract_function/mod.rs:198
+if scope_map.uses_reference_params() && !classification.reference_writes.is_empty() {
+    return None;
+}
+```
+
+but nothing in `classify_range` ever pushes into it — confirmed via
+`git log -S "reference_writes"` that no commit has ever added a
+`.push()` call since the field was introduced. Since it is always
+empty, this guard (meant to block extracting a range that writes to a
+by-reference variable, which would silently break the reference
+semantics once moved into a new function scope) can never fire.
+
+The collector already tracks the pieces needed to populate it
+correctly: `AccessKind` on each `VarAccess`, and the `ByRefResolver` /
+`ByRefCallKind` machinery in the same module that resolves which call
+arguments bind by reference. `classify_range` needs to identify
+accesses inside `[start, end)` that write through a `&$var` binding
+(a reference parameter, a `foreach (... as &$v)`, or an argument passed
+to a by-ref parameter per the resolver) and populate `reference_writes`
+with those variable names.
+
+**Where to look:** `classify_range` in `src/scope_collector/scope_map.rs`
+— the `parameters`/`return_values`/`locals` classification loops already
+show the pattern for iterating `self.accesses` within the range; add an
+equivalent pass keyed on by-reference write accesses.
+
+#### B11. `type_engine/subject_resolution.rs` duplicates `util::resolve_to_fqn` with a subtle behavioral difference
+
+**Impact: Low · Effort: Low**
+
+Found while cleaning up comments in `type_engine/subject_expr.rs`.
+`type_engine/subject_resolution.rs` has its own private
+`resolve_to_fqn(name, use_map, namespace)` (~line 120) that duplicates
+the public `crate::util::resolve_to_fqn` (`src/util.rs:41`) instead of
+calling it. The two differ in one place: when a short name resolves via
+`use_map`, the `type_engine` copy does
+`fqn.trim_start_matches('\\').to_string()` on the matched value, while
+`util::resolve_to_fqn` returns `fqn.clone()` unmodified. If a `use_map`
+entry is ever stored with a leading `\` (worth checking how entries are
+populated — some paths in this codebase do store FQNs with a leading
+backslash), the two functions return different strings for the same
+input, and only one of them strips it.
+
+This is the kind of parallel resolution path the project's type-engine
+conventions warn against: a second implementation of "resolve a name to
+its FQN" that can silently drift from the canonical one in `util.rs`.
+It is currently used for two call sites in `subject_resolution.rs`
+(parent-class and general subject FQN resolution feeding `SubjectExpr`
+resolution), not the main shared `resolve_rhs_expression` pipeline, so
+the blast radius is contained, but a future fix to `util::resolve_to_fqn`
+(e.g. a `use_map` normalization change) would not automatically apply
+here.
+
+**Where to look:** `resolve_to_fqn` in `src/type_engine/subject_resolution.rs`
+— replace its two call sites with `crate::util::resolve_to_fqn` and
+delete the local duplicate, after confirming `use_map` entries are
+consistently normalized (with or without a leading `\`) so removing the
+`trim_start_matches` step doesn't change behavior for either call site.
+
+#### B12. `resolve_rhs_expression`'s `RHS_EXPR_DEPTH` cap silently returns empty past depth 100
+
+**Impact: Low-Medium · Effort: Medium-High**
+
+Found while cleaning up comments in `type_engine/variable/rhs_resolution/`.
+`resolve_rhs_expression` (`src/type_engine/variable/rhs_resolution/mod.rs:346`)
+guards against unbounded recursion with a thread-local counter:
+
+```rust
+thread_local! {
+    static RHS_EXPR_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+let depth = RHS_EXPR_DEPTH.with(|d| { let v = d.get() + 1; d.set(v); v });
+if depth > 100 {
+    RHS_EXPR_DEPTH.with(|d| d.set(depth - 1));
+    return vec![];
+}
+```
+
+This is the exact "depth cap papering over unbounded recursion"
+anti-pattern this project's own conventions warn against (a hard cap is
+a safety net, not a fix — see the performance anti-patterns in
+`CLAUDE.local.md`, item 2), and it isn't one of the previously-known
+instances (`MAX_RESOLVE_DEPTH`, `MAX_LOOP_DEPTH`,
+`MAX_RESOLVE_TARGET_DEPTH`) — `RHS_EXPR_DEPTH` doesn't follow the
+`MAX_*` naming convention, so it was easy to miss in a grep sweep for
+those names.
+
+When the cap fires, `resolve_rhs_expression` silently returns an empty
+`Vec<ResolvedType>` — the caller sees "this expression has no type"
+with no indication the resolver bailed rather than genuinely finding
+nothing. Since this function is the single shared entry point for RHS
+expression resolution (feeding assignment tracking, hover, and
+diagnostics type strings per its own doc comment), a pathological or
+deeply-nested chain of calls/match/ternary/`??` expressions produces
+silently wrong (empty) results rather than a bounded-but-correct one.
+
+**Where to look:** `resolve_rhs_expression` in
+`src/type_engine/variable/rhs_resolution/mod.rs` — apply one of the
+standard fixes from this project's own anti-pattern list instead of
+raising the cap: cache resolved expressions by identity so recursive
+resolution of shared sub-expressions is O(1) on re-entry (the approach
+PHPStan/Phpactor use), or break cycles with a keyed visited set that
+returns a defined partial result rather than an empty one.
+
+#### B13. The hover scope cache is populated but never read
+
+**Impact: Medium · Effort: Medium**
+
+Found while cleaning up comments in
+`type_engine/variable/forward_walk/diagnostic_cache.rs`. The hover
+scope cache banner there claims that after the first hover walks a
+method body once, "subsequent hovers on the same file content look up
+the pre-computed snapshots in O(log N) time via a `BTreeMap::range`
+search — no re-walk at all." The lookup path does not exist. The only
+accesses to `HoverScopeCache.methods` in the entire codebase are
+`contains_key` (`hover_scope_has_method`) and `insert`
+(`populate_hover_scope_cache_for_method`); no code ever reads the
+stored `ScopeSnapshotMap` values back.
+
+The populate site in `resolve_in_method_body`
+(`src/type_engine/variable/forward_walk/mod.rs`, the "Hover scope
+cache" block) also carries a comment claiming the population benefits
+"diagnostics member-access lookups via `lookup_diagnostic_scope`", but
+that function reads the thread-local `DIAGNOSTIC_SCOPE`, which the
+temporary guard in the same block clears immediately after the
+snapshots are harvested into the hover cache.
+
+Net effect: the cache makes hover strictly slower, not faster. The
+first hover that reaches a given method body performs two walks (the
+full-body population walk plus the standard walk that actually answers
+the request) instead of one, and the harvested snapshot map sits in
+thread-local storage as dead memory until the content hash changes.
+The only thing the cache prevents is repeating its own useless
+population walk. A lookup path was presumably lost in a refactor, or
+was never wired up after the LHS-assignment-hover problem described in
+the populate-site comment was discovered.
+
+**Where to look:** either wire up the read path (a
+`lookup_hover_scope(method_span_start, var_name, offset)` used by the
+member-access/hover consumers that can tolerate statement-start
+snapshots, keeping the standard walk only for the LHS-assignment case
+the comment describes), or delete the cache entirely
+(`activate_hover_scope_cache`, `is_hover_scope_cache_active`,
+`hover_scope_has_method`, `populate_hover_scope_cache_for_method`, the
+`HOVER_SCOPE_CACHE` thread-local, the activation call in
+`type_engine/variable/resolution.rs`, and the population block in
+`forward_walk/mod.rs`). Measure hover latency on a hover-heavy file
+(the banner's own motivating case: a test file with 80+ `assertType()`
+calls) before choosing — if the O(n²) problem the cache was built for
+is real, the read path is the right fix.
+
+#### B14. `array_pop`/`array_shift` on nested containers resolve to the container type
+
+**Impact: Low-Medium · Effort: Low**
+
+Found while cleaning up comments in
+`type_engine/variable/raw_type_inference.rs`. For element-extracting
+functions (`ARRAY_ELEMENT_FUNCS`: `array_pop`, `array_shift`, etc.),
+`resolve_rhs_function_call` in
+`src/type_engine/variable/rhs_resolution/calls.rs` (~line 845) tries
+`resolve_array_func_element_type` first, but only returns its result
+when `type_hint_to_classes_typed` resolves the element type to at
+least one class. When the element type is not class-like — e.g.
+popping a `list<list<int>>` yields element type `list<int>` — the
+correct result is discarded and control falls through to the
+`resolve_array_func_raw_type` branch, whose `ARRAY_ELEMENT_FUNCS` arm
+returns the *input container type unchanged* as a type-string-only
+result.
+
+So `$row = array_pop($matrix)` with `$matrix: list<list<int>>` resolves
+`$row` to `list<list<int>>` instead of `list<int>`, and
+`foreach (array_pop($matrix) as $x)` resolves `$x` to `list<int>`
+instead of `int` — one level of unwrapping is missed whenever the
+element type doesn't name a class. The simple class case
+(`array_pop($users)` on `list<User>`) is unaffected because the
+element-type branch resolves `User` and returns early.
+
+**Where to look:** the element-type branch in
+`resolve_rhs_function_call` should return the element type as a
+type-string-only result (mirroring what the raw-type branch below it
+already does for unresolvable-but-informative types) instead of
+falling through. The `ARRAY_ELEMENT_FUNCS` arm of
+`resolve_array_func_raw_type` then only fires when no element type
+could be computed at all; whether it should keep returning the
+container at that point is worth revisiting at the same time.
+
+#### B15. `IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard
+
+**Impact: Low · Effort: Medium**
+
+Found while cleaning up comments in
+`type_engine/variable/closure_resolution.rs`. The
+`IN_CLOSURE_THIS_OVERRIDE` thread-local guarding
+`find_closure_this_override` is a `Cell<bool>` — exactly the coarse
+boolean re-entry guard shape the project's performance anti-patterns
+warn about (item 5). It cannot distinguish re-entry on the *same*
+closure (the `$this`-receiver cycle it exists to break) from
+legitimate nested work on a *different* closure: with a closure inside
+a closure where both call sites declare `@param-closure-this`, the
+inner resolution short-circuits to `None` and silently falls back to
+`current_class`, so `$this` inside the inner closure resolves to the
+wrong type.
+
+**Where to look:** `find_closure_this_override` in
+`src/type_engine/variable/closure_resolution.rs`. Key the guard by the
+entity being resolved (e.g. the closure's span offset or the call-site
+span) in a small visited set, as `RESOLVING` does for class FQNs, so
+only genuine same-entity cycles short-circuit.
+
+#### B16. Cursor-position narrowing inside a `for` condition isn't applied
+
+**Impact: Low · Effort: Low**
+
+Found while cleaning up comments in `type_engine/variable/forward_walk/mod.rs`.
+`walk_body_forward`'s cursor-narrowing pass applies `instanceof`/guard
+narrowing when the cursor sits inside an `if` or `while` condition:
+
+```rust
+match stmt {
+    Statement::If(if_stmt) => { ... apply_cursor_ternary_narrowing(if_stmt.condition, ...) }
+    Statement::While(while_stmt) => { ... apply_cursor_ternary_narrowing(while_stmt.condition, ...) }
+    _ => {}
+}
+```
+
+There is no `Statement::For` arm, so the same narrowing never applies
+inside a `for` loop's condition list, e.g.:
+
+```php
+for ($e = $iter->current(); $e instanceof Foo && $e->x; $e = $iter->next()) {
+    // cursor on `$e->x` above doesn't get instanceof narrowing
+}
+```
+
+`Statement::For`'s `conditions` field is `&[Expression]` (PHP allows
+comma-separated conditions, unlike `if`/`while`'s single expression),
+so the fix isn't a direct copy-paste of the `If`/`While` arms — each
+condition in the list needs the cursor-containment check, and (per PHP
+semantics) only the last one's boolean value controls loop
+continuation, though any of them could be the one the cursor is on.
+
+**Where to look:** `walk_body_forward` in
+`src/type_engine/variable/forward_walk/mod.rs`, the cursor-narrowing
+`match stmt` block — add a `Statement::For` arm that iterates
+`for_stmt.conditions` and applies `apply_cursor_ternary_narrowing` to
+whichever condition contains the cursor.
+
+#### B17. `virtual_members/resolve.rs` reimplements generic substitution without right-alignment
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+Found while cleaning up comments in `virtual_members/resolve.rs`. The
+canonical generic-substitution builder,
+`build_substitution_map`/`apply_generic_args` in
+`src/inheritance/generics.rs`, right-aligns a short type-argument list
+against trailing template parameters when every skipped leading
+parameter has a key-like bound (`array-key`/`int`/`string`) — the
+universal convention for collection key parameters, via
+`right_align_offset` (`src/inheritance/generics.rs:478`). For example
+`@extends Collection<User>` against `class Collection<TKey, TValue>`
+binds `TValue => User`, not `TKey => User`.
+
+`resolve_class_fully_inner` in `src/virtual_members/resolve.rs` (~line
+588) has its own inline copy of this substitution-map building logic,
+used while walking the `extends` chain to collect and substitute
+`@implements` generics for virtual-member (`@method`/`@property`)
+resolution. Its comment claims it mirrors
+`resolve_class_with_inheritance`'s logic, but the implementation is a
+plain `enumerate()` zip:
+
+```rust
+for (i, param_name) in parent.template_params.iter().enumerate() {
+    if let Some(arg) = args.get(i) {
+        ...
+        map.insert(param_name.to_string(), resolved);
+    }
+}
+```
+
+with no `right_align_offset` call. When a class in the chain provides
+fewer `@extends`/`@implements` type arguments than the parent
+interface's template params, and those params have key-like leading
+bounds, this path binds the short argument to the *first* (key)
+parameter instead of the trailing (value) parameter that
+`build_substitution_map` would choose — the opposite of the rest of
+the codebase's convention. This only affects interface-tag merging
+during virtual-member resolution (not the main inheritance-merge
+path), so the practical impact is `@method`/`@property` synthesis
+picking up a misbound generic argument for interfaces reached this
+way.
+
+**Where to look:** `resolve_class_fully_inner` in
+`src/virtual_members/resolve.rs` (~line 611) — replace the manual
+`enumerate()` substitution-map loop with a call to
+`crate::inheritance::generics::right_align_offset` (or, better,
+refactor to share `build_substitution_map` directly instead of
+duplicating its logic), consistent with CLAUDE.local.md's guidance
+against parallel type-resolution paths. Add a regression test with a
+short `@extends`/`@implements` argument list against an interface with
+a key-like leading template param, reached via `@mixin`/`@implements`
+tag merging rather than the main inheritance chain.

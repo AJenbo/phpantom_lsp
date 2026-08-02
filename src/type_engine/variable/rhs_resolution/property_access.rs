@@ -1,8 +1,9 @@
 /// Property access (`$this->prop`, `$obj->prop`, `$obj?->prop`)
 /// resolution: resolves the property's type hint, plus the
-/// `find_*_this_property_assignment*` scanners used to recover a
-/// property's type from its last constructor/method assignment when no
-/// declared type is available.
+/// `find_*_this_property_assignment*` scanners that narrow a property's
+/// type from its last assignment in the enclosing method when the
+/// assigned type is narrower than the declared one (or the property is
+/// untyped).
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -40,7 +41,6 @@ pub(super) fn resolve_rhs_property_access(
         all_classes: &[Arc<ClassInfo>],
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Vec<ResolvedType> {
-        // Get the type hint before resolving to ClassInfo.
         let type_hint =
             crate::inheritance::resolve_property_type_hint(owner, prop_name, class_loader);
         let resolved = crate::type_engine::type_resolution::resolve_property_types(
@@ -50,11 +50,10 @@ pub(super) fn resolve_rhs_property_access(
             class_loader,
         );
         if resolved.is_empty() {
-            // The property has a type hint but `type_hint_to_classes_typed`
-            // found no matching class (e.g. `list<Widget>`, `int`,
-            // `array{name: string}`).  Return a type-string-only
-            // entry when the type is informative (carries generics,
-            // shapes, or names a non-scalar class).
+            // The property has a type hint but no matching class was
+            // found (e.g. `list<Widget>`, `int`, `array{name: string}`).
+            // Return a type-string-only entry so the type information
+            // is not lost.
             return match type_hint {
                 Some(hint) => {
                     vec![resolved_type_with_lookup(
@@ -187,13 +186,10 @@ pub(super) fn resolve_rhs_property_access(
             Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
             Expression::Self_(_) => Some(current_class_name.to_string()),
             Expression::Static(_) => Some(current_class_name.to_string()),
-            Expression::Parent(_) => {
-                // Resolve parent class name from the current class.
-                all_classes
-                    .iter()
-                    .find(|c| c.name == current_class_name)
-                    .and_then(|c| c.parent_class.map(|a| a.to_string()))
-            }
+            Expression::Parent(_) => all_classes
+                .iter()
+                .find(|c| c.name == current_class_name)
+                .and_then(|c| c.parent_class.map(|a| a.to_string())),
             _ => None,
         };
         let prop_name = match &spa.property {
@@ -539,9 +535,10 @@ pub(super) fn find_this_property_assignment_in_toplevel<'b>(
                 }
             }
             Statement::If(if_stmt) => {
-                // Walk the then-branch, every elseif branch, and the else
-                // branch: an assignment to `$this->prop` in any of them
-                // (before the cursor) is a valid narrowing source.
+                // A class (and thus the enclosing method) can be declared
+                // inside a conditional.  Try every branch; the recursive
+                // call's cursor-containment check skips branches that
+                // don't enclose the cursor.
                 let search = |inner: &'b Statement<'b>| {
                     find_this_property_assignment_in_toplevel(
                         std::iter::once(inner),

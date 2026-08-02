@@ -78,9 +78,9 @@ pub(crate) fn process_statement<'b>(
             if let Some(val) = ret.value {
                 process_assignment_expr(val, scope, ctx);
 
-                // Record `&&` chain snapshots so that member accesses
-                // after an instanceof/null guard see the narrowed type.
-                // E.g. `return $x instanceof Foo && $x->bar()`
+                // Record `&&` and `||` chain snapshots so that member
+                // accesses after an instanceof/null guard see the
+                // narrowed type.  E.g. `return $x instanceof Foo && $x->bar()`
                 record_and_chain_snapshots(val, scope, ctx);
                 record_or_chain_snapshots(val, scope, ctx);
 
@@ -129,10 +129,10 @@ pub(crate) fn process_expression_statement<'b>(
         VarOverrideResult::None => {}
     }
 
-    // Record intermediate scope snapshots within `&&` chains so that
-    // member accesses after an instanceof/null guard see the narrowed
-    // type.  E.g. `$x instanceof Foo && $x->bar()` as an expression
-    // statement.
+    // Record intermediate scope snapshots within `&&` and `||` chains
+    // so that member accesses after an instanceof/null guard see the
+    // narrowed type.  E.g. `$x instanceof Foo && $x->bar()` as an
+    // expression statement.
     record_and_chain_snapshots(expr, scope, ctx);
     record_or_chain_snapshots(expr, scope, ctx);
 
@@ -142,15 +142,12 @@ pub(crate) fn process_expression_statement<'b>(
         record_match_ternary_snapshots(expr, scope, ctx);
     }
 
-    // Process assignments.
     process_assignment_expr(expr, scope, ctx);
 
     process_by_ref_closure_captures(expr, scope, ctx);
 
-    // Process pass-by-reference parameter type inference.
     process_pass_by_ref(expr, scope, ctx);
 
-    // Process assert narrowing.
     process_assert_narrowing(expr, scope, ctx);
 
     // Process increment/decrement: $a++, ++$a, $a--, --$a.
@@ -727,9 +724,6 @@ pub(crate) fn stmt_offset(expr: &Expression<'_>) -> u32 {
     expr.span().start.offset
 }
 
-/// Try to process an inline `/** @var Type $x */` docblock override.
-///
-/// Returns `true` if an override was found and applied.
 /// Result of [`try_process_inline_var_override`].
 pub(crate) enum VarOverrideResult {
     /// No `@var` docblock found.
@@ -744,6 +738,7 @@ pub(crate) enum VarOverrideResult {
     NoVar,
 }
 
+/// Try to process an inline `/** @var Type $x */` docblock override.
 pub(crate) fn try_process_inline_var_override<'b>(
     expr: &'b Expression<'b>,
     expr_offset: u32,
@@ -942,7 +937,6 @@ pub(crate) fn apply_preceding_var_docblocks(
     }
 }
 
-/// Parse `/** @var Type $varName */` and return (var_name, PhpType).
 /// Resolve a [`PhpType`] to a complete `Vec<ResolvedType>` with
 /// `class_info` populated when possible.  Falls back to a
 /// type-string-only entry for scalars and unresolvable types.
@@ -2050,14 +2044,9 @@ pub(crate) fn process_array_key_assignment<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Delegate to the existing check_expression_for_assignment
-    // infrastructure for array key assignments.  This handles
+    // Extract the base variable and the chain of array-access keys, then
+    // merge the RHS value type into the base variable's type.  Handles
     // both string-keyed shape building and generic element tracking.
-    //
-    // We iterate over all variables currently in scope and check
-    // whether the assignment targets any of them.
-    // For simplicity in Phase 1, use the existing path.
-    // Extract the base variable name from the array access.
     if let Some((base_name, key_chain)) =
         super::super::resolution::extract_nested_array_access_chain(_array_access)
     {

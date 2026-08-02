@@ -17,8 +17,6 @@ pub(crate) fn try_enter_closure<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    // Walk the statement's expression tree looking for closures/arrow
-    // functions that contain the cursor.
     if let Statement::Expression(expr_stmt) = stmt {
         return try_enter_closure_expr(expr_stmt.expression, scope, ctx, None);
     }
@@ -35,7 +33,7 @@ pub(crate) fn try_enter_closure<'b>(
         if try_enter_closure_expr(if_stmt.condition, scope, ctx, None) {
             return true;
         }
-        // Also check elseif conditions and bodies for closures.
+        // Also check elseif conditions for closures.
         match &if_stmt.body {
             IfBody::Statement(body) => {
                 for ei in body.else_if_clauses.iter() {
@@ -117,8 +115,7 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 }
 
                 // Seed with parameter types, using callable inference
-                // when available (mirroring the diagnostic path's
-                // seed_closure_params logic).
+                // when available.
                 let inferred = inferred_params.unwrap_or(&[]);
                 let filtered_inferred = filter_resolvable_inferred_params(inferred, ctx);
                 seed_closure_params(
@@ -129,10 +126,8 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     ctx,
                 );
 
-                // Walk the closure body.
                 walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
 
-                // Replace the outer scope with the closure scope.
                 *scope = closure_scope;
                 return true;
             }
@@ -160,10 +155,9 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 // referenced after an earlier `&&` conjunct (e.g.
                 // `fn($x) => $x instanceof Foo && $x->bar()`).
                 apply_cursor_ternary_narrowing(arrow.expression, scope, ctx);
-                // The body is a single expression.  Recurse into it
-                // to find nested closures/arrow functions that may
-                // contain the cursor (e.g. a closure passed as an
-                // argument inside the arrow body).
+                // Recurse into the body to find nested closures/arrow
+                // functions that may contain the cursor (e.g. a closure
+                // passed as an argument inside the arrow body).
                 try_enter_closure_expr(arrow.expression, scope, ctx, None);
                 return true;
             }
@@ -193,8 +187,6 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     Argument::Positional(a) => a.value,
                     Argument::Named(a) => a.value,
                 };
-                // Only infer callable params when the argument is a
-                // closure or arrow function (or wraps one).
                 let inferred = infer_callable_params_for_call(call, arg_idx, scope, ctx);
                 let inferred_opt = if inferred.is_empty() {
                     None

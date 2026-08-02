@@ -183,7 +183,9 @@ pub(super) fn build_var_section(
 ///
 /// A return entry is emitted when:
 ///   - the effective return type differs from the native return type, OR
-///   - there is a return description.
+///   - there is a return description, OR
+///   - the return type was inferred (so the `(inferred)` annotation shows
+///     even when the type matches and there is no description).
 ///
 /// Returns `None` when there is nothing to show.
 pub(super) fn build_param_return_section(
@@ -363,7 +365,6 @@ pub(crate) fn hover_for_function(
         format_see_refs(&unresolved, &func.links, &mut lines);
     }
 
-    // Build the readable param/return section as markdown.
     if let Some(section) = build_param_return_section(
         &func.parameters,
         func.return_type.as_ref(),
@@ -374,7 +375,6 @@ pub(crate) fn hover_for_function(
         lines.push(section);
     }
 
-    // Build a clean code block with just the signature.
     let code = format!("```php\n<?php\n{}{};\n```", ns_line, signature);
     lines.push(code);
 

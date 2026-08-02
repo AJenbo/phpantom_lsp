@@ -64,7 +64,6 @@ impl Backend {
         let bound = crate::call_args::bind_text_args_to_params(&method.parameters, arg_texts);
 
         for (tpl_name, param_name) in &method.template_bindings {
-            // Find the parameter index for this binding.
             let param_idx = match method
                 .parameters
                 .iter()
@@ -83,7 +82,6 @@ impl Backend {
                 .and_then(|p| p.type_hint.as_ref());
             let binding_mode = classify_template_binding(tpl_name, param_hint);
 
-            // Get the corresponding argument text.
             let arg_text = match bound.get(param_idx).and_then(|o| o.as_deref()) {
                 Some(text) => text,
                 None => {
@@ -357,8 +355,6 @@ impl Backend {
                                     HashMap::new()
                                 };
 
-                            // Search implements_generics first, then
-                            // extends_generics.
                             for (iface_name, args) in merged
                                 .implements_generics
                                 .iter()
@@ -881,11 +877,11 @@ impl Backend {
 /// signal to check that parameter's argument against: the substituted
 /// type came from resolving that same argument, so any diagnostic that
 /// compares the argument to it again is comparing the argument against
-/// itself through two potentially-diverging resolution paths. See B4
-/// in `docs/todo/bugs.md` — PHPUnit's
-/// `assertSame(ExpectedType $expected, mixed $actual)` binds
-/// `ExpectedType` only from `$expected`, so checking `$expected` against
-/// `ExpectedType` is circular and can never legitimately fail.
+/// itself through two potentially-diverging resolution paths. For
+/// example, PHPUnit's `assertSame(ExpectedType $expected, mixed
+/// $actual)` binds `ExpectedType` only from `$expected`, so checking
+/// `$expected` against `ExpectedType` is circular and can never
+/// legitimately fail.
 ///
 /// A template bound from more than one parameter (or from a parameter
 /// plus a return-type appearance elsewhere) is not covered here — those

@@ -13,7 +13,7 @@
 //! - `$casts` definitions
 //! - `$dates` definitions
 //! - `$attributes` defaults
-//! - `$fillable`/`$guarded`/`$hidden`/`$appends` column names
+//! - `$fillable`/`$guarded`/`$hidden`/`$visible`/`$appends` column names
 //! - Timestamp columns (`created_at`, `updated_at` unless disabled)
 //! - `@property` / `@property-read` / `@property-write` docblock tags (parsed from raw docblock)
 //! - Declared (non-static, non-private) properties on the class itself
@@ -40,7 +40,6 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut columns = Vec::new();
 
-    // Helper to insert a column if not already seen.
     let mut push = |name: &str| {
         if seen.insert(name.to_string()) {
             columns.push(name.to_string());
@@ -49,17 +48,14 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
 
     // ── LaravelMetadata sources ─────────────────────────────────────
     if let Some(laravel) = class.laravel() {
-        // $casts
         for (col, _) in &laravel.casts_definitions {
             push(col);
         }
 
-        // $dates
         for col in &laravel.dates_definitions {
             push(col);
         }
 
-        // $attributes defaults
         for (col, _) in &laravel.attributes_definitions {
             push(col);
         }
@@ -153,13 +149,12 @@ pub fn build_where_property_methods_for_class(
     for col in &columns {
         let method_name = format!("where{}", snake_to_pascal(col));
 
-        // Skip if a method with this name already exists on the target.
         if existing_method_names.contains(&method_name.to_ascii_lowercase()) {
             continue;
         }
 
-        // Skip if we already synthesized a method with this name
-        // (can happen when a column appears in multiple sources).
+        // A column can appear in multiple sources (e.g. both $fillable and
+        // a docblock @property), producing the same method name twice.
         if !seen_methods.insert(method_name.clone()) {
             continue;
         }

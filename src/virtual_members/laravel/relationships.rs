@@ -315,7 +315,6 @@ pub(crate) fn count_property_to_relationship_method(
 /// Returns `None` if no recognisable pattern is found.
 pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
     for &(method_name, fqn) in RELATIONSHIP_METHOD_FQN_MAP {
-        // Look for `$this->methodName(` in the body text.
         let needle = format!("$this->{method_name}(");
         let Some(call_pos) = body_text.find(&needle) else {
             continue;
@@ -324,17 +323,16 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
         // `morphTo` never carries a related-model generic parameter;
         // the concrete type is determined at runtime.
         //
-        // The FQN is prefixed with `\` so that `resolve_type_string`
-        // in `ast_update.rs` recognises it as already-qualified and
-        // does not prepend the declaring file's namespace.
-        // `resolve_name` will strip the leading `\` back to canonical
-        // form during the resolution pass.
+        // The FQN is prefixed with `\` so that the post-parse
+        // name-resolution pass (`resolve_name`, invoked via
+        // `build_type_resolver` in `ast_update.rs`) treats it as
+        // already-qualified and does not prepend the declaring file's
+        // namespace. `resolve_name` strips the leading `\` back off
+        // to produce the canonical FQN form.
         if method_name == "morphTo" {
             return Some(PhpType::named(atom(&format!("\\{fqn}"))));
         }
 
-        // Extract the first argument from the call.  We look for
-        // `SomeName::class` as the first positional argument.
         let args_start = call_pos + needle.len();
         let after_paren = &body_text[args_start..];
 
@@ -363,12 +361,9 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
 ///
 /// Returns `None` if no `::class` token is found before the closing `)`.
 fn extract_class_argument(after_paren: &str) -> Option<String> {
-    // Find the closing paren to bound our search.
     let end = after_paren.find(')')?;
     let args_region = &after_paren[..end];
 
-    // Isolate the first argument (before the first comma) and look for
-    // `X::class` within it.
     let first_arg = args_region.split(',').next().unwrap_or(args_region);
     let class_pos = first_arg.find("::class")?;
     let before = first_arg[..class_pos].trim();
@@ -377,7 +372,6 @@ fn extract_class_argument(after_paren: &str) -> Option<String> {
         return None;
     }
 
-    // Strip leading backslash for FQNs and extract the short name.
     let name = strip_fqn_prefix(before);
     let short_name = short_name(name);
 
@@ -487,17 +481,13 @@ pub(crate) fn resolve_relation_chain(
             return None;
         }
 
-        // Find the relationship method on the current model.
         let method = current_class.get_method(segment)?;
 
-        // Get the return type and extract the related model type.
         // Body-inferred relationship types are already stored in
         // `return_type` by the parser, so no fallback is needed.
         let return_type = method.return_type.as_ref()?;
         let related_type = extract_related_type_for_chain(return_type, &current_class)?;
 
-        // Resolve the related type to a full class, trying the model's
-        // namespace first (e.g. short name "Article" → "App\Models\Article").
         let resolved = resolve_related_fqn(&related_type, &current_class, class_loader)?;
         current_class = resolve_class_with_inheritance(&resolved, class_loader, cache);
     }

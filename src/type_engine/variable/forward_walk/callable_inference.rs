@@ -168,8 +168,8 @@ pub(crate) fn filter_resolvable_inferred_params(
         .collect()
 }
 
-/// Check whether a type has a base name that looks class-like but
-/// doesn't resolve to any known class in the project or stubs.
+/// Recursively check whether any base name in the type is
+/// unresolvable (see [`is_unresolvable_class_name`]).
 pub(crate) fn has_unresolvable_base(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> bool {
     match ty.kind() {
         TypeKind::Named(name) => is_unresolvable_class_name(name, ctx),
@@ -195,24 +195,16 @@ pub(crate) fn has_unresolvable_base(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> b
     }
 }
 
-/// A class name is "unresolvable" if it:
-/// 1. Contains a hyphen (e.g. `collection-of`, `non-empty-list`) — these
-///    are PHPStan pseudo-types that aren't real PHP classes.
-/// 2. Is not a scalar/builtin/special type.
-/// 3. Doesn't resolve to a class in the project or stubs.
-///
-/// We only flag hyphenated names because they are guaranteed to not be
-/// valid PHP class names.  Non-hyphenated names that fail resolution
-/// might just be missing from the index (vendor code, etc.) and
-/// shouldn't trigger the guard.
+/// A class name is "unresolvable" when it is hyphenated (e.g.
+/// `collection-of`, `non-empty-list`) and not one of the PHPStan
+/// pseudo-types the type engine handles elsewhere.  Hyphenated names
+/// can never be valid PHP class names, so flagging them is safe;
+/// non-hyphenated names that fail resolution might just be missing
+/// from the index (vendor code, etc.) and must not trigger the guard.
 pub(crate) fn is_unresolvable_class_name(name: &str, _ctx: &ForwardWalkCtx<'_>) -> bool {
-    // Hyphenated names are never valid PHP class names.  PHPStan uses
-    // them for pseudo-types like `collection-of`, `non-empty-list`,
-    // `non-empty-array`, `non-empty-string`, `class-string`, etc.
-    // `class-string` is handled elsewhere, but the rest are not
-    // resolvable as classes.
     if name.contains('-') {
-        // Allow well-known pseudo-types that we DO handle elsewhere.
+        // Pseudo-types that are handled elsewhere in the type engine
+        // keep their meaning; don't flag them.
         let lower = name.to_ascii_lowercase();
         if lower == "class-string"
             || lower == "array-key"
@@ -498,14 +490,10 @@ pub(crate) fn extract_first_arg_string_fw(
     }
 }
 
-/// Recursively walk the AST to find function and method bodies, running
-/// the forward walker on each.
-/// Seed `$this` in the scope when inside a non-static class method.
-///
-/// This creates a `ResolvedType` from the enclosing `ClassInfo` and
-/// stores it under `"$this"`.  The scope-based variable resolver then
-/// returns this entry for any `$this` lookup, eliminating the need to
-/// remain unresolved.
+/// Seed `$this` in the scope with the enclosing class's type.  Callers
+/// invoke this only for non-static class methods; the scope-based
+/// variable resolver then serves `$this` lookups from this entry
+/// instead of leaving them unresolved.
 pub(crate) fn seed_this(scope: &mut ScopeState, current_class: &ClassInfo) {
     if current_class.name.is_empty() {
         return;

@@ -334,7 +334,7 @@ fn source_text<'c>(expr: &Expression<'_>, content: &'c str) -> &'c str {
 }
 
 /// Collapse runs of whitespace so a multi-line rule expression fits on the
-/// single line completion detail and hover show it on.
+/// single line that completion detail and hover display it on.
 fn condense(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut prev_space = false;

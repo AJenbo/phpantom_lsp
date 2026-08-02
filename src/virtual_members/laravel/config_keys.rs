@@ -34,7 +34,6 @@ pub(crate) fn laravel_config_prefix_from_uri(uri: &str) -> Option<String> {
         return None;
     }
 
-    // Prefix is everything from config_idx + 1 to the end, joined by dots.
     let prefix_segments = &segments[config_idx + 1..];
     if prefix_segments.is_empty() {
         return None;

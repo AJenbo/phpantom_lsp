@@ -211,10 +211,10 @@ impl Backend {
                 return Some(target);
             }
 
-            // Fall back to __call / __callStatic — the candidate
-            // directly may contain model-specific members (e.g.
-            // Eloquent scope methods injected onto Builder<Model>)
-            // that the FQN-keyed cache does not have.
+            // Fall back to the candidate directly — it may contain
+            // model-specific members (e.g. Eloquent scope methods
+            // injected onto Builder<Model>) that the FQN-keyed
+            // cache does not have.
             if let Some(m) = owner.get_method_ci(method_name) {
                 let target = ResolvedCallableTarget {
                     parameters: m.parameters.clone(),
@@ -223,7 +223,7 @@ impl Backend {
                     ..Default::default()
                 };
 
-                // Store __call fallback in the callable target cache.
+                // Store the owner-candidate fallback in the callable target cache.
                 if let Some(ref key) = callable_cache_key {
                     CALLABLE_TARGET_CACHE.with(|cell| {
                         let mut borrow = cell.borrow_mut();

@@ -1,8 +1,8 @@
 //! Warming Laravel's shared builder classes ahead of the first completion.
 //!
-//! Relocated from `server.rs`. Pre-resolving the framework-level builder
-//! classes keeps the first `Model::query()->` completion off the full
-//! inheritance + mixin + patch cost on the editor hot path.
+//! Pre-resolving the framework-level builder classes keeps the first
+//! `Model::query()->` completion off the full inheritance + mixin + patch
+//! cost on the editor hot path.
 
 use crate::Backend;
 

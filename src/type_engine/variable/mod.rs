@@ -1,12 +1,12 @@
 /// Variable type-resolution sub-modules.
 ///
-/// - **resolution**: Variable type resolution via assignment scanning
+/// - **resolution**: Entry points and shared helpers; delegates to the forward walker
 /// - **rhs_resolution**: Right-hand-side expression resolution for variable assignments
 /// - **forward_walk**: The forward walker shared by all type-resolution consumers
 /// - **class_string_resolution**: Class-string variable resolution (`$cls = User::class`)
-/// - **raw_type_inference**: Raw type inference for variable assignments (array shapes, etc.)
-/// - **foreach_resolution**: Foreach value/key and array destructuring type resolution
-/// - **closure_resolution**: Closure and arrow-function parameter resolution
+/// - **raw_type_inference**: Array literal inference, array function helpers, generator yield inference
+/// - **foreach_resolution**: Iterable element/key type extraction from generic annotations
+/// - **closure_resolution**: Closure `$this` binding and callable parameter inference helpers
 pub(crate) mod class_string_resolution;
 pub(crate) mod closure_resolution;
 pub(crate) mod foreach_resolution;
@@ -24,8 +24,8 @@ pub(crate) mod rhs_resolution;
 // Stub deficiency: phpstorm-stubs declare these functions as returning
 // plain `array` or `mixed`, losing the element type.  PHPStan handles
 // this via dynamic return type extensions written in PHP; we use these
-// hardcoded lists instead.  See docs/todo/completion.md C1 for the
-// full inventory of functions that need special handling.
+// hardcoded lists instead.  `docs/todo/completion.md` tracks the full
+// inventory of functions that need special handling.
 
 /// Known array functions whose output preserves the input array's
 /// element type (the first positional argument).
