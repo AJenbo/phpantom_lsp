@@ -599,54 +599,6 @@ pub(super) fn resolve_rhs_function_call<'b>(
         use mago_syntax::cst::partial_application::PartialApplication;
         match pa {
             PartialApplication::StaticMethod(sma) => {
-                // For first-class callable invocation through late-static-binding
-                // targets (self::, static::, parent::), preserve `static` in the
-                // return type rather than resolving to the concrete class name.
-                let is_late_static = matches!(
-                    sma.class,
-                    Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
-                );
-                if is_late_static {
-                    // Look up the method's original return type to check if
-                    // it contains static/self/$this before resolution replaces it.
-                    let method_name = match sma.method {
-                        ClassLikeMemberSelector::Identifier(ident) => {
-                            bytes_to_str(ident.value).to_string()
-                        }
-                        _ => String::new(),
-                    };
-                    if !method_name.is_empty() {
-                        let method_ret = ctx
-                            .current_class
-                            .get_method_ci(&method_name)
-                            .and_then(|m| m.return_type.clone());
-                        let method_ret = method_ret.or_else(|| {
-                            let mut parent_name = ctx
-                                .current_class
-                                .parent_class
-                                .as_ref()
-                                .map(|a| a.to_string());
-                            while let Some(ref p) = parent_name {
-                                if let Some(cls) = (ctx.class_loader)(p) {
-                                    if let Some(m) = cls.get_method_ci(&method_name) {
-                                        return m.return_type.clone();
-                                    }
-                                    parent_name = cls.parent_class.as_ref().map(|a| a.to_string());
-                                } else {
-                                    break;
-                                }
-                            }
-                            None
-                        });
-                        if let Some(ref ret) = method_ret
-                            && ret.contains_self_ref()
-                        {
-                            return vec![ResolvedType::from_type_string(PhpType::static_type(
-                                ctx.current_class.fqn(),
-                            ))];
-                        }
-                    }
-                }
                 // Build a synthetic StaticMethodCall and resolve it.
                 let synthetic = mago_syntax::cst::call::StaticMethodCall {
                     class: sma.class,
@@ -657,51 +609,6 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 return resolve_rhs_static_call(&synthetic, ctx);
             }
             PartialApplication::Method(ma) => {
-                let receiver_is_this = matches!(
-                    ma.object,
-                    Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
-                );
-                if receiver_is_this {
-                    // Look up the method's original return type to check if
-                    // it contains static/self/$this.
-                    let method_name = match ma.method {
-                        ClassLikeMemberSelector::Identifier(ident) => {
-                            bytes_to_str(ident.value).to_string()
-                        }
-                        _ => String::new(),
-                    };
-                    if !method_name.is_empty() {
-                        let method_ret = ctx
-                            .current_class
-                            .get_method_ci(&method_name)
-                            .and_then(|m| m.return_type.clone());
-                        let method_ret = method_ret.or_else(|| {
-                            let mut parent_name = ctx
-                                .current_class
-                                .parent_class
-                                .as_ref()
-                                .map(|a| a.to_string());
-                            while let Some(ref p) = parent_name {
-                                if let Some(cls) = (ctx.class_loader)(p) {
-                                    if let Some(m) = cls.get_method_ci(&method_name) {
-                                        return m.return_type.clone();
-                                    }
-                                    parent_name = cls.parent_class.as_ref().map(|a| a.to_string());
-                                } else {
-                                    break;
-                                }
-                            }
-                            None
-                        });
-                        if let Some(ref ret) = method_ret
-                            && ret.contains_self_ref()
-                        {
-                            return vec![ResolvedType::from_type_string(PhpType::this_type(
-                                ctx.current_class.fqn(),
-                            ))];
-                        }
-                    }
-                }
                 return resolve_rhs_method_call_inner(
                     ma.object,
                     &ma.method,
@@ -1248,6 +1155,12 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
         }
     }
 
+    let receiver_is_this = matches!(
+        object,
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
+    );
+    let lsb_class = lsb_class_for_call(receiver_is_this, &receiver_resolved, ctx);
+
     let is_union = owner_classes.len() > 1;
     let mut union_results: Vec<ResolvedType> = Vec::new();
 
@@ -1322,7 +1235,7 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
         let self_replace =
             |ty: &PhpType| match receiver_type_for_owner(&receiver_resolved, &owner_key) {
                 Some(rt) => ty.replace_self_with_type(&rt),
-                None => ty.replace_self(&owner_key),
+                None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
             };
 
         let owner_results = resolve_owner_method_call(
@@ -1584,6 +1497,55 @@ pub(super) fn resolve_from_authoritative_type(
     )]
 }
 
+/// Whether `method_name` on `class_info` is declared `static`, looking through
+/// the inheritance merge so an inherited or `@method static` member counts.
+///
+/// A method the merge cannot find is treated as static: an unknown target
+/// reached through `ClassName::` is a static call as far as anything we can
+/// still say about it goes.
+fn method_is_static(class_info: &ClassInfo, method_name: &str, ctx: &VarResolutionCtx<'_>) -> bool {
+    if let Some(method) = class_info.get_method_ci(method_name) {
+        return method.is_static;
+    }
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        class_info,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    merged
+        .get_method_ci(method_name)
+        .is_none_or(|method| method.is_static)
+}
+
+/// The class a `@return static` / `@return $this` annotation binds to for this
+/// call, or `None` when the call fixes the class and the keyword collapses.
+///
+/// PHP only carries late static binding across a *forwarding* call: `$this->`,
+/// `self::`, `static::`, and `parent::`.  Writing the class out — `A::create()`,
+/// `(new A)->create()`, a variable declared `A` — pins it, so `static` there is
+/// exactly `A` however `A` is subclassed.  PHPStan and Psalm both collapse
+/// those, and keeping a bounded `static(A)` would claim an openness the call
+/// does not have.
+///
+/// A receiver that is *itself* still bounded keeps the chain open, so
+/// `$this->self()->self()` stays bound to the class the chain started from
+/// rather than collapsing at the second hop.
+fn lsb_class_for_call(
+    receiver_is_this: bool,
+    receiver_resolved: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<crate::atom::Atom> {
+    if receiver_is_this {
+        return Some(ctx.current_class.fqn());
+    }
+    receiver_resolved
+        .iter()
+        .find_map(|rt| match rt.type_string.kind() {
+            TypeKind::StaticType(bound) | TypeKind::ThisType(bound) => Some(*bound),
+            _ => None,
+        })
+}
+
 /// Resolve a method call's return type against a single, fully determined
 /// owner class: template substitution, `@psalm-if-this-is` narrowing (via
 /// the caller-supplied `template_subs`), PHPStan conditional return types,
@@ -1831,6 +1793,15 @@ pub(super) fn resolve_rhs_static_call(
 ) -> Vec<ResolvedType> {
     let current_class_name: &str = &ctx.current_class.name;
 
+    // `self::`, `static::`, and `parent::` all forward late static binding, so
+    // `@return static` on the target stays bound to the class the call is made
+    // *from* — including `parent::`, which reads the annotation off the parent
+    // but still resolves `static` to the current class.
+    let forwards_lsb = matches!(
+        static_call.class,
+        Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
+    );
+
     let class_name = match static_call.class {
         Expression::Self_(_) => Some(current_class_name.to_string()),
         Expression::Static(_) => Some(current_class_name.to_string()),
@@ -1895,7 +1866,10 @@ pub(super) fn resolve_rhs_static_call(
                                 } else {
                                     ret.clone()
                                 };
-                                let resolved = substituted.replace_self(&target.fqn());
+                                // Each target is a concrete class-string, so
+                                // late static binding has nothing left to
+                                // resolve on this branch.
+                                let resolved = substituted.replace_self_bound(&target.fqn(), None);
                                 union_types.push(resolved);
                             }
                         } else {
@@ -2037,7 +2011,14 @@ pub(super) fn resolve_rhs_static_call(
             let template_subs =
                 Backend::build_method_template_subs(owner, &method_name, &arg_refs, &rctx);
             let owner_key = owner.fqn();
-            let self_replace = |ty: &PhpType| ty.replace_self(&owner_key);
+            // An explicit `A::` on a non-static method is PHP's pre-8
+            // instance-forwarding form, which keeps `$this` (and with it late
+            // static binding) bound, so only a `static` method written out
+            // fixes the class.
+            let target_is_static = method_is_static(owner, &method_name, ctx);
+            let lsb_class = (forwards_lsb || !target_is_static).then(|| ctx.current_class.fqn());
+            let self_replace =
+                |ty: &PhpType| ty.replace_self_bound(&owner_key, lsb_class.as_deref());
 
             return resolve_owner_method_call(
                 owner,

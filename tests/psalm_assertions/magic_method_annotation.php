@@ -83,7 +83,7 @@ namespace PsalmTest_magic_method_annotation_2 {
     assertType('bool', $c);
     assertType('array<string|int>', $d);
     assertType('callable(): string', $e);
-    assertType('static(PsalmTest_magic_method_annotation_2\Child)', $f);
+    assertType('PsalmTest_magic_method_annotation_2\Child', $f);
 }
 
 // Test: validStaticAnnotationWithDefault
@@ -141,7 +141,7 @@ namespace PsalmTest_magic_method_annotation_5 {
     $b = (new C)->getThis();
 
     assertType('C', $a);
-    assertType('$this(PsalmTest_magic_method_annotation_5\C)', $b);
+    assertType('PsalmTest_magic_method_annotation_5\C', $b);
 }
 
 // Test: allowMagicMethodStatic
@@ -156,8 +156,8 @@ namespace PsalmTest_magic_method_annotation_6 {
     $c = (new C)->getStatic();
     $d = (new D)->getStatic();
 
-    assertType('static(PsalmTest_magic_method_annotation_6\C)', $c); 
-    assertType('static(PsalmTest_magic_method_annotation_6\D)', $d);
+    assertType('PsalmTest_magic_method_annotation_6\C', $c); 
+    assertType('PsalmTest_magic_method_annotation_6\D', $d);
 }
 
 // Test: validSimplePsalmAnnotations

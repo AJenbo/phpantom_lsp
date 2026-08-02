@@ -160,14 +160,14 @@ class Foo extends FooParent
 		assertType('MethodPhpDocsNamespace\Bar', static::doSomethingStatic());
 		
 		// assertType('static(MethodPhpDocsNamespace\Foo)', parent::doLorem());
-		assertType('static(MethodPhpDocsNamespace\FooParent)', $parent->doLorem());
+		assertType('MethodPhpDocsNamespace\FooParent', $parent->doLorem());
 		
 		// assertType('static(MethodPhpDocsNamespace\Foo)', $this->doLorem());
-		assertType('static(MethodPhpDocsNamespace\Foo)', $differentInstance->doLorem());
+		assertType('MethodPhpDocsNamespace\Foo', $differentInstance->doLorem());
 		
 		// assertType('static(MethodPhpDocsNamespace\Foo)', parent::doIpsum());
-		assertType('static(MethodPhpDocsNamespace\FooParent)', $parent->doIpsum());
-		assertType('static(MethodPhpDocsNamespace\Foo)', $differentInstance->doIpsum());
+		assertType('MethodPhpDocsNamespace\FooParent', $parent->doIpsum());
+		assertType('MethodPhpDocsNamespace\Foo', $differentInstance->doIpsum());
 		
 		// assertType('static(MethodPhpDocsNamespace\Foo)', $this->doIpsum());
 		assertType('MethodPhpDocsNamespace\Foo', $this->doBar()[0]);

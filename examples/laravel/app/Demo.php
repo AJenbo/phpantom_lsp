@@ -572,7 +572,7 @@ class Demo
 
     // ── Typed validated() array shapes from rules ───────────────────────
 
-    public function validatedArrayShape(StoreBakeryRequest $request): void
+    public function validatedArrayShape(StoreBakeryRequest $request, string $field): void
     {
         // validated() is declared `array`, but the rules array says exactly
         // which keys it holds and what each one is, so it resolves to:
@@ -603,6 +603,11 @@ class Demo
         // safe() narrows the same shape.
         $subset = $request->safe()->only(['name', 'apricot']);
         $subset['name'];                  // → string, and 'notes' is gone
+
+        // A key the engine cannot read leaves the declared `array` in place,
+        // rather than guessing at a narrower set than the call selects.
+        $request->validated($field);      // → array (the declared type)
+        $request->safe()->only([$field]); // → array (the declared type)
     }
 
 

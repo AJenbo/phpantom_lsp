@@ -1837,6 +1837,65 @@ fn replace_self_intersection() {
     assert_eq!(replaced.to_string(), "App\\User&JsonSerializable");
 }
 
+// ── replace_self_bound ──────────────────────────────────────
+
+#[test]
+fn a_fixed_call_target_collapses_static_and_this() {
+    // `App\User::create()` pins the class, so there is no late static
+    // binding left to carry.
+    for keyword in ["static", "$this", "self"] {
+        assert_eq!(
+            PhpType::parse(keyword)
+                .replace_self_bound("App\\User", None)
+                .to_string(),
+            "App\\User",
+            "`{keyword}` should collapse at a fixed call target"
+        );
+    }
+}
+
+#[test]
+fn a_forwarding_call_binds_static_over_the_calling_class() {
+    // `parent::create()` in `Child extends User` reads the annotation off
+    // `User` but still resolves `static` to `Child`.
+    let ty = PhpType::parse("static");
+    assert_eq!(
+        ty.replace_self_bound("App\\User", Some("App\\Child"))
+            .to_string(),
+        "static(App\\Child)"
+    );
+}
+
+#[test]
+fn self_stays_invariant_through_a_forwarding_call() {
+    // `self` names the declaring class whatever the call forwards.
+    let ty = PhpType::parse("self");
+    assert_eq!(
+        ty.replace_self_bound("App\\User", Some("App\\Child"))
+            .to_string(),
+        "App\\User"
+    );
+}
+
+#[test]
+fn a_fixed_call_target_collapses_a_bound_from_an_earlier_hop() {
+    let ty = PhpType::generic("array", vec![PhpType::static_type(atom("App\\Child"))]);
+    assert_eq!(
+        ty.replace_self_bound("App\\User", None).to_string(),
+        "array<App\\Child>"
+    );
+}
+
+#[test]
+fn a_forwarding_call_reaches_nested_keywords() {
+    let ty = PhpType::parse("list<static>|null");
+    assert_eq!(
+        ty.replace_self_bound("App\\User", Some("App\\Child"))
+            .to_string(),
+        "list<static(App\\Child)>|null"
+    );
+}
+
 // ── resolve_self_refs ───────────────────────────────────────
 
 #[test]

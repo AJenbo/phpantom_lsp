@@ -205,6 +205,11 @@ class ReturnTypeDemo
         $fluent = $marker->rename('Bold');         // rename returns static → Marker
         $fluent->highlight();                     // chained static stays on the subclass
 
+        // Writing the class out pins it: `static` here can only ever be
+        // `Marker`, so hover reads `Marker` and not `static(Marker)`.  A
+        // forwarding call is the case that stays open — see
+        // LateStaticBindingDemo below.
+
         $created = makePen();
         $created->write();                        // function return type
         // MUST NOT appear: refill() (private)
@@ -214,6 +219,43 @@ class ReturnTypeDemo
 
         $found = pickPenOrPencil();               // Pen|Pencil union
         $found->label();                          // available on both types
+    }
+}
+
+
+// ── Late Static Binding ─────────────────────────────────────────────────────
+
+class LateStaticBindingDemo extends Pen
+{
+    public function demo(): void
+    {
+        // These four forward late static binding, so `static` stays open:
+        // it is at least LateStaticBindingDemo, and a subclass of this class
+        // would get itself.  Hover shows the bound as `static(...)`.
+        $forwarded = $this->rename('Bold');
+        $forwarded->write();
+
+        $viaSelf = self::make();
+        $viaStatic = static::make();
+        $viaParent = parent::make();
+        $viaSelf->write();
+        $viaStatic->write();
+        $viaParent->write();                      // still bound here, not Pen
+
+        // A first-class callable resolves to the same type as the direct
+        // call it stands for.
+        $callable = $this->rename(...);
+        $callable('Bold')->write();
+
+        // Naming the class closes it again, even from inside the hierarchy.
+        $pinned = Pen::make();                    // exactly Pen
+        $pinned->write();
+    }
+
+    /** The forwarding forms, handed back so the assertions can check them. */
+    public function forwardedInstances(): array
+    {
+        return [self::make(), static::make(), parent::make()];
     }
 }
 
@@ -6490,6 +6532,19 @@ function runDemoAssertions(): void
 
     $fluent = $marker->rename('Bold');
     assert($fluent instanceof Marker, 'Marker::rename() returns static, must stay Marker');
+
+    // ── Return Type: late static binding stays open on a forwarding call ─
+    $lsb = new LateStaticBindingDemo();
+    foreach ($lsb->forwardedInstances() as $forwarded) {
+        assert(
+            $forwarded instanceof LateStaticBindingDemo,
+            'self::, static::, and parent:: all forward late static binding'
+        );
+    }
+    assert(
+        !(Pen::make() instanceof LateStaticBindingDemo),
+        'naming the class pins it: Pen::make() is exactly a Pen'
+    );
 
     // ── Return Type: function ───────────────────────────────────────────
     $created = makePen();

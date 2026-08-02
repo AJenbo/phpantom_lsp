@@ -143,7 +143,7 @@ namespace PsalmTest_mixin_annotation_5 {
     $f = new FooModel();
     $g = $f->getInner();
 
-    assertType('list<static(PsalmTest_mixin_annotation_5\FooModel)>', $g);
+    assertType('list<PsalmTest_mixin_annotation_5\FooModel>', $g);
 }
 
 // Test: mixinInheritMagicMethods
@@ -165,6 +165,6 @@ namespace PsalmTest_mixin_annotation_6 {
     $b = new B;
     $c = $b->active();
 
-    assertType('$this(PsalmTest_mixin_annotation_6\B)', $c);
+    assertType('PsalmTest_mixin_annotation_6\B', $c);
 }
 

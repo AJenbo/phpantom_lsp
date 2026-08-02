@@ -2,6 +2,38 @@
 
 use super::*;
 
+/// What `static` / `$this` in a return type bind to once the call they were
+/// read for is known.
+#[derive(Debug, Clone, Copy)]
+enum LsbBinding<'a> {
+    /// Bind them over whatever class the replacement type names.
+    Inherit,
+    /// Bind them over `class`, the class the forwarding call is made from.
+    Over(&'a str),
+    /// Collapse them: the called class is statically fixed, so late static
+    /// binding has nothing left to resolve.
+    Fixed,
+}
+
+impl LsbBinding<'_> {
+    /// The class to bind a `static` / `$this` keyword over, or `None` when the
+    /// keyword should collapse to the replacement instead.
+    ///
+    /// A replacement that is not a plain name (a generic receiver such as
+    /// `Builder<Article>`) carries no bound of its own, so `Inherit` collapses
+    /// there too and the whole replacement stands in.
+    fn bound_over(self, replacement: &PhpType) -> Option<Atom> {
+        match self {
+            LsbBinding::Inherit => match replacement.kind() {
+                TypeKind::Named(name) => Some(*name),
+                _ => None,
+            },
+            LsbBinding::Over(class) => Some(atom(class)),
+            LsbBinding::Fixed => None,
+        }
+    }
+}
+
 impl PhpType {
     /// Produce a new `PhpType` with all class names resolved through
     /// the provided callback.
@@ -548,6 +580,33 @@ impl PhpType {
     /// the replacement's base name is used and the return type's own args
     /// are kept (they override the receiver's args).
     pub fn replace_self_with_type(&self, replacement: &PhpType) -> PhpType {
+        self.replace_self_inner(replacement, LsbBinding::Inherit)
+    }
+
+    /// Replace `self` / `static` / `$this` throughout this type tree, with
+    /// explicit control over what the late-static-binding keywords bind to.
+    ///
+    /// `self` always becomes `self_class`, the class whose declaration the
+    /// annotation was read from, because `self` is invariant.  `static` and
+    /// `$this` become a bounded type over `lsb_class`, the class the call is
+    /// made *from*, which is not always the same class: `parent::create()` in
+    /// `B extends A` reads the annotation off `A` but still resolves `static`
+    /// to `B`.
+    ///
+    /// Pass `None` for `lsb_class` when the called class is statically fixed —
+    /// an explicit `A::create()` on a `static` method, or `new A`.  PHP
+    /// resolves `static` to exactly `A` there however `A` is subclassed, so a
+    /// bounded [`StaticType`](TypeKind::StaticType) would claim an openness
+    /// the call does not have.
+    pub fn replace_self_bound(&self, self_class: &str, lsb_class: Option<&str>) -> PhpType {
+        let lsb = match lsb_class {
+            Some(class) => LsbBinding::Over(class),
+            None => LsbBinding::Fixed,
+        };
+        self.replace_self_inner(&PhpType::named(atom(self_class)), lsb)
+    }
+
+    fn replace_self_inner(&self, replacement: &PhpType, lsb: LsbBinding<'_>) -> PhpType {
         // Extract the base class name from the replacement for use in
         // Generic nodes where only the name part is replaced.
         let replacement_name = match replacement.kind() {
@@ -557,14 +616,13 @@ impl PhpType {
         };
         match self.kind() {
             TypeKind::Named(s) if self.is_self_ref() => {
-                if let TypeKind::Named(name) = replacement.kind() {
-                    if s.eq_ignore_ascii_case("static") {
-                        PhpType::static_type(*name)
-                    } else if s.eq_ignore_ascii_case("$this") {
-                        PhpType::this_type(*name)
-                    } else {
-                        replacement.clone()
-                    }
+                let Some(bound) = lsb.bound_over(replacement) else {
+                    return replacement.clone();
+                };
+                if s.eq_ignore_ascii_case("static") {
+                    PhpType::static_type(bound)
+                } else if s.eq_ignore_ascii_case("$this") {
+                    PhpType::this_type(bound)
                 } else {
                     replacement.clone()
                 }
@@ -573,20 +631,20 @@ impl PhpType {
             TypeKind::Named(_) | TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
 
             TypeKind::Nullable(inner) => {
-                PhpType::nullable(inner.replace_self_with_type(replacement))
+                PhpType::nullable(inner.replace_self_inner(replacement, lsb))
             }
 
             TypeKind::Union(types) => PhpType::union(
                 types
                     .iter()
-                    .map(|t| t.replace_self_with_type(replacement))
+                    .map(|t| t.replace_self_inner(replacement, lsb))
                     .collect(),
             ),
 
             TypeKind::Intersection(types) => PhpType::intersection(
                 types
                     .iter()
-                    .map(|t| t.replace_self_with_type(replacement))
+                    .map(|t| t.replace_self_inner(replacement, lsb))
                     .collect(),
             ),
 
@@ -600,19 +658,19 @@ impl PhpType {
                     resolved_name,
                     g.args
                         .iter()
-                        .map(|a| a.replace_self_with_type(replacement))
+                        .map(|a| a.replace_self_inner(replacement, lsb))
                         .collect(),
                 )
             }
 
-            TypeKind::Array(inner) => PhpType::array_of(inner.replace_self_with_type(replacement)),
+            TypeKind::Array(inner) => PhpType::array_of(inner.replace_self_inner(replacement, lsb)),
 
             TypeKind::ArrayShape(entries) => PhpType::array_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
                         key: e.key.clone(),
-                        value_type: e.value_type.replace_self_with_type(replacement),
+                        value_type: e.value_type.replace_self_inner(replacement, lsb),
                         optional: e.optional,
                     })
                     .collect(),
@@ -623,7 +681,7 @@ impl PhpType {
                     .iter()
                     .map(|e| ShapeEntry {
                         key: e.key.clone(),
-                        value_type: e.value_type.replace_self_with_type(replacement),
+                        value_type: e.value_type.replace_self_inner(replacement, lsb),
                         optional: e.optional,
                     })
                     .collect(),
@@ -635,7 +693,7 @@ impl PhpType {
                     .params
                     .iter()
                     .map(|p| CallableParam {
-                        type_hint: p.type_hint.replace_self_with_type(replacement),
+                        type_hint: p.type_hint.replace_self_inner(replacement, lsb),
                         optional: p.optional,
                         variadic: p.variadic,
                     })
@@ -643,41 +701,48 @@ impl PhpType {
                 return_type: c
                     .return_type
                     .as_ref()
-                    .map(|r| r.replace_self_with_type(replacement)),
+                    .map(|r| r.replace_self_inner(replacement, lsb)),
             }),
 
             TypeKind::Conditional(c) => PhpType::conditional_type(ConditionalType {
                 param: c.param,
                 negated: c.negated,
-                condition: c.condition.replace_self_with_type(replacement),
-                then_type: c.then_type.replace_self_with_type(replacement),
-                else_type: c.else_type.replace_self_with_type(replacement),
+                condition: c.condition.replace_self_inner(replacement, lsb),
+                then_type: c.then_type.replace_self_inner(replacement, lsb),
+                else_type: c.else_type.replace_self_inner(replacement, lsb),
             }),
 
             TypeKind::ClassString(inner) => PhpType::class_string(
                 inner
                     .as_ref()
-                    .map(|t| t.replace_self_with_type(replacement)),
+                    .map(|t| t.replace_self_inner(replacement, lsb)),
             ),
 
             TypeKind::InterfaceString(inner) => PhpType::interface_string(
                 inner
                     .as_ref()
-                    .map(|t| t.replace_self_with_type(replacement)),
+                    .map(|t| t.replace_self_inner(replacement, lsb)),
             ),
 
-            TypeKind::KeyOf(inner) => PhpType::key_of(inner.replace_self_with_type(replacement)),
+            TypeKind::KeyOf(inner) => PhpType::key_of(inner.replace_self_inner(replacement, lsb)),
 
             TypeKind::ValueOf(inner) => {
-                PhpType::value_of(inner.replace_self_with_type(replacement))
+                PhpType::value_of(inner.replace_self_inner(replacement, lsb))
             }
 
             TypeKind::IntRange(..) => self.clone(),
 
             TypeKind::IndexAccess(base, index) => PhpType::index_access(
-                base.replace_self_with_type(replacement),
-                index.replace_self_with_type(replacement),
+                base.replace_self_inner(replacement, lsb),
+                index.replace_self_inner(replacement, lsb),
             ),
+
+            // A bound already applied by an earlier hop still answers to a
+            // fixed call target: `A::create()` pins whatever `create()` left
+            // open.
+            TypeKind::StaticType(n) | TypeKind::ThisType(n) if matches!(lsb, LsbBinding::Fixed) => {
+                PhpType::named(*n)
+            }
 
             TypeKind::StaticType(_) | TypeKind::ThisType(_) => self.clone(),
         }
