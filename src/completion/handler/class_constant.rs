@@ -257,7 +257,6 @@ impl Backend {
                 ..CompletionItem::default()
             };
 
-            // Add constructor snippet if available
             if let Some(ctor) = current_class.get_method("__construct") {
                 let snippet =
                     crate::completion::builder::build_callable_snippet(keyword, &ctor.parameters);
@@ -284,7 +283,6 @@ impl Backend {
                 ..CompletionItem::default()
             };
 
-            // Try to load parent class and get its constructor
             if let Some(parent_cls) = self.find_or_load_class(parent_name) {
                 if let Some(ctor) = parent_cls.get_method("__construct") {
                     let snippet = crate::completion::builder::build_callable_snippet(
@@ -439,7 +437,6 @@ impl Backend {
                 &ctx.namespace,
                 current_uri,
             );
-            // Filter out functions defined in the current file.
             let function_items = filter_current_file_functions(function_items, current_uri, self);
             let items = append_semicolon_to_insert_text(function_items);
             return Some(CompletionResponse::List(CompletionList {
@@ -452,7 +449,6 @@ impl Backend {
         if matches!(class_ctx, ClassNameContext::UseConst) {
             let (constant_items, const_incomplete) =
                 self.build_constant_completions(&partial, current_uri, position);
-            // Filter out constants defined in the current file.
             let constant_items = filter_current_file_constants(constant_items, current_uri, self);
             let items = append_semicolon_to_insert_text(constant_items);
             return Some(CompletionResponse::List(CompletionList {
@@ -504,7 +500,6 @@ impl Backend {
 
         // ── `use` (class import) → classes + keyword hints ──────────
         if matches!(class_ctx, ClassNameContext::UseImport) {
-            // Filter out classes defined in the current file.
             let class_items = filter_current_file_classes(class_items, ctx);
             // Filter out classes that are already imported via `use`.
             let already_imported: HashSet<&str> =

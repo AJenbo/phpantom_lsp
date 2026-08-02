@@ -133,11 +133,9 @@ pub(crate) fn find_function_docblock(lines: &[&str], sig_line: usize) -> Functio
             doc_end_line = Some(i);
             break;
         }
-        // Skip attributes and blank lines between function and docblock.
         if trimmed.starts_with("#[") || trimmed.is_empty() {
             continue;
         }
-        // Skip PHP modifier keywords that can appear before `function`.
         if is_php_modifier_line(trimmed) {
             continue;
         }
@@ -159,7 +157,6 @@ pub(crate) fn find_function_docblock(lines: &[&str], sig_line: usize) -> Functio
         }
     };
 
-    // Find the start of the docblock.
     let mut doc_start_line = doc_end_line;
     for i in (0..=doc_end_line).rev() {
         let trimmed = lines[i].trim();
@@ -299,9 +296,8 @@ impl Backend {
 
             let diag_line = diag.range.start.line as usize;
 
-            // The diagnostic is on the function declaration line itself.
-            // Verify there is no existing `@return` tag with a generic
-            // type (which would mean this diagnostic is stale).
+            // The diagnostic is on the function declaration line itself
+            // (or a modifier line above it — handled in the `else` below).
             let func_line = if diag_line < lines.len()
                 && (lines[diag_line].contains("function ")
                     || lines[diag_line].contains("function("))
@@ -481,7 +477,6 @@ impl Backend {
                     }
                     insert_text.push_str(&format!("{} * @return {}\n", indent, return_type));
 
-                    // Insert before the `*/` line.
                     edits.push(TextEdit {
                         range: Range {
                             start: Position::new(doc_end as u32, 0),

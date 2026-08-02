@@ -29,7 +29,7 @@ pub(crate) use scanning::*;
 /// the file content.
 pub(in crate::completion) fn has_use_import(content: &str, fqn: &str) -> bool {
     let target = format!("use {};", fqn);
-    let target_with_alias = format!("use {} as", fqn); // alias import
+    let target_with_alias = format!("use {} as", fqn);
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed == target || trimmed.starts_with(&target_with_alias) {

@@ -48,7 +48,6 @@ pub(super) fn print_github_annotations(file_diagnostics: &[(String, Vec<FileDiag
 /// (matching PHPStan's `GithubErrorFormatter` behaviour).
 pub(crate) fn format_github_message(message: &str) -> String {
     let message = message.replace('\n', "%0A");
-    // Wrap @mentions in backticks to prevent GitHub notifications.
     let mut result = String::with_capacity(message.len());
     let mut chars = message.char_indices().peekable();
     let mut last_end = 0;
@@ -348,7 +347,6 @@ mod tests {
             identifier: Some("unknown_member".to_string()),
             severity: DiagnosticSeverity::ERROR,
         };
-        // Verify the struct builds correctly with the expected values.
         assert_eq!(diag.line, 15);
         assert_eq!(diag.severity, DiagnosticSeverity::ERROR);
         assert_eq!(diag.identifier.as_deref(), Some("unknown_member"));

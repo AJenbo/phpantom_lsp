@@ -266,7 +266,6 @@ fn try_convert_switch(sw: &control_flow::switch::Switch<'_>, content: &str) -> O
 
         let stmt = &body_stmts[0];
 
-        // Determine what this arm does.
         let (arm_mode, arm_expr) = classify_arm_statement(stmt, content)?;
 
         // Verify consistency with previous arms.
@@ -319,7 +318,6 @@ fn try_convert_switch(sw: &control_flow::switch::Switch<'_>, content: &str) -> O
         Some(m) => m,
     };
 
-    // Detect indentation of the switch statement.
     let switch_start = sw.span().start.offset as usize;
     let indent = detect_indent(content, switch_start);
 
@@ -409,7 +407,6 @@ fn detect_indent(content: &str, offset: usize) -> String {
     line[..indent_len].to_string()
 }
 
-/// Extract a slice of the source text corresponding to a span.
 fn source_text(content: &str, span: mago_span::Span) -> &str {
     &content[span.start.offset as usize..span.end.offset as usize]
 }

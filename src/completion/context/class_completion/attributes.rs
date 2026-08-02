@@ -20,7 +20,6 @@ pub(super) fn detect_attribute_context(
     // Walk backward over whitespace, comma-separated attributes,
     // and their argument lists to find the `#[` opener.
     loop {
-        // Skip whitespace.
         while k > 0 && chars[k - 1].is_ascii_whitespace() {
             k -= 1;
         }
@@ -77,7 +76,6 @@ pub(super) fn detect_attribute_context(
         // attributes: `#[A, B, |`).
         if chars[k - 1] == ',' {
             k -= 1;
-            // Skip whitespace.
             while k > 0 && chars[k - 1].is_ascii_whitespace() {
                 k -= 1;
             }

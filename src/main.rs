@@ -265,8 +265,6 @@ async fn async_main() {
                     eprintln!("Error: cannot determine project root directory");
                     std::process::exit(1);
                 });
-            // Auto-detect colour support: enabled unless --no-colour is
-            // passed or stdout is not a terminal.
             let use_colour = !no_colour && atty_stdout();
 
             let output_format = match format {
@@ -381,12 +379,10 @@ async fn async_main() {
 /// Accepts either a full address like `127.0.0.1:9257` or just a port number
 /// like `9257`. When only a port is given, defaults to `127.0.0.1`.
 fn parse_tcp_address(input: &str) -> SocketAddr {
-    // Try parsing as a full SocketAddr first.
     if let Ok(addr) = input.parse::<SocketAddr>() {
         return addr;
     }
 
-    // Try parsing as a bare port number.
     if let Ok(port) = input.parse::<u16>() {
         return SocketAddr::from(([127, 0, 0, 1], port));
     }

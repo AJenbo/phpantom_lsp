@@ -187,11 +187,12 @@ fn check_scope(
         set
     };
 
-    // Build a set of parameter names for each nested frame so we can
-    // exclude them from the parent frame's writes.  Closure and arrow
-    // function parameters are written at offsets that are inside the
-    // parent frame but outside the child frame body — the parent must
-    // not claim them as its own writes.
+    // Nested frames (closures, arrow functions, catch blocks) have their
+    // own scope, so writes inside them must not be counted against this
+    // frame.  Closure and arrow function parameters are written at
+    // offsets that fall inside the parent frame but before the child's
+    // body starts, so the parent must not claim those as its own writes
+    // either.
     for frame in scope.frames.iter() {
         // Skip top-level frames — global scope has too many implicit defs.
         if frame.kind == FrameKind::TopLevel {
@@ -268,12 +269,10 @@ fn check_scope(
 
         // For each written variable, check if it has any reads.
         for (&var_name, &write_offset) in &written_vars {
-            // Skip always-skipped variables.
             if always_skip.contains(var_name) {
                 continue;
             }
 
-            // Skip variables named $_ or starting with $_
             if var_name == "$_" || var_name.starts_with("$_") {
                 continue;
             }
@@ -316,7 +315,6 @@ fn check_scope(
                 continue;
             }
 
-            // Determine the offset for the diagnostic.
             let is_parameter = frame.parameters.iter().any(|p| p.as_str() == var_name);
 
             // Skip parameters entirely for now — flagging unused parameters
@@ -327,6 +325,7 @@ fn check_scope(
                 continue;
             }
 
+            // Determine the offset for the diagnostic.
             let var_len = var_name.len();
             let range = match ctx.backend.offset_range_to_lsp_range(
                 ctx.uri,

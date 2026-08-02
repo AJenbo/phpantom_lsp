@@ -210,7 +210,6 @@ fn build_remove_throws_edit(
         .unwrap_or(type_name)
         .to_lowercase();
 
-    // Find the @throws line(s) to remove.
     let doc_lines: Vec<&str> = docblock.text.lines().collect();
 
     // Identify which line indices to remove.

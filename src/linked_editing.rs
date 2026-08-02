@@ -403,8 +403,8 @@ fn collect_variable_offsets_in_region(
     let scope_start = symbol_map.find_variable_scope(var_name, cursor_offset);
     let regions = build_regions(symbol_map, var_name, scope_start);
 
-    // If there are no definitions at all, fall back to collecting
-    // everything in scope (shouldn't happen for well-formed code).
+    // If no region contains the cursor, there's nothing to link
+    // (shouldn't happen for well-formed code).
     let region = match find_cursor_region(&regions, cursor_offset, symbol_map, var_name) {
         Some(idx) => &regions[idx],
         None => return Vec::new(),

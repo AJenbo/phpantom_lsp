@@ -65,9 +65,8 @@ enum MemberKind {
     Constant(String),
 }
 
-/// Minimum visibility required by the parent hierarchy.
-///
-/// `None` means no constraint (all three visibilities are valid).
+/// Map a `Visibility` to a numeric level for comparison, where a higher
+/// value is more permissive (`public` > `protected` > `private`).
 fn min_visibility_level(vis: &Visibility) -> u8 {
     match vis {
         Visibility::Public => 2,
@@ -130,7 +129,6 @@ impl Backend {
             _ => return,
         };
 
-        // Filter: only keep alternatives whose visibility level >= min_level.
         let alternatives: Vec<(&str, &str)> = all_alternatives
             .iter()
             .filter(|&&(kw, _)| visibility_level(kw) >= min_level)
@@ -265,7 +263,6 @@ impl Backend {
         // Collect all ancestors: parent class chain + interfaces + traits.
         let mut best_level: Option<u8> = None;
 
-        // Walk the parent class chain.
         if let Some(ref parent_name) = enclosing.parent_class {
             self.walk_ancestor_visibility(parent_name, member_kind, &mut best_level, 0);
         }
@@ -299,7 +296,6 @@ impl Backend {
             *best_level = Some(best_level.map_or(level, |prev: u8| prev.max(level)));
         }
 
-        // Continue up the chain.
         if let Some(ref parent) = cls.parent_class {
             self.walk_ancestor_visibility(parent, member_kind, best_level, depth + 1);
         }

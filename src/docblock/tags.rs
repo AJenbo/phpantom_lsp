@@ -1568,18 +1568,11 @@ fn count_braces_on_line(line: &str) -> (i32, i32) {
 
 /// Generic tag extraction: find `@tag TypeName` and return the cleaned type.
 ///
-/// **Skips** PHPStan conditional return types (those starting with `(`).
-/// Use [`super::extract_conditional_return_type`] for those.
-/// Shared implementation for tag-type extraction.
-///
 /// Searches the parsed docblock for the first usable tag of `kind`,
 /// preferring vendor-prefixed variants (`@phpstan-return` over `@return`).
 ///
-/// The tag's `description` field holds the whole value as written.  We
-/// extract the type portion using `split_type_token`, stripping trailing
-/// punctuation.
-///
-/// Skips PHPStan conditional return types (descriptions starting with `(`).
+/// **Skips** PHPStan conditional return types (those starting with `(`).
+/// Use [`super::extract_conditional_return_type`] for those.
 fn extract_type_via_mago(docblock: &str, kind: TagKind) -> Option<PhpType> {
     extract_type_via_mago_from_info(&parse_docblock_for_tags(docblock)?, kind)
 }

@@ -325,22 +325,18 @@ pub(super) fn resolve_class_name_to_fqn(
     ctx: &FileContext,
 ) -> Option<String> {
     let clean = name.trim_start_matches('\\');
-    // Check use map.
     if let Some(fqn) = ctx.use_map.get(clean) {
         return Some(fqn.clone());
     }
-    // If it looks like a FQN already.
     if clean.contains('\\') {
         return Some(clean.to_string());
     }
-    // Try prepending the file namespace.
     if let Some(ref ns) = ctx.namespace {
         let fqn = format!("{}\\{}", ns, clean);
         if backend.find_or_load_class(&fqn).is_some() {
             return Some(fqn);
         }
     }
-    // Try bare name.
     if backend.find_or_load_class(clean).is_some() {
         return Some(clean.to_string());
     }

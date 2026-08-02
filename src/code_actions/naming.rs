@@ -16,12 +16,10 @@ pub(crate) fn to_camel_case(s: &str) -> String {
         return "variable".to_string();
     }
 
-    // If it contains underscores, treat as snake_case
     if s.contains('_') {
         return snake_to_camel(s);
     }
 
-    // Just lowercase the first character
     let mut chars = s.chars();
     let first = chars.next().unwrap();
     let mut result = first.to_lowercase().to_string();
@@ -58,7 +56,6 @@ pub(crate) fn to_pascal_case(name: &str) -> String {
         return String::new();
     }
 
-    // If it contains underscores, treat as snake_case.
     if name.contains('_') {
         return name
             .split('_')
@@ -76,7 +73,6 @@ pub(crate) fn to_pascal_case(name: &str) -> String {
             .collect();
     }
 
-    // Simple case: just capitalize the first letter.
     capitalise(name)
 }
 
@@ -96,11 +92,9 @@ pub(crate) fn string_to_screaming_snake(s: &str) -> String {
         }
         // Skip other characters (e.g. special symbols).
     }
-    // Trim trailing underscore
     while result.ends_with('_') {
         result.pop();
     }
-    // Trim leading underscore
     while result.starts_with('_') {
         result.remove(0);
     }

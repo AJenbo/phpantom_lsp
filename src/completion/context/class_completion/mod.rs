@@ -1,17 +1,17 @@
-/// Class name completions.
-///
-/// This module handles building completion items for class, interface,
-/// trait, and enum names when no member-access operator (`->` or `::`)
-/// is present.
-///
-/// Also provides a Throwable-filtered variant for catch clause fallback
-/// and `throw new` completion, which only suggests exception classes
-/// from already-parsed sources and includes everything else (class index,
-/// stubs) unfiltered.
-///
-/// Constant, function, and namespace completions live in their own
-/// sibling modules (`constant_completion`, `function_completion`,
-/// `namespace_completion`).
+//! Class name completions.
+//!
+//! This module handles building completion items for class, interface,
+//! trait, and enum names when no member-access operator (`->` or `::`)
+//! is present.
+//!
+//! Also provides a Throwable-filtered variant for catch clause fallback
+//! and `throw new` completion, which only suggests exception classes
+//! from already-parsed sources and includes everything else (class index,
+//! stubs) unfiltered.
+//!
+//! Constant, function, and namespace completions live in their own
+//! sibling modules (`constant_completion`, `function_completion`,
+//! `namespace_completion`).
 use std::collections::{HashMap, HashSet};
 
 use tower_lsp::lsp_types::*;
@@ -157,7 +157,7 @@ impl ClassNameContext {
         )
     }
 
-    /// Whether this context is `New`.
+    /// Whether this context implies instantiation (`New` or `ThrowNew`).
     pub(crate) fn is_new(&self) -> bool {
         matches!(self, Self::New | Self::ThrowNew)
     }

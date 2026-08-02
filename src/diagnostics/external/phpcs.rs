@@ -14,8 +14,7 @@ impl Backend {
     /// Schedule a PHPCS run for a single file.
     ///
     /// Only the most recent file is kept: if the user switches files or
-    /// types rapidly, earlier requests are superseded. This is
-    /// intentional — PHPCS is too slow to queue up multiple files.
+    /// saves rapidly, earlier requests are superseded.
     pub(crate) fn schedule_phpcs(&self, uri: String) {
         *self.phpcs_tool.pending_uri.lock() = Some(uri);
         self.phpcs_tool.notify.notify_one();
@@ -31,17 +30,15 @@ impl Backend {
     ///
     /// At most one PHPCS process runs at a time. The worker loop:
     ///
-    /// 1. Wait for a notification (new edit arrived).
-    /// 2. Debounce: sleep [`PHPCS_DEBOUNCE_MS`], checking whether new
-    ///    edits arrived. If so, restart the debounce.
-    /// 3. Snapshot the pending URI and file content.
-    /// 4. Resolve the PHPCS binary (skip if not found / disabled).
-    /// 5. Run PHPCS (blocking — this is the slow part).
-    /// 6. Cache the results and re-publish diagnostics for the file.
-    /// 7. Loop back to step 1.
+    /// 1. Wait for a notification (file saved).
+    /// 2. Snapshot the pending URI and file content.
+    /// 3. Resolve the PHPCS binary (skip if not found / disabled).
+    /// 4. Run PHPCS (blocking — this is the slow part).
+    /// 5. Cache the results and re-publish diagnostics for the file.
+    /// 6. Loop back to step 1.
     ///
-    /// If the user edits while step 5 is in progress, the pending URI
-    /// is updated. When step 5 finishes, the worker sees the new
+    /// If the user saves again while step 4 is in progress, the pending
+    /// URI is updated. When step 4 finishes, the worker sees the new
     /// notification and loops back to step 1, starting a fresh run
     /// with the latest content.
     pub(crate) async fn phpcs_worker(&self) {
@@ -78,7 +75,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 4: resolve PHPCS binary ────────────────────────
+            // ── Step 3: resolve PHPCS binary ────────────────────────
             let config = self.config();
             if config.phpcs.is_disabled() {
                 continue;
@@ -107,7 +104,7 @@ impl Backend {
                 None => continue,
             };
 
-            // ── Step 5: run PHPCS (the slow part) ───────────────────
+            // ── Step 4: run PHPCS (the slow part) ───────────────────
             let phpcs_config = config.phpcs.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let phpcs_diags = {
@@ -139,7 +136,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 6: cache results and re-publish ────────────────
+            // ── Step 5: cache results and re-publish ────────────────
             // Verify the file is still open before caching (same
             // rationale as the PHPStan worker).
             {

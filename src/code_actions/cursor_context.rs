@@ -21,11 +21,8 @@ use mago_syntax::cst::*;
 pub(crate) enum ClassLikeContextKind {
     /// A `class` declaration (concrete or abstract).
     Class,
-    /// An `interface` declaration.
     Interface,
-    /// A `trait` declaration.
     Trait,
-    /// An `enum` declaration.
     Enum,
 }
 
@@ -35,11 +32,8 @@ pub(crate) enum MemberContext<'a> {
     /// A method declaration.  The boolean is `true` when the cursor is
     /// inside the method body (as opposed to on the signature).
     Method(&'a Method<'a>, bool),
-    /// A property declaration.
     Property(&'a Property<'a>),
-    /// A class constant declaration.
     Constant(&'a ClassLikeConstant<'a>),
-    /// A trait-use statement.
     TraitUse,
     /// An enum case (backed or unit).
     EnumCase,
@@ -51,15 +45,12 @@ pub(crate) enum MemberContext<'a> {
 /// The result of the cursor-context walk.
 #[derive(Debug)]
 pub(crate) enum CursorContext<'a> {
-    /// The cursor is inside a class-like body.
     InClassLike {
-        /// What kind of class-like declaration this is.
         kind: ClassLikeContextKind,
         /// Whether the class-like declaration has the `readonly` modifier
         /// (PHP 8.2+ `readonly class`).  Always `false` for interfaces,
         /// traits, and enums.
         class_readonly: bool,
-        /// The specific member under the cursor (if any).
         member: MemberContext<'a>,
         /// All members of the class-like, for actions that need to
         /// inspect siblings (e.g. "does a constructor already exist?").
@@ -68,7 +59,6 @@ pub(crate) enum CursorContext<'a> {
     /// The cursor is on a top-level (or namespace-level) function.
     /// The boolean is `true` when the cursor is inside the function body.
     InFunction(&'a Function<'a>, bool),
-    /// The cursor is not inside any relevant declaration.
     None,
 }
 
@@ -174,7 +164,6 @@ fn find_in_statement<'a>(stmt: &'a Statement<'a>, cursor: u32) -> CursorContext<
     }
 }
 
-/// Find which class member the cursor is on.
 fn find_member_at_cursor<'a>(
     members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
     cursor: u32,
@@ -206,7 +195,6 @@ mod tests {
     use super::*;
     use mago_allocator::LocalArena;
 
-    /// Helper: parse PHP and find cursor context at a given byte offset.
     fn ctx_at(php: &str, offset: u32) -> CursorContext<'_> {
         // SAFETY: We leak the arena so the returned CursorContext (which
         // borrows from the Program) lives long enough for the test

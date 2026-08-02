@@ -30,17 +30,15 @@ impl Backend {
     ///
     /// At most one PHPStan process runs at a time. The worker loop:
     ///
-    /// 1. Wait for a notification (new edit arrived).
-    /// 2. Debounce: sleep [`PHPSTAN_DEBOUNCE_MS`], checking whether new
-    ///    edits arrived. If so, restart the debounce.
-    /// 3. Snapshot the pending URI and file content.
-    /// 4. Resolve the PHPStan binary (skip if not found / disabled).
-    /// 5. Run PHPStan (blocking — this is the slow part).
-    /// 6. Cache the results and re-publish diagnostics for the file.
-    /// 7. Loop back to step 1.
+    /// 1. Wait for a notification (file saved).
+    /// 2. Snapshot the pending URI and file content.
+    /// 3. Resolve the PHPStan binary (skip if not found / disabled).
+    /// 4. Run PHPStan (blocking — this is the slow part).
+    /// 5. Cache the results and re-publish diagnostics for the file.
+    /// 6. Loop back to step 1.
     ///
-    /// If the user edits while step 5 is in progress, the pending URI
-    /// is updated. When step 5 finishes, the worker sees the new
+    /// If the user saves again while step 4 is in progress, the pending
+    /// URI is updated. When step 4 finishes, the worker sees the new
     /// notification and loops back to step 1, starting a fresh run
     /// with the latest content.
     pub(crate) async fn phpstan_worker(&self) {
@@ -80,7 +78,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 4: resolve PHPStan binary ──────────────────────
+            // ── Step 3: resolve PHPStan binary ──────────────────────
             let config = self.config();
             if config.phpstan.is_disabled() {
                 continue;
@@ -109,7 +107,7 @@ impl Backend {
                 None => continue,
             };
 
-            // ── Step 5: run PHPStan (the slow part) ─────────────────
+            // ── Step 4: run PHPStan (the slow part) ─────────────────
             // Move the blocking PHPStan execution onto a dedicated
             // OS thread via `spawn_blocking`. This is critical:
             // `run_phpstan` contains a poll loop that blocks the
@@ -151,7 +149,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 6: cache results and re-publish ────────────────
+            // ── Step 5: cache results and re-publish ────────────────
             // Verify the file is still open *before* writing to the
             // cache. If the file was closed while PHPStan was running,
             // `clear_diagnostics_for_file` already purged the cache

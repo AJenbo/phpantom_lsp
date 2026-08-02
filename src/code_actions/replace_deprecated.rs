@@ -168,7 +168,6 @@ impl Backend {
                             None => continue,
                         };
 
-                    // Find the call site for this method call.
                     let call_site = symbol_map
                         .call_sites
                         .iter()
@@ -323,19 +322,16 @@ fn extract_arguments(content: &str, args_start: u32, args_end: u32) -> Vec<Strin
 fn expand_template(template: &str, args: &[String], subject: Option<&str>) -> String {
     let mut result = template.to_string();
 
-    // Replace %parametersList% with all arguments.
     if result.contains("%parametersList%") {
         let all_args = args.join(", ");
         result = result.replace("%parametersList%", &all_args);
     }
 
-    // Replace %class% with the subject expression.
     if result.contains("%class%") {
         let class_text = subject.unwrap_or("$this");
         result = result.replace("%class%", class_text);
     }
 
-    // Replace %parameterN% with individual arguments.
     for (i, arg) in args.iter().enumerate() {
         let placeholder = format!("%parameter{}%", i);
         if result.contains(&placeholder) {

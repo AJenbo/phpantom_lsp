@@ -91,14 +91,12 @@ pub fn read_composer_package(workspace_root: &Path) -> Option<ComposerPackage> {
 pub fn extract_psr4_mappings_from_package(package: &ComposerPackage) -> Vec<Psr4Mapping> {
     let mut mappings = Vec::new();
 
-    // Extract from "autoload" section
     if let Some(autoload) = &package.autoload {
         for (prefix, paths) in &autoload.psr_4 {
             collect_psr4_entries(prefix, paths, &mut mappings);
         }
     }
 
-    // Extract from "autoload-dev" section
     if let Some(autoload_dev) = &package.autoload_dev {
         for (prefix, paths) in &autoload_dev.psr_4 {
             collect_psr4_entries(prefix, paths, &mut mappings);
@@ -293,7 +291,6 @@ pub fn extract_path_repo_psr4_mappings(
             continue;
         }
 
-        // Extract autoload.psr-4 entries.
         let Some(psr4) = package
             .get("autoload")
             .and_then(|a| a.get("psr-4"))
@@ -407,8 +404,6 @@ pub fn parse_autoload_classmap(
         if let Some(rest) = trimmed.strip_prefix('\'')
             && let Some(arrow_pos) = rest.find("' => ")
         {
-            // Unescape PHP single-quoted string escapes (`\\` → `\`,
-            // `\'` → `'`) in a single left-to-right pass.
             let class_name = unescape_php_single_quoted(&rest[..arrow_pos]);
 
             let rhs = rest[arrow_pos + "' => ".len()..]
@@ -639,7 +634,6 @@ pub fn resolve_class_path(
         };
 
         if let Some(relative_class) = relative {
-            // Convert namespace separators to directory separators
             let relative_path = relative_class.replace('\\', "/");
             let file_path = workspace_root
                 .join(&mapping.base_path)
@@ -751,7 +745,6 @@ pub fn extract_require_once_paths(content: &str) -> Vec<String> {
         // Strip optional parentheses: `require_once('...')` → `'...'`
         // Also handles `require_once '...'` without parens.
         let rest = if let Some(inner) = rest.strip_prefix('(') {
-            // Find matching closing paren
             if let Some(end) = inner.rfind(')') {
                 inner[..end].trim()
             } else {
@@ -761,7 +754,6 @@ pub fn extract_require_once_paths(content: &str) -> Vec<String> {
             rest
         };
 
-        // Strip trailing semicolon
         let rest = rest.trim_end_matches(';').trim();
 
         // Extract string literal — single or double quoted
@@ -835,7 +827,6 @@ pub fn parse_autoload_namespaces(
             continue;
         }
 
-        // Extract everything after `=> array(` or `=> [`
         let rhs = if let Some(pos) = trimmed.find("=> array(") {
             &trimmed[pos + "=> array(".len()..]
         } else if let Some(pos) = trimmed.find("=> [") {
@@ -844,7 +835,6 @@ pub fn parse_autoload_namespaces(
             continue;
         };
 
-        // Strip trailing `)`, `],`, etc.
         let rhs =
             rhs.trim_end_matches(|c: char| c == ')' || c == ']' || c == ',' || c.is_whitespace());
 

@@ -62,7 +62,6 @@ impl Backend {
         let request_start = position_to_byte_offset(content, params.range.start);
         let request_end = position_to_byte_offset(content, params.range.end);
 
-        // Find the FQN under the cursor.
         let cursor_span = symbol_map.spans.iter().find(|span| {
             if span.start as usize >= request_end || span.end as usize <= request_start {
                 return false;
@@ -112,7 +111,6 @@ impl Backend {
                 }
             }
 
-            // Replace every occurrence of this FQN in the file.
             for span in &symbol_map.spans {
                 let matches = matches!(
                     &span.kind,
@@ -168,10 +166,7 @@ impl Backend {
                 }
             }
 
-            // Only offer this action if there are at least 2 distinct FQCNs,
-            // or if there's 1 distinct FQCN with occurrences not already
-            // covered by action 1 (i.e. a different FQCN exists).
-            // More precisely: offer when there are FQCNs besides the one
+            // Only offer this action when there are FQCNs besides the one
             // under the cursor.
             if seen.len() < 2 {
                 return;

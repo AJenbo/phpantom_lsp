@@ -118,9 +118,7 @@ fn is_numeric_literal(t: &str) -> bool {
                 saw_e = true;
                 // Allow optional +/- after exponent
                 if i + 1 < bytes.len() && (bytes[i + 1] == b'+' || bytes[i + 1] == b'-') {
-                    // Skip the sign — it will be consumed next iteration.
-                    // We need a slightly different approach: just validate
-                    // the whole thing.
+                    // Delegate the rest (sign + digits) to validate_float_suffix.
                     return validate_float_suffix(&bytes[i + 1..]);
                 }
             }
@@ -248,7 +246,7 @@ fn generate_constant_name(value: &str) -> String {
         return format!("VALUE_{}", trimmed.replace('_', ""));
     }
 
-    // Concatenated string expression — try to use the first segment
+    // Concatenated string expression — fall back to a generic name.
     if is_concat_expression(trimmed) {
         return "CONSTANT".to_string();
     }
@@ -541,7 +539,6 @@ fn has_blank_line(text: &str) -> bool {
 /// Determine the indentation used for members inside the class body.
 /// Looks at the line after the opening brace to detect the indent.
 fn detect_member_indent(content: &str, body_start: usize) -> String {
-    // Find the first newline after the opening brace.
     if let Some(nl_pos) = content[body_start..].find('\n') {
         let line_start = body_start + nl_pos + 1;
         let rest = &content[line_start..];
@@ -550,7 +547,6 @@ fn detect_member_indent(content: &str, body_start: usize) -> String {
             return rest[..indent_len].to_string();
         }
     }
-    // Fallback: 4 spaces.
     "    ".to_string()
 }
 
@@ -592,7 +588,6 @@ impl Backend {
             return;
         }
 
-        // Only extractable literals qualify.
         if !is_extractable_literal(trimmed) {
             return;
         }
@@ -702,10 +697,8 @@ impl Backend {
             return None;
         }
 
-        // Find class body information.
         let class_info = find_class_body_info(content, start_offset as u32)?;
 
-        // Generate constant name and deduplicate.
         let base_name = generate_constant_name(trimmed);
         let const_name = deduplicate_constant_name(&base_name, &class_info.existing_constants);
 
@@ -713,9 +706,7 @@ impl Backend {
         let indent = detect_member_indent(content, class_info.body_start);
         let php_version = self.php_version();
 
-        // Determine insertion point.
         let insert_offset = if let Some(after_const) = class_info.after_last_constant {
-            // Insert after the last constant. Find the next newline.
             let rest = &content[after_const..];
             if let Some(nl) = rest.find('\n') {
                 after_const + nl + 1
@@ -723,8 +714,6 @@ impl Backend {
                 after_const
             }
         } else {
-            // No existing constants — insert at the top of the class body.
-            // Find the first newline after the opening brace.
             let rest = &content[class_info.body_start..];
             if let Some(nl) = rest.find('\n') {
                 class_info.body_start + nl + 1

@@ -11,6 +11,8 @@
 /// - **handler**: Top-level completion request orchestration
 /// - **target**: Extracting the completion target (access operator and subject)
 /// - **builder**: Building LSP `CompletionItem`s from resolved class info
+/// - **resolve**: `completionItem/resolve` — lazily filling in documentation
+///   for the highlighted item
 /// - **named_args**: Named argument completion inside function/method call parens
 /// - **array_callable**: Method name completion inside array callable strings
 ///   (`[Class::class, '` → suggest class methods)
@@ -18,9 +20,17 @@
 ///   and raw variable type resolution for array shape value chaining
 /// - **eloquent_string**: Eloquent relation dot-notation and column name string
 ///   completion inside method arguments like `with('`, `where('`, etc.
+/// - **command_params**: Artisan command parameter completion (own
+///   `argument()`/`option()` calls and `Artisan::call()` parameter arrays)
 /// - **laravel_request_keys**: Request input field name completion inside
 ///   `$request->input('`, `->has('`, `$request['`, etc., driven by the
 ///   validation rules in scope
+/// - **laravel_route_controller**: Controller method name completion inside
+///   `Route::patch('path', '|')` within a `->controller()->group()` block
+/// - **laravel_route_params**: Route parameter name completion driven by the
+///   named route's URI (`route('users.show', ['|' => 1])`)
+/// - **laravel_string_keys**: Route/config/view/translation key completion
+///   (`route('|')`, `config('|')`, `view('|')`, `__('|')`)
 /// - **use_edit**: Use-statement insertion and conflict analysis
 ///
 /// ## Sub-grouped modules

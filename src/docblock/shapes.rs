@@ -4,9 +4,8 @@
 //! shape type strings into their constituent entries, and looking up
 //! value types by key.
 //!
-//! All parsing is delegated to `PhpType::parse()` (which uses
-//! `mago_phpdoc_syntax` internally), eliminating ~250 lines of
-//! hand-rolled depth-tracking parsers.
+//! All parsing is delegated to `PhpType::parse()`, which uses
+//! `mago_phpdoc_syntax` internally.
 //!
 //! Each public function accepts `&PhpType` directly, avoiding a
 //! redundant re-parse when the caller already has a parsed type.

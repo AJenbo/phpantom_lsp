@@ -1,13 +1,11 @@
-/// Use-statement insertion helpers.
-///
-/// This module provides reusable helpers for computing where to insert a
-/// `use` statement in a PHP file and for building the corresponding LSP
-/// `TextEdit`.  These are shared by class-name completion, and will be
-/// needed by future features such as auto-import on hover, code actions,
-/// and refactoring.
-///
-/// New `use` statements are inserted at the alphabetically correct
-/// position among the existing imports so the use block stays sorted.
+//! Use-statement insertion helpers.
+//!
+//! This module provides reusable helpers for computing where to insert a
+//! `use` statement in a PHP file and for building the corresponding LSP
+//! `TextEdit`.  These are shared by class-name completion.
+//!
+//! New `use` statements are inserted at the alphabetically correct
+//! position among the existing imports so the use block stays sorted.
 use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
@@ -220,11 +218,7 @@ fn extract_use_sort_key(line: &str) -> Option<String> {
 }
 
 /// Analyse the file content and return a [`UseBlockInfo`] describing the
-/// existing `use` block.
-///
-/// This replaces the older `find_use_insert_position` — instead of a
-/// single append-at-bottom position, callers get a structure that
-/// supports alphabetical insertion via
+/// existing `use` block, which supports alphabetical insertion via
 /// [`UseBlockInfo::insert_position_for`].
 ///
 /// The scanning logic distinguishes top-level `use` imports from trait

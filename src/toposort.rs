@@ -10,8 +10,7 @@
 //! broken — the class that closes the cycle is processed without
 //! the cyclic dependency's contributions.
 //!
-//! This is the foundation for eager iterative class population
-//! (ER1 in `docs/todo/eager-resolution.md`).
+//! This is the foundation for eager iterative class population.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -52,11 +51,9 @@ fn class_dependencies(class: &ClassInfo) -> Vec<String> {
         deps.push(name.to_string());
     }
 
-    // Mixin classes (from @mixin tags).  Needed for Phase 2 (ER3)
-    // so that mixin classes are populated before the classes that
-    // reference them.  Including them here from the start means the
-    // sort order is correct for both inheritance and virtual-member
-    // passes.
+    // Mixin classes (from @mixin tags).  Included so that mixin classes
+    // are populated before the classes that reference them, keeping the
+    // sort order correct for both inheritance and virtual-member passes.
     for mixin in &class.mixins {
         deps.push(mixin.to_string());
     }
@@ -70,11 +67,8 @@ fn class_dependencies(class: &ClassInfo) -> Vec<String> {
 /// which dependency we process next, allowing us to resume after
 /// pushing a child frame.
 struct DfsFrame {
-    /// The FQN of the class being visited.
     fqn: String,
-    /// Index into the dependency list — how far we've gotten.
     dep_index: usize,
-    /// Cached dependency list for this class.
     deps: Vec<String>,
 }
 
@@ -111,7 +105,6 @@ struct DfsFrame {
 pub(crate) fn toposort_classes<'a>(
     classes: impl Iterator<Item = (String, &'a ClassInfo)>,
 ) -> Vec<String> {
-    // Build a map from FQN → dependency list.
     let mut dep_map: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_fqns: Vec<String> = Vec::new();
 
@@ -215,7 +208,6 @@ mod tests {
     use super::*;
     use crate::types::{ClassInfo, ClassLikeKind};
 
-    /// Create a minimal `ClassInfo` for testing.
     fn make_class(name: &str) -> ClassInfo {
         ClassInfo {
             kind: ClassLikeKind::Class,

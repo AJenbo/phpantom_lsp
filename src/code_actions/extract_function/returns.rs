@@ -365,9 +365,8 @@ pub(crate) fn is_reproducible_guard_value(value: &str) -> bool {
 /// Classify the return strategy for a selection that contains return
 /// statements but does NOT end with one.
 ///
-/// This is called only when `has_unsafe_return` would have been `true`
-/// under the old logic.  It inspects the actual return expressions to
-/// decide whether a safe extraction pattern exists.
+/// Inspects the actual return expressions to decide whether a safe
+/// extraction pattern (guard clause, sentinel, etc.) exists.
 pub(crate) fn classify_guard_returns(
     content: &str,
     stmts: &[&Statement<'_>],
@@ -460,9 +459,6 @@ pub(crate) fn classify_guard_returns(
     ReturnStrategy::Unsafe
 }
 
-/// Resolve the return type of the enclosing function/method at `offset`.
-///
-/// Extracts the native return type hint from the function signature.
 /// Extract the parameter names of the enclosing function/method in
 /// declaration order.  Used to sort extracted-function parameters so
 /// they mirror the original signature.
@@ -519,6 +515,9 @@ pub(crate) fn sort_params_by_enclosing_order(
     params
 }
 
+/// Resolve the return type of the enclosing function/method at `offset`.
+///
+/// Extracts the native return type hint from the function signature.
 pub(crate) fn resolve_enclosing_return_type(content: &str, offset: u32) -> PhpType {
     crate::parser::with_parsed_program(content, "extract_function", |program, _| {
         let ctx = find_cursor_context(&program.statements, offset);

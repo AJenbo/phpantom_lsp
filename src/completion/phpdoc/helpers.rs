@@ -1,8 +1,8 @@
 //! Shared helpers for PHPDoc context detection and generation.
 //!
-//! These functions are used by both `context.rs` and `generation.rs` to
-//! parse PHP declarations (parameter lists, keyword positions, balanced
-//! parentheses).
+//! These functions are used by both `context.rs` and
+//! `generation/parse_decl.rs` to parse PHP declarations (parameter
+//! lists, keyword positions, balanced parentheses).
 
 /// Find the position of a whole-word keyword in a declaration string.
 ///

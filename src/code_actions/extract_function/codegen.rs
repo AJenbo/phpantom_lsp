@@ -255,12 +255,10 @@ pub(crate) fn build_extracted_definition(info: &ExtractionInfo) -> String {
         }
         ReturnStrategy::UniformGuards(value) => {
             // All guards return the same value.  The extracted function
-            // uses bool: guards become `return false;` (exit), and
-            // fall-through is `return true;` (continue).
-            // But the body already has the original returns — we need
-            // to add the sentinel.  The body's returns stay as-is and
-            // get rewritten below by `rewrite_guard_returns_to_bool`.
-            // Here we just add the fall-through sentinel.
+            // uses bool: guards become `return false;` (exit, already
+            // rewritten above by `rewrite_guard_returns`), and
+            // fall-through is `return true;` (continue).  Here we just
+            // add the fall-through sentinel.
             let lower = value.to_lowercase();
             let sentinel = if lower == "false" {
                 "true"

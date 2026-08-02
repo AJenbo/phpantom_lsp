@@ -8,35 +8,6 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::text_position::ranges_overlap;
 
-/// Suppress lower-priority diagnostics when a higher-priority one covers
-/// an overlapping range.
-///
-/// Rules (in precedence order):
-/// 1. `unknown_class` trumps `unresolved_member_access`
-/// 2. `unknown_member` trumps `unresolved_member_access`
-/// 3. `scalar_member_access` trumps `unresolved_member_access`
-/// 4. Full-line diagnostics are suppressed when any precise (sub-line)
-///    diagnostic exists on the same line.
-///
-/// **Why rule 4 exists.** Diagnostics arrive from multiple independent
-/// sources (Mago parser, PHPStan, native PHPantom checks) that use
-/// completely different error codes and descriptions.  There is no
-/// reliable way to determine whether two diagnostics from different
-/// sources describe the same issue.  What we *can* determine is
-/// precision: tools like PHPStan only report a line number, so their
-/// diagnostics span the entire line (character 0 to a very large end
-/// character).  Native diagnostics and parser errors pinpoint the exact
-/// token.  A full-line underline obscures the precise location, making
-/// it harder for the developer to spot the problem.  Suppressing it
-/// unconditionally when any precise diagnostic exists on the same line
-/// keeps the pinpointed one visible without losing information.  Once
-/// the precise diagnostic is resolved, the full-line one reappears
-/// automatically (if the underlying issue persists).
-///
-/// Each source's diagnostics are authoritative: if PHPStan reports five
-/// issues on a line, all five are shown; if PHPantom reports two issues
-/// on the same span, both are shown.  Cross-source overlap is handled
-/// by rule 4 above, not by collapsing identical ranges.
 impl Backend {
     /// Remove diagnostics that were eagerly suppressed by a
     /// `codeAction/resolve` handler and drain the suppression list.
@@ -66,14 +37,22 @@ impl Backend {
 /// overlaps an `unresolved_member_access` hint, the hint is dropped
 /// because the root cause is already surfaced by the priority
 /// diagnostic.  This is the only case we remove: it is a strict
-/// refinement of the same finding, not two independent issues.  We do
-/// **not** discard overlapping external (line-only) diagnostics — a
-/// full-line PHPStan/PHPCS/Mago finding can be an independent issue
-/// (and may be more severe) than a precise native one on the same
-/// line, so hiding it risks losing a critical error behind a minor
-/// note.
+/// refinement of the same finding, not two independent issues.
 ///
-/// **Ordering.**  Instead of hiding line-only diagnostics, the sort at
+/// We do **not** discard overlapping external (line-only) diagnostics
+/// this way.  Diagnostics arrive from multiple independent sources
+/// (Mago parser, PHPStan, native PHPantom checks) that use completely
+/// different error codes and descriptions, so there is no reliable way
+/// to tell whether two diagnostics from different sources describe the
+/// same issue — a full-line PHPStan/PHPCS/Mago finding can be an
+/// independent issue (and may be more severe) than a precise native
+/// one on the same line, so hiding it risks losing a critical error
+/// behind a minor note.
+///
+/// **Ordering.**  Tools like PHPStan only report a line number, so
+/// their diagnostics span the entire line (character 0 to a very large
+/// end character), while native diagnostics and parser errors pinpoint
+/// the exact token.  Rather than hide the full-line ones, the sort at
 /// the end keeps a precise marker from being buried under a full-line
 /// underline (see the sort's inline comment).
 ///

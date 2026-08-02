@@ -255,7 +255,6 @@ fn try_resolve_include(
     let start = span.start.offset as usize;
     let end = span.end.offset as usize;
 
-    // Attempt to statically evaluate the expression to a path string.
     if let Some(path_str) = try_evaluate_path_expr(expr, file_dir) {
         let resolved = normalize_and_resolve(file_dir, &path_str);
         if resolved.exists() {
@@ -367,7 +366,6 @@ fn try_evaluate_dirname_call(call: &call::FunctionCall<'_>, file_dir: &Path) -> 
         1
     };
 
-    // Walk up `levels` directories.
     let mut result = PathBuf::from(&path_value);
     for _ in 0..levels {
         result = result.parent()?.to_path_buf();
@@ -376,7 +374,6 @@ fn try_evaluate_dirname_call(call: &call::FunctionCall<'_>, file_dir: &Path) -> 
     Some(result.to_string_lossy().to_string())
 }
 
-/// Normalize a path and resolve it to an absolute path.
 fn normalize_and_resolve(file_dir: &Path, path_str: &str) -> PathBuf {
     let path = PathBuf::from(path_str);
     if path.is_absolute() {
@@ -406,7 +403,6 @@ fn normalize_path(path: &Path) -> PathBuf {
     components.iter().collect()
 }
 
-/// Strip surrounding quotes from a string value.
 fn strip_quotes(s: &str) -> &str {
     if s.len() >= 2
         && ((s.starts_with('\'') && s.ends_with('\'')) || (s.starts_with('"') && s.ends_with('"')))

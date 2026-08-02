@@ -38,7 +38,6 @@ impl Backend {
         // ── Trivia (comments) ──
         collect_comment_ranges(&program.trivia, &idx, &mut ranges);
 
-        // Filter out single-line ranges and sort by start position.
         ranges.retain(|r| r.start_line < r.end_line);
         ranges.sort_by(|a, b| {
             a.start_line
@@ -133,7 +132,6 @@ fn collect_from_statement(
 ) {
     match stmt {
         Statement::Namespace(ns) => {
-            // Brace-delimited namespace body.
             if let NamespaceBody::BraceDelimited(block) = &ns.body {
                 emit_block(block, idx, ranges);
                 for inner in block.statements.iter() {
@@ -176,7 +174,6 @@ fn collect_from_statement(
 
         Statement::Function(func) => {
             emit_block(&func.body, idx, ranges);
-            // Parameter list.
             emit_paren_pair(
                 func.parameter_list.left_parenthesis,
                 func.parameter_list.right_parenthesis,
@@ -414,7 +411,6 @@ fn collect_from_class_member(
                     collect_from_statement(inner, idx, ranges);
                 }
             }
-            // Parameter list.
             emit_paren_pair(
                 method.parameter_list.left_parenthesis,
                 method.parameter_list.right_parenthesis,

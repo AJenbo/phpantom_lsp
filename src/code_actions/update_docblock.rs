@@ -163,12 +163,10 @@ impl Backend {
             None => return,
         };
 
-        // Build a class loader and function loader for type enrichment.
         let ctx = self.file_context(uri);
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
 
-        // Determine if anything needs updating.
         let needs_update = check_needs_update(
             &info,
             content,
@@ -182,7 +180,6 @@ impl Backend {
             return;
         }
 
-        // Build the replacement docblock.
         let new_docblock = build_updated_docblock(
             &info,
             content,
@@ -341,7 +338,6 @@ fn cursor_on_docblock(
     content: &str,
 ) -> bool {
     let node_start = node.span().start.offset;
-    // Check if the cursor is inside the docblock that belongs to this node.
     // Uses the canonical trivia-based locator from symbol_map::docblock.
     if let Some((_text, db_start)) =
         crate::symbol_map::docblock::get_docblock_text_with_offset(trivia, content, node)
@@ -401,7 +397,6 @@ fn build_info_for_function_like<'a>(
     let docblock_end = trivia_node.span.end.offset as usize;
     let docblock_text = content.get(docblock_start..docblock_end)?.to_string();
 
-    // Extract signature parameters.
     let sig_params: Vec<SigParam> = param_list
         .parameters
         .iter()
@@ -417,7 +412,6 @@ fn build_info_for_function_like<'a>(
         })
         .collect();
 
-    // Extract return type.
     let sig_return = return_type_hint.map(|rth| extract_hint_type(&rth.hint));
 
     // Parse existing docblock tags with a single parse pass.
@@ -432,7 +426,6 @@ fn build_info_for_function_like<'a>(
         .map(parse_doc_throws_from_info)
         .unwrap_or_default();
 
-    // Detect indentation.
     let indent = detect_indent(content, docblock_start);
 
     // Compute LSP position for throws analysis.
@@ -472,11 +465,9 @@ fn parse_doc_params_from_info(info: &DocblockInfo) -> Vec<DocParam> {
         let (type_str, name_token, after_params) = if is_name_first {
             ("", first_token, &rest[first_token.len()..])
         } else {
-            // Extract type token.
             let (type_str, remainder) = split_type_token(rest);
             let remainder = remainder.trim_start();
 
-            // Extract parameter name.
             let name_token = remainder.split_whitespace().next().unwrap_or("");
             let after_params = remainder.get(name_token.len()..).unwrap_or("");
             (type_str, name_token, after_params)
@@ -550,11 +541,9 @@ fn parse_doc_throws_from_info(info: &DocblockInfo) -> Vec<String> {
 
 /// Detect the indentation prefix from the source at the docblock position.
 fn detect_indent(content: &str, docblock_start: usize) -> String {
-    // Walk backward from docblock_start to find the line start.
     let before = &content[..docblock_start];
     let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
     let prefix = &content[line_start..docblock_start];
-    // The indent is just whitespace.
     prefix.chars().take_while(|c| c.is_whitespace()).collect()
 }
 
@@ -570,7 +559,7 @@ fn check_needs_update(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> bool {
-    // Build a map of existing doc param names.
+    // Build a list of existing doc param names.
     let doc_param_names: Vec<&str> = info
         .doc_params
         .iter()
@@ -774,10 +763,8 @@ fn build_updated_docblock(
 ) -> String {
     let indent = &info.indent;
 
-    // Parse the existing docblock into lines, categorizing each line.
     let mut lines = parse_docblock_lines(&info.docblock_text);
 
-    // Remove existing @param lines.
     lines.retain(|l| !matches!(l, DocLine::Param(_)));
 
     // Clean up orphaned empty lines left after removing @param lines.
@@ -797,9 +784,6 @@ fn build_updated_docblock(
         lines.retain(|l| !matches!(l, DocLine::Return(_)));
     }
 
-    // Find where to insert new @param lines.
-    // Prefer inserting before the first @return or @throws, or at the end
-    // before the closing `*/`.
     let insert_pos = find_param_insert_position(&lines);
 
     // Build new @param entries: (type_str, name_with_prefix, description).
@@ -817,7 +801,6 @@ fn build_updated_docblock(
             let has_any_doc_params = !info.doc_params.is_empty();
 
             let type_str = if let Some(existing) = existing {
-                // If the existing type is a refinement, keep it.
                 if let Some(native) = &sig.type_hint {
                     let native_str = native.to_string();
                     if is_type_contradiction(&existing.type_parsed, native) {
@@ -896,7 +879,6 @@ fn build_updated_docblock(
         })
         .collect();
 
-    // Insert new param lines.
     for (i, param_line) in new_params.into_iter().enumerate() {
         lines.insert(insert_pos + i, param_line);
     }
@@ -931,8 +913,6 @@ fn build_updated_docblock(
     }
 
     if !new_throws.is_empty() {
-        // Find the position to insert @throws — after the last existing
-        // @throws tag, or after @param block, or before @return.
         let throws_insert_pos = find_throws_insert_position(&lines);
         for (i, exc) in new_throws.iter().enumerate() {
             lines.insert(
@@ -948,7 +928,6 @@ fn build_updated_docblock(
         && let Some(doc_ret) = &info.doc_return
     {
         let sig_ret_str = sig_ret.to_string();
-        // Find and update the return line.
         for line in &mut lines {
             if let DocLine::Return(text) = line {
                 let description = &doc_ret.description;
@@ -1007,7 +986,6 @@ fn build_updated_docblock(
                     }
                 }
                 if !updated_existing {
-                    // Insert before the closing `*/`.
                     let close_pos = lines
                         .iter()
                         .position(|l| matches!(l, DocLine::Close))
@@ -1018,7 +996,6 @@ fn build_updated_docblock(
         }
     }
 
-    // Rebuild the docblock text.
     rebuild_docblock(&lines, indent)
 }
 

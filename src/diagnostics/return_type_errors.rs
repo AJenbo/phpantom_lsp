@@ -178,8 +178,6 @@ impl Backend {
         // return type.
         let results: Vec<ResolvedReturn> =
             with_parsed_program(content, "return_type_diagnostics", |program, _content| {
-                let strict_types = has_strict_types(program);
-                let _ = strict_types; // used below in VarResolutionCtx
                 let mut resolved_returns: Vec<ResolvedReturn> = Vec::new();
 
                 for stmt in program.statements.iter() {
@@ -476,7 +474,6 @@ fn process_top_level_statement(
                 return;
             }
 
-            // Resolve types and check.
             let enclosing = find_innermost_enclosing_class(&file_ctx.classes, func_offset);
             let current_class = enclosing.unwrap_or(default_class);
 

@@ -2,8 +2,6 @@ use super::*;
 
 // ─── Name generation ────────────────────────────────────────────────────────
 
-/// Generate a unique function/method name that doesn't conflict with
-/// existing members or functions.
 /// Context passed to [`generate_function_name`] to produce meaningful names.
 pub(crate) struct NamingContext<'a> {
     /// The enclosing function/method name (e.g. `"run"`, `"process"`).

@@ -261,7 +261,6 @@ fn find_in_if_body(
     }
 }
 
-/// Walk a while-statement body.
 fn find_in_while_body(
     body: &WhileBody<'_>,
     cursor: u32,
@@ -281,7 +280,6 @@ fn find_in_while_body(
     }
 }
 
-/// Walk a for-statement body.
 fn find_in_for_body(
     body: &ForBody<'_>,
     cursor: u32,
@@ -301,7 +299,6 @@ fn find_in_for_body(
     }
 }
 
-/// Walk a foreach-statement body.
 fn find_in_foreach_body(
     body: &ForeachBody<'_>,
     cursor: u32,
@@ -397,7 +394,6 @@ fn find_in_expression(
     walk_sub_expressions(expr, cursor, content, php_version, best);
 }
 
-/// Recurse into the sub-expressions of an expression node.
 fn walk_sub_expressions(
     expr: &Expression<'_>,
     cursor: u32,
@@ -566,7 +562,6 @@ fn try_isset_coalescing(
     else_expr: &Expression<'_>,
     content: &str,
 ) -> Option<Simplification> {
-    // Unwrap parentheses around the condition.
     let condition = unwrap_parens(condition);
 
     let isset = match condition {
@@ -574,7 +569,6 @@ fn try_isset_coalescing(
         _ => return None,
     };
 
-    // Only handle single-argument isset.
     let values: Vec<_> = isset.values.iter().collect();
     if values.len() != 1 {
         return None;
@@ -604,7 +598,6 @@ fn try_null_comparison_simplify(
     content: &str,
     php_version: PhpVersion,
 ) -> Option<Simplification> {
-    // Unwrap parentheses around the condition.
     let condition = unwrap_parens(condition);
 
     let bin = match condition {
@@ -743,7 +736,6 @@ fn expr_source_text<'c>(expr: &Expression<'_>, content: &'c str) -> &'c str {
     }
 }
 
-/// Check if an expression is a `null` literal.
 fn is_null_literal(expr: &Expression<'_>) -> bool {
     matches!(unwrap_parens(expr), Expression::Literal(Literal::Null(_)))
 }
@@ -789,7 +781,6 @@ fn find_root_object<'c>(expr: &Expression<'_>, content: &'c str) -> Option<&'c s
 /// `$this->bar->getName()` becomes `$this->bar?->getName()` rather than
 /// `$this?->bar->getName()`.
 fn replace_arrow_after_subject(text: &str, subject: &str) -> String {
-    // Find the `->` that comes after the subject text.
     if let Some(start) = text.find(subject) {
         let after_subject = start + subject.len();
         if let Some(arrow_offset) = text[after_subject..].find("->") {

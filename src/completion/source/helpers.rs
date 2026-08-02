@@ -1,25 +1,24 @@
-/// Source-text scanning helpers that are **not** part of the deprecated
-/// `extract_raw_type_from_assignment_text` pipeline.
-///
-/// These functions perform lightweight, targeted scans of raw PHP source
-/// text for patterns that the AST-based walker cannot (or need not)
-/// handle:
-///
-/// - **`extract_new_expression_class`** — parse `new ClassName(…)` from
-///   a text fragment.
-/// - **`extract_closure_return_type_from_text`** — find a
-///   closure/arrow-function's native return type hint from its own
-///   source text.
-/// - **`resolve_first_class_callable_return_type`** — resolve the
-///   return type of a first-class callable expression like
-///   `strlen(...)` or `$obj->method(...)`.
-/// - **`try_chained_array_access_with_candidates`** /
-///   **`walk_array_segments_and_resolve`** — walk bracket segments on
-///   candidate `PhpType` values to resolve array access chains.
-///
-/// All functions in this module are free functions (not methods on
-/// `Backend`).  Cross-module dependencies that previously used `Self::`
-/// are called via their canonical module paths.
+//! Source-text scanning helpers for completion and type resolution.
+//!
+//! These functions perform lightweight, targeted scans of raw PHP source
+//! text for patterns that the AST-based walker cannot (or need not)
+//! handle:
+//!
+//! - **`extract_new_expression_class`** — parse `new ClassName(…)` from
+//!   a text fragment.
+//! - **`extract_closure_return_type_from_text`** — find a
+//!   closure/arrow-function's native return type hint from its own
+//!   source text.
+//! - **`resolve_first_class_callable_return_type`** — resolve the
+//!   return type of a first-class callable expression like
+//!   `strlen(...)` or `$obj->method(...)`.
+//! - **`try_chained_array_access_with_candidates`** /
+//!   **`walk_array_segments_and_resolve`** — walk bracket segments on
+//!   candidate `PhpType` values to resolve array access chains.
+//!
+//! All functions in this module are free functions, not methods on
+//! `Backend`.
+
 use crate::atom::atom;
 use std::sync::Arc;
 
@@ -204,17 +203,6 @@ pub(crate) fn trailing_class_name(s: &str) -> &str {
     &s[start..]
 }
 
-/// Extract the return type annotation from a closure or arrow-function
-/// literal, given its own source text (e.g. the closure's span text, or
-/// the text between a call's parentheses for one argument).
-///
-/// Handles:
-/// - `fn(…): ReturnType => …`
-/// - `function(…): ReturnType { … }`
-/// - `function(…) use (…): ReturnType { … }`
-///
-/// Returns `None` if the text is not a closure/arrow-function or if
-/// there is no return type hint.
 /// Check whether text is a closure or arrow-function literal, optionally
 /// prefixed with `static` — e.g. `fn($x) => …`, `function ($x) use (…) { … }`,
 /// `static fn($x) => …`.
@@ -235,6 +223,17 @@ pub(crate) fn is_closure_like_text(text: &str) -> bool {
     is_arrow || is_closure
 }
 
+/// Extract the return type annotation from a closure or arrow-function
+/// literal, given its own source text (e.g. the closure's span text, or
+/// the text between a call's parentheses for one argument).
+///
+/// Handles:
+/// - `fn(…): ReturnType => …`
+/// - `function(…): ReturnType { … }`
+/// - `function(…) use (…): ReturnType { … }`
+///
+/// Returns `None` if the text is not a closure/arrow-function or if
+/// there is no return type hint.
 pub(crate) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpType> {
     let trimmed = text.trim();
 
@@ -1026,7 +1025,6 @@ fn walk_array_segments_and_resolve(
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
-        // Convert to string only for alias resolution.
         if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
             &current,
             current_class_name,

@@ -12,7 +12,7 @@ use crate::Backend;
 use crate::symbol_map::SymbolMap;
 use crate::types::{ClassInfo, FileContext};
 
-/// A byte range `[start, end)` representing a line in the source.
+/// A byte range `[start, end)` in the source.
 pub(crate) type ByteRange = (usize, usize);
 
 /// Per-file snapshot shared by the "symbol-span" diagnostic collectors
@@ -66,12 +66,11 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
     for line in content.split('\n') {
         let line_brace_depth = brace_depth;
 
-        // Update brace depth for braces on this line (crude but
-        // sufficient — we only need an approximate depth to tell
-        // top-level from class-body).  We skip braces inside strings
-        // and comments only to the extent that single-line `//` and
-        // `#` comments are trimmed, which covers the vast majority of
-        // real-world PHP.
+        // Brace-depth tracking is crude but sufficient — we only need an
+        // approximate depth to tell top-level from class-body.  We skip
+        // braces inside strings and comments only to the extent that
+        // single-line `//` and `#` comments are trimmed, which covers
+        // the vast majority of real-world PHP.
         let code = line.split("//").next().unwrap_or(line);
         let code = code.split('#').next().unwrap_or(code);
 
@@ -100,9 +99,6 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
             }
         }
 
-        // A `use` line is a namespace import when it is at top-level
-        // brace depth: depth 0 normally, or depth 1 when inside a
-        // braced `namespace Foo { … }` block.
         let top_level_depth = namespace_brace_depth.map_or(0, |d| d + 1);
         if let Some(start) = pending_use_start {
             if trimmed.contains(';') {
@@ -122,7 +118,6 @@ pub(crate) fn compute_use_line_ranges(content: &str) -> Vec<ByteRange> {
     ranges
 }
 
-/// Check whether a byte offset falls within any of the given ranges.
 pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
     let offset = offset as usize;
     ranges
@@ -339,19 +334,15 @@ fn find_negated_guard_range(
 ) -> Option<ByteRange> {
     let len = bytes.len();
 
-    // Find the enclosing `if`.
     let if_pos = find_preceding_if(bytes, call_start)?;
 
-    // Find the `(` of the if-condition.
     let paren_start = skip_ws(bytes, if_pos + 2);
     if paren_start >= len || bytes[paren_start] != b'(' {
         return None;
     }
 
-    // Find matching `)` of the condition.
     let cond_end = find_matching_paren(bytes, paren_start)?;
 
-    // Find the if-body start.
     let body_start_pos = skip_ws(bytes, cond_end + 1);
     if body_start_pos >= len {
         return None;
@@ -536,7 +527,6 @@ fn try_extract_class_const(bytes: &[u8], pos: usize) -> Option<(String, usize)> 
     if end == start {
         return None;
     }
-    // Now expect `::class`
     if end + 7 > len {
         return None;
     }
@@ -582,30 +572,28 @@ fn find_guarded_range(bytes: &[u8], call_start: usize, call_end: usize) -> Optio
 
     // Strategy 1: Find enclosing `if` by scanning backward.
     if let Some(if_pos) = find_preceding_if(bytes, call_start) {
-        // Find the opening `(` of the if condition.
         let paren_start = skip_ws(bytes, if_pos + 2); // skip "if"
-        if paren_start < len && bytes[paren_start] == b'(' {
-            // Find matching `)` of the condition.
-            if let Some(cond_end) = find_matching_paren(bytes, paren_start) {
-                // After `)`, find the body.
-                let body_start_pos = skip_ws(bytes, cond_end + 1);
-                if body_start_pos < len {
-                    if bytes[body_start_pos] == b'{' {
-                        // Block body: find matching `}`.
-                        if let Some(block_end) = find_matching_brace(bytes, body_start_pos) {
-                            // Guard covers from start of condition (to catch && patterns
-                            // in the condition itself) through the block end.
-                            return Some((paren_start, block_end + 1));
-                        }
-                    } else {
-                        // Single-statement body: find `;`.
-                        let mut s = body_start_pos;
-                        while s < len && bytes[s] != b';' {
-                            s += 1;
-                        }
-                        if s < len {
-                            return Some((paren_start, s + 1));
-                        }
+        if paren_start < len
+            && bytes[paren_start] == b'('
+            && let Some(cond_end) = find_matching_paren(bytes, paren_start)
+        {
+            let body_start_pos = skip_ws(bytes, cond_end + 1);
+            if body_start_pos < len {
+                if bytes[body_start_pos] == b'{' {
+                    // Block body: find matching `}`.
+                    if let Some(block_end) = find_matching_brace(bytes, body_start_pos) {
+                        // Guard covers from start of condition (to catch && patterns
+                        // in the condition itself) through the block end.
+                        return Some((paren_start, block_end + 1));
+                    }
+                } else {
+                    // Single-statement body: find `;`.
+                    let mut s = body_start_pos;
+                    while s < len && bytes[s] != b';' {
+                        s += 1;
+                    }
+                    if s < len {
+                        return Some((paren_start, s + 1));
                     }
                 }
             }

@@ -615,7 +615,6 @@ impl Backend {
                     let start_offset = enum_def.left_brace.start.offset;
                     let end_offset = enum_def.right_brace.end.offset;
 
-                    // Enums are implicitly final and cannot be extended.
                     let enum_depr = merge_deprecation_info(
                         doc_info.deprecation_message,
                         &enum_def.attribute_lists,
@@ -646,6 +645,7 @@ impl Backend {
                         mixin_generics: doc_info.mixin_generics,
                         require_extends: doc_info.require_extends,
                         require_implements: doc_info.require_implements,
+                        // Enums are implicitly final and cannot be extended.
                         is_final: true,
                         is_abstract: false,
                         deprecation_message: enum_depr.message,
@@ -797,8 +797,8 @@ impl Backend {
     /// class-like members.
     ///
     /// This is shared between `Statement::Class`, `Statement::Interface`,
-    /// and `Statement::Trait` since all use the same `ClassLikeMember`
-    /// representation.
+    /// `Statement::Trait`, and `Statement::Enum` since all use the same
+    /// `ClassLikeMember` representation.
     ///
     /// When `doc_ctx` is provided, PHPDoc `@return` and `@var` tags are used
     /// to refine (or supply) type information for methods and properties.

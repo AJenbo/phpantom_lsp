@@ -88,7 +88,6 @@ impl Backend {
 
         let mut result = Vec::new();
 
-        // Collect all supertype names: parent class first, then interfaces.
         let mut supertype_names: Vec<&str> = Vec::new();
         if let Some(ref parent) = class_info.parent_class {
             supertype_names.push(parent);
@@ -223,9 +222,6 @@ fn build_type_hierarchy_item(
     let content_bytes = content.as_bytes();
 
     let (selection_range, range) = if has_content && class_info.keyword_offset > 0 {
-        // Find the class name in source starting from the keyword.
-        // The keyword is "class", "interface", "trait", or "enum".
-        // The name follows after whitespace.
         let kw_off = class_info.keyword_offset as usize;
         let name_start = find_name_start(content_bytes, kw_off);
         let name_end = name_start + class_info.name.len();
@@ -238,7 +234,6 @@ fn build_type_hierarchy_item(
         let sel_end = offset_to_position(content, name_end);
         let sel_range = Range::new(sel_start, sel_end);
 
-        // Full range from start_offset to end_offset.
         let full_range = if class_info.end_offset > class_info.start_offset {
             let start = (class_info.start_offset as usize).min(content.len());
             let end = (class_info.end_offset as usize).min(content.len());
@@ -261,7 +256,6 @@ fn build_type_hierarchy_item(
         );
         (r, r)
     } else {
-        // No content or no offsets — use 0,0.
         let zero = Range::new(Position::new(0, 0), Position::new(0, 0));
         (zero, zero)
     };

@@ -289,10 +289,10 @@ impl Backend {
             //
             // `classes_with_ns` tracks each extracted class together with the
             // namespace block it was declared in.  This is critical for files
-            // that contain multiple `namespace { }` blocks (e.g. example.php
-            // places demo classes in `Demo` and Illuminate stubs in their own
-            // namespace blocks).  The per-class namespace is used later when
-            // building the `fqn_uri_index` and when resolving parent/trait names.
+            // that contain multiple `namespace { }` blocks, each declaring
+            // classes under a different namespace.  The per-class namespace is
+            // used later when building the `fqn_uri_index` and when resolving
+            // parent/trait names.
             let mut classes_with_ns: Vec<(ClassInfo, Option<String>)> = Vec::new();
             let mut use_map = HashMap::new();
             let mut namespace: Option<String> = None;
@@ -304,14 +304,12 @@ impl Backend {
                         Self::extract_use_items(&use_stmt.items, &mut use_map);
                     }
                     Statement::Namespace(ns) => {
-                        // Determine the namespace for this block.
                         let block_ns: Option<String> = ns
                             .name
                             .as_ref()
                             .map(|ident| bytes_to_str(ident.value()).to_string())
                             .filter(|n| !n.is_empty());
 
-                        // Record the byte span of this namespace block.
                         let ns_span = ns.span();
                         namespace_spans.push(NamespaceSpan {
                             namespace: block_ns.clone(),
@@ -327,7 +325,6 @@ impl Backend {
                         // Collect classes from this namespace block, tagging
                         // each with the block's namespace.
                         let mut block_classes = Vec::new();
-                        // Recurse into namespace body for classes and use statements
                         for inner in ns.statements().iter() {
                             match inner {
                                 Statement::Use(use_stmt) => {
@@ -379,7 +376,6 @@ impl Backend {
                             }
                         }
 
-                        // Tag each class with the namespace of this block.
                         for cls in block_classes {
                             classes_with_ns.push((cls, block_ns.clone()));
                         }
@@ -1072,14 +1068,12 @@ impl Backend {
                 let resolved = Self::resolve_name(parent, use_map, namespace);
                 class.parent_class = Some(atom(&resolved));
             }
-            // Resolve trait names to fully-qualified names
             class.used_traits = class
                 .used_traits
                 .iter()
                 .map(|t| atom(&Self::resolve_name(t, use_map, namespace)))
                 .collect();
 
-            // Resolve interface names to fully-qualified names
             class.interfaces = class
                 .interfaces
                 .iter()

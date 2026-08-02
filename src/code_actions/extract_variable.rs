@@ -161,14 +161,12 @@ fn contains_unquoted_semicolon(text: &str) -> bool {
 /// it would just produce a pointless intermediary:
 /// `$variable = expr; $var = $variable;`
 fn is_entire_assignment_rhs(content: &str, start: usize, end: usize) -> bool {
-    // Find the start of the line containing `start`.
     let before = &content[..start];
     let line_start = match before.rfind('\n') {
         Some(pos) => pos + 1,
         None => 0,
     };
 
-    // Find the end of the line containing `end`.
     let line_end = content[end..]
         .find('\n')
         .map_or(content.len(), |pos| end + pos);
@@ -294,7 +292,6 @@ fn extract_method_call_name(expr: &str) -> Option<String> {
         return None;
     }
 
-    // Strip common prefixes like get/is/has for cleaner names
     let stripped = strip_accessor_prefix(ident);
     Some(to_camel_case(stripped))
 }
@@ -348,7 +345,6 @@ fn extract_function_call_name(expr: &str) -> Option<String> {
         return None;
     }
 
-    // Verify all chars are valid identifier chars
     if !ident.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return None;
     }
@@ -506,7 +502,6 @@ fn deduplicate_name(name: &str, existing_vars: &[String]) -> String {
 ///
 /// Returns `(line_start_offset, indentation_string)`.
 fn find_enclosing_statement_line(content: &str, selection_start: usize) -> (usize, String) {
-    // Walk backwards from the selection start to find the beginning of the line.
     // The "enclosing statement" heuristic: find the start of the line
     // containing the selection. This works well for typical single-statement
     // lines in PHP.
@@ -517,7 +512,6 @@ fn find_enclosing_statement_line(content: &str, selection_start: usize) -> (usiz
         None => 0,
     };
 
-    // Extract indentation (leading whitespace on this line).
     let line_content = &content[line_start..];
     let indent_len = line_content
         .chars()
@@ -562,7 +556,6 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        // Only activate when the selection is non-empty.
         if params.range.start == params.range.end {
             return;
         }
@@ -594,7 +587,6 @@ impl Backend {
 
         let selected_text = &content[start_offset..end_offset];
 
-        // Skip if the selection is purely whitespace.
         if selected_text.trim().is_empty() {
             return;
         }
@@ -736,7 +728,6 @@ impl Backend {
             return None;
         }
 
-        // Generate variable name and deduplicate.
         let base_name = generate_variable_name(selected_text);
         let scope_map = build_scope_map(content, start_offset as u32);
         let existing_vars = scope_map.variables_in_scope(start_offset as u32);

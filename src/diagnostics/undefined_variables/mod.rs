@@ -367,7 +367,6 @@ fn check_scope(
     // Collect byte offsets of variables inside `isset()` and `empty()`.
     let guarded_offsets = collect_guarded_offsets(statements);
 
-    // Bail out if there are no frames at all.
     if scope.frames.is_empty() {
         return;
     }
@@ -423,7 +422,6 @@ fn check_scope(
         })
         .collect();
 
-    // Process each frame independently.
     for (frame_idx, frame) in scope.frames.iter().enumerate() {
         // Build the list of writes visible to this frame by walking
         // up the parent-frame chain.  This correctly handles
@@ -490,7 +488,6 @@ fn check_scope(
                 continue;
             }
 
-            // Emit diagnostic.
             let var_len = access.name.len();
             let range = match ctx.backend.offset_range_to_lsp_range(
                 ctx.uri,

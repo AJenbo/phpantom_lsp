@@ -45,8 +45,6 @@ pub(super) fn extract_attribute_targets(
                 return attribute_target::TARGET_ALL;
             };
 
-            // Extract the raw text of the first argument and parse
-            // the target flags from it.
             let span = first_arg.span();
             let start = span.start.offset as usize;
             let end = span.end.offset as usize;
@@ -76,7 +74,7 @@ fn parse_attribute_target_flags(text: &str) -> u8 {
     let mut flags: u8 = 0;
     for part in text.split('|') {
         let part = part.trim();
-        // Strip optional `Attribute::` or `self::` prefix.
+        // Strip optional `Attribute::`, `\Attribute::`, or `self::` prefix.
         let constant = part
             .strip_prefix("Attribute::")
             .or_else(|| part.strip_prefix("\\Attribute::"))

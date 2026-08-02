@@ -54,7 +54,6 @@ impl Backend {
         let symbol_map = &ctx.symbol_map;
         let class_loader = self.class_loader(&ctx.file);
 
-        // Iterate all ClassDeclaration spans in the symbol map.
         for span in &symbol_map.spans {
             let class_name = match &span.kind {
                 SymbolKind::ClassDeclaration { name } => name,
@@ -91,7 +90,6 @@ impl Backend {
                 continue;
             }
 
-            // Build the diagnostic range from the class name span.
             let range = match self.offset_range_to_lsp_range(
                 uri,
                 content,
@@ -175,7 +173,6 @@ fn method_source_description(
     method_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> String {
-    // Check interfaces first.
     for iface_name in &class.interfaces {
         if let Some(iface) = class_loader(iface_name)
             && has_method_in_chain(&iface, method_name, class_loader, &mut HashSet::new())
@@ -212,7 +209,6 @@ fn has_method_in_chain(
         return true;
     }
 
-    // Check parent interfaces.
     for iface_name in &class.interfaces {
         if let Some(iface) = class_loader(iface_name)
             && has_method_in_chain(&iface, method_name, class_loader, visited)
@@ -221,7 +217,6 @@ fn has_method_in_chain(
         }
     }
 
-    // Check parent class.
     if let Some(ref parent_name) = class.parent_class
         && let Some(parent) = class_loader(parent_name)
         && has_method_in_chain(&parent, method_name, class_loader, visited)

@@ -52,7 +52,6 @@ fn detect_call_site_from_map(
 ) -> Option<CallSiteContext> {
     let cursor_byte_offset = position_to_offset(content, position);
     let cs = symbol_map.find_enclosing_call_site(cursor_byte_offset)?;
-    // Active parameter = number of commas before the cursor.
     let active = cs
         .comma_offsets
         .iter()
@@ -96,7 +95,6 @@ fn detect_call_site_text_fallback(content: &str, position: Position) -> Option<C
         return None;
     }
 
-    // Extract the call expression before `(`.
     let call_expr = extract_call_expression(&chars, open_paren)?;
     if call_expr.is_empty() {
         return None;
@@ -267,7 +265,6 @@ fn build_signature(
     // also accepted, but since PHP identifiers are ASCII the byte
     // offsets match).
     let mut param_infos = Vec::with_capacity(params.len());
-    // The parameters start right after the `(`.
     let mut offset = 1; // skip the leading `(`
 
     for (idx, (pl, param)) in param_labels.iter().zip(params.iter()).enumerate() {
@@ -277,7 +274,6 @@ fn build_signature(
             label: ParameterLabel::LabelOffsets([start, end]),
             documentation: build_param_documentation(param),
         });
-        // Move past this parameter label and the separator `, `.
         offset += pl.len();
         if idx < param_labels.len() - 1 {
             offset += 2; // ", "
@@ -350,7 +346,6 @@ fn collect_fcc_targets(
     content: &str,
     best: &mut Option<String>,
 ) {
-    /// Helper macro: walk an iterable of statements.
     macro_rules! walk {
         ($iter:expr) => {
             for s in $iter {
@@ -480,13 +475,11 @@ fn find_fcc_target_in_expr(
             return None;
         }
 
-        // Check the LHS is the variable we're looking for.
         if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
             if dv.name != var_name.as_bytes() {
                 return None;
             }
 
-            // Check if the RHS is a PartialApplication.
             if let Expression::PartialApplication(pa) = assignment.rhs {
                 return extract_callable_text_from_partial(pa, content);
             }
@@ -608,8 +601,6 @@ impl Backend {
         None
     }
 
-    /// Resolve the call expression to a `SignatureHelp` using the given
-    /// file context and content.
     fn resolve_signature(
         &self,
         site: &CallSiteContext,

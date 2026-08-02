@@ -257,9 +257,6 @@ pub(crate) fn byte_offset_to_utf16_col(line: &str, byte_offset: usize) -> u32 {
 }
 
 /// Convert a byte offset range to an LSP `Range`.
-///
-/// Returns a `Range` with both endpoints converted from byte offsets
-/// to `Position` (line/character).
 pub(crate) fn byte_range_to_lsp_range(content: &str, start: usize, end: usize) -> Range {
     let start_pos = offset_to_position(content, start);
     let end_pos = offset_to_position(content, end);

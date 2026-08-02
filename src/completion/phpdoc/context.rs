@@ -172,7 +172,6 @@ pub fn detect_docblock_typing_position(
     let at_pos = before_cursor.rfind('@')?;
     let tag_end = at_pos + 1 + tag_name.len();
 
-    // Text between the end of the tag and the cursor.
     let after_tag = &before_cursor[tag_end..];
 
     // If there's no whitespace after the tag yet, the user is still
@@ -214,7 +213,6 @@ pub fn detect_docblock_typing_position(
         return None;
     }
 
-    // Text after the type token.
     let after_type = trimmed[type_token_len..].trim_start();
     if after_type.is_empty() {
         // Space after the type, nothing typed yet → variable position.

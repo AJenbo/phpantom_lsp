@@ -406,23 +406,19 @@ fn try_convert_closure(
     // Build the arrow function text.
     let mut result = String::new();
 
-    // Static keyword
     if closure.r#static.is_some() {
         result.push_str("static ");
     }
 
-    // fn keyword + parameters
     result.push_str("fn");
     let params_text = source_text(content, closure.parameter_list.span());
     result.push_str(params_text);
 
-    // Return type hint (if any)
     if let Some(return_type) = &closure.return_type_hint {
         let hint_text = source_text(content, return_type.span());
         result.push_str(hint_text);
     }
 
-    // Arrow and expression
     result.push_str(" => ");
     let expr_text = source_text(content, return_expr.span());
     result.push_str(expr_text);
@@ -430,7 +426,6 @@ fn try_convert_closure(
     Some(result)
 }
 
-/// Extract a slice of the source text corresponding to a span.
 fn source_text(content: &str, span: mago_span::Span) -> &str {
     &content[span.start.offset as usize..span.end.offset as usize]
 }

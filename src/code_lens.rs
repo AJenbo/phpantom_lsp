@@ -25,7 +25,6 @@ fn line_indent(content: &str, byte_offset: usize) -> u32 {
 struct Prototype {
     /// Display name of the ancestor class (short name).
     ancestor_name: String,
-    /// Whether the ancestor is an interface.
     is_interface: bool,
     /// URI of the file containing the ancestor class.
     file_uri: String,
@@ -199,7 +198,6 @@ impl Backend {
             {
                 return Some(proto);
             }
-            // Recurse into traits used by this trait.
             if let Some(proto) = self.find_prototype_in_traits(
                 &trait_info.used_traits,
                 method_name,

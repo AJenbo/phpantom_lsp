@@ -16,7 +16,6 @@ pub struct BladeSourceMap {
 impl BladeSourceMap {
     pub fn blade_to_php(&self, pos: Position) -> Position {
         let line = pos.line as usize;
-        // Prologue adds 5 lines. Blade line 0 becomes virtual line 5.
         let virtual_line = line as u32 + super::PROLOGUE_LINES;
 
         if line >= self.adjustments.len() {

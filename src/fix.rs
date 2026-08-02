@@ -150,7 +150,6 @@ fn fix_unused_imports(backend: &Backend, uri: &str, content: &str) -> (String, V
         .map(|d| d.range.start.line as usize)
         .collect();
 
-    // Build deletion edits for each unused import.
     let mut edits: Vec<TextEdit> = diagnostics
         .iter()
         .map(|d| build_line_deletion_edit(content, &d.range, &removed_import_lines))
@@ -160,7 +159,6 @@ fn fix_unused_imports(backend: &Backend, uri: &str, content: &str) -> (String, V
     // apply deletions from bottom to top.
     edits.sort_by_key(|b| std::cmp::Reverse(b.range.start));
 
-    // Record what we fixed before applying edits.
     let fixes: Vec<AppliedFix> = diagnostics
         .iter()
         .map(|d| AppliedFix {
@@ -170,7 +168,6 @@ fn fix_unused_imports(backend: &Backend, uri: &str, content: &str) -> (String, V
         })
         .collect();
 
-    // Apply edits to content.
     let new_content = apply_text_edits(content, &edits);
 
     (new_content, fixes)
@@ -376,7 +373,6 @@ pub async fn run(options: FixOptions) -> i32 {
                         let mut current_content = content.clone();
                         let mut all_fixes: Vec<AppliedFix> = Vec::new();
 
-                        // Apply each rule in order.
                         for rule in native_rules.iter() {
                             match *rule {
                                 "unused_import" => {
@@ -469,7 +465,6 @@ pub async fn run(options: FixOptions) -> i32 {
         return 2;
     }
 
-    // Write files.
     let mut write_errors = 0;
     for result in &sorted_results {
         if let Err(e) = std::fs::write(&result.abs_path, &result.new_content) {
@@ -593,8 +588,6 @@ fn print_fixed_box(total_fixes: usize, files_changed: usize, use_colour: bool) {
         println!("{text}");
     }
 }
-
-// ── Progress bar ────────────────────────────────────────────────────────────
 
 // ── GitHub Actions annotations ──────────────────────────────────────────────
 

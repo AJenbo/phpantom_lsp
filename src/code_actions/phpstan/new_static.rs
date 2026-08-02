@@ -72,7 +72,6 @@ impl Backend {
 
             let diag_line = diag.range.start.line as usize;
 
-            // Find the enclosing class declaration by walking backward.
             let Some(class_info) = find_enclosing_class(content, diag_line) else {
                 continue;
             };
@@ -238,9 +237,10 @@ struct ConstructorInfo {
 /// Find the enclosing class declaration by walking backward from the
 /// diagnostic line.
 ///
-/// The `new static()` diagnostic always fires inside a method body,
-/// so we walk backward tracking brace depth to escape the method body,
-/// then the class body, to find the `class` keyword.
+/// The `new static()` diagnostic always fires inside a method body.
+/// Since PHP classes can't be nested (except anonymous classes, which
+/// PHPStan treats differently), the most recent `class` keyword found
+/// scanning backward from the diagnostic is the enclosing class.
 fn find_enclosing_class(content: &str, diag_line: usize) -> Option<EnclosingClassInfo> {
     let lines: Vec<&str> = content.lines().collect();
     if diag_line >= lines.len() {
@@ -250,24 +250,12 @@ fn find_enclosing_class(content: &str, diag_line: usize) -> Option<EnclosingClas
     // Convert the diagnostic line to a byte offset.
     let diag_byte_offset: usize = lines.iter().take(diag_line).map(|l| l.len() + 1).sum();
 
-    // Walk backward from the diagnostic position tracking brace depth.
-    // We need to exit the method body (depth -1) and then find the
-    // class declaration.  The class `{` is at depth -2 when coming
-    // from inside a method.
-    //
-    // Strategy: find the `class` keyword by scanning backward for it,
-    // ensuring it's at the right structural level.  Since PHP classes
-    // can't be nested (except anonymous classes, which PHPStan treats
-    // differently), we look for the most recent `class` keyword that
-    // appears at the top-level of the file or inside a namespace.
-
     let search_area = &content[..diag_byte_offset.min(content.len())];
 
     // Find the last `class` keyword that looks like a class declaration.
     // We scan backward for `class ` preceded by a valid context.
     let class_kw_offset = find_class_keyword_before(search_area)?;
 
-    // Find the start of the line containing the class keyword.
     let class_line_start = content[..class_kw_offset]
         .rfind('\n')
         .map(|p| p + 1)
@@ -282,14 +270,10 @@ fn find_enclosing_class(content: &str, diag_line: usize) -> Option<EnclosingClas
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
-    // Check if the class is abstract.
     let before_class = content[class_line_start..class_kw_offset].trim();
     let is_abstract = before_class.split_whitespace().any(|w| w == "abstract");
 
-    // Look for an existing docblock above the class declaration.
     let docblock = find_class_docblock(content, class_line_start);
-
-    // Find the constructor within the class body.
     let constructor = find_constructor(content, class_kw_offset);
 
     Some(EnclosingClassInfo {
@@ -689,7 +673,6 @@ fn build_final_class_edit(content: &str, info: &EnclosingClassInfo) -> Option<Ve
         return None;
     }
 
-    // Insert `final ` right before the `class` keyword.
     let insert_pos = offset_to_position(content, info.class_keyword_offset);
 
     Some(vec![TextEdit {
@@ -1144,9 +1127,8 @@ mod tests {
             "<?php\nclass Foo {\n    public function bar() {\n        new static();\n    }\n}\n";
         let info = find_enclosing_class(src, 3).unwrap();
         assert!(info.constructor.is_none());
-        // build_final_constructor_edit returns None when there's no constructor.
         assert!(build_final_constructor_edit(src, &info).is_none());
-        // The collect phase (line 136) guards with `if class_info.constructor.is_some()`,
+        // The collect phase guards on `class_info.constructor.is_some()`,
         // so the "Add final to constructor" action is never offered.
     }
 

@@ -94,11 +94,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // ── 4. Two-phase parallel analysis ──────────────────────────────
     //
     // Phase 1 — **Parse**: run `update_ast` on every user file so that
-    // `fqn_index`, `uri_classes_index`, `symbol_maps`, `use_map`, `namespace_map`
-    // and `fqn_uri_index` are fully populated for the entire project.
+    // `fqn_class_index`, `uri_classes_index`, `symbol_maps`, `file_imports`,
+    // `file_namespaces` and `fqn_uri_index` are fully populated for the
+    // entire project.
     //
     // Phase 2 — **Diagnose**: collect diagnostics for every file.
-    // Because all user classes are already in `fqn_index`, cross-file
+    // Because all user classes are already in `fqn_class_index`, cross-file
     // references resolve via an O(1) hash lookup instead of falling
     // through to fqn_uri_index / PSR-4 lazy loading (which takes write
     // locks and serialises threads).

@@ -156,8 +156,8 @@ impl Backend {
                 continue;
             }
 
-            // 2. find_or_load_class covers: fqn_uri_index → uri_classes_index →
-            //    fqn_uri_index → PSR-4 → stubs
+            // 2. find_or_load_class covers: uri_classes_index → stubs →
+            //    fqn_uri_index → PSR-4 → stubs (namespaced fallback)
             if self.find_or_load_class(&fqn).is_some() {
                 continue;
             }
@@ -229,11 +229,10 @@ fn compute_attribute_ranges(content: &str) -> Vec<ByteRange> {
     let mut i = 0;
 
     while i < len {
-        // Look for `#[` (attribute start).
         if bytes[i] == b'#' && i + 1 < len && bytes[i + 1] == b'[' {
             let start = i;
             let mut depth: u32 = 1;
-            i += 2; // skip `#[`
+            i += 2;
             while i < len && depth > 0 {
                 match bytes[i] {
                     b'[' => depth += 1,
@@ -244,7 +243,7 @@ fn compute_attribute_ranges(content: &str) -> Vec<ByteRange> {
                         i += 1;
                         while i < len && bytes[i] != quote {
                             if bytes[i] == b'\\' {
-                                i += 1; // skip escaped char
+                                i += 1;
                             }
                             i += 1;
                         }

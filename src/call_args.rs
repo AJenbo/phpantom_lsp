@@ -220,7 +220,6 @@ mod tests {
     use super::*;
     use crate::atom::atom;
 
-    /// Build a parameter with the given name and required-ness.
     fn param(name: &str, is_required: bool) -> ParameterInfo {
         ParameterInfo {
             name: atom(name),

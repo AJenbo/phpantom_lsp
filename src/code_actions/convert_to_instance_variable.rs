@@ -152,18 +152,15 @@ fn collect_info(content: &str, cursor_offset: u32) -> Option<ConvertInfo> {
                 _ => return None,
             };
 
-            // Find the assignment at the cursor.
             let assignment_info =
                 find_assignment_in_block(block.statements.as_slice(), cursor_offset)?;
             let var_name = assignment_info.0;
-            // Skip $this.
             if var_name == "$this" {
                 return None;
             }
 
             let bare_name = var_name.strip_prefix('$').unwrap_or(&var_name);
 
-            // Check if property already exists.
             if property_exists(all_members, bare_name) {
                 return None;
             }
@@ -215,7 +212,6 @@ fn find_assignment_in_stmt(stmt: &Statement<'_>, cursor: u32) -> Option<(String,
         }
         Statement::Block(block) => find_assignment_in_block(block.statements.as_slice(), cursor),
         Statement::If(if_stmt) => {
-            // Check the if body.
             if let Some(r) = find_assignment_in_if_body(if_stmt, cursor) {
                 return Some(r);
             }
@@ -393,7 +389,6 @@ impl Backend {
                     _ => return None,
                 };
 
-                // Find the assignment at cursor.
                 let assignment_info =
                     find_assignment_in_block(block.statements.as_slice(), cursor_offset)?;
                 let var_name = assignment_info.0;

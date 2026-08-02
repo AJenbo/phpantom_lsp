@@ -86,7 +86,10 @@ full set of CI checks, testing conventions, and code style rules.
   cause rather than patching symptoms.
 - **Comments only where they add value.** Don't add obvious or
   boilerplate comments. Do comment tricky logic, non-obvious design
-  decisions, and workarounds. Follow existing conventions.
+  decisions, and workarounds. Follow existing conventions. Don't leave
+  tombstone comments (e.g. "this was moved to `foo.rs`", "previously
+  did X") — they stop being helpful the moment the commit lands and
+  just rot; git history is the record of what moved where.
   All files must end with a newline.
 
 ## Working on examples/demo.php

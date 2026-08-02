@@ -75,14 +75,10 @@ pub(crate) fn resolve_phpcs(
     bin_dir: Option<&str>,
 ) -> Option<ResolvedPhpcs> {
     match config.command.as_deref() {
-        // Explicitly disabled.
         Some("") => None,
-        // User-provided command.
         Some(cmd) => Some(ResolvedPhpcs {
             path: PathBuf::from(cmd),
         }),
-        // Auto-detect: `<bin_dir>/phpcs` under the workspace root,
-        // then `$PATH`.
         None => crate::process::auto_detect_binary(workspace_root, bin_dir, "phpcs")
             .map(|path| ResolvedPhpcs { path }),
     }
@@ -312,9 +308,6 @@ fn parse_phpcs_json(json_str: &str, file_path: &Path) -> Result<Vec<Diagnostic>,
     let mut diagnostics = Vec::new();
 
     if let Some(files) = output.get("files").and_then(|f| f.as_object()) {
-        // When using stdin mode with --stdin-path, PHPCS keys the output
-        // by the stdin-path value.  Try matching by the path, and if
-        // there's only one file entry, use it regardless of key.
         let messages = if files.len() == 1 {
             files.values().next()
         } else {

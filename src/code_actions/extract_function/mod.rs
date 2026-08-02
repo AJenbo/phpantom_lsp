@@ -73,13 +73,11 @@ impl Backend {
         let start_offset = position_to_byte_offset(content, params.range.start);
         let end_offset = position_to_byte_offset(content, params.range.end);
 
-        // Trim the selection to exclude leading/trailing whitespace.
         let (start, end) = match trim_selection(content, start_offset, end_offset) {
             Some(range) => range,
             None => return,
         };
 
-        // Validate that the selection covers complete statements.
         if !selection_covers_complete_statements(content, start, end) {
             return;
         }
@@ -356,10 +354,6 @@ impl Backend {
     }
 }
 
-/// Clean a resolved type string for use in a function signature.
-///
-/// Removes generic parameters (PHP doesn't support them in signatures),
-/// and simplifies union types that are too complex for type hints.
 /// Compute the raw (un-cleaned) return type hint string for PHPDoc
 /// enrichment purposes.  Unlike `build_return_type` (which strips
 /// generics for native hints), this preserves the full type so that

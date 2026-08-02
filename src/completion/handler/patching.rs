@@ -65,7 +65,6 @@ impl Backend {
 
         for (i, line) in content.lines().enumerate() {
             if i == line_idx {
-                // Insert `);` at the cursor column
                 let byte_col = line
                     .char_indices()
                     .nth(col)

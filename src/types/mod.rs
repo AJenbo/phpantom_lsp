@@ -2336,9 +2336,9 @@ pub(crate) struct FileContext {
     /// Classes extracted from the file's AST (from `uri_classes_index`).
     pub classes: Vec<Arc<ClassInfo>>,
     /// Import table mapping short names to fully-qualified names
-    /// (from `use_map`).
+    /// (from `file_imports`).
     pub use_map: HashMap<String, String>,
-    /// The file's declared namespace, if any (from `namespace_map`).
+    /// The file's declared namespace, if any (from `file_namespaces`).
     pub namespace: Option<String>,
     /// Per-file resolved names from `mago-names` (byte offset → FQN).
     ///

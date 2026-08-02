@@ -72,7 +72,6 @@ pub(crate) struct ParseInflight {
 }
 
 impl ParseInflight {
-    /// Create an empty inflight set.
     pub(crate) fn new() -> Self {
         Self {
             entries: parking_lot::Mutex::new(HashMap::new()),
@@ -707,10 +706,8 @@ impl Backend {
             }
         }
 
-        // Wrap each ClassInfo in Arc before inserting into the maps.
         let arc_classes: Vec<Arc<ClassInfo>> = classes.into_iter().map(Arc::new).collect();
 
-        // Check whether this URI already has been parsed before.
         // Used below to decide whether resolved-class cache eviction
         // is needed (only on re-parse, not first load).
         let was_already_parsed = self.parsed_uris.read().contains(uri);
@@ -740,7 +737,6 @@ impl Backend {
             Vec::new()
         };
 
-        // Record that this URI has been parsed.
         self.parsed_uris.write().insert(uri.to_owned());
 
         // Store in uri_classes_index for wait_for_cached_result (concurrent
@@ -990,7 +986,6 @@ impl Backend {
                             func.name.to_string()
                         };
 
-                        // Check if this is the function we're looking for.
                         if result.is_none()
                             && (fqn.eq_ignore_ascii_case(name)
                                 || func.name.eq_ignore_ascii_case(name))
@@ -1405,8 +1400,8 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
-    //! PHP resolves class, function, and method names case-insensitively
-    //! (B25).  These tests exercise each lookup phase with a casing that
+    //! PHP resolves class, function, and method names case-insensitively.
+    //! These tests exercise each lookup phase with a casing that
     //! differs from the declaration.
 
     use crate::Backend;

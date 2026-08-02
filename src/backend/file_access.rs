@@ -16,24 +16,19 @@ use crate::Backend;
 use crate::types::{ClassInfo, FileContext};
 
 impl Backend {
-    /// Look up a class by its (possibly namespace-qualified) name in the
-    /// in-memory `uri_classes_index`, without triggering any disk I/O.
+    /// Look up a class by its (possibly namespace-qualified) name via
+    /// `fqn_class_index`, without triggering any disk I/O.
     ///
     /// The `class_name` can be:
     ///   - A simple name like `"Customer"`
     ///   - A namespace-qualified name like `"Klarna\\Customer"`
     ///   - A fully-qualified name like `"\\Klarna\\Customer"` (leading `\` is stripped)
     ///
-    /// When a namespace prefix is present, the file's namespace (from
-    /// `namespace_map`) must match for the class to be returned.  This
-    /// prevents `"Demo\\PDO"` from matching the global `PDO` stub.
-    ///
     /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
     pub(crate) fn find_class_in_uri_classes_index(
         &self,
         class_name: &str,
     ) -> Option<Arc<ClassInfo>> {
-        // ── Fast path: O(1) lookup via fqn_index ──
         // For namespace-qualified names the FQN is the normalized name
         // itself.  For bare names (no backslash) the FQN equals the
         // short name, which is also stored in the index.
@@ -41,9 +36,6 @@ impl Backend {
             return Some(Arc::clone(cls));
         }
 
-        // The fqn_class_index is always populated before (or at the
-        // same time as) uri_classes_index, so if the O(1) lookup above
-        // missed, a linear scan would not find it either.
         None
     }
 
@@ -122,8 +114,8 @@ impl Backend {
     /// duplicated across the completion handler, definition resolver,
     /// implementation resolver, and variable definition modules.  Each of
     /// those sites used to have three nearly-identical blocks acquiring
-    /// `uri_classes_index`, `use_map`, and `namespace_map` locks and
-    /// extracting the entry for a given URI.
+    /// `uri_classes_index`, `file_imports`, and `file_namespaces` locks
+    /// and extracting the entry for a given URI.
     pub(crate) fn file_context(&self, uri: &str) -> FileContext {
         let classes = self
             .symbols
@@ -243,7 +235,6 @@ impl Backend {
     pub(crate) fn namespace_at_offset(&self, uri: &str, byte_offset: u32) -> Option<String> {
         let nmap = self.file_namespaces.read();
         let spans = nmap.get(uri)?;
-        // Try to find the namespace block containing the offset.
         for span in spans {
             if byte_offset >= span.start && byte_offset <= span.end {
                 return span.namespace.clone();
@@ -298,15 +289,15 @@ impl Backend {
         self.symbol_maps.read().get(uri).cloned()
     }
 
-    /// Remove a file's entries from `uri_classes_index`, `use_map`, and `namespace_map`.
+    /// Remove a file's entries from every per-URI map populated while it
+    /// was open (`uri_classes_index`, `symbol_maps`, `file_imports`,
+    /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
+    /// reference index.
     ///
-    /// This is the mirror of [`file_context`](Self::file_context): where that
-    /// method *reads* the three maps, this method *clears* them for a given URI.
     /// Called from `did_close` to clean up state when a file is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
-        // Drop per-file maps that are only needed while the file is
-        // open.  uri_classes_index is redundant with fqn_class_index once indexing is
-        // complete — GTD falls back to fqn_uri_index + parse_and_cache_file
+        // uri_classes_index is redundant with fqn_class_index once indexing
+        // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
         // when the uri_classes_index entry is missing.
         self.symbols.uri_classes_index.write().remove(uri);
         self.symbol_maps.write().remove(uri);

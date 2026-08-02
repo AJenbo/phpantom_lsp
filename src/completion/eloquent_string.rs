@@ -105,7 +105,6 @@ enum EloquentStringKind {
     Column,
 }
 
-/// Context extracted when the cursor is inside an Eloquent string argument.
 /// Generic context for a cursor inside a string argument of a
 /// function or method call.  Shared by Eloquent string completion
 /// and `model-property<Model>` completion.
@@ -247,10 +246,6 @@ fn find_matching_open_paren(text: &str) -> Option<usize> {
                 }
                 depth -= 1;
             }
-            b'\n' => {
-                // Allow multi-line, but limit scan depth.
-                // Count newlines; bail after 5 lines.
-            }
             _ => {}
         }
     }
@@ -327,7 +322,6 @@ impl Backend {
             &class_loader,
         )?;
 
-        // Verify it's actually an Eloquent model.
         if !extends_eloquent_model(&model_class, &class_loader) {
             return None;
         }
@@ -367,9 +361,8 @@ impl Backend {
                 crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset)?;
             Some(Arc::new(current_class.clone()))
         } else if subject.starts_with('$') {
-            // Variable — resolve its type. Use a simplified approach:
-            // look for the resolved type in the class hierarchy.
-            // For now, try to resolve via the forward walker.
+            // Variable — resolve its type, then check both `Builder<Model>`
+            // results (from query builder chains) and direct model instances.
             let cursor_offset = position_to_offset(content, position);
             let default_class = ClassInfo::default();
             let current_class =
@@ -407,22 +400,18 @@ impl Backend {
     /// Resolve a short/relative class name to FQN using use statements.
     fn resolve_class_name_to_fqn(&self, name: &str, ctx: &FileContext) -> Option<String> {
         let clean = name.trim_start_matches('\\');
-        // Check use map.
         if let Some(fqn) = ctx.use_map.get(clean) {
             return Some(fqn.clone());
         }
-        // If it looks like a FQN already.
         if clean.contains('\\') {
             return Some(clean.to_string());
         }
-        // Try prepending the file namespace.
         if let Some(ref ns) = ctx.namespace {
             let fqn = format!("{}\\{}", ns, clean);
             if self.find_or_load_class(&fqn).is_some() {
                 return Some(fqn);
             }
         }
-        // Try bare name.
         if self.find_or_load_class(clean).is_some() {
             return Some(clean.to_string());
         }
@@ -472,7 +461,6 @@ impl Backend {
         // Collect relationship methods from the current model.
         let mut items = Vec::new();
         for method in current_model.methods.iter() {
-            // Only public methods.
             if method.visibility != crate::types::Visibility::Public {
                 continue;
             }
@@ -489,7 +477,6 @@ impl Backend {
             if RELATIONSHIP_BUILDER_METHODS.contains(&method_name.as_str()) {
                 continue;
             }
-            // Filter by partial.
             if !current_partial.is_empty()
                 && !method_name
                     .to_lowercase()

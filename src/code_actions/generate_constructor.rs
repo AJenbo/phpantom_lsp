@@ -42,7 +42,6 @@ struct QualifyingProperty {
     /// Visibility keyword (`"public"`, `"protected"`, `"private"`).
     /// Falls back to `"public"` when none is declared.
     visibility: &'static str,
-    /// Whether the property has the `readonly` modifier.
     is_readonly: bool,
     /// Byte span of the entire property declaration (for deletion in the
     /// promoted variant).  `(start, end)` where `end` is past the trailing
@@ -97,24 +96,19 @@ impl Backend {
                     _ => return None,
                 };
 
-                // If a __construct already exists, do not offer the action.
                 if has_constructor(all_members) {
                     return None;
                 }
 
                 let trivia = program.trivia.as_slice();
 
-                // Collect qualifying properties (non-static).
                 let props = collect_qualifying_properties(all_members, content, trivia);
                 if props.is_empty() {
                     return None;
                 }
 
-                // Detect indentation from existing class members.
                 let indent = detect_indent_from_members(all_members, content);
 
-                // Insertion point: after the last property declaration,
-                // before any methods or other members.
                 let insert_offset = find_insertion_offset(all_members, content);
                 Some((props, indent, insert_offset))
             },
@@ -160,7 +154,6 @@ impl Backend {
             // Sort deletions back-to-front so byte offsets stay valid.
             let mut edits: Vec<TextEdit> = Vec::new();
 
-            // Delete each qualifying property declaration.
             for prop in props.iter().rev() {
                 let start = offset_to_position(content, prop.declaration_span.0);
                 let end = offset_to_position(content, prop.declaration_span.1);
@@ -229,16 +222,13 @@ fn collect_qualifying_properties<'a>(
             _ => continue,
         };
 
-        // Skip static properties.
         if is_static(member_prop) {
             continue;
         }
 
-        // Extract visibility and readonly from modifiers.
         let visibility = extract_visibility(plain.modifiers.iter());
         let is_readonly = has_readonly(plain.modifiers.iter());
 
-        // Extract the native type hint for the property.
         let native_hint = plain.hint.as_ref().map(|h| extract_hint_type(h));
 
         // Try to get a docblock @var type if there's no native hint
@@ -257,7 +247,6 @@ fn collect_qualifying_properties<'a>(
             let var_name = bytes_to_str(item.variable().name);
             let bare_name = var_name.strip_prefix('$').unwrap_or(var_name);
 
-            // Determine the type hint for the parameter.
             let type_hint = if let Some(ref hint) = native_hint {
                 Some(hint.clone())
             } else if let Some(ref doc_type) = docblock_type {
@@ -272,7 +261,6 @@ fn collect_qualifying_properties<'a>(
                 None
             };
 
-            // Extract default value if the property has one.
             let default_value = if let PropertyItem::Concrete(concrete) = item {
                 let span = concrete.value.span();
                 let start = span.start.offset as usize;
@@ -319,7 +307,6 @@ fn is_simple_php_type(ty: &PhpType) -> bool {
 /// properties before any methods, it's inserted after the class opening
 /// brace.
 fn find_insertion_offset<'a>(members: &Sequence<'a, ClassLikeMember<'a>>, content: &str) -> usize {
-    // Find the end of the last property declaration.
     let mut last_property_end: Option<u32> = None;
     let mut first_non_property_start: Option<u32> = None;
 
@@ -357,7 +344,6 @@ fn find_insertion_offset<'a>(members: &Sequence<'a, ClassLikeMember<'a>>, conten
     }
 }
 
-/// Find the start of the line containing the given offset.
 fn find_line_start(content: &str, offset: usize) -> usize {
     content[..offset]
         .rfind('\n')
@@ -459,15 +445,12 @@ fn build_promoted_constructor(props: &[QualifyingProperty], indent: &str) -> Str
         param.push_str(indent);
         param.push_str(indent);
 
-        // Visibility modifier.
         param.push_str(prop.visibility);
 
-        // Readonly modifier.
         if prop.is_readonly {
             param.push_str(" readonly");
         }
 
-        // Type hint.
         if let Some(ref hint) = prop.type_hint {
             param.push(' ');
             param.push_str(&hint.to_string());
@@ -514,14 +497,12 @@ fn extract_visibility<'a>(modifiers: impl Iterator<Item = &'a Modifier<'a>>) -> 
     "public"
 }
 
-/// Check if the modifier list includes `readonly`.
 fn has_readonly<'a>(modifiers: impl Iterator<Item = &'a Modifier<'a>>) -> bool {
     modifiers
         .into_iter()
         .any(|m| matches!(m, Modifier::Readonly(_)))
 }
 
-/// Check if any modifier is `static`.
 fn is_static(property: &Property<'_>) -> bool {
     property.modifiers().iter().any(|m| m.is_static())
 }
@@ -823,7 +804,6 @@ mod tests {
         let php = "<?php\nclass Foo {\n    public function __construct() {}\n}";
         let program = mago_syntax::parser::parse_file_content(arena, file_id, php.as_bytes());
 
-        // Find the class and check for constructor.
         let ctx = find_cursor_context(&program.statements, 20);
         if let CursorContext::InClassLike { all_members, .. } = &ctx {
             assert!(has_constructor(all_members));

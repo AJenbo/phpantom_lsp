@@ -1,32 +1,33 @@
-/// Array shape key completion.
-///
-/// This module detects when the cursor is inside an array access expression
-/// with a string key (e.g. `$config['`) and offers completion items for
-/// the known keys of the array shape type annotation.
-///
-/// It also provides helpers for resolving the raw type annotation of a
-/// variable so that array shape entries can be extracted.
-///
-/// # Supported annotation sources
-///
-/// - `/** @var array{name: string, age: int} $var */` — inline `@var`
-/// - `@param array{name: string, age: int} $param` — method/function parameter
-/// - `@return array{name: string}` — return type of a function/method call
-///   assigned to the variable
-/// - Property type annotations (`@var` on class properties)
-/// - `$_SERVER` superglobal — hardcoded key completions for all 40 well-known keys
-///
-/// # Auto-close handling
-///
-/// Completion items use `text_edit` with a range that covers any trailing
-/// auto-inserted characters (closing quote + `]`) placed by the IDE.
-/// This prevents duplicates like `$config['host']]` or `$config['host']']`.
-///
-/// # Nested array shapes
-///
-/// Chained array accesses like `$response['meta']['` are supported.
-/// The detector collects prefix keys (`["meta"]`) and the resolver walks
-/// through each level of the shape to offer keys from the inner type.
+//! Array shape key completion.
+//!
+//! This module detects when the cursor is inside an array access expression
+//! with a string key (e.g. `$config['`) and offers completion items for
+//! the known keys of the array shape type annotation.
+//!
+//! It also provides helpers for resolving the raw type annotation of a
+//! variable so that array shape entries can be extracted.
+//!
+//! # Supported annotation sources
+//!
+//! - `/** @var array{name: string, age: int} $var */` — inline `@var`
+//! - `@param array{name: string, age: int} $param` — method/function parameter
+//! - `@return array{name: string}` — return type of a function/method call
+//!   assigned to the variable
+//! - Property type annotations (`@var` on class properties)
+//! - `$_SERVER` superglobal — hardcoded key completions for all 40 well-known keys
+//!
+//! # Auto-close handling
+//!
+//! Completion items use `text_edit` with a range that covers any trailing
+//! auto-inserted characters (closing quote + `]`) placed by the IDE.
+//! This prevents duplicates like `$config['host']]` or `$config['host']']`.
+//!
+//! # Nested array shapes
+//!
+//! Chained array accesses like `$response['meta']['` are supported.
+//! The detector collects prefix keys (`["meta"]`) and the resolver walks
+//! through each level of the shape to offer keys from the inner type.
+
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
@@ -360,7 +361,6 @@ impl Backend {
                 None => continue, // skip positional entries without explicit keys
             };
 
-            // Filter by partial key prefix.
             if !ctx.partial_key.is_empty()
                 && !key_name
                     .to_lowercase()
@@ -408,7 +408,6 @@ impl Backend {
         let mut items = Vec::new();
 
         for (sort_idx, &(key, detail)) in SERVER_KEYS.iter().enumerate() {
-            // Filter by partial key prefix.
             if !ctx.partial_key.is_empty()
                 && !key
                     .to_lowercase()

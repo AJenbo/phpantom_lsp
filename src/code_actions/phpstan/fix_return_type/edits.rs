@@ -55,7 +55,6 @@ pub(super) fn build_strip_return_expr_edit(content: &str, diag_line: usize) -> O
         .map(|l| l.len() + 1) // +1 for newline
         .sum();
 
-    // The return statement starts at `return` keyword.
     let return_byte = line_start_byte + return_col;
 
     // Walk forward from after `return` to find the terminating `;`,
@@ -67,7 +66,6 @@ pub(super) fn build_strip_return_expr_edit(content: &str, diag_line: usize) -> O
     // Build the replacement range: from `return` keyword through `;`.
     let stmt_end_byte = semi_byte + 1;
 
-    // Compute line/col for the start (the `return` keyword).
     let start_line = diag_line as u32;
     let start_char = return_col as u32;
 
@@ -94,7 +92,6 @@ pub(super) fn build_strip_return_expr_edit(content: &str, diag_line: usize) -> O
         });
     }
 
-    // Capture the indentation of the return line.
     let indent = &line_text[..return_col];
 
     // Check whether this return is the last statement in the function
@@ -678,8 +675,10 @@ fn is_last_statement_in_function(content: &str, after_semi: usize) -> bool {
 /// correct backward scan would require re-parsing from the top of the
 /// file.  This simple heuristic works for typical PHP code.
 pub(super) fn find_function_open_brace_line(lines: &[&str], start_line: usize) -> Option<usize> {
-    // Track brace depth: we start inside the function body (depth 1)
-    // and look backward for the opening `{`.
+    // Scan backward tracking brace balance: `}` closes a nested block
+    // (increments), `{` opens one (decrements). The function's own
+    // opening brace is the first one that tips the balance negative,
+    // i.e. an opening brace with no matching close before it.
     let mut depth: i32 = 0;
     for i in (0..start_line).rev() {
         let line = lines[i];
@@ -813,11 +812,8 @@ fn find_return_type_edit(
         return None;
     }
 
-    // Convert the offset within `between` to a line/col position.
-    // The colon_pos tells us where `:` is; the type starts at
-    // `type_text_start` and ends at `type_text_start + type_len`.
-
-    // Map `colon_pos` back to an absolute line/col.
+    // Map `colon_pos` and the type's end offset (both within `between`)
+    // back to absolute line/col positions in the original source.
     let colon_abs = map_between_offset_to_position(lines, paren_line, paren_col, colon_pos)?;
     let type_end_abs =
         map_between_offset_to_position(lines, paren_line, paren_col, type_text_start + type_len)?;
@@ -873,7 +869,8 @@ fn find_and_remove_return_tag(lines: &[&str], func_line: usize) -> Option<TextEd
     }
 
     // Walk backward from the line before the function to find the
-    // docblock.  Skip attribute lines like `#[Override]`.
+    // docblock end.  Skip attribute lines like `#[Override]` and
+    // blank lines between the function and the docblock.
     let mut doc_end_line = None;
     for i in (0..func_line).rev() {
         let trimmed = lines[i].trim();
@@ -881,7 +878,6 @@ fn find_and_remove_return_tag(lines: &[&str], func_line: usize) -> Option<TextEd
             doc_end_line = Some(i);
             break;
         }
-        // Skip attributes and blank lines between function and docblock.
         if trimmed.starts_with("#[") || trimmed.is_empty() {
             continue;
         }
@@ -891,7 +887,6 @@ fn find_and_remove_return_tag(lines: &[&str], func_line: usize) -> Option<TextEd
 
     let doc_end_line = doc_end_line?;
 
-    // Find the start of the docblock.
     let mut doc_start_line = doc_end_line;
     for i in (0..=doc_end_line).rev() {
         let trimmed = lines[i].trim();
@@ -905,7 +900,6 @@ fn find_and_remove_return_tag(lines: &[&str], func_line: usize) -> Option<TextEd
         break;
     }
 
-    // Look for a `@return` line within the docblock.
     let return_line =
         (doc_start_line..=doc_end_line).find(|&i| lines[i].trim().contains("@return"))?;
 

@@ -33,9 +33,7 @@
 //! the same subject text (e.g. 60 occurrences of `$this->assertEquals`,
 //! `$this->assertTrue`, etc.).  Without caching, each span triggers the
 //! full resolution pipeline including `resolve_variable_types` which
-//! re-parses the entire file via `with_parsed_program`.  For unresolved
-//! subjects the secondary helpers (`resolve_scalar_subject_type`,
-//! `resolve_unresolvable_class_subject`) add further re-parses.
+//! re-parses the entire file via `with_parsed_program`.
 //!
 //! To avoid this, we cache the resolution outcome per unique
 //! `(subject_text, access_kind, scope_key)` tuple, where `scope_key`
@@ -683,11 +681,9 @@ impl Backend {
     /// Check whether a member exists on the resolved classes and emit
     /// a diagnostic if it does not.
     ///
-    /// Returns `true` if a diagnostic was emitted (the member was not
-    /// found), `false` otherwise.
-    ///
-    /// Extracted from the main loop to keep `collect_unknown_member_diagnostics`
-    /// readable.
+    /// Returns the check result (whether the access is fine, breaks the
+    /// type chain, or is recoverable via a magic-method fallback) along
+    /// with any diagnostics to emit.
     #[allow(clippy::too_many_arguments)]
     fn check_member_on_resolved_classes(
         &self,
@@ -920,14 +916,6 @@ fn is_downstream_of_broken_chain(subject_text: &str, broken_prefixes: &[String])
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Check whether a member exists on the fully-resolved class.
-///
-/// For method calls, checks `methods`.  For non-method static access,
-/// checks constants first then static properties.  For instance property
-/// access, checks properties.
-///
-/// Method name matching is case-insensitive (PHP methods are
-/// case-insensitive).  Property and constant matching is case-sensitive.
 /// Relaxed member check for docblock references (`@see Class::member`).
 ///
 /// PHPDoc `@see` uses `::` notation for all members (instance properties,
@@ -951,6 +939,14 @@ fn member_exists_relaxed(class: &ClassInfo, member_name: &str, _is_method_call: 
     class.constants.iter().any(|c| c.name == member_name)
 }
 
+/// Check whether a member exists on the fully-resolved class.
+///
+/// For method calls, checks `methods`.  For non-method static access,
+/// checks constants first then static properties.  For instance property
+/// access, checks properties.
+///
+/// Method name matching is case-insensitive (PHP methods are
+/// case-insensitive).  Property and constant matching is case-sensitive.
 pub(crate) fn member_exists(
     class: &ClassInfo,
     member_name: &str,
@@ -967,8 +963,9 @@ pub(crate) fn member_exists(
     }
 
     if is_static {
-        // Static property or constant.
-        // Constants first (most common in `Class::CONST` usage).
+        // Static property or constant. Constants first (most common in
+        // `Class::CONST` usage) — this also matches enum cases, which
+        // are stored as constants.
         if class.constants.iter().any(|c| c.name == member_name) {
             return true;
         }
@@ -980,7 +977,6 @@ pub(crate) fn member_exists(
         }) {
             return true;
         }
-        // Also check enum cases which are stored as constants.
         return false;
     }
 

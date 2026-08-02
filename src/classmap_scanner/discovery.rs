@@ -312,12 +312,10 @@ fn collect_package_sources(
         pkg_name.unwrap_or("unknown/unknown").to_string(),
     ));
 
-    // Extract autoload section
     let Some(autoload) = package.get("autoload") else {
         return out;
     };
 
-    // PSR-4 entries
     if let Some(psr4) = autoload.get("psr-4").and_then(|p| p.as_object()) {
         for paths in psr4.values() {
             for dir_str in value_to_strings(paths) {
@@ -361,7 +359,6 @@ fn collect_package_sources(
         }
     }
 
-    // Classmap entries
     if let Some(cm) = autoload.get("classmap").and_then(|c| c.as_array()) {
         for entry in cm {
             if let Some(dir_str) = entry.as_str() {

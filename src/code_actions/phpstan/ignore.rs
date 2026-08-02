@@ -41,8 +41,8 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        // Look at the diagnostics attached to this code action request
-        // and also at all cached PHPStan diagnostics for the file.
+        // Look at all cached PHPStan diagnostics for the file; overlap
+        // with the requested range is checked per-diagnostic below.
         let phpstan_diags: Vec<Diagnostic> = {
             let cache = self.phpstan_tool.last_diags.lock();
             cache.get(uri).cloned().unwrap_or_default()
@@ -207,7 +207,6 @@ impl Backend {
 /// appended to the existing comma-separated list.  Otherwise, a
 /// `// @phpstan-ignore <id>` comment is inserted at the end of the line.
 fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: &str) -> TextEdit {
-    // Check if line already has a @phpstan-ignore comment.
     if let Some(ignore_pos) = line_text.find("@phpstan-ignore") {
         let after_tag = &line_text[ignore_pos + "@phpstan-ignore".len()..];
 
@@ -222,8 +221,6 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
         // a closing comment delimiter, parenthesis, or end of line.
         let ids_start = ignore_pos + "@phpstan-ignore".len();
         let ids_text = &line_text[ids_start..];
-
-        // Trim leading whitespace after the tag.
         let ids_trimmed = ids_text.trim_start();
         let ids_offset = ids_text.len() - ids_trimmed.len();
 
@@ -240,7 +237,6 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
 
         let existing_ids = ids_trimmed[..ids_end].trim();
 
-        // Check if identifier is already present.
         if existing_ids.split(',').any(|id| id.trim() == identifier) {
             // Already ignored — return a no-op edit.
             return TextEdit {
@@ -258,7 +254,6 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
         let insert_byte = ids_start + ids_offset + ids_end;
         let insert_col = crate::text_position::byte_offset_to_utf16_col(line_text, insert_byte);
 
-        // Check if we need a comma separator.
         let separator = if existing_ids.is_empty() { "" } else { ", " };
 
         return TextEdit {
@@ -338,10 +333,9 @@ fn build_remove_ignore_edit(
         if let Some(ignore_pos) = line_text.find("@phpstan-ignore") {
             let after_tag = &line_text[ignore_pos + "@phpstan-ignore".len()..];
 
-            // Don't touch `@phpstan-ignore-line` / `@phpstan-ignore-next-line`.
+            // `-line` / `-next-line` variants have no identifier list to
+            // trim, so always remove the whole comment.
             if after_tag.starts_with("-line") || after_tag.starts_with("-next-line") {
-                // But if we specifically want to remove the whole thing,
-                // we can handle it below.
                 return build_remove_whole_ignore(content, check_line, line_text, ignore_pos);
             }
 
@@ -443,7 +437,6 @@ fn build_remove_whole_ignore(
             line_text.len()
         };
 
-        // Trim trailing whitespace before the comment too.
         let trim_start = before_comment.len();
 
         Some(TextEdit {

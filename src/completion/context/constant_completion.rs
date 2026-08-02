@@ -59,6 +59,8 @@ fn build_constant_item(
 impl Backend {
     // ─── Constant name completion ───────────────────────────────────
 
+    const MAX_CONSTANT_COMPLETIONS: usize = 100;
+
     /// Build completion items for standalone constants (`define()` constants)
     /// from all known sources.
     ///
@@ -74,9 +76,6 @@ impl Backend {
     /// Returns `(items, is_incomplete)`.  When the total number of
     /// matching constants exceeds [`MAX_CONSTANT_COMPLETIONS`], the result
     /// is truncated and `is_incomplete` is `true`.
-    const MAX_CONSTANT_COMPLETIONS: usize = 100;
-
-    /// Build completion items for global constants matching `prefix`.
     pub(crate) fn build_constant_completions(
         &self,
         prefix: &str,

@@ -298,7 +298,6 @@ impl Backend {
                     }
                     let tt = self.resolve_declaration_token_type(name, uri, ctx);
                     let mut mods = TM_DECLARATION;
-                    // Check if the declared class itself is deprecated or abstract.
                     mods |= self.resolve_class_declaration_modifiers(name, uri, ctx);
                     (tt, mods)
                 }
@@ -352,8 +351,6 @@ impl Backend {
                     if mode == SemanticTokensMode::Contextual {
                         continue;
                     }
-                    // Determine if it's a method, property, or constant
-                    // by checking the source text at the span.
                     let tt = self.classify_member_declaration(name, span.start, uri, ctx);
                     let mut mods = TM_DECLARATION;
                     if *is_static {
@@ -802,19 +799,16 @@ impl Backend {
             if offset < class.start_offset || offset > class.end_offset {
                 continue;
             }
-            // Check methods.
             for method in &class.methods {
                 if method.name == name {
                     return TT_METHOD;
                 }
             }
-            // Check properties.
             for prop in &class.properties {
                 if prop.name == name {
                     return TT_PROPERTY;
                 }
             }
-            // Check constants / enum cases.
             for constant in &class.constants {
                 if constant.name == name {
                     return TT_ENUM_MEMBER;
@@ -834,7 +828,6 @@ impl Backend {
         _uri: &str,
         _ctx: &crate::types::FileContext,
     ) -> (u32, u32) {
-        // Check if this is a property declaration.
         if let Some(kind) = symbol_map.var_def_kind_at(name, offset) {
             match kind {
                 VarDefKind::Property => return (TT_PROPERTY, TM_DECLARATION),
@@ -843,8 +836,6 @@ impl Backend {
             }
         }
 
-        // Check if any VarDefSite marks this variable as a parameter
-        // in the current scope.
         let scope = symbol_map.find_enclosing_scope(offset);
         for def in &symbol_map.var_defs {
             if def.name == name && def.scope_start == scope {

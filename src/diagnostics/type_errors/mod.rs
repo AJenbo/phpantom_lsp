@@ -484,13 +484,11 @@ impl Backend {
                     .clone()
             };
 
-            // Resolve the call expression to a callable target.
             let resolved = match resolved {
                 Some(r) => r,
                 None => continue,
             };
 
-            // Get resolved argument types for this call site.
             let resolved_args = match resolved_map.get(&call_site.args_start) {
                 Some(c) => c,
                 None => continue,
@@ -516,7 +514,6 @@ impl Backend {
                 class_loader(fqn).and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
             });
 
-            // Check each argument against its parameter.
             for (arg_idx, resolved_arg) in resolved_args.args.iter().enumerate() {
                 // Skip spread arguments.
                 if call_site.spread_arg_indices.contains(&(arg_idx as u32)) {
@@ -596,7 +593,6 @@ impl Backend {
                     param_type
                 };
 
-                // Check compatibility.
                 if is_type_compatible(arg_type, effective_param_type, &class_loader, strict_types) {
                     // Even when the array types are compatible, validate
                     // string literals against model-property<Model> when
@@ -683,7 +679,6 @@ impl Backend {
                     }
                 }
 
-                // Emit diagnostic.
                 let range = match self.offset_range_to_lsp_range(
                     uri,
                     content,

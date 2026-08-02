@@ -41,7 +41,6 @@ struct HookableProperty {
 
 // ── Which hooks already exist ───────────────────────────────────────────────
 
-/// Check which hook names already exist on a hooked property.
 fn existing_hook_names<'a>(property: &Property<'a>) -> (bool, bool) {
     match property {
         Property::Hooked(hooked) => {
@@ -60,14 +59,12 @@ fn existing_hook_names<'a>(property: &Property<'a>) -> (bool, bool) {
     }
 }
 
-/// Check if the modifier list includes `readonly`.
 fn has_readonly<'a>(modifiers: impl Iterator<Item = &'a Modifier<'a>>) -> bool {
     modifiers
         .into_iter()
         .any(|m| matches!(m, Modifier::Readonly(_)))
 }
 
-/// Check if the modifier list includes `static`.
 fn has_static<'a>(modifiers: impl Iterator<Item = &'a Modifier<'a>>) -> bool {
     modifiers.into_iter().any(|m| m.is_static())
 }
@@ -87,15 +84,6 @@ fn build_hooked_property_text(
     is_interface: bool,
     existing_hooks_text: Option<&str>,
 ) -> String {
-    // For a plain property, we rewrite the whole declaration.
-    // For a hooked property, we insert into the existing hook block.
-    //
-    // The approach for plain properties:
-    //   Strip the trailing semicolon and add a hook block.
-    //
-    // The approach for hooked properties (adding missing hook):
-    //   Insert the new hook(s) before the closing brace.
-
     let mut result = String::new();
 
     if let Some(existing) = existing_hooks_text {
@@ -106,7 +94,6 @@ fn build_hooked_property_text(
         let close_brace_pos = trimmed.rfind('}');
         if let Some(pos) = close_brace_pos {
             result.push_str(&trimmed[..pos]);
-            // Add the new hooks.
             if gen_get {
                 result.push_str(&build_single_hook("get", prop, indent, is_interface));
             }
@@ -298,7 +285,6 @@ impl Backend {
                     return None;
                 }
 
-                // Check which hooks already exist.
                 let (has_get, has_set) = existing_hook_names(property);
                 let can_get = !has_get;
                 let can_set = !has_set;

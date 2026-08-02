@@ -120,10 +120,8 @@ impl Backend {
     ) -> Option<WorkspaceEdit> {
         let uri = &data.uri;
 
-        // Parse the extra data to recover the diagnostic line.
         let diag_line = data.extra.get("diagnostic_line")?.as_u64()? as usize;
 
-        // Find the insertion point for the attribute.
         let insertion = find_method_insertion_point(content, diag_line)?;
 
         // If Override was added since the action was offered, bail out.
@@ -131,7 +129,6 @@ impl Backend {
             return None;
         }
 
-        // Look up the use_map and namespace_map for the URI.
         let file_use_map: HashMap<String, String> = self.file_use_map(uri);
         let file_namespace: Option<String> = self.first_file_namespace(uri);
 

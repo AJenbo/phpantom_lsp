@@ -376,7 +376,6 @@ pub(crate) fn find_brace_match_line(
                 continue;
             }
 
-            // Normal code
             if b == b'/' && i + 1 < len {
                 if bytes[i + 1] == b'/' {
                     in_line_comment = true;

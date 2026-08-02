@@ -157,8 +157,6 @@ impl Backend {
 
             Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {
-            // Single-import removal: use the diagnostic range from the
-            // action to build the deletion edit.
             let diag = &diags[0];
             let removed_import_lines = HashSet::from([diag.range.start.line as usize]);
             let removal_edit =
@@ -433,7 +431,6 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
     // If no trailing comma, look for a leading comma+whitespace.
     let before_member = &line[..member_start_in_line];
     let removal_start = if removal_end == end_byte {
-        // No trailing comma — remove leading comma.
         let trimmed = before_member.trim_end();
         if trimmed.ends_with(',') {
             trimmed.len() - 1
@@ -454,10 +451,9 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
         .filter(|m| !m.trim().is_empty())
         .count();
     if member_count <= 1 {
-        return None; // Fall through to full-line deletion.
+        return None;
     }
 
-    // Verify the member text is plausible (non-empty).
     if member_text.trim().is_empty() {
         return None;
     }
@@ -535,7 +531,6 @@ mod tests {
         let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n";
         let range = Range::new(Position::new(1, 4), Position::new(1, 11));
         let edit = build_single_line_deletion_edit(content, &range);
-        // Should delete the entire "use Foo\Bar;\n" line.
         let start = lsp_position_to_byte_offset(content, edit.range.start);
         let end = lsp_position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Foo\\Bar;\n");

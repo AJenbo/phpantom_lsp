@@ -77,7 +77,6 @@ impl Backend {
                 continue;
             }
 
-            // Skip calls with no arguments.
             if call_site.arg_count == 0 {
                 continue;
             }
@@ -509,16 +508,12 @@ impl Backend {
 
             let param = &params[param_idx];
 
-            // Build the hint label parts.
             let mut label_parts: Vec<String> = Vec::new();
 
-            // By-reference indicator.
             if param.is_reference {
                 label_parts.push("&".to_string());
             }
 
-            // Parameter name hint.
-            // Strip the `$` prefix for a cleaner display.
             let param_display_name = param.name.strip_prefix('$').unwrap_or(&param.name);
 
             // Skip the hint when the argument is a simple variable whose
@@ -563,8 +558,6 @@ impl Backend {
         }
     }
 
-    /// Emit a return-type inlay hint for a function / method / closure /
-    /// arrow function that lacks an explicit return type declaration.
     /// Emit parameter-type and return-type inlay hints for closures and
     /// arrow functions whose types can be inferred from the callable context.
     fn emit_closure_hints(

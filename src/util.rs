@@ -43,12 +43,10 @@ pub(crate) fn resolve_to_fqn(
     use_map: &HashMap<String, String>,
     namespace: &Option<String>,
 ) -> String {
-    // Already fully-qualified with leading `\` — strip and return.
     if let Some(stripped) = name.strip_prefix('\\') {
         return stripped.to_string();
     }
 
-    // Unqualified name (no backslash) — try use_map, then namespace, then bare.
     if !name.contains('\\') {
         if let Some(fqn) = use_map.get(name) {
             return fqn.clone();
@@ -59,7 +57,6 @@ pub(crate) fn resolve_to_fqn(
         return name.to_string();
     }
 
-    // Qualified name (contains `\` but no leading `\`).
     let first_segment = name.split('\\').next().unwrap_or(name);
     if let Some(fqn_prefix) = use_map.get(first_segment) {
         let rest = &name[first_segment.len()..];

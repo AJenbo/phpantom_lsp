@@ -6,7 +6,10 @@
 /// - **class_completion**: Class name completions (class, interface, trait, enum)
 /// - **constant_completion**: Global constant name completions
 /// - **function_completion**: Standalone function name completions
+/// - **keyword_completion**: PHP keyword completions for non-member expression/statement contexts
 /// - **namespace_completion**: Namespace declaration completions
+/// - **override_completion**: Parent method/property/constant override completion in a class body
+/// - **symbol_ranking**: Shared sort-text helpers for ranking flat symbol completions
 /// - **type_hint_completion**: Type completion inside function/method parameter lists,
 ///   return types, and property declarations
 pub(crate) mod catch_completion;

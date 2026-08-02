@@ -107,8 +107,9 @@ pub(super) fn classify_declaration(text: &str) -> DocblockContext {
 /// Parse the declaration after the trigger to extract parameter names,
 /// type hints, return types, etc.
 pub(super) fn parse_declaration_info(text: &str) -> SymbolInfo {
-    // Reuse the existing parser from the context module, but we need
-    // to work from the raw text directly.
+    // Unlike `context::parse_symbol_info`, there's no closing `*/` to
+    // skip past here — the trigger fires before the docblock exists, so
+    // `text` starts directly at the declaration.
     let mut info = SymbolInfo::default();
 
     // Collect the declaration — may span multiple lines until `{` or `;`.
@@ -147,7 +148,6 @@ pub(super) fn parse_declaration_info(text: &str) -> SymbolInfo {
         return info;
     }
 
-    // Check if it's a function/method.
     if let Some(func_pos) = find_keyword_pos(decl, "function") {
         let after_func = &decl[func_pos + 8..].trim_start();
 

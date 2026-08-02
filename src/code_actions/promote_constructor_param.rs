@@ -33,8 +33,8 @@ struct PromotionCandidate {
     /// The text to insert before the parameter's type hint (or variable
     /// if there is no type hint) — e.g. `"private "`, `"public readonly "`.
     prefix: String,
-    /// Byte span of the property declaration to delete (includes any
-    /// preceding docblock and trailing newline).
+    /// Byte span of the property declaration to delete (includes leading
+    /// whitespace on its line and trailing newline).
     property_delete_start: usize,
     property_delete_end: usize,
     /// Byte span of the assignment statement to delete (includes leading
@@ -85,7 +85,6 @@ impl Backend {
 
         let mut edits = Vec::with_capacity(4);
 
-        // 1. Delete the property declaration.
         edits.push(TextEdit {
             range: crate::text_position::byte_range_to_lsp_range(
                 content,
@@ -95,7 +94,6 @@ impl Backend {
             new_text: String::new(),
         });
 
-        // 2. Delete the assignment statement.
         edits.push(TextEdit {
             range: crate::text_position::byte_range_to_lsp_range(
                 content,
@@ -105,7 +103,6 @@ impl Backend {
             new_text: String::new(),
         });
 
-        // 3. Insert the visibility prefix before the parameter.
         edits.push(TextEdit {
             range: crate::text_position::byte_range_to_lsp_range(
                 content,
@@ -115,7 +112,6 @@ impl Backend {
             new_text: candidate.prefix,
         });
 
-        // 4. Carry over default value from property if needed.
         if let (Some(default_text), Some(offset)) =
             (candidate.carry_default, candidate.default_insert_offset)
         {
@@ -155,12 +151,10 @@ fn find_promotion_candidate(
         _ => return None,
     };
 
-    // Must be __construct.
     if method.name.value != b"__construct" {
         return None;
     }
 
-    // Must have a concrete body.
     let body = match &method.body {
         MethodBody::Concrete(block) => block,
         MethodBody::Abstract(_) => return None,
@@ -172,7 +166,6 @@ fn find_promotion_candidate(
         cursor >= span.start.offset && cursor <= span.end.offset
     })?;
 
-    // Must not already be promoted.
     if param.is_promoted_property() {
         return None;
     }
@@ -186,7 +179,6 @@ fn find_promotion_candidate(
     // Strip the leading `$` for property matching.
     let bare_name = param_name.strip_prefix('$').unwrap_or(param_name);
 
-    // Find the matching property declaration in the class body.
     let (property, plain_prop) = find_matching_property(all_members, bare_name)?;
 
     // Only promote a property declared on its own. A multi-variable
@@ -197,16 +189,13 @@ fn find_promotion_candidate(
         return None;
     }
 
-    // Property must not be static.
     if is_static(plain_prop.modifiers.iter()) {
         return None;
     }
 
-    // Extract property visibility and readonly status.
     let visibility = extract_visibility_keyword(plain_prop.modifiers.iter());
     let is_readonly = has_readonly(plain_prop.modifiers.iter());
 
-    // Build the prefix string.
     let vis_str = visibility.unwrap_or("public");
     let prefix = if is_readonly {
         format!("{vis_str} readonly ")
@@ -230,16 +219,14 @@ fn find_promotion_candidate(
         return None;
     }
 
-    // Determine the insertion offset for the visibility prefix.
-    // Insert before the type hint if present, otherwise before the variable.
     let param_insert_offset = if let Some(hint) = &param.hint {
         hint.span().start.offset as usize
     } else {
         param.variable.span.start.offset as usize
     };
 
-    // Determine the property deletion span (include leading whitespace /
-    // docblock and trailing newline).
+    // Determine the property deletion span (include leading whitespace
+    // on its line and trailing newline).
     let prop_span = property.span();
     let property_delete_start = find_line_start(content, prop_span.start.offset as usize);
     let property_delete_end = find_line_end(content, prop_span.end.offset as usize);
@@ -247,7 +234,6 @@ fn find_promotion_candidate(
     // Check if the property has a default value that the parameter lacks.
     let (carry_default, default_insert_offset) = if param.default_value.is_none() {
         if let Some(default_text) = extract_property_default(plain_prop, content) {
-            // Insert after the parameter variable name.
             let offset = param.variable.span.end.offset as usize;
             (Some(format!(" = {default_text}")), Some(offset))
         } else {
@@ -294,7 +280,6 @@ fn find_matching_property<'a>(
     None
 }
 
-/// Extract the visibility keyword string from a modifier list.
 fn extract_visibility_keyword<'a>(
     modifiers: impl Iterator<Item = &'a Modifier<'a>>,
 ) -> Option<&'static str> {
@@ -309,14 +294,12 @@ fn extract_visibility_keyword<'a>(
     None
 }
 
-/// Check if the modifier list includes `static`.
 fn is_static<'a>(modifiers: impl Iterator<Item = &'a Modifier<'a>>) -> bool {
     modifiers
         .into_iter()
         .any(|m| matches!(m, Modifier::Static(_)))
 }
 
-/// Check if the modifier list includes `readonly`.
 fn has_readonly<'a>(modifiers: impl Iterator<Item = &'a Modifier<'a>>) -> bool {
     modifiers
         .into_iter()
@@ -467,8 +450,6 @@ mod tests {
 
     /// Helper: apply a candidate's edits to the source text and return the result.
     fn apply_candidate(php: &str, c: &PromotionCandidate) -> String {
-        // Collect all edits as (start, end, new_text) sorted by start descending
-        // so we can apply them back-to-front without invalidating offsets.
         let mut edits: Vec<(usize, usize, &str)> = vec![
             (c.property_delete_start, c.property_delete_end, ""),
             (c.assignment_delete_start, c.assignment_delete_end, ""),
@@ -623,7 +604,6 @@ class Foo {
         let pos = (construct_pos + php[construct_pos..].find("string $status").unwrap()) as u32;
         let c = find_candidate(php, pos).expect("should find candidate");
         let result = apply_candidate(php, &c);
-        // Should not have two defaults.
         let count = result.matches("= 'active'").count();
         assert_eq!(count, 1, "should not duplicate default: {result}");
     }
@@ -841,7 +821,6 @@ class Foo {
     }
 }
 ";
-        // Put cursor on $age parameter.
         let pos = php.find("int $age)").unwrap() as u32;
         let c = find_candidate(php, pos).expect("should find candidate for $age");
         let result = apply_candidate(php, &c);

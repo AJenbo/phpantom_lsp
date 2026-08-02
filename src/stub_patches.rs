@@ -71,6 +71,11 @@
 //!    Same template params + `@extends FilterIterator<TKey, TValue, TIterator>`
 //!    + constructor binding.
 //!
+//! 6. **`ArrayIterator`** -- phpstorm-stubs declare `@template TKey of
+//!    array-key` / `@template TValue` on the class but the constructor's
+//!    `@param` is untyped `object|array`.  We bind `TKey`/`TValue` from
+//!    the `$array` argument, matching PHPStan's stubs.
+//!
 //! ## Removing patches
 //!
 //! When phpstorm-stubs gains proper annotations for a patched symbol,
@@ -417,7 +422,6 @@ fn patch_array_iterator(class: &mut ClassInfo) {
     {
         let mut ctor = (*class.methods[ctor_idx]).clone();
 
-        // Add template bindings: TKey → $array, TValue → $array
         for tpl_name in ["TKey", "TValue"] {
             let binding = (atom(tpl_name), atom("$array"));
             if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
@@ -552,7 +556,6 @@ fn add_implements_generics(class: &mut ClassInfo, iface_name: &str, params: &[&s
 /// Add an `@implements InterfaceName<Type1, Type2, ...>` entry with
 /// pre-built `PhpType` arguments.
 fn add_implements_generics_typed(class: &mut ClassInfo, iface_name: &str, args: &[PhpType]) {
-    // Don't add duplicate entries.
     if class
         .implements_generics
         .iter()

@@ -277,18 +277,16 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         }
         // Static property: `self::$propName = expr` or `static::$propName = expr`
         Expression::Access(Access::StaticProperty(spa)) => {
-            let class_name = match spa.class {
+            match spa.class {
                 Expression::Identifier(ident) => {
                     let raw = bytes_to_str(ident.value());
                     let lower = raw.to_ascii_lowercase();
                     if lower != "self" && lower != "static" {
                         return; // Only handle self/static for now
                     }
-                    raw.to_string()
                 }
                 _ => return,
             };
-            let _ = class_name; // We use offset-based class lookup
 
             let prop_name = match &spa.property {
                 Variable::Direct(dv) => {

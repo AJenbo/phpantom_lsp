@@ -1,10 +1,10 @@
 //! Pull-model diagnostics (`textDocument/diagnostic` and
 //! `workspace/diagnostic`).
 //!
-//! Relocated from `server.rs`: the resultId-cache logic that decides
-//! whether to return `Unchanged`, trigger fresh native computation, or
-//! report the background workspace pass's cached results. The LSP trait
-//! handlers in `server.rs` are thin delegations to these methods.
+//! Contains the resultId-cache logic that decides whether to return
+//! `Unchanged`, trigger fresh native computation, or report the
+//! background workspace pass's cached results. The LSP trait handlers
+//! in `server.rs` are thin delegations to these methods.
 
 use std::collections::{HashMap, HashSet};
 
@@ -44,12 +44,15 @@ impl Backend {
         }
 
         // In pull mode the pull request *triggers* native diagnostic
-        // computation (no debounce — the IDE decided "now is the time").
-        // If the full cache is missing for this URI, run the native
-        // pipeline immediately and block until it finishes.  External
-        // tool results (PHPStan, PHPCS, Mago) are delivered
-        // incrementally via publishDiagnostics as each finishes; we do
-        // not block on them here to keep the pull response fast.
+        // computation, but never computes it inline: a synchronous
+        // compute on the request path would hold a tower-lsp concurrency
+        // slot for seconds and wedge the transport under a typing burst
+        // (see `trigger_diagnostics_for_pull`). If the full cache is
+        // missing for this URI, this call queues the debounced
+        // background worker and returns whatever is currently cached
+        // (possibly empty); the worker recomputes, caches the full set,
+        // and requests a `workspace/diagnostic/refresh` so the editor
+        // re-pulls the real results a moment later.
         let needs_compute = {
             let cache = self.diag.last_full.lock();
             !cache.contains_key(&uri_str)

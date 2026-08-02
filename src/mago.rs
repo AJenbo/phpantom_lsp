@@ -86,14 +86,10 @@ pub(crate) fn resolve_mago(
     bin_dir: Option<&str>,
 ) -> Option<ResolvedMago> {
     match config.command.as_deref() {
-        // Explicitly disabled.
         Some("") => None,
-        // User-provided command.
         Some(cmd) => Some(ResolvedMago {
             path: PathBuf::from(cmd),
         }),
-        // Auto-detect: `<bin_dir>/mago` under the workspace root,
-        // then `$PATH`.
         None => crate::process::auto_detect_binary(workspace_root, bin_dir, "mago")
             .map(|path| ResolvedMago { path }),
     }
@@ -159,18 +155,14 @@ pub(crate) fn run_mago_lint(
             }
         }
         1 => parse_mago_json(&result.stdout, content, &file_path_str, "mago-lint"),
-        _ => {
-            // For other exit codes, try parsing JSON; fall back
-            // to error.
-            match parse_mago_json(&result.stdout, content, &file_path_str, "mago-lint") {
-                Ok(diags) if !diags.is_empty() => Ok(diags),
-                _ => Err(format!(
-                    "Mago lint exited with code {} (stderr: {})",
-                    result.code,
-                    result.stderr.trim()
-                )),
-            }
-        }
+        _ => match parse_mago_json(&result.stdout, content, &file_path_str, "mago-lint") {
+            Ok(diags) if !diags.is_empty() => Ok(diags),
+            _ => Err(format!(
+                "Mago lint exited with code {} (stderr: {})",
+                result.code,
+                result.stderr.trim()
+            )),
+        },
     }
 }
 
@@ -752,7 +744,6 @@ mod tests {
         );
         assert!(diags[0].message.contains("Invalid return type."));
         assert!(diags[0].message.contains("This has type int"));
-        // Line 2, offset 19 → compute from content
         assert_eq!(diags[0].range.start.line, 2);
     }
 
@@ -1063,8 +1054,6 @@ mod tests {
         // Message should NOT be duplicated.
         assert_eq!(diags[0].message, "Same message");
     }
-
-    // ── Helper to build issue JSON for severity tests ───────────────
 
     #[test]
     fn parse_edits_from_json() {

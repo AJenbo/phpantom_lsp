@@ -229,10 +229,9 @@ fn build_remove_assert_edit(content: &str, diag_line: usize) -> Option<TextEdit>
         // code after the semicolon.  Remove from line start to after
         // the semicolon.
         let start_pos = Position::new(diag_line as u32, 0);
-        // Preserve indentation for what follows by keeping the
-        // newline — but we want to remove the assert up to the
-        // semicolon.  Since we checked the end line is the same
-        // general area, just remove assert(...); plus trailing space.
+        // Also consume any trailing whitespace after the semicolon so
+        // the code that follows on the same line isn't left with a
+        // stray leading space.
         let trailing_space = content[stmt_end_byte..]
             .chars()
             .take_while(|c| *c == ' ' || *c == '\t')

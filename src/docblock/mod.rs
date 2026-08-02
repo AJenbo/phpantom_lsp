@@ -5,6 +5,11 @@
 //!
 //! # Submodules
 //!
+//! - `parser`: Parsing adapter bridging raw docblock text to the
+//!   structured `mago-phpdoc-syntax` tag representation (`DocblockInfo`,
+//!   `TagInfo`).
+//! - `tag_kind`: Vendor-agnostic tag classification (`TagKind`), folding
+//!   `@psalm-`/`@phpstan-` prefixed tags together with their bare form.
 //! - `tags`: Core PHPDoc tag extraction (`@return`, `@var`, `@param`,
 //!   `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval,
 //!   and type override logic).
@@ -31,10 +36,9 @@ pub(crate) mod type_strings;
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────
 //
-// Everything below was previously a public or crate-visible item in the
-// single-file `docblock.rs`.  Re-exporting here keeps all existing call
-// sites (`use crate::docblock;` and `use phpantom_lsp::docblock::*;`)
-// working without modification.
+// Flattens the submodule tree so call sites can `use crate::docblock;` /
+// `use phpantom_lsp::docblock::*;` without knowing which submodule an item
+// actually lives in.
 
 // Parsed docblock representation
 pub use parser::{DocblockInfo, TagInfo, parse_docblock_for_tags};

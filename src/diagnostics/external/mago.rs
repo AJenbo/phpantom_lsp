@@ -15,7 +15,7 @@ impl Backend {
     /// Schedule a Mago lint run for a single file.
     ///
     /// Only the most recent file is kept: if the user switches files or
-    /// types rapidly, earlier requests are superseded.
+    /// saves rapidly, earlier requests are superseded.
     pub(crate) fn schedule_mago_lint(&self, uri: String) {
         *self.mago_lint_tool.pending_uri.lock() = Some(uri);
         self.mago_lint_tool.notify.notify_one();
@@ -63,7 +63,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 4: resolve Mago binary ─────────────────────────
+            // ── Step 3: resolve Mago binary ─────────────────────────
             let config = self.config();
             if config.mago.is_disabled() {
                 continue;
@@ -94,7 +94,7 @@ impl Backend {
                     None => continue,
                 };
 
-            // ── Step 5: run mago lint (the slow part) ───────────────
+            // ── Step 4: run mago lint (the slow part) ───────────────
             let mago_config = config.mago.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let mago_diags = {
@@ -117,7 +117,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 6: cache results and re-publish ────────────────
+            // ── Step 5: cache results and re-publish ────────────────
             {
                 let files = self.open_files.read();
                 if !files.contains_key(&uri) {
@@ -147,7 +147,7 @@ impl Backend {
     /// Schedule a Mago analyze run for a single file.
     ///
     /// Only the most recent file is kept: if the user switches files or
-    /// types rapidly, earlier requests are superseded.
+    /// saves rapidly, earlier requests are superseded.
     pub(crate) fn schedule_mago_analyze(&self, uri: String) {
         *self.mago_analyze_tool.pending_uri.lock() = Some(uri);
         self.mago_analyze_tool.notify.notify_one();
@@ -195,7 +195,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 4: resolve Mago binary ─────────────────────────
+            // ── Step 3: resolve Mago binary ─────────────────────────
             let config = self.config();
             if config.mago.is_disabled() {
                 continue;
@@ -226,7 +226,7 @@ impl Backend {
                     None => continue,
                 };
 
-            // ── Step 5: run mago analyze (the slow part) ────────────
+            // ── Step 4: run mago analyze (the slow part) ────────────
             let mago_config = config.mago.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let mago_diags = {
@@ -249,7 +249,7 @@ impl Backend {
                 }
             };
 
-            // ── Step 6: cache results and re-publish ────────────────
+            // ── Step 5: cache results and re-publish ────────────────
             {
                 let files = self.open_files.read();
                 if !files.contains_key(&uri) {

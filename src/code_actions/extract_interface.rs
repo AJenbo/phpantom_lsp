@@ -80,7 +80,6 @@ impl Backend {
             return;
         }
 
-        // Build the action as deferred.
         let data = make_code_action_data(
             "refactor.extractInterface",
             uri,
@@ -150,13 +149,10 @@ impl Backend {
         let file_namespace = file_ctx.namespace.clone();
         let use_map: HashMap<String, String> = file_ctx.use_map.clone();
 
-        // Collect class-level template params referenced by extracted methods.
         let class_templates = collect_referenced_templates(current_class, &public_methods);
 
-        // Detect indentation from class.
         let indent = detect_class_indent(content, current_class);
 
-        // Generate interface source.
         let interface_source = generate_interface_source(&InterfaceGenParams {
             interface_name: &interface_name,
             file_namespace: &file_namespace,
@@ -174,7 +170,6 @@ impl Backend {
         let new_file_path = dir.join(format!("{}.php", interface_name));
         let new_file_uri = Url::from_file_path(&new_file_path).ok()?;
 
-        // Build the implements clause edit on the original class.
         let implements_edit = build_implements_edit(content, current_class, &interface_name)?;
 
         // Build document_changes with CreateFile + edits.
@@ -232,12 +227,10 @@ fn collect_referenced_templates(class: &ClassInfo, methods: &[&Arc<MethodInfo>])
     for template in &class.template_params {
         let template_str = template.as_str();
         let is_used = methods.iter().any(|m| {
-            // Check return type.
             let in_return = m
                 .return_type
                 .as_ref()
                 .is_some_and(|rt| rt.to_string().contains(template_str));
-            // Check parameter types.
             let in_params = m.parameters.iter().any(|p| {
                 p.type_hint
                     .as_ref()

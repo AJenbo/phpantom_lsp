@@ -105,13 +105,11 @@ impl Backend {
 
                 let trivia = program.trivia.as_slice();
 
-                // Collect properties from the declaration under the cursor.
                 let props = collect_accessor_properties(property, content, trivia);
                 if props.is_empty() {
                     return None;
                 }
 
-                // Check which methods already exist.
                 let existing_methods = collect_existing_method_names(all_members);
 
                 // Determine available accessors for each property.
@@ -153,11 +151,8 @@ impl Backend {
                     return None;
                 }
 
-                // Detect indentation from existing class members.
                 let indent = detect_indent_from_members(all_members, content);
 
-                // Insertion point: after the last method, or after the
-                // last member if there are no methods.
                 let insert_offset = find_accessor_insertion_offset(all_members, content);
                 Some((available, indent, insert_offset))
             },

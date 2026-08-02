@@ -1,4 +1,4 @@
-/// PHP keyword completions for non-member expression/statement contexts.
+//! PHP keyword completions for non-member expression/statement contexts.
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;

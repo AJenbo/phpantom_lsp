@@ -47,7 +47,6 @@ fn determine_extends_context(chars: &[char], extends_start: usize) -> ClassNameC
     while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
         i -= 1;
     }
-    // Skip whitespace.
     while i > 0 && chars[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
@@ -126,8 +125,7 @@ pub(crate) fn detect_class_name_context(content: &str, position: Position) -> Cl
     // Handle comma-separated lists (e.g. `implements Foo, Bar, Baz`).
     // Walk past `Identifier,` sequences.
     while i > 0 && chars[i - 1] == ',' {
-        i -= 1; // skip comma
-        // Skip whitespace.
+        i -= 1;
         while i > 0 && chars[i - 1].is_ascii_whitespace() {
             i -= 1;
         }
@@ -137,7 +135,6 @@ pub(crate) fn detect_class_name_context(content: &str, position: Position) -> Cl
         {
             i -= 1;
         }
-        // Skip whitespace.
         while i > 0 && chars[i - 1].is_ascii_whitespace() {
             i -= 1;
         }
@@ -228,12 +225,10 @@ pub(crate) fn is_class_declaration_name(content: &str, position: Position) -> bo
         i -= 1;
     }
 
-    // Skip whitespace.
     while i > 0 && chars[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
 
-    // Check for declaration keywords.
     let is_decl = keyword_ends_at(&chars, i, "class")
         || keyword_ends_at(&chars, i, "interface")
         || keyword_ends_at(&chars, i, "trait")

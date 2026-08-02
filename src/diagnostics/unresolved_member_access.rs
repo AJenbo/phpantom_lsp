@@ -23,9 +23,10 @@
 //! in type coverage so the developer can add annotations or discover
 //! places where PHPantom's inference falls short.
 //!
-//! The actual diagnostic collection logic is now handled inline in the
-//! `Untyped` arm of [`collect_unknown_member_diagnostics`](super::unknown_members)
-//! in `unknown_members.rs`. This module only re-exports the diagnostic
+//! The diagnostic collection logic lives in the `Untyped` arm of
+//! [`collect_unknown_member_diagnostics`](super::unknown_members) in
+//! `unknown_members.rs`, since it shares the subject-type walk with the
+//! unknown-member check. This module only re-exports the diagnostic
 //! code constant.
 
 /// Diagnostic code used for unresolved-member-access diagnostics.

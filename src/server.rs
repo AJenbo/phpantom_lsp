@@ -70,7 +70,6 @@ where
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        // Extract and store the workspace root path
         let workspace_root = params
             .root_uri
             .as_ref()
@@ -85,7 +84,6 @@ impl LanguageServer for Backend {
             *self.client_name.lock() = info.name.clone();
         }
 
-        // Detect whether the client supports pull diagnostics.
         let client_supports_pull = params
             .capabilities
             .text_document
@@ -134,8 +132,6 @@ impl LanguageServer for Backend {
         self.supports_semantic_tokens_refresh
             .store(client_supports_semantic_tokens_refresh, Ordering::Release);
 
-        // Detect whether the client supports dynamic registration for
-        // type hierarchy.
         let client_supports_type_hierarchy_dynamic_registration = params
             .capabilities
             .text_document
@@ -279,7 +275,6 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        // Parse composer.json for PSR-4 mappings if we have a workspace root
         let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {
@@ -373,7 +368,6 @@ impl LanguageServer for Backend {
                     self.init_monorepo(&root, &subprojects, php_version, Some(&progress))
                         .await;
                 } else {
-                    // No subprojects found — pure non-Composer workspace.
                     self.init_no_composer(&root, php_version, Some(&progress))
                         .await;
                 }
@@ -610,7 +604,6 @@ impl LanguageServer for Backend {
             self.blade_uris.write().insert(uri.clone());
         }
 
-        // Store file content
         self.open_files
             .write()
             .insert(uri.clone(), Arc::clone(&text));
@@ -672,7 +665,6 @@ impl LanguageServer for Backend {
             Arc::new(current)
         };
 
-        // Update stored content
         self.open_files
             .write()
             .insert(uri.clone(), Arc::clone(&text));
@@ -786,7 +778,6 @@ impl LanguageServer for Backend {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
 
-        // If the client sent the full text on save, update our copy.
         if let Some(text) = params.text {
             let text = Arc::new(text);
             self.open_files
@@ -1567,7 +1558,6 @@ impl LanguageServer for Backend {
             None => return Ok(None),
         };
 
-        // Get the file content.
         let content = match self.get_file_content(&uri) {
             Some(c) => c,
             None => return Ok(None),

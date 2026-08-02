@@ -61,7 +61,6 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit};
 use crate::atom::bytes_to_str;
 use crate::config::FormattingConfig;
 
-/// Default formatting timeout in milliseconds.
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 
 // ── Tool resolution ─────────────────────────────────────────────────
@@ -108,7 +107,6 @@ pub(crate) fn resolve_strategy(
         return FormattingStrategy::Disabled;
     }
 
-    // Check for explicit config overrides first.
     let fixer_explicit = matches!(config.php_cs_fixer.as_deref(), Some(s) if !s.is_empty());
     let phpcbf_explicit = matches!(config.phpcbf.as_deref(), Some(s) if !s.is_empty());
     let pint_explicit = matches!(config.pint.as_deref(), Some(s) if !s.is_empty());
@@ -335,7 +333,6 @@ pub(crate) fn execute_strategy(
     }
 }
 
-/// Run a single tool on the content and return the formatted string.
 fn run_tool(
     tool: &ResolvedTool,
     content: &str,
@@ -539,11 +536,9 @@ fn write_sibling_temp_file(original: &Path, content: &str) -> Result<NamedTempFi
     Ok(temp)
 }
 
-/// Result of running an external command.
 struct CommandResult {
     /// Exit code (or -1 if the process was killed / no code available).
     code: i32,
-    /// Captured stderr content.
     stderr: String,
 }
 

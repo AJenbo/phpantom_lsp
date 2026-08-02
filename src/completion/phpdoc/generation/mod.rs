@@ -167,7 +167,6 @@ pub fn try_generate_docblock_on_enter(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
 ) -> Option<Vec<TextEdit>> {
-    // Detect the empty docblock range and indentation.
     let (block_range, _block_indent, after_block) =
         trigger::detect_empty_docblock(content, position)?;
 
@@ -177,7 +176,6 @@ pub fn try_generate_docblock_on_enter(
     // declaration line is always at the correct level.
     let indent = trigger::declaration_indent(&after_block);
 
-    // Classify and parse the declaration after the block.
     let context = parse_decl::classify_declaration(&after_block);
 
     // Inside a function body (Inline / Unknown) we don't generate a

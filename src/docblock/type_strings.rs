@@ -8,8 +8,8 @@
 //! These functions operate on unparsed docblock text and are used by
 //! the other `docblock` submodules (generics, shapes, callable types)
 //! and a few external call sites. Type-level operations (scalar
-//! classification, nullable handling, self/static replacement) have
-//! been migrated to `PhpType` methods in `php_type.rs`.
+//! classification, nullable handling, self/static replacement) live
+//! as `PhpType` methods in `src/php_type/` instead.
 
 /// All built-in type keywords offered in PHPDoc type completion contexts.
 ///

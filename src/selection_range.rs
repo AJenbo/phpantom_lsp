@@ -63,7 +63,6 @@ impl Backend {
                 len_b.cmp(&len_a).then(a.0.cmp(&b.0))
             });
 
-            // Build the linked list from outermost to innermost.
             let selection_range = build_selection_range(content, &spans);
             results.push(selection_range);
         }

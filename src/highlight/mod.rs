@@ -119,7 +119,6 @@ impl Backend {
         let mut highlights = Vec::new();
         let mut seen_offsets = std::collections::HashSet::new();
 
-        // Collect from symbol spans.
         for span in &symbol_map.spans {
             let name = match &span.kind {
                 SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => name,

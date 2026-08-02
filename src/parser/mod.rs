@@ -15,6 +15,7 @@ use std::collections::HashMap;
 /// - [`functions`]: Standalone function and `define()` constant extraction
 /// - [`use_statements`]: `use` statement and namespace extraction
 /// - [`ast_update`]: The `update_ast` orchestrator and name resolution
+/// - [`error_format`]: Human-readable formatting for Mago parse errors
 mod anonymous;
 mod ast_update;
 mod attributes;
@@ -147,7 +148,6 @@ pub(crate) fn is_available_for_version(
     if let Some(avail) = extract_version_availability(attribute_lists, ctx) {
         php_version.matches_range(avail.from, avail.to)
     } else {
-        // No version attribute → always available.
         true
     }
 }
@@ -469,7 +469,7 @@ fn extract_version_type_pairs(
 
 /// Deprecation metadata extracted from a `#[Deprecated]` attribute.
 ///
-/// phpstorm-stubs annotate ~362 elements with this attribute.  The three
+/// phpstorm-stubs annotate hundreds of elements with this attribute.  The three
 /// fields mirror the attribute's named arguments:
 ///
 /// - `reason` — human-readable explanation (may also appear as a positional arg).

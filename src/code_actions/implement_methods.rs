@@ -31,7 +31,6 @@ impl Backend {
     ) {
         let ctx = self.file_context(uri);
 
-        // Convert LSP cursor position to byte offset.
         let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Find the class the cursor is inside.  Use keyword_offset as the
@@ -74,7 +73,6 @@ impl Backend {
         let use_map: HashMap<String, String> = ctx.use_map.clone();
         let file_namespace = ctx.namespace.clone();
 
-        // Build the text for all method stubs.
         let stub_text =
             build_method_stubs(&missing, &use_map, &file_namespace, content, current_class);
 
@@ -382,7 +380,6 @@ fn collect_from_parent_chain_atom(
         missing.push((**method).clone());
     }
 
-    // Continue up the chain.
     collect_from_parent_chain_atom(
         &parent.parent_class,
         class_loader,
@@ -404,7 +401,6 @@ fn build_method_stubs(
     content: &str,
     class: &ClassInfo,
 ) -> String {
-    // Detect the indentation used inside the class body.
     let indent = detect_class_indent(content, class);
 
     let mut result = String::new();
@@ -422,13 +418,9 @@ fn build_method_stubs(
 
         let static_kw = if method.is_static { "static " } else { "" };
 
-        // Build parameter list.
         let params = format_params(method, use_map, file_namespace);
-
-        // Build return type.
         let return_type = format_return_type(method, use_map, file_namespace);
 
-        // Write the method stub.
         result.push_str(&indent);
         result.push_str(&format!(
             "{} {}function {}({}){}\n",
@@ -466,7 +458,6 @@ pub(crate) fn format_params(
             }
         }
 
-        // Variadic and reference markers.
         if param.is_reference {
             s.push('&');
         }
@@ -482,7 +473,6 @@ pub(crate) fn format_params(
         }
         s.push_str(pname);
 
-        // Default value.
         if let Some(ref default) = param.default_value {
             s.push_str(" = ");
             s.push_str(default);
@@ -594,7 +584,6 @@ pub(super) fn shorten_single_type(
         }
     }
 
-    // Return as-is.
     type_str.to_string()
 }
 
@@ -607,7 +596,6 @@ pub(crate) fn detect_class_indent(content: &str, class: &ClassInfo) -> String {
     // next non-empty line's indentation as the member indentation.
     let brace_offset = class.start_offset as usize;
     if brace_offset < content.len() {
-        // Find the first non-empty line after the opening brace.
         let after_brace = &content[brace_offset..];
         for line in after_brace.lines().skip(1) {
             if line.trim().is_empty() {
@@ -620,7 +608,6 @@ pub(crate) fn detect_class_indent(content: &str, class: &ClassInfo) -> String {
         }
     }
 
-    // Fallback: four spaces.
     "    ".to_string()
 }
 

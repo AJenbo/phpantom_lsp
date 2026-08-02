@@ -23,8 +23,7 @@ use tower_lsp::lsp_types::Position;
 #[derive(Debug)]
 pub(crate) struct ThrowInfo {
     /// The exception type as written in source (e.g.
-    /// `PhpType::named("InvalidArgumentException")`,
-    /// `PhpType::named("RuntimeException")`).
+    /// `InvalidArgumentException`, `RuntimeException`).
     pub type_name: PhpType,
     /// Byte offset of this throw statement relative to the start of the
     /// scanned block.

@@ -5,8 +5,8 @@
 //! gets a diagnostic with `Severity::Hint` and `DiagnosticTag::Unnecessary`,
 //! which editors render as dimmed text.
 //!
-//! We only check class-level `use` imports (not trait `use` inside class
-//! bodies, and not `use function` / `use const` — those are a follow-up).
+//! We only check class-level `use` imports, including `use function` and
+//! `use const`, but not trait `use` inside class bodies.
 
 use std::collections::{HashMap, HashSet};
 
@@ -56,9 +56,8 @@ impl Backend {
         // A `use Foo\Bar;` import is considered "used" if `Bar` appears as:
         //   - A ClassReference name (type hint, new, extends, implements, catch, etc.)
         //   - A MemberAccess subject_text for static access (`Bar::method()`)
-        //   - A FunctionCall name that matches the alias (unlikely for class
-        //     imports, but covers edge cases)
-        //   - The subject_text in any context that matches the short name
+        //   - A FunctionCall name matching a `use function` alias
+        //   - A ConstantReference name matching a `use const` alias
         //
         // We also check docblock type references, which are already emitted
         // as ClassReference spans by the symbol map extraction.
@@ -159,7 +158,6 @@ impl Backend {
                 continue;
             }
 
-            // Find the `use` statement line that imports this FQN.
             if let Some(range) = find_use_statement_range(self, uri, content, alias, fqn) {
                 out.push(Diagnostic {
                     range,
@@ -303,11 +301,6 @@ fn alias_is_referenced_in_content(
                 search_from = pos + alias_len;
                 continue;
             }
-
-            // Skip occurrences inside string literals — simple heuristic:
-            // if there's an odd number of unescaped quotes before the match
-            // on the same line, it's likely inside a string.  This isn't
-            // perfect but avoids the most common false positives.
 
             // Found a real reference outside excluded lines
             return true;
@@ -477,14 +470,13 @@ fn is_group_import_match(line: &str, fqn: &str, short_name: &str) -> bool {
             return false;
         };
 
-        if prefix_part == expected_prefix {
-            // Check if short_name is in the group
-            if let Some(close_brace) = line.find('}') {
-                let group_content = &line[brace_pos + 1..close_brace];
-                return group_content
-                    .split(',')
-                    .any(|item| item.trim() == short_name);
-            }
+        if prefix_part == expected_prefix
+            && let Some(close_brace) = line.find('}')
+        {
+            let group_content = &line[brace_pos + 1..close_brace];
+            return group_content
+                .split(',')
+                .any(|item| item.trim() == short_name);
         }
     }
     false

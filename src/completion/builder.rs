@@ -1,28 +1,26 @@
+//! Member completion item building.
+//!
+//! This module contains the logic for constructing LSP `CompletionItem`s from
+//! resolved `ClassInfo`, filtered by the `AccessKind` (arrow, double-colon,
+//! or parent double-colon).
+//!
+//! The union-merge pipeline ([`build_union_completion_items`] and
+//! [`merge_union_completion_items`]) handles the case where a variable has
+//! multiple candidate types (e.g. `User|AdminUser`).  It deduplicates
+//! completion items across candidates, partitions them into intersection
+//! members (present on all types) and branch-only members, and assigns
+//! sort tiers so intersection members appear first.
+//!
+//! Use-statement insertion helpers live in the sibling [`super::use_edit`]
+//! module and are re-exported here for backward compatibility.
+
 use std::collections::{HashMap, HashSet};
-
-use crate::hover::shorten_php_type;
-
-/// Member completion item building.
-///
-/// This module contains the logic for constructing LSP `CompletionItem`s from
-/// resolved `ClassInfo`, filtered by the `AccessKind` (arrow, double-colon,
-/// or parent double-colon).
-///
-/// The union-merge pipeline ([`build_union_completion_items`] and
-/// [`merge_union_completion_items`]) handles the case where a variable has
-/// multiple candidate types (e.g. `User|AdminUser`).  It deduplicates
-/// completion items across candidates, partitions them into intersection
-/// members (present on all types) and branch-only members, and assigns
-/// sort tiers so intersection members appear first.
-///
-/// Use-statement insertion helpers live in the sibling [`super::use_edit`]
-/// module and are re-exported here for backward compatibility.
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use super::resolve::CompletionItemData;
-use crate::hover::{MemberKindForOrigin, find_declaring_class};
+use crate::hover::{MemberKindForOrigin, find_declaring_class, shorten_php_type};
 use crate::types::Visibility;
 use crate::types::*;
 
@@ -107,9 +105,7 @@ pub(crate) fn build_callable_snippet(name: &str, params: &[ParameterInfo]) -> St
 /// | `("DataProvider", &[req(string $methodName)])`          | `"DataProvider(${1:'methodName'})$0"`                 |
 /// | `("Route", &[req(string $path), opt(array $methods)])` | `"Route(${1:'path'})$0"`                              |
 pub(crate) fn build_attribute_snippet(name: &str, params: &[ParameterInfo]) -> String {
-    // Collect parameters worth including: all required ones, plus
-    // optional ones only when they have no default (rare but possible).
-    // Parameters with defaults are omitted — the user can add them via
+    // Optional parameters are omitted — the user can add them via
     // signature help if needed.
     let required: Vec<&ParameterInfo> = params.iter().filter(|p| p.is_required).collect();
 
@@ -315,7 +311,9 @@ pub(crate) fn build_completion_items(
     let same_class = current_class_name.is_some_and(|name| name == target_class.name);
     let mut items: Vec<CompletionItem> = Vec::new();
 
-    // Methods — filtered by static / instance, excluding magic methods
+    // Methods — filtered by static / instance and visibility. Magic
+    // methods (other than `__construct`) are not excluded here; they are
+    // included but sorted after regular methods (see `magic_sort_tier`).
     for method in &target_class.methods {
         // `__construct` is only meaningful to call explicitly via `::` when
         // inside the same class or a subclass (e.g.

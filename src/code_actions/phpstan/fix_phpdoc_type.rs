@@ -107,13 +107,11 @@ impl Backend {
 
             let diag_line = diag.range.start.line as usize;
 
-            // Find the docblock above the diagnostic line.
             let docblock = match find_docblock_above_line(content, diag_line) {
                 Some(db) => db,
                 None => continue,
             };
 
-            // Validate that the tag exists in the docblock.
             if find_tag_line_in_docblock(&docblock, &mismatch).is_none() {
                 continue;
             }
@@ -320,7 +318,6 @@ fn parse_param_mismatch(message: &str) -> Option<PhpDocMismatch> {
 /// Also handles the alternate formats:
 /// - `{desc} for property Cls::$bar with type {phpdoc} is ...`
 fn parse_property_mismatch(message: &str) -> Option<PhpDocMismatch> {
-    // Find "with type " — the types come after it.
     let type_marker = " with type ";
     let type_start = message.find(type_marker)? + type_marker.len();
     let rest = &message[type_start..];
@@ -478,27 +475,12 @@ fn build_update_tag_edit(
 
     let original_line = doc_lines[tag_line_idx];
 
-    // Build the replacement line by substituting the PHPDoc type with
-    // the native type.
     let new_line = replace_type_in_tag_line(original_line, mismatch)?;
 
-    // Rebuild the docblock with the replaced line.
-    let mut new_lines: Vec<&str> = Vec::with_capacity(doc_lines.len());
-    let new_line_ref: String = new_line;
-    for (i, line) in doc_lines.iter().enumerate() {
-        if i == tag_line_idx {
-            // Will be pushed below.
-            continue;
-        }
-        new_lines.push(line);
-    }
-
-    // We need to insert the new line at the right position.
-    // Rebuild manually to get ownership right.
     let mut result_lines: Vec<String> = Vec::with_capacity(doc_lines.len());
     for (i, line) in doc_lines.iter().enumerate() {
         if i == tag_line_idx {
-            result_lines.push(new_line_ref.clone());
+            result_lines.push(new_line.clone());
         } else {
             result_lines.push((*line).to_string());
         }
@@ -525,7 +507,6 @@ fn build_update_tag_edit(
 /// - `     * @param SomeType $name description`
 /// - `     * @var SomeType description`
 fn replace_type_in_tag_line(line: &str, mismatch: &PhpDocMismatch) -> Option<String> {
-    // Find the tag in the line.
     let tag = mismatch.tag;
     let tag_pos = line.find(tag)?;
     let after_tag_start = tag_pos + tag.len();
@@ -542,8 +523,6 @@ fn replace_type_in_tag_line(line: &str, mismatch: &PhpDocMismatch) -> Option<Str
     let type_start_in_line = after_tag_start + whitespace_len;
     let type_end_in_line = type_start_in_line + type_end;
 
-    // Build the new line: everything before the type + new type +
-    // everything after the type.
     let mut result = String::with_capacity(line.len());
     result.push_str(&line[..type_start_in_line]);
     result.push_str(&mismatch.native_type);
@@ -582,7 +561,6 @@ fn build_remove_tag_edit(
     lines_to_remove.sort();
     lines_to_remove.dedup();
 
-    // Build new docblock text.
     let new_lines: Vec<&str> = doc_lines
         .iter()
         .enumerate()

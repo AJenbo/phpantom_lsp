@@ -289,12 +289,9 @@ fn find_try_block_body(_content: &str, before_catch: &str) -> Option<String> {
     // `before_catch` ends with `}`. Find the matching `{`.
     let close_brace_offset = before_catch.len() - 1;
 
-    // We need the absolute position in `content`. `before_catch` is a
-    // prefix of `content` (after trimming), so we can use its length.
-    // But actually, `before_catch` was derived by slicing `content`, so
-    // we need to find where this `}` is in the full content.
-    //
-    // Walk backward to find the matching `{`.
+    // `before_catch` is a prefix of `content` trimmed only at the end, so
+    // offsets relative to its start are also absolute offsets into
+    // `content`. Walk backward to find the matching `{`.
     let block_open =
         crate::text_scan::find_matching_backward(before_catch, close_brace_offset, b'{', b'}')?;
 

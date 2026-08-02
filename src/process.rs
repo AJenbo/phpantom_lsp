@@ -8,9 +8,7 @@
 pub struct CommandOutput {
     /// Exit code (or -1 if the process was killed / no code available).
     pub code: i32,
-    /// Captured stdout content.
     pub stdout: String,
-    /// Captured stderr content.
     pub stderr: String,
 }
 
@@ -162,7 +160,6 @@ pub fn which(binary_name: &str) -> Result<std::path::PathBuf, String> {
     Err(format!("{} not found on PATH", binary_name))
 }
 
-/// Check whether a file is executable.
 #[cfg(unix)]
 fn is_executable(path: &std::path::Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -188,7 +185,6 @@ pub fn paths_match(a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
-    // Normalize separators for comparison.
     let a_norm = a.replace('\\', "/");
     let b_norm = b.replace('\\', "/");
     if a_norm == b_norm {

@@ -65,9 +65,7 @@ fn infer_namespaces_from_path(
             continue;
         }
 
-        // The portion of the directory path after the base_path.
         let remainder = &dir[base.len()..];
-        // Strip trailing `/` if present.
         let remainder = remainder.trim_end_matches('/');
 
         // Convert directory separators to namespace separators.
@@ -165,12 +163,10 @@ impl Backend {
         // when assigning sort keys later.
         let inferred_set: HashSet<String> = inferred.iter().map(|i| i.namespace.clone()).collect();
 
-        // Always include inferred namespaces in the candidate set.
         for inf in &inferred {
             namespaces.insert(inf.namespace.clone());
         }
 
-        // Helper: insert a namespace and all its parent namespaces.
         fn insert_with_parents(ns: &str, set: &mut HashSet<String>) {
             if ns.is_empty() {
                 return;
@@ -183,14 +179,12 @@ impl Backend {
             }
         }
 
-        /// Check whether `ns` falls under one of the PSR-4 prefixes.
         fn under_psr4(ns: &str, prefixes: &[String]) -> bool {
             prefixes
                 .iter()
                 .any(|p| ns == p || ns.starts_with(&format!("{}\\", p)))
         }
 
-        // Helper: insert ns (and parents) only if under a PSR-4 prefix.
         fn insert_if_under_psr4(ns: &str, set: &mut HashSet<String>, prefixes: &[String]) {
             if under_psr4(ns, prefixes) {
                 insert_with_parents(ns, set);
@@ -281,12 +275,10 @@ impl Backend {
                 //   - All other namespaces get prefix "0_1_" to appear
                 //     after the inferred ones.
                 let sort_text = if inferred_set.contains(&ns) {
-                    // Higher specificity → lower number → sorts first.
-                    // Invert specificity so that the longest match (most
-                    // specific) gets the smallest number.
+                    // Invert specificity (large constant minus spec) so the
+                    // longest, most specific match sorts first; leading
+                    // zeros keep the string comparison stable.
                     let spec = specificity_map.get(ns.as_str()).copied().unwrap_or(0);
-                    // Use a large constant minus specificity to invert,
-                    // then format with leading zeros for stable sorting.
                     let inverted = 10000_usize.saturating_sub(spec);
                     format!("0_0_{:05}_{}", inverted, sn.to_lowercase())
                 } else {

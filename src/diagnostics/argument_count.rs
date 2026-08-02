@@ -42,16 +42,13 @@ pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
 /// These are genuine overloads where PHP accepts fewer arguments than
 /// any single stub declaration can express (e.g. `mt_rand()` accepts
 /// 0 or 2 arguments, but the stub can only declare the 2-arg form).
-///
-/// Entries that previously existed because the stub parser did not
-/// handle `#[PhpStormStubsElementAvailable]` attributes on parameters
-/// have been removed. The AST parser now filters version-specific
-/// parameters by the configured PHP version (default 8.5), producing
-/// correct required counts without this workaround.
+/// Version-specific optional parameters (declared via
+/// `#[PhpStormStubsElementAvailable]`) don't need an entry here — the
+/// AST parser filters those by the configured PHP version (default
+/// 8.5) directly, so the stub's required count is already correct.
 ///
 /// This map is derived from PHPStan's `functionMap.php` diffed against
 /// phpstorm-stubs with proper version filtering applied.
-/// Regenerate with `php scripts/check_overloads.php`.
 fn overload_min_args(name: &str) -> Option<u32> {
     // Strip a leading namespace separator so `\mt_rand()` in namespaced code
     // matches the same overload entry as `mt_rand()`. Compare lowercase to
@@ -289,7 +286,6 @@ impl Backend {
                 )
             };
 
-            // Resolve the call expression to a callable target.
             let resolved = match resolved {
                 Some(r) => r,
                 None => continue,
@@ -305,7 +301,6 @@ impl Backend {
             let params = &resolved.parameters;
             let actual_args = call_site.arg_count;
 
-            // Count required parameters (no default, not variadic).
             let mut required_count = params.iter().filter(|p| p.is_required).count() as u32;
 
             // Consult the overload map: if this function has an
@@ -320,7 +315,7 @@ impl Backend {
                 required_count = overload_min;
             }
 
-            // Count total non-variadic parameters.
+            // Unlimited if variadic, otherwise the declared parameter count.
             let has_variadic = params.iter().any(|p| p.is_variadic);
             let max_count = if has_variadic {
                 None // unlimited trailing args

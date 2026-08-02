@@ -88,14 +88,14 @@ impl PharArchive {
         if cursor + alias_len > data.len() {
             return None;
         }
-        cursor += alias_len; // skip alias bytes
+        cursor += alias_len;
 
         // Metadata: 4-byte length + metadata bytes.
         let metadata_len = read_u32(data, &mut cursor)? as usize;
         if cursor + metadata_len > data.len() {
             return None;
         }
-        cursor += metadata_len; // skip metadata bytes
+        cursor += metadata_len;
 
         // 3. Parse each file entry and build the index.
         //    We collect entries first, then compute offsets into the data area.

@@ -32,8 +32,7 @@
 //! insert the import automatically.
 //!
 //! Context detection and symbol info extraction live in the sibling
-//! `phpdoc_context` module and are re-exported here for
-//! backward compatibility.
+//! `context` module and are re-exported here for backward compatibility.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -751,8 +750,6 @@ pub fn build_phpdoc_completions(
                 if sym.return_type.is_none() {
                     // No return type hint — offer `@return void` when the
                     // function body contains no return-with-value statements.
-                    // When `: void` is already declared, the type hint
-                    // speaks for itself and we skip the suggestion.
                     let body = throws_analysis::extract_function_body(content, position);
                     let has_return = body.as_deref().is_some_and(|b| {
                         // Quick scan for a `return` keyword followed by a
@@ -800,8 +797,6 @@ pub fn build_phpdoc_completions(
                     // to the generic `@return Type` fallback so the user
                     // can type the actual return type manually.
                 }
-                // Return type not detected — fall through to the generic
-                // `@return Type` fallback so the user can type it manually.
             }
 
             // ── Smart item for @var on properties / constants ───────

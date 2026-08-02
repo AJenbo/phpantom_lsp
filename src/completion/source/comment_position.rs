@@ -11,9 +11,8 @@
 
 use tower_lsp::lsp_types::Position;
 
-// Re-export the canonical position-to-byte-offset helper so that existing
-// `use super::comment_position::position_to_byte_offset` imports continue
-// to work without modification.
+// Re-export the canonical position-to-byte-offset helper so callers can
+// import it from this module rather than from `text_position` directly.
 pub(crate) use crate::text_position::position_to_byte_offset;
 
 /// Returns `true` if the given position is inside a `/** … */` docblock.
@@ -21,18 +20,16 @@ pub(crate) use crate::text_position::position_to_byte_offset;
 /// Scans backwards from the cursor to find the nearest `/**` that has not
 /// been closed by a matching `*/` before the cursor position.
 pub fn is_inside_docblock(content: &str, position: Position) -> bool {
-    // Convert position to byte offset for easier scanning
     let byte_offset = position_to_byte_offset(content, position);
 
     let before_cursor = &content[..byte_offset.min(content.len())];
 
-    // Find the last `/**` before the cursor
     let Some(open_pos) = before_cursor.rfind("/**") else {
         return false;
     };
 
-    // Check if there is a `*/` between the `/**` and the cursor
-    // (which would mean the docblock is closed)
+    // A `*/` between the `/**` and the cursor means the docblock is
+    // already closed, so the cursor is not inside it.
     let after_open = &before_cursor[open_pos + 3..];
     !after_open.contains("*/")
 }
@@ -48,7 +45,6 @@ pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
     let len = bytes.len();
     let mut i = 0;
 
-    // Scanner states
     #[derive(PartialEq)]
     enum State {
         Code,
@@ -99,13 +95,12 @@ pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
                 {
                     // Possible heredoc / nowdoc
                     i += 3;
-                    // Skip optional whitespace
                     while i < len && bytes[i] == b' ' {
                         i += 1;
                     }
                     let is_nowdoc = i < len && bytes[i] == b'\'';
                     if is_nowdoc {
-                        i += 1; // skip opening quote
+                        i += 1;
                     }
                     heredoc_label.clear();
                     while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
@@ -114,7 +109,7 @@ pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
                     }
                     if !heredoc_label.is_empty() {
                         if is_nowdoc && i < len && bytes[i] == b'\'' {
-                            i += 1; // skip closing quote
+                            i += 1;
                         }
                         state = State::Heredoc;
                     }
@@ -146,7 +141,7 @@ pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
             }
             State::SingleString => {
                 if bytes[i] == b'\\' && i + 1 < len {
-                    i += 2; // skip escaped char
+                    i += 2;
                 } else if bytes[i] == b'\'' {
                     state = State::Code;
                     i += 1;
@@ -156,7 +151,7 @@ pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
             }
             State::DoubleString => {
                 if bytes[i] == b'\\' && i + 1 < len {
-                    i += 2; // skip escaped char
+                    i += 2;
                 } else if bytes[i] == b'"' {
                     state = State::Code;
                     i += 1;
@@ -168,8 +163,6 @@ pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
                 // Look for the closing label at the start of a line
                 if bytes[i] == b'\n' {
                     i += 1;
-                    // Skip optional whitespace before the label
-                    let line_start = i;
                     while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
                         i += 1;
                     }
@@ -187,10 +180,9 @@ pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
                             continue;
                         }
                     }
-                    // Not the closing label — rewind to just after the newline
-                    // to avoid skipping content, but we already advanced past
-                    // whitespace which is fine (it's part of the heredoc body).
-                    let _ = line_start; // consumed above
+                    // Not the closing label — the whitespace scanned past
+                    // above is part of the heredoc body, so no rewind is
+                    // needed here.
                 } else {
                     i += 1;
                 }
@@ -227,9 +219,10 @@ pub enum StringContext {
 /// it is at an interpolation site where completion should still fire.
 ///
 /// Returns [`StringContext::InStringLiteral`] when completion should be
-/// suppressed, [`StringContext::InInterpolation`] when inside a PHP
-/// interpolation expression, and [`StringContext::NotInString`] when the
-/// cursor is in normal code.
+/// suppressed, [`StringContext::SimpleInterpolation`] or
+/// [`StringContext::BraceInterpolation`] when inside a PHP interpolation
+/// expression, and [`StringContext::NotInString`] when the cursor is in
+/// normal code.
 pub fn classify_string_context(content: &str, position: Position) -> StringContext {
     let target = position_to_byte_offset(content, position);
     let bytes = content.as_bytes();
@@ -379,7 +372,6 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                     i += 1;
                 } else if bytes[i] == b'\n' {
                     i += 1;
-                    let line_start = i;
                     while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
                         i += 1;
                     }
@@ -398,7 +390,6 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                             continue;
                         }
                     }
-                    let _ = line_start;
                 } else {
                     i += 1;
                 }
@@ -406,7 +397,6 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
             State::Nowdoc => {
                 if bytes[i] == b'\n' {
                     i += 1;
-                    let line_start = i;
                     while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
                         i += 1;
                     }
@@ -424,7 +414,6 @@ pub fn classify_string_context(content: &str, position: Position) -> StringConte
                             continue;
                         }
                     }
-                    let _ = line_start;
                 } else {
                     i += 1;
                 }

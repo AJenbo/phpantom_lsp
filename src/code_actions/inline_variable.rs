@@ -90,7 +90,6 @@ fn find_assignment_in_statement(
                 };
 
                 let var_name = bytes_to_str(var.name).to_string();
-                // Skip `$this`.
                 if var_name == "$this" {
                     return None;
                 }
@@ -106,11 +105,6 @@ fn find_assignment_in_statement(
 
                 let needs_parens = expression_needs_parens(assignment.rhs);
                 let has_side_effects = expression_has_side_effects(assignment.rhs);
-
-                // Verify cursor is actually on this statement.
-                if (cursor as usize) < stmt_start || (cursor as usize) > stmt_end {
-                    return None;
-                }
 
                 // Sanity check: RHS text must be extractable.
                 if rhs_end > content.len() || rhs_start > rhs_end {
@@ -390,7 +384,8 @@ fn expression_has_side_effects(expr: &Expression<'_>) -> bool {
         Expression::Throw(_) => true,
         // Assignment in the RHS is side-effectful.
         Expression::Assignment(a) => {
-            // The assignment itself is a side effect, plus check the RHS.
+            // The assignment itself is a side effect; the RHS need not be
+            // inspected separately.
             let _ = a;
             true
         }
@@ -497,11 +492,6 @@ fn build_scope_map(content: &str, offset: u32) -> ScopeMap {
 
 // ─── Line deletion helpers ──────────────────────────────────────────────────
 
-/// Compute the byte range for deleting an entire statement line.
-///
-/// Extends the statement span to include leading whitespace and the
-/// trailing newline (if present), so that removing the statement doesn't
-/// leave a blank line.
 /// Check whether inlining the given assignment is safe, based on scope
 /// analysis.
 ///
@@ -553,6 +543,11 @@ fn is_inline_safe(info: &AssignmentInfo, content: &str, cursor_offset: u32) -> b
     true
 }
 
+/// Compute the byte range for deleting an entire statement line.
+///
+/// Extends the statement span to include leading whitespace and the
+/// trailing newline (if present), so that removing the statement doesn't
+/// leave a blank line.
 fn deletion_range(content: &str, stmt_start: usize, stmt_end: usize) -> (usize, usize) {
     // Extend backward to the start of the line (include leading whitespace).
     let line_start = content[..stmt_start]
@@ -605,8 +600,6 @@ impl Backend {
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
         // ── 1. Find the assignment at the cursor ────────────────────
-        // If the cursor is not on a simple `$var = expr;` assignment,
-        // no action is offered.
         let info = with_parsed_program(content, "inline_variable", |program, content| {
             find_assignment_at_cursor(program.statements.as_slice(), cursor_offset, content)
         });
@@ -1235,10 +1228,6 @@ function foo($obj) {
         let (start, end) = deletion_range(content, 4, 15); // "$x = 1;" is at 4..15
         // Should include leading spaces and trailing newline.
         assert_eq!(start, 0, "should start at line beginning");
-        // stmt_end is 15 which is ';', the newline is at index 15 (assuming
-        // the ";" is at index 14).  Let's check precisely:
-        // "    $x = 1;\n" — the `;` is at index 10, `\n` at 11
-        // Actually let's just verify the range covers the full line.
         assert!(end > 10, "should extend past the semicolon");
     }
 

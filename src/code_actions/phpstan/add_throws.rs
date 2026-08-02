@@ -75,7 +75,6 @@ impl Backend {
                 continue;
             }
 
-            // Extract the exception FQN from the message.
             let exception_fqn = match extract_exception_fqn(&diag.message) {
                 Some(fqn) => fqn,
                 None => continue,
@@ -104,19 +103,16 @@ impl Backend {
 
             let needs_import = !already_imported && !same_namespace;
 
-            // Check for import conflicts.
             if needs_import && use_import_conflicts(&exception_fqn, &file_use_map) {
                 continue;
             }
 
-            // Find the enclosing function/method and its docblock.
             let diag_line = diag.range.start.line as usize;
             let docblock_info = match find_enclosing_docblock(content, diag_line) {
                 Some(info) => info,
                 None => continue,
             };
 
-            // Check if this exception is already in @throws.
             if docblock_already_has_throws(
                 &docblock_info,
                 &exception_fqn,
@@ -164,15 +160,12 @@ impl Backend {
     ) -> Option<WorkspaceEdit> {
         let uri = &data.uri;
 
-        // Parse the extra data to recover the diagnostic message.
         let diagnostic_message = data.extra.get("diagnostic_message")?.as_str()?;
         let diagnostic_line = data.extra.get("diagnostic_line")?.as_u64()? as usize;
 
-        // Extract the exception FQN from the message.
         let exception_fqn = extract_exception_fqn(diagnostic_message)?;
         let short_name = crate::util::short_name(&exception_fqn);
 
-        // Look up the use_map and namespace_map for the URI.
         let file_use_map: HashMap<String, String> = self.file_use_map(uri);
         let file_namespace: Option<String> = self.first_file_namespace(uri);
 
@@ -192,10 +185,8 @@ impl Backend {
 
         let needs_import = !already_imported && !same_namespace;
 
-        // Find the enclosing docblock.
         let docblock_info = find_enclosing_docblock(content, diagnostic_line)?;
 
-        // Build edits.
         let mut edits = Vec::new();
 
         // 1. Docblock edit: insert @throws tag.
@@ -300,7 +291,9 @@ fn find_enclosing_docblock(content: &str, diag_line: usize) -> Option<DocblockIn
 
     let brace_pos = func_open_brace?;
 
-    // Find the `function` keyword before the brace.
+    // Find the `function` keyword before the brace, bounding the backward
+    // scan to the last 2000 bytes so a pathologically long signature (or a
+    // brace found deep into a huge file) can't force an unbounded search.
     let before_brace = content.get(..brace_pos)?;
     let mut sig_start = before_brace.len().saturating_sub(2000);
     while sig_start > 0 && !before_brace.is_char_boundary(sig_start) {
@@ -367,7 +360,6 @@ fn find_enclosing_docblock(content: &str, diag_line: usize) -> Option<DocblockIn
         }
     }
 
-    // No existing docblock — we'll create one.
     Some(DocblockInfo {
         has_docblock: false,
         start: 0,
@@ -439,7 +431,6 @@ fn insert_throws_into_existing_docblock(
     let doc = &info.text;
     let indent = &info.indent;
 
-    // Find the position of `*/` in the docblock.
     let close_pos = match doc.rfind("*/") {
         Some(p) => p,
         None => {
@@ -513,7 +504,6 @@ fn create_docblock_with_throws(_content: &str, info: &DocblockInfo, short_name: 
     );
 
     // Insert at the start of the signature line.
-    // We need to convert sig_line_start to an LSP position.
     let lsp_pos = offset_to_position(_content, info.sig_line_start);
 
     TextEdit {

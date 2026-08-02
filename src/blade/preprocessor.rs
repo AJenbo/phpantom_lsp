@@ -172,7 +172,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                     current_utf16_col += directive_len as u32;
                     mode = Mode::Html;
                 } else {
-                    // Skip char (it's inside the comment)
                     char_idx += 1;
                     current_utf16_col += ch.len_utf16() as u32;
                 }
@@ -227,7 +226,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 replacement = "".to_string();
                             } else {
                                 replacement = format!(" {} ", translate_directive(directive));
-                                next_mode = Mode::DirectiveArgs(";"); // Directive Args for @php(...)
+                                next_mode = Mode::DirectiveArgs(";");
                                 paren_depth = 0;
                             }
                         } else if directive == "endphp" {
@@ -249,7 +248,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 next_mode = Mode::DirectiveArgs("):");
                                 paren_depth = 0;
                             } else {
-                                // forelse @empty (no args) → endforeach; if (false):
                                 replacement = " endforeach; if (false): ".to_string();
                                 next_mode = Mode::Html;
                             }
@@ -288,7 +286,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             "if" | "elseif" | "for" | "while" | "switch" | "case"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
-                            next_mode = Mode::DirectiveArgs(":"); // Directive Args
+                            next_mode = Mode::DirectiveArgs(":");
                             paren_depth = 0;
                         } else if matches!(directive, "unless" | "isset") {
                             // `translate_directive` opens an extra unmatched
@@ -336,7 +334,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "dump"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
-                            next_mode = Mode::DirectiveArgs(";"); // Directive Args for layout tags
+                            next_mode = Mode::DirectiveArgs(";");
                             paren_depth = 0;
                         } else if matches!(
                             directive,
@@ -509,7 +507,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                     if paren_depth <= 0 {
                         char_idx += 1;
                         current_utf16_col += 1;
-                        // Discard buffer (args not output)
                         buffer.clear();
 
                         let start_suffix = utf16_count(&processed) as u32;
@@ -523,7 +520,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         continue;
                     }
                 }
-                // Don't output anything in SkipArgs - just advance
                 char_idx += 1;
                 current_utf16_col += ch.len_utf16() as u32;
                 continue;
@@ -1212,13 +1208,11 @@ mod tests {
         let content =
             "@verbatim\n    {{ $name }}\n    @if(true)\n@endverbatim\n<p>{{ $real }}</p>\n";
         let (php, _) = preprocess(content);
-        // The {{ $name }} inside verbatim should NOT produce echo
         assert!(
             !php.contains("$name"),
             "verbatim content should be skipped: {}",
             php
         );
-        // The {{ $real }} after @endverbatim should work normally
         assert!(
             php.contains("$real"),
             "content after endverbatim should work: {}",

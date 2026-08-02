@@ -38,7 +38,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
     // Brace depth tracking for top-level `const` detection.
     // Depth 0 = top-level, depth 1 = inside a class/namespace block.
     let mut brace_depth: u32 = 0;
-    // Whether we are inside a braced namespace block.
     let mut in_braced_namespace = false;
     // The brace depth at which the current namespace was opened.
     // `const` declarations at this depth (or depth 0 outside braced
@@ -224,7 +223,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
 
         // ── Keyword detection ───────────────────────────────────────
         if is_keyword_boundary(content, i) {
-            // namespace
             if b == b'n'
                 && i + 9 <= len
                 && &content[i..i + 9] == b"namespace"
@@ -273,7 +271,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
                 continue;
             }
 
-            // class
             if b == b'c'
                 && i + 5 <= len
                 && &content[i..i + 5] == b"class"
@@ -286,7 +283,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
                 continue;
             }
 
-            // interface
             if b == b'i'
                 && i + 9 <= len
                 && &content[i..i + 9] == b"interface"
@@ -299,7 +295,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
                 continue;
             }
 
-            // trait
             if b == b't'
                 && i + 5 <= len
                 && &content[i..i + 5] == b"trait"
@@ -312,7 +307,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
                 continue;
             }
 
-            // enum
             if b == b'e'
                 && i + 4 <= len
                 && &content[i..i + 4] == b"enum"
@@ -382,7 +376,6 @@ pub fn find_symbols(content: &[u8]) -> ScanResult {
                 && (i + 6 < len && content[i + 6] == b'(')
             {
                 i += 7; // skip `define(`
-                // Skip whitespace
                 while i < len && content[i].is_ascii_whitespace() {
                     i += 1;
                 }
@@ -593,7 +586,6 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
         // Heredoc / nowdoc: <<<
         if b == b'<' && i + 2 < len && content[i + 1] == b'<' && content[i + 2] == b'<' {
             i += 3;
-            // Skip whitespace
             while i < len && content[i] == b' ' {
                 i += 1;
             }
@@ -612,7 +604,6 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
                 if i < len && (content[i] == b'\'' || content[i] == b'"') {
                     i += 1;
                 }
-                // Skip to newline
                 while i < len && content[i] != b'\n' {
                     i += 1;
                 }
@@ -627,7 +618,6 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
         // Only match at valid keyword boundaries to avoid matching
         // property accesses like `$node->class`.
         if is_keyword_boundary(content, i) {
-            // namespace
             if b == b'n'
                 && i + 9 <= len
                 && &content[i..i + 9] == b"namespace"
@@ -667,7 +657,6 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
                 continue;
             }
 
-            // class
             if b == b'c'
                 && i + 5 <= len
                 && &content[i..i + 5] == b"class"
@@ -680,7 +669,6 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
                 continue;
             }
 
-            // interface
             if b == b'i'
                 && i + 9 <= len
                 && &content[i..i + 9] == b"interface"
@@ -693,7 +681,6 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
                 continue;
             }
 
-            // trait
             if b == b't'
                 && i + 5 <= len
                 && &content[i..i + 5] == b"trait"
@@ -706,7 +693,6 @@ pub fn find_classes(content: &[u8]) -> Vec<String> {
                 continue;
             }
 
-            // enum
             if b == b'e'
                 && i + 4 <= len
                 && &content[i..i + 4] == b"enum"
@@ -869,7 +855,6 @@ fn read_define_name<'a>(content: &'a [u8], i: &mut usize) -> Option<&'a str> {
 fn read_name<'a>(content: &'a [u8], i: &mut usize) -> Option<&'a str> {
     let len = content.len();
 
-    // Skip whitespace
     while *i < len && content[*i].is_ascii_whitespace() {
         *i += 1;
     }

@@ -228,9 +228,7 @@ fn build_remove_override_edit(content: &str, attr_line: usize) -> Option<TextEdi
     let line_text = lines[attr_line];
     let trimmed = line_text.trim();
 
-    // Check if this is the sole attribute on the line.
     if is_sole_override_attribute(trimmed) {
-        // Remove the entire line (including newline).
         let start = line_byte_offset(content, attr_line);
         let end = if attr_line + 1 < lines.len() {
             line_byte_offset(content, attr_line + 1)
@@ -249,8 +247,6 @@ fn build_remove_override_edit(content: &str, attr_line: usize) -> Option<TextEdi
             new_text: String::new(),
         })
     } else {
-        // Multiple attributes on the line. Remove just the Override
-        // token (with optional `\` prefix and surrounding comma/space).
         let new_line = remove_override_from_attribute_list(trimmed)?;
 
         // Preserve original indentation.

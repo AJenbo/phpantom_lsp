@@ -39,17 +39,8 @@ type OptClassLoader<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
 /// Bundles the loaders needed for cross-file throws resolution.
 ///
 /// When provided to [`find_uncaught_throw_types_with_context`], every call
-/// in the function body is inspected:
-///
-/// - `$variable->method()` — the variable's type is resolved from the
-///   function's parameter list, the class is loaded, and the method's
-///   `@throws` tags are propagated.
-/// - `ClassName::staticMethod()` — the class is loaded directly and the
-///   method's `@throws` tags are propagated.
-/// - `functionName()` — the function is loaded and its `@throws` tags
-///   are propagated.
-/// - `new ClassName(…)` — the class is loaded and the constructor's
-///   `@throws` tags are propagated.
+/// in the function body is inspected for cross-file `@throws` propagation
+/// (see the module-level docs for the call patterns this covers).
 pub(crate) struct ThrowsContext<'a> {
     /// Resolves a class name to its [`ClassInfo`].
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -88,17 +79,8 @@ pub(crate) fn find_uncaught_throw_types(content: &str, position: Position) -> Ve
 /// for cross-file throws propagation.
 ///
 /// When a context is provided, **every** call in the function body is
-/// inspected for cross-file `@throws` tags:
-///
-/// - `$variable->method()` — the variable's type is resolved from the
-///   function's parameter list, the class is loaded, and the method's
-///   `@throws` tags are propagated.
-/// - `ClassName::staticMethod()` — the class is loaded directly and the
-///   method's `@throws` tags are propagated.
-/// - `functionName()` — the function is loaded and its `@throws` tags
-///   are propagated.
-/// - `new ClassName(…)` — the class is loaded and the constructor's
-///   `@throws` tags are propagated.
+/// inspected for cross-file `@throws` tags (see the module-level docs for
+/// the call patterns this covers).
 pub(crate) fn find_uncaught_throw_types_with_context(
     content: &str,
     position: Position,
@@ -404,7 +386,7 @@ pub(crate) fn parse_param_type_map(signature: &str) -> Vec<(String, PhpType)> {
 
         // Each parameter segment looks like:
         //   [?]TypeName [&][$]varName [= default]
-        // We need to find the last `$name` token and the type before it.
+        // We need to find the first `$name` token and the type before it.
         // Skip promoted property modifiers (public/protected/private/readonly).
         let tokens: Vec<&str> = trimmed.split_whitespace().collect();
 

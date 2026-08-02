@@ -1,36 +1,35 @@
-/// Completion request orchestration.
-///
-/// This module contains the main `handle_completion` method that was
-/// previously inlined in `server.rs`.  It coordinates the various
-/// completion strategies (PHPDoc tags, named arguments, array shape keys,
-/// member access, variable names, class/constant/function names) and
-/// returns the first successful result.
-///
-/// Each strategy is a private method, grouped into sibling modules by
-/// concern:
-/// - `phpdoc` — `complete_phpdoc_tag` (`@tag` completion inside docblocks)
-///   and `complete_docblock_type_or_variable` (type/variable after
-///   `@param`, `@return`, etc.)
-/// - `class_constant` — `complete_type_hint` (type completion in
-///   parameter lists, return types, properties) and
-///   `try_class_constant_function_completion` (bare class/constant/
-///   function names, including `new` and `throw new`)
-/// - `named_args` — `try_named_arg_completion`-style collection of
-///   `name:` argument completion inside call parens
-/// - `member_access` — `try_member_access_completion` (`->` and `::`
-///   member completion) and the related override-suggestion strategy
-/// - `patching` — source-text patches shared by `member_access` and
-///   `named_args` to recover a parseable AST mid-keystroke
-///
-/// Strategies not big enough to warrant their own module (array shape
-/// completion, variable name completion, catch clause completion, and
-/// the PHPStan-ignore-code completion) stay here alongside the
-/// orchestrator.
-///
-/// Methods prefixed with `complete_` always short-circuit: the caller
-/// unconditionally returns their result.  Methods prefixed with `try_`
-/// return `Option<CompletionResponse>` where `None` means "not applicable,
-/// try the next strategy."
+//! Completion request orchestration.
+//!
+//! Coordinates the various completion strategies (PHPDoc tags, named
+//! arguments, array shape keys, member access, variable names,
+//! class/constant/function names) and returns the first successful
+//! result.
+//!
+//! Each strategy is a private method, grouped into sibling modules by
+//! concern:
+//! - `phpdoc` — `complete_phpdoc_tag` (`@tag` completion inside docblocks)
+//!   and `complete_docblock_type_or_variable` (type/variable after
+//!   `@param`, `@return`, etc.)
+//! - `class_constant` — `complete_type_hint` (type completion in
+//!   parameter lists, return types, properties) and
+//!   `try_class_constant_function_completion` (bare class/constant/
+//!   function names, including `new` and `throw new`)
+//! - `named_args` — `try_named_arg_completion`-style collection of
+//!   `name:` argument completion inside call parens
+//! - `member_access` — `try_member_access_completion` (`->` and `::`
+//!   member completion) and the related override-suggestion strategy
+//! - `patching` — source-text patches shared by `member_access` and
+//!   `named_args` to recover a parseable AST mid-keystroke
+//!
+//! Strategies not big enough to warrant their own module (array shape
+//! completion, variable name completion, catch clause completion, and
+//! the PHPStan-ignore-code completion) stay here alongside the
+//! orchestrator.
+//!
+//! Methods prefixed with `complete_` always short-circuit: the caller
+//! unconditionally returns their result.  Methods prefixed with `try_`
+//! return `Option<CompletionResponse>` where `None` means "not applicable,
+//! try the next strategy."
 use std::collections::BTreeSet;
 
 use tower_lsp::jsonrpc::Result;
@@ -465,7 +464,6 @@ impl Backend {
             }
         }
 
-        // Nothing matched — return no completions.
         Ok(None)
     }
 

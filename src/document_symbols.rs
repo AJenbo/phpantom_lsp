@@ -128,10 +128,6 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
     // Selection range covers just the class name.
     let name_start = idx.position(class.keyword_offset as usize);
     let selection_range = if class.keyword_offset > 0 {
-        // Find the actual name token after the keyword. We use
-        // keyword_offset as a reasonable approximation for the start.
-        // The name appears shortly after the keyword; use the name
-        // length to compute the selection end.
         let name_offset = find_name_after_keyword(idx.content(), class.keyword_offset as usize);
         let ns = idx.position(name_offset);
         let ne = idx.position(name_offset + class.name.len());
@@ -367,8 +363,6 @@ fn constant_to_symbol(
         None
     };
 
-    // For enum cases within an enum, show as ENUM_MEMBER.
-    // For regular constants, show as CONSTANT.
     let _ = is_enum;
 
     Some(DocumentSymbol {
@@ -527,12 +521,10 @@ fn find_name_after_keyword(content: &str, keyword_offset: usize) -> usize {
     let bytes = content.as_bytes();
     let mut i = keyword_offset;
 
-    // Skip the keyword itself (class, interface, trait, enum).
     while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
         i += 1;
     }
 
-    // Skip whitespace between keyword and name.
     while i < bytes.len() && bytes[i].is_ascii_whitespace() {
         i += 1;
     }

@@ -345,21 +345,7 @@ impl Backend {
             }
         }
 
-        // ── 2. Class index ──────────────────────────────────────────────
-        {
-            let cmap = self.symbols.fqn_uri_index.read();
-            for fqn in cmap.keys() {
-                if short_name(fqn).to_lowercase() == name_lower
-                    && !candidates
-                        .iter()
-                        .any(|c: &String| c.eq_ignore_ascii_case(fqn))
-                {
-                    candidates.push(fqn.to_owned());
-                }
-            }
-        }
-
-        // ── 3. uri_classes_index (already-parsed files) ───────────────────────────
+        // ── 2. uri_classes_index (already-parsed files) ───────────────────────────
         {
             let amap = self.symbols.uri_classes_index.read();
             for classes in amap.values() {
@@ -380,7 +366,7 @@ impl Backend {
             }
         }
 
-        // ── 4. Stubs (built-in PHP classes) ─────────────────────────────
+        // ── 3. Stubs (built-in PHP classes) ─────────────────────────────
         // Stubs are global-namespace classes, so the FQN is the short name.
         // Only add if the file has a namespace (otherwise no import needed).
         let stub_idx = self.stub_index.read();
@@ -706,9 +692,9 @@ impl Backend {
         // Second pass: compute all edits against the original content.
         // All positions come from the same use_block (original file).
         // The editor applies all edits simultaneously, so multiple
-        // inserts at the same line stack in array order.  We sort the
-        // Sort alphabetically so they appear in order when multiple
-        // inserts target the same line.
+        // inserts at the same line stack in array order.  Sort
+        // alphabetically so they appear in order when multiple inserts
+        // target the same line.
         chosen_fqns.sort_by_key(|a| a.to_lowercase());
         chosen_fqns.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
@@ -883,7 +869,6 @@ fn compute_use_line_ranges(content: &str) -> Vec<(u32, u32)> {
     ranges
 }
 
-/// Check whether a byte offset falls within any of the given ranges.
 fn is_offset_in_ranges(offset: u32, ranges: &[(u32, u32)]) -> bool {
     ranges
         .iter()

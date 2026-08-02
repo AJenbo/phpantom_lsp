@@ -1,7 +1,7 @@
-/// Standalone function name completions.
-///
-/// This module builds completion items for global and namespaced
-/// functions (both user-defined and built-in PHP stubs).
+//! Standalone function name completions.
+//!
+//! This module builds completion items for global and namespaced
+//! functions (both user-defined and built-in PHP stubs).
 use std::collections::HashSet;
 
 use tower_lsp::lsp_types::*;
@@ -137,7 +137,11 @@ fn build_use_import_item(
 }
 
 impl Backend {
-    /// Build completion items for standalone functions from all known sources.
+    /// Maximum number of standalone function completions returned before truncating.
+    const MAX_FUNCTION_COMPLETIONS: usize = 100;
+
+    /// Build completion items for standalone functions matching `prefix`, from
+    /// all known sources.
     ///
     /// Sources (in priority order):
     ///   1. Functions discovered from parsed files (`global_functions`)
@@ -151,13 +155,6 @@ impl Backend {
     /// only the function name is shown to avoid the cost of parsing every
     /// matching file at completion time.
     ///
-    /// Returns `(items, is_incomplete)`.  When the total number of
-    /// matching functions exceeds [`MAX_FUNCTION_COMPLETIONS`], the result
-    /// is truncated and `is_incomplete` is `true`.
-    const MAX_FUNCTION_COMPLETIONS: usize = 100;
-
-    /// Build completion items for standalone functions matching `prefix`.
-    ///
     /// When `for_use_import` is `true` the items are tailored for a
     /// `use function` statement: the insert text is the FQN (so that
     /// `use function FQN;` is produced) and no parentheses are appended.
@@ -167,6 +164,10 @@ impl Backend {
     /// at the correct position, mirroring how class auto-import works.
     /// The `content` and `file_namespace` parameters are required for
     /// this auto-import; pass `None` / empty when not needed.
+    ///
+    /// Returns `(items, is_incomplete)`.  When the total number of
+    /// matching functions exceeds [`MAX_FUNCTION_COMPLETIONS`], the result
+    /// is truncated and `is_incomplete` is `true`.
     pub(crate) fn build_function_completions(
         &self,
         prefix: &str,

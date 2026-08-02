@@ -36,7 +36,6 @@ pub(super) fn detect_docblock_trigger(
         return None;
     }
 
-    // Get the text up to the cursor on this line.
     let before_cursor = if col <= line.len() {
         &line[..col]
     } else {
@@ -54,7 +53,6 @@ pub(super) fn detect_docblock_trigger(
         return None;
     }
 
-    // Check what follows the `/**` on this line.
     let after_trigger = if col <= line.len() { &line[col..] } else { "" };
 
     // Editors like VS Code auto-close `/**` into `/** */` on the same
@@ -161,7 +159,6 @@ pub(super) fn detect_empty_docblock(
         return None;
     }
 
-    // Extract indentation from the opening line.
     let indent: String = open_text
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')
@@ -189,7 +186,6 @@ pub(super) fn detect_empty_docblock(
             {
                 let after_star = after_star.trim();
                 if !after_star.is_empty() {
-                    // There's actual text — this is not a fresh block.
                     return None;
                 }
             }

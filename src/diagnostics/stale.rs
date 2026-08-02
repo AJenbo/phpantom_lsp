@@ -5,9 +5,9 @@
 //! debounce timer. Between a user fixing an issue (via a code action or
 //! a manual edit) and the next PHPStan run, the cached diagnostic would
 //! otherwise linger. [`is_stale_phpstan_diagnostic`] detects the cases
-//! where content-based evidence (an added `@phpstan-ignore` comment)
-//! shows the diagnostic no longer applies, so `assemble_and_push` can
-//! prune it eagerly.
+//! where content-based evidence (an added `@phpstan-ignore` comment, a
+//! fix applied by hand, …) shows the diagnostic no longer applies, so
+//! `assemble_and_push` can prune it eagerly.
 
 use tower_lsp::lsp_types::*;
 
@@ -16,17 +16,18 @@ use tower_lsp::lsp_types::*;
 ///
 /// A diagnostic is stale when the user has already fixed the underlying
 /// issue (via a code action or manual edit) but PHPStan hasn't re-run
-/// yet to clear it:
+/// yet to clear it. Each branch below checks for the content-based
+/// evidence a specific fix leaves behind (an attribute added, a PHPDoc
+/// tag changed, a statement removed, …); see the comment above each
+/// branch for details. Any identifier is also considered stale when the
+/// diagnostic's line now carries a `@phpstan-ignore` comment listing it.
 ///
-/// - `throws.unusedType` / `throws.notThrowable`: the `@throws` tag
-///   was removed — stale if the type no longer appears after `@throws`.
-/// - `missingType.checkedException`: the `@throws` tag was added —
-///   stale if the exception short name now appears after `@throws`.
-/// - `method.missingOverride`: the `#[Override]` attribute was added —
-///   stale if a `#[...]` line containing `Override` appears near the
-///   diagnostic line.
-/// - **Any identifier**: the line now contains a `@phpstan-ignore`
-///   comment that covers the diagnostic's identifier.
+/// A few identifiers are deliberately not covered here: `throws.unusedType`,
+/// `missingType.checkedException`, and `method.missingOverride` are
+/// cleared eagerly by `codeAction/resolve` instead (see
+/// `clear_phpstan_diagnostics_after_resolve` in `code_actions`);
+/// `return.type` has no heuristic at all because no content-based check
+/// can tell whether the right fix is to change the type or the code.
 pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> bool {
     let identifier = match &diag.code {
         Some(NumberOrString::String(s)) => s.as_str(),
@@ -44,13 +45,6 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
     {
         return true;
     }
-
-    // The per-identifier heuristics for `throws.unusedType`,
-    // `missingType.checkedException`, and `method.missingOverride`
-    // have been removed.  These diagnostics are now cleared eagerly
-    // by `codeAction/resolve` when the user picks a PHPStan quickfix
-    // (see `clear_phpstan_diagnostics_after_resolve` in code_actions).
-    // The `@phpstan-ignore` check above still covers manual edits.
 
     // ── method.override / property.override / property.overrideAttribute ─
     // The user may remove the attribute by hand, so check whether
@@ -168,9 +162,11 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
     false
 }
 
-// The following helpers were used by the per-identifier stale detection
-// branches that have been removed.  They are kept under `#[cfg(test)]`
-// because existing tests exercise them directly.
+// The following helpers have no production caller (the `@throws`-based
+// stale detection they supported is now handled by `codeAction/resolve`
+// instead — see the doc comment on `is_stale_phpstan_diagnostic`). They
+// are kept under `#[cfg(test)]` because the tests below exercise them
+// directly.
 
 #[cfg(test)]
 #[allow(dead_code)]
@@ -401,12 +397,10 @@ mod tests {
 
     // ── Per-identifier heuristics removed ───────────────────────────
     //
-    // The throws.unusedType, missingType.checkedException, and
-    // method.missingOverride stale-detection branches have been
-    // removed.  These diagnostics are now cleared eagerly by
-    // `codeAction/resolve` (see `clear_phpstan_diagnostics_after_resolve`).
-    // The tests below verify they are no longer considered stale by
-    // `is_stale_phpstan_diagnostic` alone.
+    // throws.unusedType, missingType.checkedException, and
+    // method.missingOverride are cleared by `codeAction/resolve` instead
+    // (see `clear_phpstan_diagnostics_after_resolve`), not by content
+    // heuristics here.  The tests below verify that.
 
     #[test]
     fn throws_unused_type_not_stale_via_heuristic() {
@@ -724,10 +718,9 @@ mod tests {
 
     // ── Scoped docblock checks ──────────────────────────────────────
     //
-    // The scoped docblock heuristics have been removed alongside the
-    // per-identifier stale detection.  These tests verify the new
-    // behaviour: throws/override diagnostics are never stale via
-    // heuristic (they are cleared by codeAction/resolve instead).
+    // These tests verify that throws/override diagnostics are never
+    // stale via content heuristic (they are cleared by
+    // codeAction/resolve instead).
 
     #[test]
     fn throws_not_stale_even_when_tag_on_same_function() {

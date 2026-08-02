@@ -52,11 +52,15 @@
 //!   parser as Error-severity diagnostics.  The most fundamental
 //!   diagnostic: without it, a user with a typo gets no feedback until
 //!   they try to run the code.
-//! - **`@deprecated` usage diagnostics** — report references to symbols
-//!   marked `@deprecated` with `DiagnosticTag::Deprecated` (renders as
-//!   strikethrough in most editors).
 //! - **Unused `use` dimming** — dim `use` declarations that are not
 //!   referenced anywhere in the file with `DiagnosticTag::Unnecessary`.
+//! - **Unused variable diagnostics** — dim variables that are assigned
+//!   or bound as a parameter but never read in the same scope.
+//! - **Namespace mismatch diagnostics** — report a single-class file
+//!   whose declared namespace disagrees with the PSR-4 mapping derived
+//!   from its path.
+//! - **Class name mismatch diagnostics** — report a single-class file
+//!   whose class name disagrees with the name PSR-4 expects for its path.
 //!
 //! ## Phase 2 — slow (require type resolution)
 //!
@@ -89,6 +93,25 @@
 //!   fail to implement all required methods from their interfaces or
 //!   abstract parents.  Reuses the same missing-method detection as the
 //!   "Implement missing methods" code action.
+//! - **`@deprecated` usage diagnostics** — report references to symbols
+//!   marked `@deprecated` with `DiagnosticTag::Deprecated` (renders as
+//!   strikethrough in most editors).  Requires resolving the reference
+//!   to its declaration, so this runs here rather than in Phase 1.
+//! - **Class case mismatch diagnostics** — report a class reference
+//!   whose spelling differs only in case from its PSR-4 declaration,
+//!   which loads fine on case-insensitive filesystems but fatals on
+//!   Linux.
+//! - **Type mismatch diagnostics** — report argument, return, and
+//!   property-assignment values whose type does not satisfy the
+//!   declared/inferred type.
+//! - **Invalid class kind diagnostics** — report a class-like name used
+//!   in a syntactic position (`new`, `implements`, `instanceof`, …) that
+//!   its kind (class/interface/trait/enum) cannot satisfy.
+//! - **Laravel string key / command parameter diagnostics** (Laravel
+//!   projects only) — report route/config/view/translation/command
+//!   names and morph aliases that don't resolve to a known declaration,
+//!   and `$this->argument()` / `$this->option()` calls that aren't in
+//!   the enclosing command's `$signature`.
 //!
 //! ## Phase 3 — heavy (external process, dedicated workers)
 //!
@@ -137,7 +160,7 @@
 //!
 //! | Cache                    | Source             |
 //! | ------------------------ | ------------------ |
-//! | `diag_last_fast`           | syntax, unused use |
+//! | `diag_last_fast`           | Phase 1 (fast)     |
 //! | `diag_last_slow`           | type resolution    |
 //! | `phpstan_tool.last_diags`  | PHPStan            |
 //! | `phpcs_tool.last_diags`    | PHPCS              |
@@ -159,11 +182,16 @@
 //! and the editor is asked to re-pull via `workspace/diagnostic/refresh`.
 //! The pull handler (`textDocument/diagnostic`) returns this cached set.
 //! If the cache is missing (e.g. the file was just opened), the pull
-//! handler triggers computation directly instead of returning empty
-//! results.  This is not a workaround for a single client; it is the
-//! intended server contract.  A pull-capable client already has a canonical
-//! native diagnostic stream, so pushing the same native diagnostics as well
-//! would create two competing streams that clients may merge differently.
+//! handler schedules a background computation and returns whatever is
+//! cached right now — usually empty — instead of computing inline: a
+//! synchronous compute on the request path can wedge the transport
+//! under a typing burst (see [`trigger_diagnostics_for_pull`]). The
+//! worker's completion then bumps the `resultId` and requests a
+//! `workspace/diagnostic/refresh`, so the editor re-pulls with the real
+//! results a moment later.  A pull-capable client already has a
+//! canonical native diagnostic stream, so pushing the same native
+//! diagnostics as well would create two competing streams that clients
+//! may merge differently.
 //!
 //! External tool workers (PHPStan, PHPCS, Mago) use their own
 //! debounce timers in both modes because they are expensive.
@@ -213,16 +241,19 @@ use crate::Backend;
 
 impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics
-    /// (stub files only).  Vendor files are not skipped because
-    /// diagnostics only run on files the user has open in the editor,
-    /// and users working in monorepos or with `--prefer-source`
-    /// packages legitimately edit vendor files.
+    /// (stub files only).  Vendor files are not skipped here: users
+    /// working in monorepos or with `--prefer-source` packages
+    /// legitimately edit vendor files, so the live per-file pass
+    /// diagnoses them like any other open file.  The workspace-wide
+    /// background pass excludes vendor files separately, via its own
+    /// `vendor_uri_prefixes` filter.
     fn should_skip_diagnostics(&self, uri_str: &str) -> bool {
         uri_str.starts_with("phpantom-stub://") || uri_str.starts_with("phpantom-stub-fn://")
     }
 
     /// Collect Phase 1 (fast) diagnostics: syntax errors, unused
-    /// imports.  These are cheap — no type resolution.
+    /// imports/variables, and namespace/class-name mismatches.  These
+    /// are cheap — no type resolution.
     pub(crate) fn collect_fast_diagnostics(
         &self,
         uri_str: &str,
@@ -237,8 +268,10 @@ impl Backend {
     }
 
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,
-    /// argument count, implementation errors, deprecated usage.  These
-    /// require type resolution and are expensive.
+    /// argument count, implementation errors, deprecated usage, type
+    /// mismatches, and (in Laravel projects) route/config/view/
+    /// translation/command name checks.  These require type resolution
+    /// and are expensive.  See the module docs for the full list.
     pub fn collect_slow_diagnostics(
         &self,
         uri_str: &str,
@@ -314,9 +347,9 @@ impl Backend {
             self.collect_unknown_member_diagnostics_with_context(ctx, uri_str, content, out);
             self.collect_unknown_function_diagnostics_with_context(ctx, uri_str, content, out);
         }
-        // NOTE: unresolved_member_access diagnostics are now emitted
-        // inside collect_unknown_member_diagnostics (in the Untyped arm)
-        // to avoid a second full walk with duplicate type resolution.
+        // unresolved_member_access diagnostics are emitted inside
+        // collect_unknown_member_diagnostics (in the Untyped arm) to
+        // avoid a second full walk with duplicate type resolution.
         self.collect_argument_count_diagnostics(uri_str, content, out);
         self.collect_type_mismatch_diagnostics(uri_str, content, out);
         if let Some(ctx) = &file_ctx {
@@ -598,12 +631,12 @@ impl Backend {
     ///
     /// Called from the background diagnostic worker after debouncing.
     ///
-    /// **Phase 1 (instant):** Run fast collectors (syntax errors,
-    /// deprecated, unused imports) and assemble them with *cached* slow
-    /// and PHPStan results.  In push mode the merged set is published;
-    /// in pull mode it is cached and a `workspace/diagnostic/refresh` is
-    /// sent so the editor re-pulls.  Either way the editor shows
-    /// strikethrough and dimming within milliseconds.
+    /// **Phase 1 (instant):** Run fast collectors (syntax errors, unused
+    /// imports/variables, namespace/class-name mismatches) and assemble
+    /// them with *cached* slow and PHPStan results.  In push mode the
+    /// merged set is published; in pull mode it is cached and a
+    /// `workspace/diagnostic/refresh` is sent so the editor re-pulls.
+    /// Either way the editor shows dimming within milliseconds.
     ///
     /// **Phase 2 (background):** Compute slow diagnostics, rebuild the
     /// full set (fast + fresh slow + cached PHPStan), and deliver it the
@@ -739,9 +772,9 @@ impl Backend {
             cache.get(uri_str).cloned().unwrap_or_default()
         };
 
-        // Eagerly prune stale PHPStan diagnostics against current
-        // file content (e.g. @throws tag added/removed, @phpstan-ignore
-        // comment added).
+        // Eagerly prune stale PHPStan diagnostics against current file
+        // content (e.g. an added `@phpstan-ignore` comment) — see
+        // `stale::is_stale_phpstan_diagnostic` for the specific checks.
         if !phpstan_before.is_empty() {
             let content: Option<Arc<String>> = self.open_files.read().get(uri_str).cloned();
             let filtered: Vec<Diagnostic> = phpstan_before
@@ -848,15 +881,16 @@ impl Backend {
         }
     }
 
-    /// Notify the diagnostic system that a file needs fresh diagnostics.
+    /// Notify the diagnostic system that a file needs fresh native
+    /// diagnostics.
     ///
-    /// **Push mode:** Queues the file for the debounced background
-    /// diagnostic worker and schedules external tool runs.
-    ///
-    /// **Pull mode:** Only schedules external tool runs (PHPStan,
-    /// PHPCS, Mago).  Native diagnostic computation is deferred until
-    /// the editor sends a `textDocument/diagnostic` pull request, which
-    /// triggers [`trigger_diagnostics_for_pull`].
+    /// Queues the file for the debounced background diagnostic worker in
+    /// both push and pull mode: in push mode the worker publishes the
+    /// full assembled set, in pull mode it caches the full set for the
+    /// next `textDocument/diagnostic` response.  External tool runs
+    /// (PHPStan, PHPCS, Mago) are scheduled separately, by
+    /// [`Self::schedule_external_diagnostics`], since they are expensive
+    /// and only run on save.
     ///
     /// This returns immediately — all diagnostic computation happens
     /// in the background so that completion, hover, and signature help
@@ -922,10 +956,12 @@ impl Backend {
     /// cannot tell.  The saved file itself is excluded (it is already
     /// scheduled by the caller).
     ///
-    /// **Push mode:** Queues those files for the background worker.
-    ///
-    /// **Pull mode:** Invalidates cached full diagnostics and sends
-    /// `workspace/diagnostic/refresh` so the editor re-pulls.
+    /// Queues those files for the debounced background worker in both
+    /// modes.  In pull mode, the cached full diagnostic set for each
+    /// file is also invalidated up front (its resultId is kept) so a
+    /// pull that lands before the worker finishes triggers a fresh
+    /// computation instead of returning diagnostics from before the
+    /// save.
     ///
     /// [`open_files_affected_by_save`]: Backend::open_files_affected_by_save
     pub(crate) fn schedule_diagnostics_for_open_files(&self, exclude_uri: &str) {
@@ -962,13 +998,16 @@ impl Backend {
         self.diag.notify.notify_one();
     }
 
-    /// Compute native diagnostics for a single file (pull-mode path).
+    /// Ensure fresh native diagnostics get computed for a file (pull-mode
+    /// path).
     ///
-    /// Called directly from the pull handler (`textDocument/diagnostic`)
-    /// when the cached full diagnostics are stale or missing.  Runs
-    /// both fast and slow collectors synchronously (no debounce) and
-    /// caches the results.  The pull handler reads `diag_last_full`
-    /// after this returns.
+    /// Called from the pull handler (`textDocument/diagnostic`) when the
+    /// cached full diagnostics are stale or missing.  Does **not**
+    /// compute synchronously; it only queues the file for the debounced
+    /// background worker and returns immediately (see the comment inside
+    /// for why). The pull handler reads whatever is currently cached in
+    /// `diag_last_full`, which may be stale until the worker finishes and
+    /// requests a `workspace/diagnostic/refresh`.
     pub(crate) fn trigger_diagnostics_for_pull(&self, uri_str: &str) {
         // Don't compute diagnostics before initialization is complete.
         // The pull handler will return empty results; once `initialized`
@@ -1003,10 +1042,11 @@ impl Backend {
     /// Long-lived background task that processes diagnostic requests.
     ///
     /// Active in both push and pull modes.  In push mode, the worker
-    /// pushes the full assembled diagnostic set via
-    /// `publishDiagnostics`.  In pull mode, it pushes only fast
-    /// diagnostics and caches the full set in `diag_last_full` for
-    /// the next pull response (see [`assemble_and_push`]).
+    /// publishes the full assembled diagnostic set via
+    /// `publishDiagnostics`.  In pull mode, nothing is pushed: it
+    /// caches the full set in `diag_last_full` and asks the editor to
+    /// re-pull via `workspace/diagnostic/refresh` (see
+    /// [`assemble_and_push`]).
     ///
     /// Spawned once during `initialized`.  Loops forever, waiting for
     /// [`schedule_diagnostics`](Self::schedule_diagnostics) to signal
@@ -1016,8 +1056,8 @@ impl Backend {
     /// 2. Debounce: sleep [`DIAGNOSTIC_DEBOUNCE_MS`], then check
     ///    whether the version counter moved (more edits).  If so,
     ///    loop back to step 2.
-    /// 3. Snapshot the pending URI and current file content.
-    /// 4. Run the diagnostic collectors and publish results.
+    /// 3. Snapshot the pending URIs and each one's current file content.
+    /// 4. Run the diagnostic collectors and publish results for each URI.
     /// 5. Loop back to step 1.
     ///
     /// Because there is exactly one instance of this task, at most one

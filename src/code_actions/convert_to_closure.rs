@@ -257,7 +257,6 @@ fn find_arrow_in_expression(
         return;
     }
 
-    // Check if this expression IS an arrow function we can convert.
     if let Expression::ArrowFunction(af) = expr
         && let Some(replacement) = try_convert_arrow(af, content)
     {
@@ -268,7 +267,6 @@ fn find_arrow_in_expression(
         }
     }
 
-    // Recurse into sub-expressions.
     match expr {
         Expression::Parenthesized(p) => {
             find_arrow_in_expression(p.expression, cursor, content, best)
@@ -517,30 +515,25 @@ fn try_convert_arrow(
 
     let mut result = String::new();
 
-    // Static keyword
     if af.r#static.is_some() {
         result.push_str("static ");
     }
 
-    // function keyword + parameters
     result.push_str("function");
     let params_text = source_text(content, af.parameter_list.span());
     result.push_str(params_text);
 
-    // use() clause for captured variables
     if !captured.is_empty() {
         result.push_str(" use (");
         result.push_str(&captured.join(", "));
         result.push(')');
     }
 
-    // Return type hint (if any)
     if let Some(return_type) = &af.return_type_hint {
         let hint_text = source_text(content, return_type.span());
         result.push_str(hint_text);
     }
 
-    // Body: { return expr; }
     result.push_str(" { return ");
     let expr_text = source_text(content, af.expression.span());
     result.push_str(expr_text);

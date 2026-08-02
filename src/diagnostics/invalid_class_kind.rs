@@ -91,12 +91,10 @@ impl Backend {
                 continue;
             }
 
-            // Skip use-import lines.
             if is_offset_in_ranges(span.start, &use_line_ranges) {
                 continue;
             }
 
-            // Skip template parameters.
             if !is_fqn
                 && !ref_name.contains('\\')
                 && symbol_map.find_template_def(ref_name, span.start).is_some()
@@ -104,7 +102,6 @@ impl Backend {
                 continue;
             }
 
-            // Resolve to FQN.
             let fqn = if is_fqn {
                 ref_name.to_string()
             } else if let Some(rn) = file_resolved_names {
@@ -128,8 +125,6 @@ impl Backend {
                 continue;
             };
 
-            // Check the class kind against the context and build a
-            // diagnostic if it's invalid.
             if let Some((severity, message)) =
                 check_kind_in_context(&class_info, ref_ctx, &fqn, &class_loader)
             {
@@ -321,7 +316,6 @@ fn check_kind_in_context(
                     ),
                 )),
                 ClassLikeKind::Class | ClassLikeKind::Interface => {
-                    // Check if the class/interface implements Throwable.
                     if !is_throwable(class, class_loader) {
                         Some((
                             DiagnosticSeverity::ERROR,
@@ -375,7 +369,8 @@ fn is_throwable_inner(
         return false;
     }
 
-    // Direct match on well-known throwable types.
+    // Recognize common built-in exception types directly, without needing
+    // to resolve their class hierarchy.
     let fqn_lower = fqn.to_lowercase();
     if fqn_lower == "throwable"
         || fqn_lower == "exception"
@@ -386,7 +381,6 @@ fn is_throwable_inner(
         return true;
     }
 
-    // Check interfaces.
     for iface_name in &class.interfaces {
         let iface_lower = iface_name.to_lowercase();
         let iface_short = short_name(&iface_lower);
@@ -400,7 +394,6 @@ fn is_throwable_inner(
         }
     }
 
-    // Check parent class.
     if let Some(ref parent_name) = class.parent_class {
         let parent_lower = parent_name.to_lowercase();
         let parent_short = short_name(&parent_lower);

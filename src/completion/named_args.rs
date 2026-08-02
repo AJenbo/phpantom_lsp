@@ -152,8 +152,8 @@ pub fn detect_named_arg_context(content: &str, position: Position) -> Option<Nam
     })
 }
 
-// Re-exported from `crate::util` for backward compatibility with
-// existing import paths.
+// Re-exported from `crate::text_position` since several completion
+// modules import it via this path.
 pub use crate::text_position::position_to_char_offset;
 
 /// Walk backward from `start` (exclusive) to find the unmatched `(` that
@@ -317,7 +317,7 @@ pub fn extract_subject_before_arrow(chars: &[char], arrow_pos: usize) -> String 
     }
 
     // Could be a chained property: `$this->prop->method(` — just return
-    // the identifier; resolution in server.rs will handle it.
+    // the identifier; the call-expression resolver handles the chain.
     chars[i..end].iter().collect()
 }
 
@@ -419,11 +419,9 @@ pub fn split_args_top_level(text: &str) -> Vec<String> {
         i += 1;
     }
 
-    // Don't push the last segment — it's the argument currently being typed
-    // and is handled separately as the prefix.
-    // Actually, we DO want to push it if it has content, because parse_existing_args
-    // needs to count it. But the caller already stripped the prefix from args_text,
-    // so the last segment here (if any) is a complete previous argument.
+    // The caller already stripped the in-progress prefix from `args_text`
+    // before calling this, so the last segment here (if any) is a complete
+    // previous argument and must be pushed like any other.
     if !current.trim().is_empty() {
         args.push(current);
     }
@@ -455,7 +453,6 @@ pub fn extract_named_arg_name(arg: &str) -> Option<String> {
 
     // Must be followed by `:` (but not `::`)
     if i < chars.len() && chars[i] == ':' {
-        // Check it's not `::`
         if i + 1 < chars.len() && chars[i + 1] == ':' {
             return None;
         }

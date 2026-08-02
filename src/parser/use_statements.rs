@@ -82,7 +82,6 @@ impl Backend {
     ) {
         let item_name = bytes_to_str(item.name.value());
 
-        // Build the fully-qualified name
         let fqn = if let Some(prefix) = group_prefix {
             format!("{}\\{}", prefix, item_name)
         } else {
@@ -93,7 +92,6 @@ impl Backend {
         let alias_name = if let Some(ref alias) = item.alias {
             bytes_to_str(alias.identifier.value).to_string()
         } else {
-            // Last segment of the FQN
             short_name(&fqn).to_string()
         };
 

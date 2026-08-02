@@ -571,25 +571,13 @@ fn is_after_modifier_keyword(chars: &[char], pos: usize) -> bool {
                 return false;
             }
 
-            // Also handle `function` keyword before the modifier — this
-            // means we're looking at a method declaration, not a property.
-            // But that's fine: `function` can only appear before the name
-            // and parens, so if we're here the cursor must be at a property
-            // or promoted-param position.
-            //
-            // However, we do NOT want to trigger inside function
-            // parameter lists that happen to have a modifier keyword
-            // on a preceding line — the paren-based detection handles
-            // those.  We check that we're NOT inside an unmatched `(`.
-            // This avoids double-triggering for promoted constructor
-            // params (the paren-based check already handles those).
-            //
-            // Actually, we DO want to trigger for promoted constructor
-            // params like `__construct(private readonly |)` because the
-            // modifier is the immediate predecessor.  The paren-based
-            // detection would NOT fire there because `readonly` is not
-            // `(` or `,`.  So this branch is the correct handler for
-            // promoted params with modifiers.
+            // `function` can only appear before the method name and its
+            // parens, so if we're here the cursor is at a property or
+            // promoted-param position. This branch is also what makes
+            // promoted constructor params fire (`__construct(private
+            // readonly |)`): the paren-based detection above only
+            // triggers on `(` or `,` immediately before the cursor, not
+            // on a modifier keyword, so it can't handle this case itself.
             true
         }
         _ => false,

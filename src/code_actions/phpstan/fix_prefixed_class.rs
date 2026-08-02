@@ -243,7 +243,6 @@ fn build_fix_prefixed_edit(
 
     let line_text = lines[diag_line];
 
-    // Find the byte offset of the prefixed name within the line.
     let byte_col = find_occurrence(line_text, prefixed)?;
 
     // Convert byte offsets to UTF-16 code unit offsets for LSP.

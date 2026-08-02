@@ -710,18 +710,18 @@ pub struct Backend {
     /// this, editors keep showing tokens computed from the pre-edit
     /// symbol map until the next unrelated request.
     pub(crate) supports_semantic_tokens_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Shared flag set to `true` when the LSP `shutdown` request is
-    /// received.  Background workers (diagnostic, PHPStan, PHPCS) check this
-    /// flag on each iteration and exit their loops.  The PHPStan
-    /// `run_command_with_timeout` poll loop also checks it so that a
-    /// running child process is killed promptly instead of waiting up
-    /// to 60 seconds.
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
     /// diagnostic handler check this flag before running diagnostics
     /// so that files opened during startup don't produce a flood of
     /// false-positive "class not found" / "function not found" errors.
     pub(crate) init_complete: Arc<std::sync::atomic::AtomicBool>,
+    /// Shared flag set to `true` when the LSP `shutdown` request is
+    /// received.  Background workers (diagnostic, PHPStan, PHPCS) check this
+    /// flag on each iteration and exit their loops.  The PHPStan
+    /// `run_command_with_timeout` poll loop also checks it so that a
+    /// running child process is killed promptly instead of waiting up
+    /// to 60 seconds.
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
     /// Virtual PHP content generated from Blade files.
     pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,

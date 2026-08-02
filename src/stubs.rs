@@ -127,7 +127,6 @@ pub fn is_stub_class_removed(
     // Use the short (unqualified) name for the search pattern.
     let short = class_name.rsplit('\\').next().unwrap_or(class_name);
 
-    // Try `class Name`, `interface Name`, `trait Name`.
     let candidates = [
         format!("class {short}"),
         format!("interface {short}"),
