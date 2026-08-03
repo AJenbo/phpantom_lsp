@@ -770,3 +770,39 @@ walk covers `extends`, but nothing follows a `use SomeTrait;`.
 already carries them) and read `rules()` out of the trait's file with the
 same `rules_from_class_source` pass, keeping the trait's own file as the
 entry `origin` so go-to-definition lands on the trait.
+
+#### B23. Three type-engine resolvers are activated for only four consumers
+
+**Impact: Medium · Effort: Medium**
+
+`activate_body_return_inferrer`, `activate_auth_user_resolver`, and
+`activate_validation_rules_resolver` install thread-locals that the type
+engine consults while resolving an expression, and all three are
+activated at exactly four sites: `hover/mod.rs`, `diagnostics/mod.rs`,
+`completion/handler/mod.rs`, and `analyse/run.rs`. Every other feature
+resolves the same expression with those resolvers absent, so it gets a
+different, poorer answer than hover does for the identical code:
+`$request->validated()` is a plain `array` rather than an array shape,
+`auth()->user()` is the framework contract rather than the model the
+guard is configured with, and a function whose return type is only
+knowable from its body has none.
+
+Go-to-definition, find-references, signature help, code actions, rename,
+and inlay hints are all on the wrong side of that line. Hovering
+`auth()->user()->email` resolves the model and shows the property, while
+go-to-definition on the same `email` has nothing to jump to.
+
+This is exactly anti-pattern 4 (consumer-gated caches): a facility that
+is live for one consumer and not others makes the two code paths
+diverge. Fixing it for one feature at a time would just add a fifth and
+sixth activation site.
+
+**Where to change:** `src/type_engine/call_resolution/target_cache.rs`
+holds the thread-locals and the three `activate_*` methods. The cheap
+version is to bundle the three guards into one request-scope helper on
+`Backend` and call it from every LSP entry point rather than four of
+them. The version that removes the pattern is to carry the resolvers on
+the resolution context the type engine already threads through, so they
+are present by construction and no entry point can forget them; that
+also settles whether they belong on the `Backend` rather than in
+thread-local state.

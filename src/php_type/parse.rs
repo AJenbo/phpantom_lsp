@@ -1,5 +1,7 @@
 //! Parsing, AST conversion, and type-operator evaluation.
 
+use std::collections::HashMap;
+
 use super::*;
 
 impl PhpType {
@@ -18,60 +20,124 @@ impl PhpType {
         }
 
         // `static(Foo)` / `$this(Foo)` is how a bounded late-static type is
-        // displayed, and no PHPDoc grammar covers it, so read it back here.
-        // Without this the bound is silently dropped and an unresolved
-        // `static` keyword comes back out of a value that had a class.
-        if let Some(bounded) = parse_bounded_late_static(input) {
-            return bounded;
+        // displayed, and no PHPDoc grammar covers it, so each one is smuggled
+        // past the parser as a placeholder name and put back afterwards.
+        if input.contains('(')
+            && let Some((cleaned, bounds)) = replace_late_static_bounds(input)
+        {
+            return parse_type_text(&cleaned).substitute(&bounds);
         }
 
-        // Replace known hyphenated pseudo-types (e.g. `model-property`)
-        // with underscore placeholders so Mago can parse the surrounding
-        // type structure.  The placeholders are restored in the result.
-        let cleaned = replace_hyphenated_keywords(input);
-        let effective: &str = &cleaned;
-
-        let span = Span::new(
-            FileId::zero(),
-            Position::new(0),
-            Position::new(effective.len() as u32),
-        );
-
-        let arena = LocalArena::new();
-        match mago_phpdoc_syntax::parse_type(&arena, effective.as_bytes(), span) {
-            Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
-            Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
-        }
+        parse_type_text(input)
     }
 }
 
-/// Read back the display form of a bounded late-static type,
-/// `static(Some\Class)` or `$this(Some\Class)`.
+fn parse_type_text(input: &str) -> PhpType {
+    // Replace known hyphenated pseudo-types (e.g. `model-property`)
+    // with underscore placeholders so Mago can parse the surrounding
+    // type structure.  The placeholders are restored in the result.
+    let cleaned = replace_hyphenated_keywords(input);
+    let effective: &str = &cleaned;
+
+    let span = Span::new(
+        FileId::zero(),
+        Position::new(0),
+        Position::new(effective.len() as u32),
+    );
+
+    let arena = LocalArena::new();
+    match mago_phpdoc_syntax::parse_type(&arena, effective.as_bytes(), span) {
+        Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
+        Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
+    }
+}
+
+/// Placeholder stem standing in for a bounded late-static type while the
+/// PHPDoc parser runs.  Each occurrence gets its own index so several bounds
+/// in one type stay distinct.
+const LATE_STATIC_PLACEHOLDER: &str = "__phpantom_late_static_";
+
+/// Rewrite every `static(Some\Class)` / `$this(Some\Class)` in `input` as a
+/// placeholder name the PHPDoc grammar accepts, returning the rewritten text
+/// alongside the substitutions that turn the placeholders back into bounded
+/// late-static types.
 ///
-/// The bound must be a single class name: `static(int)` and
-/// `static(Foo|Bar)` are not shapes the display form ever produces, so they
-/// fall through to the ordinary parser rather than being invented here.  Only
-/// a whole type is read this way; a bound nested in a generic argument
-/// (`list<static(App\Foo)>`) is still lost, since no PHPDoc grammar accepts
-/// the notation there either.
-fn parse_bounded_late_static(input: &str) -> Option<PhpType> {
-    let trimmed = input.trim();
-    let rest = trimmed.strip_suffix(')')?;
-    let (keyword, bound) = rest.split_once('(')?;
-    let bound = bound.trim();
-    if bound.is_empty()
-        || is_keyword_type(bound)
-        || !bound
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
-    {
+/// That notation is the only spelling those types have and no grammar covers
+/// it, so without the detour the bound is dropped and an unresolved `static`
+/// keyword comes back out of a value whose class was known.  Rewriting in
+/// place rather than matching the whole input means a bound nested in a
+/// generic argument (`list<static(App\Foo)>`, which `replace_self_bound`
+/// produces) survives the round trip too.
+///
+/// The bound must be a single class name: `static(int)` and `static(Foo|Bar)`
+/// are not shapes the display form ever produces, so they are left for the
+/// ordinary parser rather than being invented here.  Returns `None` when the
+/// input holds no such notation, which is the common case for a type that
+/// merely contains a `callable(…)` shape.
+fn replace_late_static_bounds(input: &str) -> Option<(String, HashMap<String, PhpType>)> {
+    let mut bounds: HashMap<String, PhpType> = HashMap::new();
+    let mut out = String::new();
+    let mut cursor = 0;
+
+    while let Some(open) = input[cursor..].find('(').map(|i| cursor + i) {
+        let keyword = late_static_keyword(&input[..open]).filter(|&(start, _)| start >= cursor);
+        let close = input[open + 1..].find(')').map(|i| open + 1 + i);
+        let bound = close
+            .map(|close| input[open + 1..close].trim())
+            .filter(|b| {
+                !b.is_empty()
+                    && !is_keyword_type(b)
+                    && b.chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+            });
+
+        let (Some((start, is_this)), Some(close), Some(bound)) = (keyword, close, bound) else {
+            out.push_str(&input[cursor..=open]);
+            cursor = open + 1;
+            continue;
+        };
+
+        out.push_str(&input[cursor..start]);
+        let placeholder = format!("{LATE_STATIC_PLACEHOLDER}{}__", bounds.len());
+        out.push_str(&placeholder);
+        let bound_atom = atom(bound);
+        bounds.insert(
+            placeholder,
+            if is_this {
+                PhpType::this_type(bound_atom)
+            } else {
+                PhpType::static_type(bound_atom)
+            },
+        );
+        cursor = close + 1;
+    }
+
+    if bounds.is_empty() {
         return None;
     }
-    match keyword.trim() {
-        "static" => Some(PhpType::static_type(atom(bound))),
-        "$this" => Some(PhpType::this_type(atom(bound))),
-        _ => None,
+    out.push_str(&input[cursor..]);
+    Some((out, bounds))
+}
+
+/// If `head` ends with a bare `static` or `$this` keyword, report where that
+/// keyword starts and whether it was `$this`.
+fn late_static_keyword(head: &str) -> Option<(usize, bool)> {
+    for (keyword, is_this) in [("static", false), ("$this", true)] {
+        let Some(start) = head.len().checked_sub(keyword.len()) else {
+            continue;
+        };
+        if !head.is_char_boundary(start) || &head[start..] != keyword {
+            continue;
+        }
+        let runs_on_from_a_name = head[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '\\' | '$' | '-'));
+        if !runs_on_from_a_name {
+            return Some((start, is_this));
+        }
     }
+    None
 }
 
 pub(crate) fn literal_number_type(raw: String) -> PhpType {

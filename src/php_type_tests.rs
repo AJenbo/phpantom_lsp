@@ -1909,6 +1909,17 @@ fn a_bounded_late_static_type_round_trips_through_parse() {
         assert_eq!(PhpType::parse(&ty.to_string()), ty);
     }
 
+    // A bound nested inside a larger type has to survive too: `replace_self_bound`
+    // reaches into generic arguments, unions, and callable signatures.
+    for nested in [
+        "list<static(App\\Foo)>|null",
+        "array<string, $this(App\\Foo)>",
+        "Closure(static(App\\Foo)): $this(App\\Bar)",
+        "static(App\\Foo)|static(App\\Bar)",
+    ] {
+        assert_eq!(PhpType::parse(nested).to_string(), nested);
+    }
+
     // An unbounded `static` keeps its keyword meaning, and text that merely
     // looks like a call is not mistaken for a bound.
     assert!(!matches!(

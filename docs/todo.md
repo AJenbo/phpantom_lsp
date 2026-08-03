@@ -131,6 +131,7 @@ unlikely to move the needle for most users.
 | B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |
 | B21 | [Completion's backward scan is blind to comments](todo/bugs.md#b21-completions-backward-scan-is-blind-to-comments)                                                           | Low         | Medium      |
 | B22 | [A `rules()` method supplied by a trait is not read](todo/bugs.md#b22-a-rules-method-supplied-by-a-trait-is-not-read)                                                        | Low         | Low         |
+| B23 | [Three type-engine resolvers are activated for only four consumers](todo/bugs.md#b23-three-type-engine-resolvers-are-activated-for-only-four-consumers)                      | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
