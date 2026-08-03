@@ -170,7 +170,7 @@ impl Backend {
         if arg_text.ends_with(')')
             && let Some((call_body, _args)) = split_call_subject(arg_text)
         {
-            match SubjectExpr::parse_callee(call_body) {
+            match &SubjectExpr::parse_callee(call_body) {
                 SubjectExpr::MethodCall { base, method } => {
                     let base_text = base.to_subject_text();
                     let lhs_classes = ResolvedType::into_arced_classes(
@@ -183,7 +183,7 @@ impl Backend {
                     for cls in &lhs_classes {
                         if let Some(rt) = crate::inheritance::resolve_method_return_type(
                             cls,
-                            &method,
+                            method,
                             class_loader,
                         ) {
                             return Some(rt);
@@ -191,18 +191,18 @@ impl Backend {
                     }
                 }
                 SubjectExpr::StaticMethodCall { class, method } => {
-                    let owner = if let Some(resolved) = resolve_class_keyword(&class, current_class)
+                    let owner = if let Some(resolved) = resolve_class_keyword(class, current_class)
                     {
                         class_loader(&resolved).map(Arc::unwrap_or_clone)
                     } else {
-                        find_class_by_name(all_classes, &class)
+                        find_class_by_name(all_classes, class)
                             .map(|arc| ClassInfo::clone(arc))
-                            .or_else(|| class_loader(&class).map(Arc::unwrap_or_clone))
+                            .or_else(|| class_loader(class).map(Arc::unwrap_or_clone))
                     };
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(
                             cls,
-                            &method,
+                            method,
                             class_loader,
                         )
                     {

@@ -294,33 +294,3 @@ which is not identical to a property-only attribute, so an explicit
 `#[\Attribute(\Attribute::TARGET_PROPERTY)]` target may need to be
 preserved as-is and a bare attribute may need one added.
 
-#### B25. A very long method chain overflows the stack
-
-**Impact: Low · Effort: Medium**
-
-Found while stress-testing right-associative chain resolution. A fluent
-chain of roughly 3000 links overflows the 8 MB parse-worker stack and
-aborts the process (`SIGSEGV`, which `catch_unwind` cannot catch):
-
-```php
-$out = $x->self()->self()/* … ~3000 links … */->self();
-```
-
-The recursion is `resolve_rhs_call` → `resolve_rhs_expression` →
-`resolve_rhs_method_call_inner` → `resolve_rhs_call`, about three frames
-per link, walking from the outermost call down to the receiver. Nothing
-bounds it: the parser's own recursion limit does not apply because a
-postfix chain is parsed in a loop rather than recursively, so the AST can
-nest arbitrarily deep with no parse error. Hand-written code does not
-reach that length, but generated query builders and generated client
-code can.
-
-**Where to look:** `resolve_rhs_call` /
-`resolve_rhs_method_call_inner` in
-`src/type_engine/variable/rhs_resolution/calls.rs`. The receiver spine
-is a chain, not a tree, so collect it into a `Vec` iteratively (peeling
-one call at a time until the base expression) and then resolve outward
-from the base, the same way `??` and ternary chains are walked in
-`rhs_resolution/mod.rs`. Raising the stack size is not a fix (see the
-performance anti-patterns): chain length is unbounded, so any stack size
-has a chain that overflows it.

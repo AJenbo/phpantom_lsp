@@ -175,12 +175,12 @@ pub(super) fn unresolved_member_subject_matches_scope(
 }
 
 fn unresolved_member_subject_name(subject_text: &str) -> Option<String> {
-    match crate::type_engine::subject_expr::SubjectExpr::parse(subject_text) {
+    match &crate::type_engine::subject_expr::SubjectExpr::parse(subject_text) {
         crate::type_engine::subject_expr::SubjectExpr::Variable(name) => {
             Some(name.trim_start_matches('$').to_string())
         }
         crate::type_engine::subject_expr::SubjectExpr::PropertyChain { property, .. } => {
-            Some(property)
+            Some(property.clone())
         }
         _ => None,
     }

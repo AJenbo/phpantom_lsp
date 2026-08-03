@@ -1,4 +1,4 @@
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, with_parse_worker_stack};
 use tower_lsp::lsp_types::Position;
 
 /// Helper: send a hover request at (line, character) and return the result.
@@ -403,6 +403,91 @@ class Repo {
 
     // Hover on `Builder::query()` at the start.
     hover_at(&backend, uri, content, 23, 30);
+}
+
+/// Regression test: a generated-length fluent chain must resolve without
+/// overflowing the stack.
+///
+/// A receiver spine is a chain, not a tree: every link's receiver is the
+/// link before it, so walking one from the outermost call inward costs a
+/// stack frame per link.  At this length that exhausts the stack every
+/// AST-walking thread in the server gets, and a stack overflow is a
+/// `SIGSEGV` that aborts the process rather than a panic a test harness can
+/// catch.  Hand-written PHP stays short, but generated query builders and
+/// generated API clients do not.
+///
+/// It runs on a parse-worker-sized stack because the libtest default is a
+/// quarter of what the server gives these threads.
+#[test]
+fn generated_length_method_chain_does_not_overflow() {
+    const LINKS: usize = 3000;
+
+    let mut content = String::from(
+        "<?php
+class Fluent {
+    /** @return static */
+    public function self(): static { return $this; }
+    public function finish(): int { return 0; }
+}
+
+class Runner {
+    public function run(Fluent $start): void {
+        $out = $start",
+    );
+    for _ in 0..LINKS {
+        content.push_str("->self()");
+    }
+    content.push_str(";\n        $out->finish();\n    }\n}\n");
+
+    // The chain sits on one line; `->self()` is eight characters wide, so
+    // the last link's method name starts after the assignment prefix, every
+    // earlier link, and that link's own arrow.
+    let last_link_character = ("        $out = $start".len() + (LINKS - 1) * 8 + 2) as u32;
+
+    let (chain_hover, assigned_hover) = with_parse_worker_stack(move || {
+        let backend = create_test_backend();
+        let uri = "file:///generated_chain.php";
+        backend.update_ast(uri, &content);
+        (
+            // The last `self()` of the chain — resolving it walks every
+            // link back to `$start`.
+            backend.handle_hover(
+                uri,
+                &content,
+                Position {
+                    line: 9,
+                    character: last_link_character,
+                },
+            ),
+            // `finish()` on the assigned variable, which is only found if
+            // the whole chain resolved to `Fluent`.
+            backend.handle_hover(
+                uri,
+                &content,
+                Position {
+                    line: 10,
+                    character: 16,
+                },
+            ),
+        )
+    });
+
+    let chain_hover = format!(
+        "{:?}",
+        chain_hover.expect("hover on the last link of the chain")
+    );
+    assert!(
+        chain_hover.contains("Fluent"),
+        "The receiver of a {LINKS}-link chain should resolve to Fluent, got: {chain_hover}"
+    );
+    let assigned_hover = format!(
+        "{:?}",
+        assigned_hover.expect("hover on a method called on the chain's result")
+    );
+    assert!(
+        assigned_hover.contains("finish"),
+        "A {LINKS}-link chain should resolve to Fluent so finish() is found, got: {assigned_hover}"
+    );
 }
 
 /// Regression test: multiple deep chains in the same method, each

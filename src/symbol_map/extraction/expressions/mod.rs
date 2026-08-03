@@ -57,6 +57,32 @@ pub(super) fn extract_from_expression<'a>(
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
 ) {
+    // A method-call spine is a chain, not a tree: each call's receiver is the
+    // call before it.  Visiting the outermost call and recursing into its
+    // receiver costs a stack frame per link, and a generated fluent chain has
+    // no length bound, so peel the links and visit them innermost-out.
+    if matches!(
+        expr,
+        Expression::Call(Call::Method(_) | Call::NullSafeMethod(_))
+    ) {
+        let mut links: Vec<&'a Call<'a>> = Vec::new();
+        let mut receiver = expr;
+        while let Expression::Call(call) = receiver {
+            let object = match call {
+                Call::Method(method_call) => method_call.object,
+                Call::NullSafeMethod(method_call) => method_call.object,
+                Call::Function(_) | Call::StaticMethod(_) => break,
+            };
+            links.push(call);
+            receiver = object;
+        }
+        extract_from_expression(receiver, ctx, scope_start);
+        for call in links.iter().rev() {
+            extract_call_expr_members(call, ctx, scope_start);
+        }
+        return;
+    }
+
     match expr {
         // ── Variables ──
         Expression::Variable(Variable::Direct(dv)) => {

@@ -906,6 +906,37 @@ most of the repetition.
 `virtual_members/resolve.rs`, and the template-param mixin block in
 `type_engine/types/resolution.rs`.
 
+## P49. A very long method chain costs superlinear time to analyse
+
+**Impact: Low · Effort: Medium**
+
+Resolving a receiver spine no longer recurses per link, so a fluent chain
+of any length parses, hovers, and analyses without overflowing the stack.
+The work is still superlinear in the chain's length, though: a 1000-link
+chain takes roughly eight times as long to run diagnostics over as a
+500-link one on a debug build, so a generated query builder or generated
+API client long enough turns a diagnostic pass into a multi-second stall.
+
+Two costs compound along the spine, each linear in the prefix and paid
+once per link:
+
+1. **Subject text is rebuilt per link.** `extract_call_expr` calls
+   `expr_to_subject_text(method_call.object)` for every link, which
+   renders the whole prefix, so the symbol map spends O(n²) bytes on one
+   chain. Rendering the spine once and handing each link a slice of the
+   result would make it linear.
+
+2. **Chain cache keys are rebuilt per link.** `chain_cache_key` calls
+   `SubjectExpr::to_subject_text` for every link of the spine, again
+   rendering the whole prefix. The keys of a spine are prefixes of one
+   another, so one render plus per-link lengths would do.
+
+**Where to look:** `symbol_map/extraction/expressions/calls.rs` for the
+first, `chain_cache_key` in `type_engine/resolver/mod.rs` for the second.
+Neither is a correctness problem, and hand-written code never reaches the
+lengths where it shows.
+
+
 ---
 
 # Remaining anti-pattern fixes

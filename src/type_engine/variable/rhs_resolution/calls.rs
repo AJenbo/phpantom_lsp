@@ -444,11 +444,12 @@ pub(super) fn resolve_arg_call_raw_type(
         return None;
     }
     let expr = crate::type_engine::subject_expr::SubjectExpr::parse(trimmed);
-    let crate::type_engine::subject_expr::SubjectExpr::CallExpr { callee, args_text } = expr else {
+    let crate::type_engine::subject_expr::SubjectExpr::CallExpr { callee, args_text } = &expr
+    else {
         return None;
     };
     let mut hint: Option<PhpType> = None;
-    Backend::resolve_call_return_types_expr_with_hint(&callee, &args_text, rctx, Some(&mut hint));
+    Backend::resolve_call_return_types_expr_with_hint(callee, args_text, rctx, Some(&mut hint));
     hint
 }
 
@@ -1054,6 +1055,66 @@ pub(super) fn resolve_rhs_function_call<'b>(
     vec![]
 }
 
+/// A method call's receiver, already resolved: the candidate owner classes
+/// plus the `ResolvedType` values they came from.
+///
+/// The full `ResolvedType` is kept alongside the classes so that the
+/// receiver's generic type string (e.g. `Builder<Article>`) is available
+/// when the method returns `static`/`self`/`$this`.
+pub(super) type MethodReceiver = (Vec<Arc<ClassInfo>>, Vec<ResolvedType>);
+
+/// Resolve a method call's object expression to its receiver.
+///
+/// `$this` resolves to the enclosing class, a bare variable through the
+/// variable pipeline (honouring `match(true)` arm narrowing), and anything
+/// else — `(new Factory())`, `getService()`, a chain link — by resolving the
+/// expression.
+fn resolve_method_receiver<'b>(
+    object: &'b Expression<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> MethodReceiver {
+    if let Expression::Variable(Variable::Direct(dv)) = object
+        && dv.name == b"$this"
+    {
+        let classes: Vec<Arc<ClassInfo>> = ctx
+            .all_classes
+            .iter()
+            .find(|c| c.name == ctx.current_class.name)
+            .map(Arc::clone)
+            .into_iter()
+            .collect();
+        return (classes, vec![]);
+    }
+    if let Expression::Variable(Variable::Direct(dv)) = object {
+        let var = bytes_to_str(dv.name).to_string();
+        // Check match-arm narrowing override first — when inside
+        // a match(true) arm, the variable may be narrowed to a
+        // specific class by the arm's instanceof condition.
+        let resolved = match ctx.match_arm_narrowing.get(&var).cloned() {
+            Some(overridden) => overridden,
+            None => resolve_var_types(&var, ctx, object.span().end.offset),
+        };
+        if !resolved.is_empty() {
+            let classes = ResolvedType::into_arced_classes(resolved.clone());
+            return (classes, resolved);
+        }
+        // Fall back to resolve_target_classes when the variable
+        // resolution pipeline returns nothing (e.g. for parameters
+        // that are resolved through the completion pipeline's subject
+        // resolution).
+        let classes: Vec<Arc<ClassInfo>> =
+            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
+                &var,
+                crate::types::AccessKind::Arrow,
+                &ctx.as_resolution_ctx(),
+            ));
+        return (classes, vec![]);
+    }
+    let resolved = resolve_rhs_expression(object, ctx);
+    let classes = ResolvedType::into_arced_classes(resolved.clone());
+    (classes, resolved)
+}
+
 /// Resolve a method call (regular or null-safe) from its constituent parts:
 /// the object expression (`$this`, a variable, or an arbitrary chained
 /// expression), the method selector, and the argument list.
@@ -1067,62 +1128,31 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
     argument_list: &'b ArgumentList<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    resolve_method_call_on_receiver(object, method, argument_list, None, ctx)
+}
+
+/// Resolve a method call whose receiver may already be known.
+///
+/// A `Some(receiver)` skips resolving `object`, which is how a fluent chain
+/// is walked outward from its base without recursing into each link (see
+/// `resolve_method_chain` in the parent module).  `object` is still needed
+/// for the parts of resolution that read the receiver's *syntax* rather
+/// than its type: whether the call forwards late static binding, and which
+/// request a Laravel validation shape belongs to.
+pub(super) fn resolve_method_call_on_receiver<'b>(
+    object: &'b Expression<'b>,
+    method: &'b ClassLikeMemberSelector<'b>,
+    argument_list: &'b ArgumentList<'b>,
+    receiver: Option<MethodReceiver>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
     let method_name = match method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
         // Variable method name (`$obj->$method()`) — can't resolve statically.
         _ => return vec![],
     };
-    // Resolve the object expression to candidate owner classes.
-    // Keep the full `ResolvedType` for non-$this variables and chain
-    // expressions so that the receiver's generic type string (e.g.
-    // `Builder<Article>`) is available when the method returns
-    // `static`/`self`/`$this`.
-    let (owner_classes, receiver_resolved): (Vec<Arc<ClassInfo>>, Vec<ResolvedType>) =
-        if let Expression::Variable(Variable::Direct(dv)) = object
-            && dv.name == b"$this"
-        {
-            let classes: Vec<Arc<ClassInfo>> = ctx
-                .all_classes
-                .iter()
-                .find(|c| c.name == ctx.current_class.name)
-                .map(Arc::clone)
-                .into_iter()
-                .collect();
-            (classes, vec![])
-        } else if let Expression::Variable(Variable::Direct(dv)) = object {
-            let var = bytes_to_str(dv.name).to_string();
-            // Check match-arm narrowing override first — when inside
-            // a match(true) arm, the variable may be narrowed to a
-            // specific class by the arm's instanceof condition.
-            let resolved = match ctx.match_arm_narrowing.get(&var).cloned() {
-                Some(overridden) => overridden,
-                None => resolve_var_types(&var, ctx, object.span().end.offset),
-            };
-            if !resolved.is_empty() {
-                let classes = ResolvedType::into_arced_classes(resolved.clone());
-                (classes, resolved)
-            } else {
-                // Fall back to resolve_target_classes when the
-                // variable resolution pipeline returns nothing (e.g.
-                // for parameters that are resolved through the
-                // completion pipeline's subject resolution).
-                let classes: Vec<Arc<ClassInfo>> = ResolvedType::into_arced_classes(
-                    crate::type_engine::resolver::resolve_target_classes(
-                        &var,
-                        crate::types::AccessKind::Arrow,
-                        &ctx.as_resolution_ctx(),
-                    ),
-                );
-                (classes, vec![])
-            }
-        } else {
-            // Handle non-variable object expressions like
-            // `(new Factory())->create()`, `getService()->method()`,
-            // or chained calls by recursively resolving the expression.
-            let resolved = resolve_rhs_expression(object, ctx);
-            let classes = ResolvedType::into_arced_classes(resolved.clone());
-            (classes, resolved)
-        };
+    let (owner_classes, receiver_resolved) =
+        receiver.unwrap_or_else(|| resolve_method_receiver(object, ctx));
 
     let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
         argument_list,

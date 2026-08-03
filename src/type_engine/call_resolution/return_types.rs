@@ -288,6 +288,31 @@ impl Backend {
         callee: &SubjectExpr,
         text_args: &str,
         ctx: &ResolutionCtx<'_>,
+        return_type_hint_out: Option<&mut Option<PhpType>>,
+    ) -> Vec<Arc<ClassInfo>> {
+        Self::resolve_call_return_types_on_receiver(
+            callee,
+            text_args,
+            None,
+            ctx,
+            return_type_hint_out,
+        )
+    }
+
+    /// [`resolve_call_return_types_expr_with_hint`] with the receiver of an
+    /// instance method call optionally already resolved.
+    ///
+    /// A `Some(receiver)` skips resolving the callee's base, which is how a
+    /// fluent chain is walked outward from its base without recursing into
+    /// each link (see `resolve_target_classes_expr`).  The base expression is
+    /// still needed for the Laravel interceptions that read the receiver's
+    /// *syntax* (which guard an `auth()` call names, which request a
+    /// validation shape belongs to).
+    pub(crate) fn resolve_call_return_types_on_receiver(
+        callee: &SubjectExpr,
+        text_args: &str,
+        receiver: Option<Vec<ResolvedType>>,
+        ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
         match callee {
@@ -299,12 +324,13 @@ impl Backend {
                 // arguments (e.g. `Collection<Product>`) so class-level
                 // template parameters can be substituted in the method's
                 // return type.
-                let lhs_resolved: Vec<ResolvedType> =
+                let lhs_resolved: Vec<ResolvedType> = receiver.unwrap_or_else(|| {
                     crate::type_engine::resolver::resolve_target_classes_expr(
                         base,
                         AccessKind::Arrow,
                         ctx,
-                    );
+                    )
+                });
 
                 // Guard-aware auth user model: a `user()` call on a
                 // `Guard`/`Request` subtype resolves to the model

@@ -67,6 +67,29 @@ pub(super) fn extract_call_expr<'a>(
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
 ) {
+    extract_call(call, ctx, scope_start, true)
+}
+
+/// Extract everything [`extract_call_expr`] does *except* the receiver of an
+/// instance method call.
+///
+/// Used when walking a method-call spine iteratively: the receiver of each
+/// link has already been visited as part of the link below it, so visiting it
+/// again here would reintroduce the per-link recursion.
+pub(super) fn extract_call_expr_members<'a>(
+    call: &'a Call<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    extract_call(call, ctx, scope_start, false)
+}
+
+fn extract_call<'a>(
+    call: &'a Call<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+    visit_receiver: bool,
+) {
     match call {
         Call::Function(func_call) => {
             match func_call.function {
@@ -137,7 +160,9 @@ pub(super) fn extract_call_expr<'a>(
         }
         Call::Method(method_call) => {
             let subject_text = expr_to_subject_text(method_call.object);
-            extract_from_expression(method_call.object, ctx, scope_start);
+            if visit_receiver {
+                extract_from_expression(method_call.object, ctx, scope_start);
+            }
 
             if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
                 let member_name = crate::atom::atom_bytes(ident.value);
@@ -250,7 +275,9 @@ pub(super) fn extract_call_expr<'a>(
         }
         Call::NullSafeMethod(method_call) => {
             let subject_text = expr_to_subject_text(method_call.object);
-            extract_from_expression(method_call.object, ctx, scope_start);
+            if visit_receiver {
+                extract_from_expression(method_call.object, ctx, scope_start);
+            }
 
             if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
                 let member_name = crate::atom::atom_bytes(ident.value);

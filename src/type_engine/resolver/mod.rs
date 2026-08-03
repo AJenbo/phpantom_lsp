@@ -71,11 +71,130 @@ pub(crate) fn resolve_target_classes(
 
 /// Core dispatch for [`resolve_target_classes`], operating on a
 /// pre-parsed [`SubjectExpr`].
+///
+/// A method or property chain nests one node per link, and each link's
+/// child is the link before it — a chain, not a tree.  Resolving the
+/// outermost link and recursing into its base would therefore cost a stack
+/// frame per link, and a generated fluent chain has no length bound, so the
+/// spine is collected into a `Vec` and resolved outward from its base
+/// instead.
 pub(crate) fn resolve_target_classes_expr(
     expr: &SubjectExpr,
     access_kind: AccessKind,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    // `spine[0]` is the expression itself, `spine[len - 1]` its base.  Each
+    // entry carries the access kind its parent link resolves it with: a
+    // method call always reads its receiver through `->`, while a property
+    // chain passes its own access kind down.
+    let mut spine: Vec<(&SubjectExpr, AccessKind)> = vec![(expr, access_kind)];
+    loop {
+        let &(node, node_access) = spine.last().expect("spine is seeded with `expr`");
+        let next = match node {
+            SubjectExpr::CallExpr { callee, .. } => match callee.as_ref() {
+                SubjectExpr::MethodCall { base, .. } => Some((base.as_ref(), AccessKind::Arrow)),
+                _ => None,
+            },
+            SubjectExpr::PropertyChain { base, .. } => Some((base.as_ref(), node_access)),
+            _ => None,
+        };
+        match next {
+            Some(entry) => spine.push(entry),
+            None => break,
+        }
+    }
+
+    // Cache key per link, computed once and reused for the probe below and
+    // the store in `resolve_chain_link`.  `None` marks a link that must not
+    // be cached.
+    let cache_keys: Vec<Option<String>> = spine
+        .iter()
+        .map(|(node, _)| chain_cache_key(node, ctx))
+        .collect();
+
+    // Probe the outermost link inward for an answer that does not depend on
+    // the receiver, mirroring the checks the recursive form made on its way
+    // down.  The first hit is a finished result for that link, so nothing
+    // below it needs resolving at all.
+    let mut receiver: Option<Vec<ResolvedType>> = None;
+    let mut unresolved = spine.len();
+    for (index, &(node, _)) in spine.iter().enumerate() {
+        let hit = cache_keys[index]
+            .as_deref()
+            .and_then(lookup_chain_cache)
+            .or_else(|| narrowed_property_path(node, ctx));
+        let Some(hit) = hit else { continue };
+        if index == 0 {
+            return hit;
+        }
+        receiver = Some(hit);
+        unresolved = index;
+        break;
+    }
+
+    for index in (0..unresolved).rev() {
+        let (node, node_access) = spine[index];
+        receiver = Some(resolve_chain_link(
+            node,
+            node_access,
+            cache_keys[index].as_deref(),
+            receiver.take(),
+            ctx,
+        ));
+    }
+    receiver.unwrap_or_default()
+}
+
+/// Resolve one link of a receiver spine, reading from and writing to the
+/// chain cache under `cache_key` when the link is cacheable.
+fn resolve_chain_link(
+    expr: &SubjectExpr,
+    access_kind: AccessKind,
+    cache_key: Option<&str>,
+    receiver: Option<Vec<ResolvedType>>,
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let Some(cache_key) = cache_key else {
+        return resolve_target_classes_expr_inner(expr, access_kind, receiver, ctx);
+    };
+    if let Some(hit) = lookup_chain_cache(cache_key) {
+        return hit;
+    }
+    let result = resolve_target_classes_expr_inner(expr, access_kind, receiver, ctx);
+    CHAIN_CACHE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if let Some(ref mut map) = *borrow {
+            map.insert(cache_key.to_string(), result.clone());
+        }
+    });
+    result
+}
+
+/// The forward walker's narrowed type for a property path, when `expr` is one
+/// and the walker has already narrowed it.
+///
+/// This answers without touching the property's receiver, so the spine walk
+/// can stop here rather than resolving everything below it.
+fn narrowed_property_path(
+    expr: &SubjectExpr,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !matches!(expr, SubjectExpr::PropertyChain { .. }) {
+        return None;
+    }
+    lookup_scope_for_subject(&subject_scope_key(expr), ctx)
+}
+
+fn lookup_chain_cache(cache_key: &str) -> Option<Vec<ResolvedType>> {
+    CHAIN_CACHE.with(|cell| {
+        let borrow = cell.borrow();
+        borrow.as_ref().and_then(|map| map.get(cache_key).cloned())
+    })
+}
+
+/// The chain cache key for a subject expression, or `None` when the
+/// expression must not be cached.
+fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String> {
     // ── Chain cache lookup ───────────────────────────────────────
     // During diagnostic passes the chain cache is active and stores
     // results by subject text.  This eliminates O(depth²) re-resolution
@@ -113,55 +232,37 @@ pub(crate) fn resolve_target_classes_expr(
         SubjectExpr::PropertyChain { base, .. } => !base_roots_in_variable(base),
         _ => false,
     };
-    if is_cacheable_chain {
-        // A chain that references a local variable (as receiver or as a call
-        // argument) can resolve to different types at call sites where the
-        // variable holds a different type — e.g. `$this->parse($stmt)` where
-        // `$stmt` is a different subtype in two methods, or a `@template T`
-        // method binding `@return T` from a variable argument.  Keying by the
-        // subject text alone would leak the result across sites, so mix in a
-        // discriminator built from those variables' resolved types: sites
-        // where the variables share a type still share the cache entry (so
-        // the common case stays fast), while differently-typed sites get
-        // distinct entries.  When the variables can't be resolved cheaply
-        // (no active scope), fall back to a per-site key so nothing leaks.
-        // Chains with no local variables keep the shared text-only key.
-        let cache_key = {
-            let mut vars = Vec::new();
-            expr.collect_local_variables(&mut vars);
-            if vars.is_empty() {
-                expr.to_subject_text()
-            } else if let Some(disc) = scope_type_discriminator(&vars, ctx) {
-                format!("{}{}", expr.to_subject_text(), disc)
-            } else {
-                format!("{}@{}", expr.to_subject_text(), ctx.cursor_offset)
-            }
-        };
-        let cached = CHAIN_CACHE.with(|cell| {
-            let borrow = cell.borrow();
-            borrow.as_ref().and_then(|map| map.get(&cache_key).cloned())
-        });
-        if let Some(result) = cached {
-            return result;
-        }
-
-        let result = resolve_target_classes_expr_inner(expr, access_kind, ctx);
-
-        CHAIN_CACHE.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            if let Some(ref mut map) = *borrow {
-                map.insert(cache_key, result.clone());
-            }
-        });
-
-        return result;
+    if !is_cacheable_chain {
+        return None;
     }
 
-    resolve_target_classes_expr_inner(expr, access_kind, ctx)
+    // A chain that references a local variable (as receiver or as a call
+    // argument) can resolve to different types at call sites where the
+    // variable holds a different type — e.g. `$this->parse($stmt)` where
+    // `$stmt` is a different subtype in two methods, or a `@template T`
+    // method binding `@return T` from a variable argument.  Keying by the
+    // subject text alone would leak the result across sites, so mix in a
+    // discriminator built from those variables' resolved types: sites
+    // where the variables share a type still share the cache entry (so
+    // the common case stays fast), while differently-typed sites get
+    // distinct entries.  When the variables can't be resolved cheaply
+    // (no active scope), fall back to a per-site key so nothing leaks.
+    // Chains with no local variables keep the shared text-only key.
+    let mut vars = Vec::new();
+    expr.collect_local_variables(&mut vars);
+    Some(if vars.is_empty() {
+        expr.to_subject_text()
+    } else if let Some(disc) = scope_type_discriminator(&vars, ctx) {
+        format!("{}{}", expr.to_subject_text(), disc)
+    } else {
+        format!("{}@{}", expr.to_subject_text(), ctx.cursor_offset)
+    })
 }
 
 /// Inner implementation of [`resolve_target_classes_expr`] without
-/// chain caching.  The outer function handles cache lookup/store.
+/// chain caching.  The outer function handles cache lookup/store and the
+/// spine walk, so `receiver` arrives already resolved for every link but
+/// the base.
 ///
 /// Recursion here follows the finite structure of the subject
 /// expression plus variable resolution, which carries its own keyed
@@ -170,6 +271,7 @@ pub(crate) fn resolve_target_classes_expr(
 fn resolve_target_classes_expr_inner(
     expr: &SubjectExpr,
     access_kind: AccessKind,
+    receiver: Option<Vec<ResolvedType>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
@@ -377,9 +479,10 @@ fn resolve_target_classes_expr_inner(
         // ── Call expression ─────────────────────────────────────
         SubjectExpr::CallExpr { callee, args_text } => {
             let mut hint: Option<PhpType> = None;
-            let classes = Backend::resolve_call_return_types_expr_with_hint(
+            let classes = Backend::resolve_call_return_types_on_receiver(
                 callee,
                 args_text,
+                receiver,
                 ctx,
                 Some(&mut hint),
             );
@@ -420,7 +523,9 @@ fn resolve_target_classes_expr_inner(
                 return narrowed;
             }
 
-            let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
+            let base_arcs = resolved_to_arcs(
+                receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
+            );
             let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
             for cls in &base_arcs {
                 let resolved = super::type_resolution::resolve_property_types(
@@ -1348,15 +1453,17 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
 /// in a call (`$this->make()->prop`) resolve deterministically and stay
 /// cacheable.
 fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
-    match expr {
-        SubjectExpr::This
-        | SubjectExpr::SelfKw
-        | SubjectExpr::StaticKw
-        | SubjectExpr::Parent
-        | SubjectExpr::Variable(_) => true,
-        SubjectExpr::PropertyChain { base, .. } => base_roots_in_variable(base),
-        SubjectExpr::ArrayAccess { base, .. } => base_roots_in_variable(base),
-        _ => false,
+    let mut node = expr;
+    loop {
+        node = match node {
+            SubjectExpr::This
+            | SubjectExpr::SelfKw
+            | SubjectExpr::StaticKw
+            | SubjectExpr::Parent
+            | SubjectExpr::Variable(_) => return true,
+            SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => base,
+            _ => return false,
+        };
     }
 }
 
@@ -1369,24 +1476,43 @@ fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
 /// the same key (matching PHP's integer/string key coercion).  Any
 /// subject shape the forward walker does not key on falls back to
 /// `to_subject_text`.
+/// Walks the spine iteratively: a property or array-access chain nests one
+/// node per link and there is no bound on how long a generated chain gets.
 fn subject_scope_key(expr: &SubjectExpr) -> String {
-    match expr {
-        SubjectExpr::PropertyChain { base, property } => {
-            format!("{}->{}", subject_scope_key(base), property)
+    // Collect the spine outermost-first, then render it from the base out.
+    let mut spine = vec![expr];
+    while let Some(base) = match spine.last().expect("spine is seeded with `expr`") {
+        SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => {
+            Some(base.as_ref())
         }
-        SubjectExpr::ArrayAccess { base, segments } => {
-            let mut k = subject_scope_key(base);
-            for seg in segments {
-                match seg {
-                    BracketSegment::StringKey(s) => k.push_str(&format!("[\"{}\"]", s)),
-                    BracketSegment::IntKey(n) => k.push_str(&format!("[\"{}\"]", n)),
-                    BracketSegment::ElementAccess => k.push_str("[]"),
+        _ => None,
+    } {
+        spine.push(base);
+    }
+
+    let mut key = spine
+        .last()
+        .expect("spine is seeded with `expr`")
+        .to_subject_text();
+    for node in spine.iter().rev().skip(1) {
+        match node {
+            SubjectExpr::PropertyChain { property, .. } => {
+                key.push_str("->");
+                key.push_str(property);
+            }
+            SubjectExpr::ArrayAccess { segments, .. } => {
+                for seg in segments {
+                    match seg {
+                        BracketSegment::StringKey(s) => key.push_str(&format!("[\"{}\"]", s)),
+                        BracketSegment::IntKey(n) => key.push_str(&format!("[\"{}\"]", n)),
+                        BracketSegment::ElementAccess => key.push_str("[]"),
+                    }
                 }
             }
-            k
+            _ => unreachable!("the spine only descends through property and array access"),
         }
-        _ => expr.to_subject_text(),
     }
+    key
 }
 
 /// Consult the forward-walker scope for a narrowed type for a compound

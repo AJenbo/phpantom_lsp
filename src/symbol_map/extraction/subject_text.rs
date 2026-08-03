@@ -22,6 +22,15 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
         .unwrap_or_default()
 }
 
+/// One link of a receiver spine: `->property` or `->method(args)`.
+enum SpineLink<'a> {
+    Property(&'a ClassLikeMemberSelector<'a>),
+    Method(
+        &'a ClassLikeMemberSelector<'a>,
+        &'a TokenSeparatedSequence<'a, Argument<'a>>,
+    ),
+}
+
 /// Lower an AST expression into a structured [`SubjectExpr`].
 ///
 /// Returns `None` when the expression has no subject-text representation
@@ -29,11 +38,54 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
 /// serialised eagerly via [`format_all_call_args`] and stored as the raw
 /// `args_text` of the resulting [`SubjectExpr::CallExpr`].
 ///
+/// A receiver spine (`$base->a()->b->c()`) is a chain, not a tree: every
+/// link's child is the link before it.  Lowering it from the outermost link
+/// inward would cost a stack frame per link, and generated fluent code runs
+/// long enough to exhaust any stack, so the spine is peeled into a `Vec`
+/// and rebuilt outward from its base instead.
+///
 /// Note on null-safe access: `SubjectExpr` does not distinguish `?->` from
 /// `->` (`SubjectExpr::parse` strips the `?` and the resolver normalises the
 /// two), so null-safe property and method access lower to the same
 /// `PropertyChain` / `MethodCall` shapes as their plain counterparts.
-pub(super) fn expr_to_subject_expr(expr: &Expression<'_>) -> Option<SubjectExpr> {
+pub(super) fn expr_to_subject_expr<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
+    let mut links: Vec<SpineLink<'a>> = Vec::new();
+    let mut current = expr;
+    loop {
+        match current {
+            Expression::Access(Access::Property(pa)) => {
+                links.push(SpineLink::Property(&pa.property));
+                current = pa.object;
+            }
+            Expression::Access(Access::NullSafeProperty(pa)) => {
+                links.push(SpineLink::Property(&pa.property));
+                current = pa.object;
+            }
+            Expression::Call(Call::Method(mc)) => {
+                links.push(SpineLink::Method(&mc.method, &mc.argument_list.arguments));
+                current = mc.object;
+            }
+            Expression::Call(Call::NullSafeMethod(mc)) => {
+                links.push(SpineLink::Method(&mc.method, &mc.argument_list.arguments));
+                current = mc.object;
+            }
+            _ => break,
+        }
+    }
+
+    let mut lowered = lower_spine_base(current)?;
+    for link in links.iter().rev() {
+        lowered = match link {
+            SpineLink::Property(property) => lower_property(lowered, property),
+            SpineLink::Method(method, args) => lower_method_call(lowered, method, args),
+        };
+    }
+    Some(lowered)
+}
+
+/// Lower the base of a receiver spine: everything except the property and
+/// method links [`expr_to_subject_expr`] peels off itself.
+fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
     match expr {
         Expression::Variable(Variable::Direct(dv)) => {
             Some(SubjectExpr::Variable(bytes_to_str(dv.name).to_string()))
@@ -45,9 +97,6 @@ pub(super) fn expr_to_subject_expr(expr: &Expression<'_>) -> Option<SubjectExpr>
             bytes_to_str(ident.value()).to_string(),
         )),
 
-        // Property access (plain `->` and null-safe `?->` share a shape).
-        Expression::Access(Access::Property(pa)) => lower_property(pa.object, &pa.property),
-        Expression::Access(Access::NullSafeProperty(pa)) => lower_property(pa.object, &pa.property),
         Expression::Access(Access::StaticProperty(spa)) => {
             let class = expr_to_subject_expr(spa.class)?;
             if let Variable::Direct(dv) = &spa.property {
@@ -70,16 +119,6 @@ pub(super) fn expr_to_subject_expr(expr: &Expression<'_>) -> Option<SubjectExpr>
             }
         }
 
-        // Instance method call (plain `->` and null-safe `?->` share a
-        // shape).  A dynamic method name (`$obj->$name()`) has no identifier,
-        // so the method lowers to `?` — the type engine cannot resolve it
-        // either way.
-        Expression::Call(Call::Method(mc)) => {
-            lower_method_call(mc.object, &mc.method, &mc.argument_list.arguments)
-        }
-        Expression::Call(Call::NullSafeMethod(mc)) => {
-            lower_method_call(mc.object, &mc.method, &mc.argument_list.arguments)
-        }
         Expression::Call(Call::StaticMethod(sc)) => {
             let class = expr_to_subject_expr(sc.class)?;
             let (method, args_text) = match &sc.method {
@@ -225,33 +264,28 @@ pub(super) fn expr_to_subject_expr(expr: &Expression<'_>) -> Option<SubjectExpr>
     }
 }
 
-/// Lower a property access (`object->property` or `object?->property`) into a
-/// [`SubjectExpr`].  A non-identifier selector (dynamic property name) drops
-/// to the base expression, matching the original serialiser.
-fn lower_property(
-    object: &Expression<'_>,
-    property: &ClassLikeMemberSelector<'_>,
-) -> Option<SubjectExpr> {
-    let base = expr_to_subject_expr(object)?;
+/// Add a property access (`base->property` or `base?->property`) to an
+/// already-lowered base.  A non-identifier selector (dynamic property name)
+/// drops to the base expression, matching the original serialiser.
+fn lower_property(base: SubjectExpr, property: &ClassLikeMemberSelector<'_>) -> SubjectExpr {
     if let ClassLikeMemberSelector::Identifier(ident) = property {
-        Some(SubjectExpr::PropertyChain {
+        SubjectExpr::PropertyChain {
             base: Box::new(base),
             property: bytes_to_str(ident.value).to_string(),
-        })
+        }
     } else {
-        Some(base)
+        base
     }
 }
 
-/// Lower an instance method call (`object->method(args)` or the null-safe
-/// form) into a [`SubjectExpr::CallExpr`].  A dynamic method name lowers to a
-/// `?` method with no arguments.
+/// Add an instance method call (`base->method(args)` or the null-safe form)
+/// to an already-lowered base.  A dynamic method name lowers to a `?` method
+/// with no arguments, since the type engine cannot resolve it either way.
 fn lower_method_call(
-    object: &Expression<'_>,
+    base: SubjectExpr,
     method: &ClassLikeMemberSelector<'_>,
     args: &TokenSeparatedSequence<'_, Argument<'_>>,
-) -> Option<SubjectExpr> {
-    let base = expr_to_subject_expr(object)?;
+) -> SubjectExpr {
     let (method, args_text) = match method {
         ClassLikeMemberSelector::Identifier(ident) => (
             bytes_to_str(ident.value).to_string(),
@@ -259,13 +293,13 @@ fn lower_method_call(
         ),
         _ => ("?".to_string(), String::new()),
     };
-    Some(SubjectExpr::CallExpr {
+    SubjectExpr::CallExpr {
         callee: Box::new(SubjectExpr::MethodCall {
             base: Box::new(base),
             method,
         }),
         args_text,
-    })
+    }
 }
 
 /// Format all arguments of a call expression as a comma-separated string.

@@ -278,92 +278,127 @@ impl SubjectExpr {
     /// This is used as a bridge while callers are migrated: they can
     /// parse a string into `SubjectExpr`, match on it, and still pass
     /// the original text to functions that haven't been converted yet.
+    ///
+    /// A method or property chain nests one variant per link, so this walks
+    /// an explicit work stack rather than recursing: recursion would spend a
+    /// stack frame per link (and re-format the whole prefix at every one),
+    /// and a generated fluent chain has no length bound.
     pub fn to_subject_text(&self) -> String {
-        match self {
-            SubjectExpr::This => "$this".to_string(),
-            SubjectExpr::SelfKw => "self".to_string(),
-            SubjectExpr::StaticKw => "static".to_string(),
-            SubjectExpr::Parent => "parent".to_string(),
-            SubjectExpr::Variable(v) => v.clone(),
-            SubjectExpr::PropertyChain { base, property } => {
-                format!("{}->{}", base.to_subject_text(), property)
-            }
-            SubjectExpr::CallExpr { callee, args_text } => {
-                // Wrap the callee in parentheses when it is an
-                // expression form that is not naturally callable by
-                // name.  Without this, `PropertyChain { $this, "prop" }`
-                // serialises as `$this->prop(args)` (a method call)
-                // instead of the correct `($this->prop)(args)` (invoke
-                // property as callable via __invoke).
-                let needs_parens = matches!(
-                    callee.as_ref(),
-                    SubjectExpr::PropertyChain { .. }
-                        | SubjectExpr::This
-                        | SubjectExpr::SelfKw
-                        | SubjectExpr::StaticKw
-                        | SubjectExpr::Parent
-                        | SubjectExpr::ArrayAccess { .. }
-                        | SubjectExpr::InlineArray { .. }
-                        | SubjectExpr::CallExpr { .. }
-                );
-                if needs_parens {
-                    format!("({})({})", callee.to_subject_text(), args_text)
-                } else {
-                    format!("{}({})", callee.to_subject_text(), args_text)
+        /// A pending piece of output.  The stack is popped LIFO, so each
+        /// node pushes its parts in reverse of the order they are written.
+        enum Step<'a> {
+            Node(&'a SubjectExpr),
+            Text(&'a str),
+            Brackets(&'a [BracketSegment]),
+        }
+
+        let mut out = String::new();
+        let mut stack = vec![Step::Node(self)];
+        while let Some(step) = stack.pop() {
+            let node = match step {
+                Step::Text(text) => {
+                    out.push_str(text);
+                    continue;
                 }
-            }
-            SubjectExpr::MethodCall { base, method } => {
-                format!("{}->{}", base.to_subject_text(), method)
-            }
-            SubjectExpr::StaticMethodCall { class, method } => {
-                format!("{}::{}", class, method)
-            }
-            SubjectExpr::StaticAccess { class, member } => {
-                format!("{}::{}", class, member)
-            }
-            SubjectExpr::NewExpr { class_name } => {
-                format!("new {}", class_name)
-            }
-            SubjectExpr::ClassName(name) => name.clone(),
-            SubjectExpr::FunctionCall(name) => name.clone(),
-            SubjectExpr::ArrayAccess { base, segments } => {
-                let mut s = base.to_subject_text();
-                for seg in segments {
-                    match seg {
-                        BracketSegment::StringKey(k) => {
-                            s.push_str(&format!("['{}']", k));
-                        }
-                        BracketSegment::IntKey(n) => {
-                            s.push_str(&format!("[{}]", n));
-                        }
-                        BracketSegment::ElementAccess => {
-                            s.push_str("[]");
+                Step::Brackets(segments) => {
+                    for segment in segments {
+                        match segment {
+                            BracketSegment::StringKey(key) => {
+                                out.push('[');
+                                out.push('\'');
+                                out.push_str(key);
+                                out.push('\'');
+                                out.push(']');
+                            }
+                            BracketSegment::IntKey(n) => {
+                                out.push('[');
+                                out.push_str(n);
+                                out.push(']');
+                            }
+                            BracketSegment::ElementAccess => out.push_str("[]"),
                         }
                     }
+                    continue;
                 }
-                s
-            }
-            SubjectExpr::InlineArray {
-                elements,
-                index_segments,
-            } => {
-                let mut s = format!("[{}]", elements.join(", "));
-                for seg in index_segments {
-                    match seg {
-                        BracketSegment::StringKey(k) => {
-                            s.push_str(&format!("['{}']", k));
-                        }
-                        BracketSegment::IntKey(n) => {
-                            s.push_str(&format!("[{}]", n));
-                        }
-                        BracketSegment::ElementAccess => {
-                            s.push_str("[]");
-                        }
+                Step::Node(node) => node,
+            };
+            match node {
+                SubjectExpr::This => out.push_str("$this"),
+                SubjectExpr::SelfKw => out.push_str("self"),
+                SubjectExpr::StaticKw => out.push_str("static"),
+                SubjectExpr::Parent => out.push_str("parent"),
+                SubjectExpr::Variable(v) => out.push_str(v),
+                SubjectExpr::PropertyChain { base, property } => {
+                    stack.push(Step::Text(property));
+                    stack.push(Step::Text("->"));
+                    stack.push(Step::Node(base));
+                }
+                SubjectExpr::CallExpr { callee, args_text } => {
+                    // Wrap the callee in parentheses when it is an
+                    // expression form that is not naturally callable by
+                    // name.  Without this, `PropertyChain { $this, "prop" }`
+                    // serialises as `$this->prop(args)` (a method call)
+                    // instead of the correct `($this->prop)(args)` (invoke
+                    // property as callable via __invoke).
+                    let needs_parens = matches!(
+                        callee.as_ref(),
+                        SubjectExpr::PropertyChain { .. }
+                            | SubjectExpr::This
+                            | SubjectExpr::SelfKw
+                            | SubjectExpr::StaticKw
+                            | SubjectExpr::Parent
+                            | SubjectExpr::ArrayAccess { .. }
+                            | SubjectExpr::InlineArray { .. }
+                            | SubjectExpr::CallExpr { .. }
+                    );
+                    stack.push(Step::Text(")"));
+                    stack.push(Step::Text(args_text));
+                    stack.push(Step::Text("("));
+                    if needs_parens {
+                        // The opening paren precedes the callee, so it is
+                        // written now rather than queued.
+                        out.push('(');
+                        stack.push(Step::Text(")"));
                     }
+                    stack.push(Step::Node(callee));
                 }
-                s
+                SubjectExpr::MethodCall { base, method } => {
+                    stack.push(Step::Text(method));
+                    stack.push(Step::Text("->"));
+                    stack.push(Step::Node(base));
+                }
+                SubjectExpr::StaticMethodCall { class, method } => {
+                    out.push_str(class);
+                    out.push_str("::");
+                    out.push_str(method);
+                }
+                SubjectExpr::StaticAccess { class, member } => {
+                    out.push_str(class);
+                    out.push_str("::");
+                    out.push_str(member);
+                }
+                SubjectExpr::NewExpr { class_name } => {
+                    out.push_str("new ");
+                    out.push_str(class_name);
+                }
+                SubjectExpr::ClassName(name) => out.push_str(name),
+                SubjectExpr::FunctionCall(name) => out.push_str(name),
+                SubjectExpr::ArrayAccess { base, segments } => {
+                    stack.push(Step::Brackets(segments));
+                    stack.push(Step::Node(base));
+                }
+                SubjectExpr::InlineArray {
+                    elements,
+                    index_segments,
+                } => {
+                    out.push('[');
+                    out.push_str(&elements.join(", "));
+                    out.push(']');
+                    stack.push(Step::Brackets(index_segments));
+                }
             }
         }
+        out
     }
 
     /// Returns `true` if this expression is one of the "current class"
@@ -388,30 +423,46 @@ impl SubjectExpr {
     /// discriminator built from these variables' resolved types.  `$this`,
     /// `self`, `static`, and `parent` are class-relative rather than local,
     /// so they are not collected.
+    /// Walks the spine iteratively: a chain nests one variant per link, and
+    /// there is no bound on how long a generated chain gets.
     pub fn collect_local_variables(&self, out: &mut Vec<String>) {
-        match self {
-            SubjectExpr::Variable(name) => out.push(name.clone()),
-            SubjectExpr::PropertyChain { base, .. }
-            | SubjectExpr::MethodCall { base, .. }
-            | SubjectExpr::ArrayAccess { base, .. } => base.collect_local_variables(out),
-            SubjectExpr::CallExpr { callee, args_text } => {
-                callee.collect_local_variables(out);
-                collect_text_local_variables(args_text, out);
-            }
-            SubjectExpr::InlineArray { elements, .. } => {
-                for elem in elements {
-                    collect_text_local_variables(elem, out);
+        // Argument texts are set aside on the way down the spine and drained
+        // innermost-first afterwards, so `out` keeps the base-first order a
+        // recursive walk produces.
+        let mut pending_args: Vec<&str> = Vec::new();
+        let mut node = self;
+        loop {
+            node = match node {
+                SubjectExpr::Variable(name) => {
+                    out.push(name.clone());
+                    break;
                 }
-            }
-            SubjectExpr::This
-            | SubjectExpr::SelfKw
-            | SubjectExpr::StaticKw
-            | SubjectExpr::Parent
-            | SubjectExpr::StaticMethodCall { .. }
-            | SubjectExpr::StaticAccess { .. }
-            | SubjectExpr::NewExpr { .. }
-            | SubjectExpr::ClassName(_)
-            | SubjectExpr::FunctionCall(_) => {}
+                SubjectExpr::PropertyChain { base, .. }
+                | SubjectExpr::MethodCall { base, .. }
+                | SubjectExpr::ArrayAccess { base, .. } => base,
+                SubjectExpr::CallExpr { callee, args_text } => {
+                    pending_args.push(args_text);
+                    callee
+                }
+                SubjectExpr::InlineArray { elements, .. } => {
+                    for elem in elements {
+                        collect_text_local_variables(elem, out);
+                    }
+                    break;
+                }
+                SubjectExpr::This
+                | SubjectExpr::SelfKw
+                | SubjectExpr::StaticKw
+                | SubjectExpr::Parent
+                | SubjectExpr::StaticMethodCall { .. }
+                | SubjectExpr::StaticAccess { .. }
+                | SubjectExpr::NewExpr { .. }
+                | SubjectExpr::ClassName(_)
+                | SubjectExpr::FunctionCall(_) => break,
+            };
+        }
+        for args_text in pending_args.into_iter().rev() {
+            collect_text_local_variables(args_text, out);
         }
     }
 
@@ -432,6 +483,46 @@ impl SubjectExpr {
     pub fn parse_callee(call_body: &str) -> SubjectExpr {
         parse_callee(call_body)
     }
+}
+
+/// A chain nests one `Box` per link, so the derived drop glue recurses
+/// through the spine — and a generated fluent chain has no length bound, so
+/// that recursion can exhaust the stack while merely *freeing* an
+/// expression.  Dismantle the spine iteratively instead.
+impl Drop for SubjectExpr {
+    fn drop(&mut self) {
+        let mut pending: Vec<SubjectExpr> = Vec::new();
+        detach_child(self, &mut pending);
+        while let Some(mut node) = pending.pop() {
+            detach_child(&mut node, &mut pending);
+            // `node` is freed at the end of this iteration.  Its own child
+            // is a leaf by now, so its drop cannot recurse back into the
+            // spine.
+        }
+    }
+}
+
+/// Move `node`'s boxed child (if it has one) into `pending`, leaving a leaf
+/// in its place so that dropping `node` cannot recurse.
+fn detach_child(node: &mut SubjectExpr, pending: &mut Vec<SubjectExpr>) {
+    let child = match node {
+        SubjectExpr::PropertyChain { base, .. }
+        | SubjectExpr::MethodCall { base, .. }
+        | SubjectExpr::ArrayAccess { base, .. } => base,
+        SubjectExpr::CallExpr { callee, .. } => callee,
+        SubjectExpr::This
+        | SubjectExpr::SelfKw
+        | SubjectExpr::StaticKw
+        | SubjectExpr::Parent
+        | SubjectExpr::Variable(_)
+        | SubjectExpr::StaticMethodCall { .. }
+        | SubjectExpr::StaticAccess { .. }
+        | SubjectExpr::NewExpr { .. }
+        | SubjectExpr::ClassName(_)
+        | SubjectExpr::FunctionCall(_)
+        | SubjectExpr::InlineArray { .. } => return,
+    };
+    pending.push(std::mem::replace(child.as_mut(), SubjectExpr::This));
 }
 
 // ─── SubjectExpr parsing helpers ────────────────────────────────────────────

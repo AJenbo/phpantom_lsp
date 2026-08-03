@@ -55,7 +55,7 @@ mod instantiation;
 mod property_access;
 
 use array_access::resolve_rhs_array_access;
-use calls::resolve_rhs_call;
+use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
 use instantiation::resolve_rhs_instantiation;
 use property_access::resolve_rhs_property_access;
 
@@ -344,11 +344,11 @@ fn resolved_type_with_lookup(
 /// and recursively by multi-branch constructs (match, ternary, `??`).
 ///
 /// Resolution recurses along the nesting of the expression, so the
-/// three right-associative shapes PHP code really does write long
-/// (`$a ?? $b ?? … ?? $z`, ternaries nested in their own `else` branch,
-/// and stacked `(…)` / `@` wrappers) are walked iteratively here
+/// shapes PHP code really does write long (`$a ?? $b ?? … ?? $z`,
+/// ternaries nested in their own `else` branch, stacked `(…)` / `@`
+/// wrappers, and fluent method chains) are walked iteratively here
 /// instead: they nest one AST level per link, and recursing them would
-/// spend a stack frame per link to reach a type the loop below reaches
+/// spend a stack frame per link to reach a type the loops below reach
 /// for free.
 pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
     expr: &'b Expression<'b>,
@@ -360,6 +360,9 @@ pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
             resolve_null_coalesce_chain(binary, ctx)
         }
         Expression::Conditional(conditional) => resolve_conditional_chain(conditional, ctx),
+        Expression::Call(Call::Method(_) | Call::NullSafeMethod(_)) => {
+            resolve_method_chain(expr, ctx)
+        }
         _ => resolve_rhs_expression_inner(expr, ctx),
     }
 }
@@ -501,6 +504,71 @@ fn resolve_conditional_chain<'b>(
             }
         }
     }
+}
+
+/// One link of a fluent chain: `->method(args)` applied to `object`.
+struct ChainLink<'b> {
+    object: &'b Expression<'b>,
+    method: &'b ClassLikeMemberSelector<'b>,
+    argument_list: &'b ArgumentList<'b>,
+}
+
+/// Resolve a method call, walking its receiver spine iteratively.
+///
+/// `$x->a()->b()->c()` nests one method call per link, and each link's
+/// receiver is the link before it — a chain, not a tree.  Resolving the
+/// outermost call and recursing into its receiver therefore costs a stack
+/// frame per link, so a long enough chain overflows the stack whatever
+/// size it is given.  Hand-written code stays short, but generated query
+/// builders and generated API clients do not.
+///
+/// So the spine is peeled into a `Vec` and folded outward from the base
+/// instead: only the innermost link resolves an object expression (which
+/// is where `$this`, a bare variable, or `(new Foo)` is read), and every
+/// link after it is handed the previous link's result as its receiver.
+///
+/// A chain that mixes in property reads (`$x->a()->prop->b()`) breaks the
+/// spine at the property, which resolves through the normal recursive
+/// path; only the method links either side of it are flattened.
+fn resolve_method_chain<'b>(
+    expr: &'b Expression<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let mut links: Vec<ChainLink<'b>> = Vec::new();
+    let mut current = expr;
+    loop {
+        let link = match peel_type_transparent(current) {
+            Expression::Call(Call::Method(call)) => ChainLink {
+                object: call.object,
+                method: &call.method,
+                argument_list: &call.argument_list,
+            },
+            Expression::Call(Call::NullSafeMethod(call)) => ChainLink {
+                object: call.object,
+                method: &call.method,
+                argument_list: &call.argument_list,
+            },
+            // The base of the spine.  It is left to the innermost link,
+            // which knows how to read it as a receiver.
+            _ => break,
+        };
+        current = link.object;
+        links.push(link);
+    }
+
+    let mut receiver: Option<MethodReceiver> = None;
+    for link in links.iter().rev() {
+        let resolved = resolve_method_call_on_receiver(
+            link.object,
+            link.method,
+            link.argument_list,
+            receiver,
+            ctx,
+        );
+        receiver = Some((ResolvedType::into_arced_classes(resolved.clone()), resolved));
+    }
+    // `links` always holds at least the call this was entered on.
+    receiver.map(|(_, resolved)| resolved).unwrap_or_default()
 }
 
 fn resolve_rhs_expression_inner<'b>(
