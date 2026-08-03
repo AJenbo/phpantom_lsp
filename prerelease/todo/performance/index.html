@@ -1425,6 +1425,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P49. A very long method chain costs superlinear time to analyse
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1998,6 +2009,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P48. Higher-order collection proxy injection repeats work
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P49. A very long method chain costs superlinear time to analyse
       </span>
     </span>
   </a>
@@ -2878,6 +2900,35 @@ most of the repetition.</p>
 <p><strong>Where to look:</strong> <code>virtual_members/laravel/higher_order_proxy.rs</code>,
 <code>virtual_members/resolve.rs</code>, and the template-param mixin block in
 <code>type_engine/types/resolution.rs</code>.</p>
+<h2 id="p49-a-very-long-method-chain-costs-superlinear-time-to-analyse">P49. A very long method chain costs superlinear time to analyse<a class="headerlink" href="#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p>Resolving a receiver spine no longer recurses per link, so a fluent chain
+of any length parses, hovers, and analyses without overflowing the stack.
+The work is still superlinear in the chain's length, though: a 1000-link
+chain takes roughly eight times as long to run diagnostics over as a
+500-link one on a debug build, so a generated query builder or generated
+API client long enough turns a diagnostic pass into a multi-second stall.</p>
+<p>Two costs compound along the spine, each linear in the prefix and paid
+once per link:</p>
+<ol>
+<li>
+<p><strong>Subject text is rebuilt per link.</strong> <code>extract_call_expr</code> calls
+   <code>expr_to_subject_text(method_call.object)</code> for every link, which
+   renders the whole prefix, so the symbol map spends O(n²) bytes on one
+   chain. Rendering the spine once and handing each link a slice of the
+   result would make it linear.</p>
+</li>
+<li>
+<p><strong>Chain cache keys are rebuilt per link.</strong> <code>chain_cache_key</code> calls
+   <code>SubjectExpr::to_subject_text</code> for every link of the spine, again
+   rendering the whole prefix. The keys of a spine are prefixes of one
+   another, so one render plus per-link lengths would do.</p>
+</li>
+</ol>
+<p><strong>Where to look:</strong> <code>symbol_map/extraction/expressions/calls.rs</code> for the
+first, <code>chain_cache_key</code> in <code>type_engine/resolver/mod.rs</code> for the second.
+Neither is a correctness problem, and hand-written code never reaches the
+lengths where it shows.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues were addressed by eager class

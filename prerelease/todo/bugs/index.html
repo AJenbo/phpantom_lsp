@@ -926,17 +926,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b25-a-very-long-method-chain-overflows-the-stack" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B25. A very long method chain overflows the stack
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1503,17 +1492,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b25-a-very-long-method-chain-overflows-the-stack" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B25. A very long method chain overflows the stack
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1774,30 +1752,6 @@ parameter applies to both the parameter and the synthesised property,
 which is not identical to a property-only attribute, so an explicit
 <code>#[\Attribute(\Attribute::TARGET_PROPERTY)]</code> target may need to be
 preserved as-is and a bare attribute may need one added.</p>
-<h4 id="b25-a-very-long-method-chain-overflows-the-stack">B25. A very long method chain overflows the stack<a class="headerlink" href="#b25-a-very-long-method-chain-overflows-the-stack" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
-<p>Found while stress-testing right-associative chain resolution. A fluent
-chain of roughly 3000 links overflows the 8 MB parse-worker stack and
-aborts the process (<code>SIGSEGV</code>, which <code>catch_unwind</code> cannot catch):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$out = $x-&gt;self()-&gt;self()/* … ~3000 links … */-&gt;self();</span>
-</code></pre></div>
-<p>The recursion is <code>resolve_rhs_call</code> → <code>resolve_rhs_expression</code> →
-<code>resolve_rhs_method_call_inner</code> → <code>resolve_rhs_call</code>, about three frames
-per link, walking from the outermost call down to the receiver. Nothing
-bounds it: the parser's own recursion limit does not apply because a
-postfix chain is parsed in a loop rather than recursively, so the AST can
-nest arbitrarily deep with no parse error. Hand-written code does not
-reach that length, but generated query builders and generated client
-code can.</p>
-<p><strong>Where to look:</strong> <code>resolve_rhs_call</code> /
-<code>resolve_rhs_method_call_inner</code> in
-<code>src/type_engine/variable/rhs_resolution/calls.rs</code>. The receiver spine
-is a chain, not a tree, so collect it into a <code>Vec</code> iteratively (peeling
-one call at a time until the base expression) and then resolve outward
-from the base, the same way <code>??</code> and ternary chains are walked in
-<code>rhs_resolution/mod.rs</code>. Raising the stack size is not a fix (see the
-performance anti-patterns): chain length is unbounded, so any stack size
-has a chain that overflows it.</p>
 
 
 
