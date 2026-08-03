@@ -233,6 +233,66 @@ class UserController {
 }
 
 #[test]
+fn a_validate_call_in_each_branch_contributes_its_keys() {
+    // Either arm may have run, so both describe the request at the cursor.
+    let content = "<?php
+class UserController {
+    public function store(Request $request) {
+        if ($request->has('draft')) {
+            $request->validate(['first' => 'required']);
+        } else {
+            $request->validate(['second' => 'required']);
+        }
+        $request->input('');
+    }
+}
+";
+    let cursor = content.find("input('").unwrap() + 7;
+    let rules = inline_validate_rules(content, cursor).unwrap();
+    assert_eq!(keys(&rules), vec!["first", "second"]);
+    assert!(rules.keys_complete);
+}
+
+#[test]
+fn an_unconditional_call_after_a_branch_takes_over() {
+    // The last call cannot have been skipped, so it alone is in force.
+    let content = "<?php
+class UserController {
+    public function store(Request $request) {
+        if ($request->has('draft')) {
+            $request->validate(['first' => 'required']);
+        }
+        $request->validate(['second' => 'required']);
+        $request->input('');
+    }
+}
+";
+    let cursor = content.find("input('").unwrap() + 7;
+    let rules = inline_validate_rules(content, cursor).unwrap();
+    assert_eq!(keys(&rules), vec!["second"]);
+}
+
+#[test]
+fn a_call_in_a_loop_does_not_displace_an_earlier_one() {
+    // The loop body may never run, so the earlier call can still be the one
+    // in force.
+    let content = "<?php
+class UserController {
+    public function store(Request $request) {
+        $request->validate(['first' => 'required']);
+        foreach ($items as $item) {
+            $request->validate(['second' => 'required']);
+        }
+        $request->input('');
+    }
+}
+";
+    let cursor = content.find("input('").unwrap() + 7;
+    let rules = inline_validate_rules(content, cursor).unwrap();
+    assert_eq!(keys(&rules), vec!["first", "second"]);
+}
+
+#[test]
 fn an_unreadable_nearer_call_does_not_hand_back_the_earlier_one() {
     // The second call is the one in force.  Its keys cannot be read, so the
     // answer is "an incomplete set", never the first call's keys — those
@@ -278,6 +338,7 @@ fn rule(key: &str) -> ValidationRule {
         key: key.to_string(),
         rules: "required".to_string(),
         key_start: 0,
+        origin: None,
         enum_class: None,
     }
 }

@@ -31,29 +31,39 @@ use crate::type_engine::resolver::ResolutionCtx;
 
 pub(crate) use crate::type_engine::subject_expr::parse_new_expression_class as extract_new_expression_class;
 
-/// Find the string literal the cursor sits inside, scanning backwards from
-/// `cursor_offset` for the opening quote.
+/// Find the string literal the cursor sits inside, or `None` when it sits
+/// outside one.
 ///
-/// Returns `(quote_offset, quote_char)`.  Escaped quotes are skipped by
-/// counting the preceding backslashes.  Returns `None` when a newline is
-/// reached first, since the cursor is then not inside a single-line string.
+/// Returns `(quote_offset, quote_char)` of the literal's opening quote.  The
+/// scan runs *forward* from the start of the cursor's line, tracking which
+/// quote (if any) is currently open, because quotes only pair up in that
+/// direction: scanning backwards for the nearest quote reports the closing
+/// quote of a finished literal (`$a = 'x'; $request[|`) as an opener, and
+/// picks an apostrophe inside a double-quoted string (`"it's here|"`) over the
+/// real opening quote.  Escaped quotes do not delimit.
+///
+/// A literal that opened on an earlier line is not seen, so the cursor is
+/// reported as outside a string there.
 pub(crate) fn find_open_quote(content: &str, cursor_offset: usize) -> Option<(usize, char)> {
     let bytes = content.as_bytes();
     if cursor_offset == 0 || cursor_offset > bytes.len() {
         return None;
     }
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
+    let line_start = content[..cursor_offset]
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1);
+
+    let mut open: Option<(usize, u8)> = None;
+    for i in line_start..cursor_offset {
         let ch = bytes[i];
-        if (ch == b'\'' || ch == b'"') && !is_escaped(bytes, i) {
-            return Some((i, ch as char));
-        }
-        if ch == b'\n' {
-            return None;
+        match open {
+            Some((_, quote)) if ch == quote && !is_escaped(bytes, i) => open = None,
+            Some(_) => {}
+            None if (ch == b'\'' || ch == b'"') && !is_escaped(bytes, i) => open = Some((i, ch)),
+            None => {}
         }
     }
-    None
+    open.map(|(offset, quote)| (offset, quote as char))
 }
 
 /// A call whose argument array holds the key the cursor is typing.
@@ -172,8 +182,12 @@ fn first_string_argument(content: &str, paren_open: usize) -> Option<String> {
     if quote != '\'' && quote != '"' {
         return None;
     }
-    let inner = &rest[1..];
-    let end = inner.find(quote)?;
+    let inner = rest.get(1..)?;
+    // An escaped quote (`route('it\'s')`) does not close the literal, so the
+    // scan skips it the way `scan_back_to_opener` does.  The value keeps its
+    // escapes, matching how the names it is looked up against are recorded.
+    let bytes = inner.as_bytes();
+    let end = (0..bytes.len()).find(|&i| bytes[i] == quote as u8 && !is_escaped(bytes, i))?;
     Some(inner[..end].to_string())
 }
 
@@ -1056,6 +1070,57 @@ fn walk_array_segments_and_resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_quote_is_the_literal_the_cursor_is_in() {
+        // Cursor inside a plain literal.
+        let content = "$request->input('ti";
+        assert_eq!(
+            find_open_quote(content, content.len()),
+            Some((content.find('\'').unwrap(), '\''))
+        );
+
+        // An apostrophe inside a double-quoted string is not its opener.
+        let content = "$request->input(\"it's ";
+        assert_eq!(
+            find_open_quote(content, content.len()),
+            Some((content.find('"').unwrap(), '"'))
+        );
+
+        // A literal that already closed leaves the cursor outside a string.
+        let content = "$a = 'x'; $request[";
+        assert_eq!(find_open_quote(content, content.len()), None);
+
+        // An escaped quote does not close the literal.
+        let content = "$request->input('it\\'s ";
+        assert_eq!(
+            find_open_quote(content, content.len()),
+            Some((content.find('\'').unwrap(), '\''))
+        );
+
+        // A literal on an earlier line does not leak into this one.
+        let content = "$a = 'x';\n$request[";
+        assert_eq!(find_open_quote(content, content.len()), None);
+    }
+
+    /// The name is read up to the literal's real closing quote, so an escaped
+    /// quote inside it does not truncate the value.
+    #[test]
+    fn call_name_keeps_an_escaped_quote() {
+        let content = "route('it\\'s', ['' => 1]);";
+        let quote_pos = content.rfind("''").unwrap();
+        let call = enclosing_array_key_call(content, quote_pos).expect("a route() call");
+        assert_eq!(call.name, "it\\'s");
+        assert_eq!(call.callee, "route");
+    }
+
+    #[test]
+    fn call_name_reads_a_plain_first_argument() {
+        let content = "route('users.show', ['' => 1]);";
+        let quote_pos = content.rfind("''").unwrap();
+        let call = enclosing_array_key_call(content, quote_pos).expect("a route() call");
+        assert_eq!(call.name, "users.show");
+    }
 
     #[test]
     fn arrow_fn_with_return_type() {

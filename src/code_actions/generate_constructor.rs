@@ -288,14 +288,14 @@ fn collect_qualifying_properties<'a>(
 /// for use as a parameter type hint.
 ///
 /// Accepts `Named` and `Nullable(Named)` types; rejects unions,
-/// intersections, array shapes, generics, etc.
+/// intersections, array shapes, generics, etc.  A late-static type is
+/// rejected as well: PHP allows `static` as a return type only, and its
+/// bounded display form (`static(App\Foo)`) is not source syntax at all, so
+/// writing either into a parameter list would not parse.
 fn is_simple_php_type(ty: &PhpType) -> bool {
     match ty.kind() {
-        TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_) => true,
-        TypeKind::Nullable(inner) => matches!(
-            inner.kind(),
-            TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_)
-        ),
+        TypeKind::Named(_) => true,
+        TypeKind::Nullable(inner) => matches!(inner.kind(), TypeKind::Named(_)),
         _ => false,
     }
 }
@@ -512,6 +512,7 @@ fn is_static(property: &Property<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::atom::atom;
 
     // ── is_simple_type ──────────────────────────────────────────────────
 
@@ -533,6 +534,18 @@ mod tests {
     fn simple_type_accepts_fqn() {
         assert!(is_simple_php_type(&PhpType::parse("App\\Models\\User")));
         assert!(is_simple_php_type(&PhpType::parse("?App\\Models\\User")));
+    }
+
+    /// `static` is not a valid parameter type in PHP, and the bounded display
+    /// form is not source syntax, so neither may reach a generated signature.
+    #[test]
+    fn simple_type_rejects_late_static() {
+        assert!(!is_simple_php_type(&PhpType::parse("static(App\\Foo)")));
+        assert!(!is_simple_php_type(&PhpType::parse("$this(App\\Foo)")));
+        assert!(!is_simple_php_type(&PhpType::static_type(atom("App\\Foo"))));
+        assert!(!is_simple_php_type(&PhpType::nullable(PhpType::this_type(
+            atom("App\\Foo")
+        ))));
     }
 
     #[test]

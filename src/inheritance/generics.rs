@@ -59,6 +59,62 @@ pub(crate) fn method_has_bare_self(method: &MethodInfo) -> bool {
             .any(|p| p.type_hint.as_ref().is_some_and(|h| h.contains_bare_self()))
 }
 
+/// Whether an inheritance merge would rewrite a relative class keyword in
+/// `method`: bare `self`, or bare `parent` when the declaring class's own
+/// parent is known.
+pub(crate) fn method_has_inherited_class_keyword(
+    method: &MethodInfo,
+    declaring_parent: Option<&str>,
+) -> bool {
+    method_has_bare_self(method) || (declaring_parent.is_some() && method_has_bare_parent(method))
+}
+
+fn method_has_bare_parent(method: &MethodInfo) -> bool {
+    method
+        .return_type
+        .as_ref()
+        .is_some_and(|r| r.contains_bare_parent())
+        || method.parameters.iter().any(|p| {
+            p.type_hint
+                .as_ref()
+                .is_some_and(|h| h.contains_bare_parent())
+        })
+}
+
+/// Bind the relative class keywords of an inherited method to concrete
+/// classes: bare `self` to `class_name`, bare `parent` to
+/// `declaring_parent`.
+///
+/// Both bind to the class that *declares* the method, so an inherited copy
+/// must carry those classes rather than the keywords — resolving them against
+/// the class a call is made on names the wrong class as soon as a subclass
+/// sits in between. `static` is deliberately left alone: it binds late, to the
+/// class the call is made on.
+pub(crate) fn bind_inherited_class_keywords(
+    method: &mut MethodInfo,
+    class_name: &str,
+    declaring_parent: Option<&str>,
+) {
+    replace_bare_self_in_method(method, class_name);
+    let Some(declaring_parent) = declaring_parent else {
+        return;
+    };
+    if let Some(ref mut ret) = method.return_type
+        && ret.contains_bare_parent()
+    {
+        *ret = ret.replace_bare_parent(declaring_parent);
+    }
+    if method_has_bare_parent(method) {
+        for param in method.parameters.make_mut() {
+            if let Some(ref mut hint) = param.type_hint
+                && hint.contains_bare_parent()
+            {
+                *hint = hint.replace_bare_parent(declaring_parent);
+            }
+        }
+    }
+}
+
 /// Replace bare `self` in a method's return type and parameter hints
 /// with `class_name`.
 ///

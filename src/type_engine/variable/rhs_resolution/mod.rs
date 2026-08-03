@@ -70,8 +70,10 @@ pub(crate) use instantiation::{
 
 /// Apply unary `+` or `-` to an already-resolved numeric type.
 ///
-/// Exact literal members remain exact. A broad integer may become a float
-/// when negating `PHP_INT_MIN`, while unary plus keeps the integer domain.
+/// Exact literal members remain exact; negating a literal `PHP_INT_MIN`
+/// overflows and gives up rather than reporting a wrong value. A broad
+/// integer stays an integer, matching PHPStan: modelling the one input that
+/// overflows to a float would cost precision on every other negation.
 /// Any non-numeric branch makes the result unknown.
 fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
     match ty.kind() {
@@ -118,9 +120,6 @@ fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
         // version and diagnostics policy; keep the established conservative
         // fallback instead of silently discarding nullability.
         TypeKind::Nullable(_) => None,
-        _ if ty.is_int_subtype() && negated => {
-            Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
-        }
         _ if ty.is_int_subtype() => Some(PhpType::int()),
         _ if ty.is_float_subtype() => Some(PhpType::float()),
         _ if ty.is_named_ci("numeric") || ty.is_named("number") => {
@@ -1170,6 +1169,23 @@ mod tests {
         assert_eq!(
             infer_type_from_constant_value("0xFF"),
             Some(PhpType::literal_int("255"))
+        );
+        // A sign in front of a non-decimal spelling keeps the value too.
+        assert_eq!(
+            infer_type_from_constant_value("-0xFF"),
+            Some(PhpType::literal_int("-255"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("-0b1010"),
+            Some(PhpType::literal_int("-10"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("+0o17"),
+            Some(PhpType::literal_int("15"))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("-0_1_0"),
+            Some(PhpType::literal_int("-8"))
         );
         assert_eq!(
             infer_type_from_constant_value("3.14"),

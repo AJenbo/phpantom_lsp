@@ -1896,6 +1896,36 @@ fn a_forwarding_call_reaches_nested_keywords() {
     );
 }
 
+/// The display form of a bounded late-static type is the only spelling it has,
+/// so it has to read back as the same type: dropping the bound would turn a
+/// value whose class is known into an unresolved `static` keyword.
+#[test]
+fn a_bounded_late_static_type_round_trips_through_parse() {
+    for ty in [
+        PhpType::static_type(atom("App\\Foo")),
+        PhpType::this_type(atom("App\\Foo")),
+        PhpType::static_type(atom("Foo")),
+    ] {
+        assert_eq!(PhpType::parse(&ty.to_string()), ty);
+    }
+
+    // An unbounded `static` keeps its keyword meaning, and text that merely
+    // looks like a call is not mistaken for a bound.
+    assert!(!matches!(
+        PhpType::parse("static").kind(),
+        TypeKind::StaticType(_)
+    ));
+    for not_a_bound in ["static(int)", "static()", "count($items)", "strlen(...)"] {
+        assert!(
+            !matches!(
+                PhpType::parse(not_a_bound).kind(),
+                TypeKind::StaticType(_) | TypeKind::ThisType(_)
+            ),
+            "{not_a_bound} is not a bounded late-static type"
+        );
+    }
+}
+
 // ── resolve_self_refs ───────────────────────────────────────
 
 #[test]
@@ -3523,6 +3553,26 @@ mod simplification_tests {
             PhpType::named(atom("real"))
         );
         assert!(PhpType::literal_float("1.5").is_subtype_of(&PhpType::named(atom("real"))));
+    }
+
+    /// `real` is a float alias only in lowercase. A userland class named `Real`
+    /// is a class like any other, so it must not be folded into `float`.
+    #[test]
+    fn capitalised_real_is_a_class_not_the_float_alias() {
+        let class = PhpType::named(atom("Real"));
+
+        assert!(!class.is_float());
+        assert!(!class.is_subtype_of(&PhpType::float()));
+        assert!(!PhpType::float().is_subtype_of(&class));
+        assert!(!PhpType::literal_float("1.5").is_subtype_of(&class));
+        assert!(!PhpType::named(atom("real")).is_subtype_of(&class));
+        assert!(!class.is_subtype_of(&PhpType::named(atom("real"))));
+
+        // Class names themselves stay case-insensitive.
+        assert!(class.is_subtype_of(&PhpType::named(atom("REAL"))));
+
+        let with_float = PhpType::union(vec![class.clone(), PhpType::literal_float("1.5")]);
+        assert_eq!(with_float.simplified(), with_float);
     }
 
     #[test]

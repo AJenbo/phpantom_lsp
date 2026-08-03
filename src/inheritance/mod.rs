@@ -39,9 +39,9 @@ pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 pub(crate) use generics::apply_substitution;
 pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
-    apply_substitution_to_property, build_generic_subs, build_substitution_map, default_type_args,
-    method_has_bare_self, method_references_params, property_references_params,
-    replace_bare_self_in_method,
+    apply_substitution_to_property, bind_inherited_class_keywords, build_generic_subs,
+    build_substitution_map, default_type_args, method_has_inherited_class_keyword,
+    method_references_params, property_references_params,
 };
 
 /// A borrow-or-owned handle to a `ClassInfo`, used to walk the parent
@@ -323,11 +323,13 @@ pub(crate) fn resolve_class_with_inheritance(
         };
 
         // Interning fingerprints for the three transform shapes a parent
-        // method can need (substitution, bare-`self` replacement, or
-        // both), computed once per level.  The bare-`self` target is the
-        // declaring parent, so the transformed copies are identical for
+        // method can need (substitution, relative-keyword binding, or
+        // both), computed once per level.  The keyword binding is fully
+        // determined by the declaring parent (its own parent is what a bare
+        // `parent` binds to), so the transformed copies are identical for
         // every subclass and can be shared through the interning store.
         let parent_fqn = parent.fqn();
+        let declaring_parent = parent.parent_class.map(|a| a.to_string());
         let fp_sub = TransformFingerprint::new(Some(&level_subs), None, 0);
         let fp_self = TransformFingerprint::new(None, Some(parent_fqn.as_str()), 0);
         let fp_both = TransformFingerprint::new(Some(&level_subs), Some(parent_fqn.as_str()), 0);
@@ -368,18 +370,19 @@ pub(crate) fn resolve_class_with_inheritance(
                 }
                 continue;
             }
-            // Replace bare `self` in the return type and parameter hints
-            // with the declaring (parent) class name so that `self`
-            // resolves to the class that defines the method, not the
-            // inheriting child.
-            let needs_bare_self = method_has_bare_self(method);
-            if !needs_sub && !needs_bare_self {
-                // Substitution is a no-op and there is no bare `self`:
+            // Bind bare `self` / `parent` in the return type and parameter
+            // hints to the declaring (parent) class and its own parent, so
+            // they resolve to the classes that the declaration meant rather
+            // than to the inheriting child and its parent.
+            let needs_keywords =
+                method_has_inherited_class_keyword(method, declaring_parent.as_deref());
+            if !needs_sub && !needs_keywords {
+                // Substitution is a no-op and there is no relative keyword:
                 // keep the shared `Arc` instead of deep-cloning.
                 merged.methods.push(Arc::clone(method));
                 continue;
             }
-            let fp = match (needs_sub, needs_bare_self) {
+            let fp = match (needs_sub, needs_keywords) {
                 (true, false) => fp_sub,
                 (false, true) => fp_self,
                 _ => fp_both,
@@ -389,8 +392,12 @@ pub(crate) fn resolve_class_with_inheritance(
                 if needs_sub {
                     apply_substitution_to_method(&mut ancestor_method, &level_subs);
                 }
-                if needs_bare_self {
-                    replace_bare_self_in_method(&mut ancestor_method, &parent_fqn);
+                if needs_keywords {
+                    bind_inherited_class_keywords(
+                        &mut ancestor_method,
+                        &parent_fqn,
+                        declaring_parent.as_deref(),
+                    );
                 }
                 ancestor_method
             });

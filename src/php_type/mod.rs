@@ -925,7 +925,7 @@ impl PhpType {
     pub fn is_float(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => {
-                matches!(s.to_ascii_lowercase().as_str(), "float" | "double" | "real")
+                matches!(keyword_lowercase(s).as_str(), "float" | "double" | "real")
             }
             TypeKind::Nullable(inner) => inner.is_float(),
             _ => false,

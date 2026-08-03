@@ -340,7 +340,7 @@ fn is_runtime_scalar_value_domain(ty: &PhpType) -> bool {
                 return true;
             }
             matches!(
-                name.to_ascii_lowercase().as_str(),
+                keyword_lowercase(name).as_str(),
                 "int"
                     | "integer"
                     | "positive-int"
@@ -711,7 +711,7 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
         types.iter().enumerate().any(|(index, ty)| {
             keep[index]
                 && matches!(ty.kind(), TypeKind::Named(name)
-                    if names.iter().any(|candidate| name.eq_ignore_ascii_case(candidate)))
+                    if names.contains(&keyword_lowercase(name).as_str()))
         })
     };
     let has_int = has_kept_name(&["int", "integer"]);

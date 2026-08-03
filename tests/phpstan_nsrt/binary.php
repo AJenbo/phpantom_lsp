@@ -64,7 +64,10 @@ class Foo
 
 		// ── Unary operators ─────────────────────────────────────────────
 
-		assertType('int|float', -$integer);
+		assertType('int', -$integer);
+		assertType('int', +$integer);
+		assertType('float', -$float);
+		assertType('-1', -1);
 
 		// ── Arithmetic: literal int op int ──────────────────────────────
 

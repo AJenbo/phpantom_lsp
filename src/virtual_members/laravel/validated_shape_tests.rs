@@ -47,6 +47,43 @@ fn nullable_adds_null_and_leaves_the_key_optional() {
     );
 }
 
+/// `exclude` validates the field and then drops it, so it is never a key of
+/// the validated array.
+#[test]
+fn an_excluded_field_is_not_part_of_the_shape() {
+    assert_eq!(
+        shape_of("['name' => 'required|string', 'token' => 'exclude|string']"),
+        "array{name: string}"
+    );
+    // Nothing left to describe once the only field is excluded.
+    assert_eq!(shape_of("['token' => 'exclude|string']"), "array");
+    // A dotted subtree goes with its excluded root.
+    assert_eq!(
+        shape_of(
+            "['name' => 'required|string', 'meta' => 'exclude|array', 'meta.tag' => 'string']"
+        ),
+        "array{name: string}"
+    );
+}
+
+/// The conditional family only sometimes drops the field, so the key stays but
+/// may be missing.
+#[test]
+fn a_conditionally_excluded_field_is_an_optional_key() {
+    for rule in [
+        "exclude_if:other,1",
+        "exclude_unless:other,1",
+        "exclude_with:other",
+        "exclude_without:other",
+    ] {
+        assert_eq!(
+            shape_of(&format!("['name' => 'required|string|{rule}']")),
+            "array{name?: string}",
+            "{rule} should leave an optional key"
+        );
+    }
+}
+
 #[test]
 fn present_guarantees_the_key_without_requiring_a_value() {
     assert_eq!(

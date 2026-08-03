@@ -448,26 +448,42 @@ impl PhpType {
     /// inherited methods carry the declaring class's identity for `self`
     /// while preserving `static` for late-static-binding resolution.
     pub fn replace_bare_self(&self, class_name: &str) -> PhpType {
+        self.replace_bare_keyword("self", class_name)
+    }
+
+    /// Replace only the `parent` keyword with a concrete class name.
+    ///
+    /// `parent` binds to the parent of the class that *declares* the method,
+    /// so an inherited method must carry that class rather than the keyword:
+    /// resolving `parent` against the class the call is made on names the
+    /// wrong class as soon as another subclass is in between.
+    pub fn replace_bare_parent(&self, class_name: &str) -> PhpType {
+        self.replace_bare_keyword("parent", class_name)
+    }
+
+    fn replace_bare_keyword(&self, keyword: &str, class_name: &str) -> PhpType {
         match self.kind() {
-            TypeKind::Named(s) if s.eq_ignore_ascii_case("self") => {
+            TypeKind::Named(s) if s.eq_ignore_ascii_case(keyword) => {
                 PhpType::named(atom(class_name))
             }
             TypeKind::Named(_) | TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
-            TypeKind::Nullable(inner) => PhpType::nullable(inner.replace_bare_self(class_name)),
+            TypeKind::Nullable(inner) => {
+                PhpType::nullable(inner.replace_bare_keyword(keyword, class_name))
+            }
             TypeKind::Union(types) => PhpType::union(
                 types
                     .iter()
-                    .map(|t| t.replace_bare_self(class_name))
+                    .map(|t| t.replace_bare_keyword(keyword, class_name))
                     .collect(),
             ),
             TypeKind::Intersection(types) => PhpType::intersection(
                 types
                     .iter()
-                    .map(|t| t.replace_bare_self(class_name))
+                    .map(|t| t.replace_bare_keyword(keyword, class_name))
                     .collect(),
             ),
             TypeKind::Generic(g) => {
-                let resolved_name = if g.name.eq_ignore_ascii_case("self") {
+                let resolved_name = if g.name.eq_ignore_ascii_case(keyword) {
                     atom(class_name)
                 } else {
                     g.name
@@ -476,11 +492,13 @@ impl PhpType {
                     resolved_name,
                     g.args
                         .iter()
-                        .map(|a| a.replace_bare_self(class_name))
+                        .map(|a| a.replace_bare_keyword(keyword, class_name))
                         .collect(),
                 )
             }
-            TypeKind::Array(inner) => PhpType::array_of(inner.replace_bare_self(class_name)),
+            TypeKind::Array(inner) => {
+                PhpType::array_of(inner.replace_bare_keyword(keyword, class_name))
+            }
             _ => self.clone(),
         }
     }
@@ -488,16 +506,26 @@ impl PhpType {
     /// Returns `true` when this type contains the bare `self` keyword
     /// (not `static` or `$this`).
     pub fn contains_bare_self(&self) -> bool {
+        self.contains_bare_keyword("self")
+    }
+
+    /// Returns `true` when this type contains the bare `parent` keyword.
+    pub fn contains_bare_parent(&self) -> bool {
+        self.contains_bare_keyword("parent")
+    }
+
+    fn contains_bare_keyword(&self, keyword: &str) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => s.eq_ignore_ascii_case("self"),
-            TypeKind::Nullable(inner) => inner.contains_bare_self(),
+            TypeKind::Named(s) => s.eq_ignore_ascii_case(keyword),
+            TypeKind::Nullable(inner) => inner.contains_bare_keyword(keyword),
             TypeKind::Union(types) | TypeKind::Intersection(types) => {
-                types.iter().any(|t| t.contains_bare_self())
+                types.iter().any(|t| t.contains_bare_keyword(keyword))
             }
             TypeKind::Generic(g) => {
-                g.name.eq_ignore_ascii_case("self") || g.args.iter().any(|a| a.contains_bare_self())
+                g.name.eq_ignore_ascii_case(keyword)
+                    || g.args.iter().any(|a| a.contains_bare_keyword(keyword))
             }
-            TypeKind::Array(inner) => inner.contains_bare_self(),
+            TypeKind::Array(inner) => inner.contains_bare_keyword(keyword),
             _ => false,
         }
     }

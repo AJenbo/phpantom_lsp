@@ -89,6 +89,19 @@ class StorePostRequest extends FormRequest {
 }
 ";
 
+/// A child request that composes its parent's rules with `array_merge`.
+const UPDATE_POST_REQUEST_PHP: &str = "\
+<?php
+namespace App\\Http\\Requests;
+class UpdatePostRequest extends StorePostRequest {
+    public function rules(): array {
+        return array_merge(parent::rules(), [
+            'slug' => 'required|string',
+        ]);
+    }
+}
+";
+
 fn base_files() -> Vec<(&'static str, &'static str)> {
     vec![
         ("vendor/illuminate/Http/Request.php", REQUEST_PHP),
@@ -107,6 +120,10 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         (
             "src/Http/Requests/StorePostRequest.php",
             STORE_POST_REQUEST_PHP,
+        ),
+        (
+            "src/Http/Requests/UpdatePostRequest.php",
+            UPDATE_POST_REQUEST_PHP,
         ),
     ]
 }
@@ -243,6 +260,29 @@ class PostController {
     );
 }
 
+/// `array_merge(parent::rules(), […])` must offer the ancestor's keys too, not
+/// only the ones the child adds.
+#[tokio::test]
+async fn parent_rules_are_merged_into_input_completion() {
+    let controller = "\
+<?php
+namespace App;
+use App\\Http\\Requests\\UpdatePostRequest;
+class PostController {
+    public function update(UpdatePostRequest $request) {
+        $request->input('§');
+    }
+}
+";
+    let labels = complete_labels("src/PostController.php", controller).await;
+    for expected in ["slug", "title", "published", "tags"] {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "expected '{expected}' from the merged parent rules, got: {labels:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn wildcard_rule_keys_complete_their_root_segment() {
     let controller = "\
@@ -347,6 +387,34 @@ class PostController {
         labels.contains(&"slug".to_string()) && labels.contains(&"excerpt".to_string()),
         "expected inline validate() keys, got: {labels:?}"
     );
+}
+
+/// Which arm of an `if`/`else` ran is not knowable, so the keys of a
+/// `validate()` call in either arm describe the request after it.
+#[tokio::test]
+async fn validate_calls_in_both_branches_both_reach_the_cursor() {
+    let controller = "\
+<?php
+namespace App;
+use Illuminate\\Http\\Request;
+class PostController {
+    public function store(Request $request) {
+        if ($request->has('draft')) {
+            $request->validate(['draft_note' => 'required|string']);
+        } else {
+            $request->validate(['published_at' => 'required|date']);
+        }
+        $request->input('§');
+    }
+}
+";
+    let labels = complete_labels("src/PostController.php", controller).await;
+    for expected in ["draft_note", "published_at"] {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "expected '{expected}' from the branch's validate() call, got: {labels:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -561,6 +629,25 @@ class PostController {
     let (file, line) = definition_line("src/PostController.php", controller)
         .await
         .expect("expected a definition for 'title'");
+    assert_eq!(file, "StorePostRequest.php");
+    assert_eq!(line, "'title' => 'required|string|max:255',");
+}
+
+#[tokio::test]
+async fn definition_of_an_inherited_key_jumps_to_the_parent_request() {
+    let controller = "\
+<?php
+namespace App;
+use App\\Http\\Requests\\UpdatePostRequest;
+class PostController {
+    public function update(UpdatePostRequest $request) {
+        $request->input('tit§le');
+    }
+}
+";
+    let (file, line) = definition_line("src/PostController.php", controller)
+        .await
+        .expect("expected a definition for the inherited 'title'");
     assert_eq!(file, "StorePostRequest.php");
     assert_eq!(line, "'title' => 'required|string|max:255',");
 }

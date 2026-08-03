@@ -697,3 +697,76 @@ where to read it from during parsing. Once `PropertyInfo` carries it,
 visibility keyword whenever `include_declaration` is set. Same blast
 radius caveat as [B18](#b18-override-completion-offers-final-parent-methods):
 adding the field touches every `PropertyInfo` construction site.
+
+#### B20. A class constructed from a string literal picks up a `bool` generic argument
+
+**Impact: Medium · Effort: Medium**
+
+`new \Acme\Decimal\Decimal('0.00')` resolves to `Decimal<bool>`, and the
+value is then rejected against a plain `Decimal` parameter:
+
+```
+Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal<bool>
+```
+
+The generic argument is nonsense: the class is constructed from a string
+literal and nothing in the call binds a `bool`. Because the reported type
+is wrong, the diagnostic is a false positive, and it accounts for the
+argument mismatches the analyzer reports on large Laravel projects.
+
+Two contributing factors are worth separating when it is fixed:
+
+1. Whatever binds `bool` as the template argument of a class constructed
+   from a string literal. Start at `classify_template_binding` /
+   `remap_inherited_ctor_subs` in
+   `type_engine/variable/rhs_resolution/instantiation.rs`, and check what
+   the class's own `@template` bound resolves to when the constructor
+   argument is a literal.
+2. `is_type_compatible`'s unloadable-short-name escape hatch only
+   inspects `TypeKind::Named`, so a `Generic` whose base name cannot be
+   loaded (here `Decimal` written without its namespace) skips the hatch
+   and is compared anyway. Widening the hatch does not fix the wrong
+   type, but it stops a name the project cannot even load from producing
+   a mismatch.
+
+**Reproduce:** point `analyze` at a project that constructs a generic
+class from a string literal and passes it to a parameter typed with the
+bare class.
+
+#### B21. Completion's backward scan is blind to comments
+
+**Impact: Low · Effort: Medium**
+
+`scan_back_to_opener` in `src/completion/source/helpers.rs` walks
+backwards from the cursor over brackets, parentheses, braces, and string
+literals, but does not skip `//`, `#`, or `/* … */` comments. A stray
+bracket or quote in a comment between the call and the cursor unbalances
+the walk, and the completion drops out:
+
+```php
+route('users.show', [   // TODO: check (parameters)
+    '|' => 1,
+]);
+```
+
+It fails closed (no suggestions rather than wrong ones), which is why it
+is low impact. The obstacle is that a backwards scan cannot tell a `//`
+inside a string from the start of a comment without a forward pass, so
+the fix likely means scanning the enclosing statement forward once and
+masking comments before the backwards walk, the way the Blade
+preprocessor masks non-PHP text.
+
+#### B22. A `rules()` method supplied by a trait is not read
+
+**Impact: Low · Effort: Low**
+
+`collect_rules_method` in
+`src/virtual_members/laravel/validation_rules.rs` only looks at
+`Node::Class`, so a `FormRequest` that gets its `rules()` from a trait
+offers no request-input keys and no `validated()` shape. The parent-chain
+walk covers `extends`, but nothing follows a `use SomeTrait;`.
+
+**Where to change:** resolve the class's used traits (the class index
+already carries them) and read `rules()` out of the trait's file with the
+same `rules_from_class_source` pass, keeping the trait's own file as the
+entry `origin` so go-to-definition lands on the trait.

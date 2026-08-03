@@ -334,12 +334,23 @@ fn key_list(args: &[&str]) -> Option<Vec<String>> {
 
 // ─── Rule specs ─────────────────────────────────────────────────────────────
 
+/// Rules that drop the field from the validated array depending on the input,
+/// so the key may simply not be there.
+const CONDITIONAL_EXCLUDE_RULES: [&str; 4] = [
+    "exclude_if",
+    "exclude_unless",
+    "exclude_with",
+    "exclude_without",
+];
+
 /// What one rules-array entry says about its field.
 #[derive(Debug, Clone, Default)]
 struct RuleSpec {
     required: bool,
     nullable: bool,
     sometimes: bool,
+    /// `exclude`, which keeps the field out of the validated array entirely.
+    excluded: bool,
     /// The declared element type, or `None` when no rule names one.
     base: Option<PhpType>,
 }
@@ -349,22 +360,28 @@ impl RuleSpec {
         let mut spec = RuleSpec::default();
         for token in rule.rules.split('|') {
             // `max:255` and `date_format:Y-m-d` carry a parameter that says
-            // nothing about the type.
+            // nothing about the type.  Rule names are matched case-insensitively
+            // in place, since lowercasing every token of every key on every
+            // resolution is pure allocation.
             let name = token.split(':').next().unwrap_or(token).trim();
-            match name.to_ascii_lowercase().as_str() {
-                // `required_if`, `required_with` and friends are deliberately
-                // not matched here: they only sometimes demand the key, so the
-                // shape has to allow it to be missing.
-                "required" | "present" => spec.required = true,
-                "nullable" => spec.nullable = true,
-                "sometimes" => spec.sometimes = true,
-                other => {
-                    if spec.base.is_none()
-                        && let Some(ty) = rule_token_type(other)
-                    {
-                        spec.base = Some(ty);
-                    }
-                }
+            let is = |candidate: &str| name.eq_ignore_ascii_case(candidate);
+            // `required_if`, `required_with` and friends are deliberately not
+            // matched here: they only sometimes demand the key, so the shape
+            // has to allow it to be missing.
+            if is("required") || is("present") {
+                spec.required = true;
+            } else if is("nullable") {
+                spec.nullable = true;
+            } else if is("sometimes") {
+                spec.sometimes = true;
+            } else if is("exclude") {
+                spec.excluded = true;
+            } else if CONDITIONAL_EXCLUDE_RULES.iter().any(|rule| is(rule)) {
+                spec.sometimes = true;
+            } else if spec.base.is_none()
+                && let Some(ty) = rule_token_type(name)
+            {
+                spec.base = Some(ty);
             }
         }
         // An enum rule is an object, so it names no type token; the scalar it
@@ -423,6 +440,11 @@ fn enum_backing_type(fqn: &str, class_loader: ClassLoader<'_>) -> Option<PhpType
 /// The value type a single validation rule implies, or `None` when the rule
 /// constrains the value without naming its type (`max`, `unique`, `confirmed`).
 fn rule_token_type(name: &str) -> Option<PhpType> {
+    // Rule names are conventionally written lowercase, so only an
+    // unconventional spelling pays for a lowercased copy.
+    if name.bytes().any(|b| b.is_ascii_uppercase()) {
+        return rule_token_type(&name.to_ascii_lowercase());
+    }
     let ty = match name {
         // Rules that only accept strings.  `date` included: the validated
         // array holds the raw input, so a date is still its string.
@@ -476,21 +498,29 @@ impl Node {
         &mut self.children.last_mut().expect("just pushed a child").1
     }
 
-    /// The shape of this node's children, or `None` when it has none.
+    /// The shape of this node's children, or `None` when it has none that
+    /// reach the validated array.
     fn shape(&self) -> Option<PhpType> {
-        if self.children.is_empty() {
-            return None;
-        }
-        let entries = self
+        let entries: Vec<ShapeEntry> = self
             .children
             .iter()
+            .filter(|(_, child)| !child.is_excluded())
             .map(|(name, child)| ShapeEntry {
                 key: Some(name.clone()),
                 value_type: child.value_type(),
                 optional: child.optional(),
             })
             .collect();
-        Some(PhpType::array_shape(entries))
+        (!entries.is_empty()).then(|| PhpType::array_shape(entries))
+    }
+
+    /// Whether `exclude` keeps this key out of the validated array entirely.
+    ///
+    /// Laravel validates the field and then drops it, so the key is never
+    /// there — unlike the conditional `exclude_if` family, which only makes it
+    /// optional.
+    fn is_excluded(&self) -> bool {
+        self.spec.as_ref().is_some_and(|spec| spec.excluded)
     }
 
     /// The type of the value this node holds.
@@ -529,6 +559,9 @@ impl Node {
     }
 
     fn has_required_descendant(&self) -> bool {
+        if self.is_excluded() {
+            return false;
+        }
         if self.spec.as_ref().is_some_and(|spec| !spec.optional()) {
             return true;
         }

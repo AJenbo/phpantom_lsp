@@ -6,7 +6,7 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::ResolvedType;
@@ -1350,7 +1350,7 @@ pub(crate) fn classify_php_type(
 ) -> Option<()> {
     match ty.kind() {
         TypeKind::Named(n) => {
-            let lower = n.to_ascii_lowercase();
+            let lower = keyword_lowercase(n);
             if lower == "float" || lower == "double" || lower == "real" {
                 *saw_float = true;
             } else if lower == "int"
@@ -2491,7 +2491,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
 fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
     match ty.kind() {
         TypeKind::Named(name) => matches!(
-            name.to_ascii_lowercase().as_str(),
+            keyword_lowercase(name).as_str(),
             "int"
                 | "integer"
                 | "string"

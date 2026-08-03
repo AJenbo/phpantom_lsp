@@ -189,6 +189,19 @@ use Illuminate\\Validation\\Validator;
 class AppValidator extends Validator {}
 ";
 
+/// A child request that composes its parent's rules with `array_merge`.
+const UPDATE_POST_REQUEST_PHP: &str = "\
+<?php
+namespace App\\Http\\Requests;
+class UpdatePostRequest extends StorePostRequest {
+    public function rules(): array {
+        return array_merge(parent::rules(), [
+            'slug' => 'required|string',
+        ]);
+    }
+}
+";
+
 fn base_files() -> Vec<(&'static str, &'static str)> {
     vec![
         ("vendor/illuminate/Http/Request.php", REQUEST_PHP),
@@ -219,6 +232,10 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         (
             "src/Http/Requests/StoreTicketRequest.php",
             STORE_TICKET_REQUEST_PHP,
+        ),
+        (
+            "src/Http/Requests/UpdatePostRequest.php",
+            UPDATE_POST_REQUEST_PHP,
         ),
         ("src/Enums/Role.php", ROLE_ENUM_PHP),
         ("src/Enums/Priority.php", PRIORITY_ENUM_PHP),
@@ -313,6 +330,7 @@ namespace App;
 use App\\Enums\\Priority;
 use App\\Http\\Requests\\StorePostRequest;
 use App\\Http\\Requests\\StoreTicketRequest;
+use App\\Http\\Requests\\UpdatePostRequest;
 use Illuminate\\Http\\Request;
 use Illuminate\\Support\\Facades\\Validator;
 use Illuminate\\Validation\\Rules\\Enum;
@@ -344,6 +362,26 @@ async fn form_request_validated_hovers_as_an_array_shape() {
     assert!(
         hover.contains("views: int"),
         "expected `views: int`, got: {hover}"
+    );
+}
+
+/// The keys a child request inherits through `array_merge(parent::rules(), …)`
+/// belong in the shape alongside the ones it adds.
+#[tokio::test]
+async fn inherited_rules_are_part_of_the_shape() {
+    let source = controller(
+        "    public function update(UpdatePostRequest $request) {
+        $data§ = $request->validated();
+    }",
+    );
+    let hover = hover_text(&source).await;
+    assert!(
+        hover.contains("slug: string"),
+        "expected the child's own `slug: string`, got: {hover}"
+    );
+    assert!(
+        hover.contains("title: string"),
+        "expected the inherited `title: string`, got: {hover}"
     );
 }
 

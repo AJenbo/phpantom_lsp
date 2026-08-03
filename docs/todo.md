@@ -128,6 +128,9 @@ unlikely to move the needle for most users.
 | B17 | [`virtual_members/resolve.rs` reimplements generic substitution without right-alignment](todo/bugs.md#b17-virtual_membersresolversrs-reimplements-generic-substitution-without-right-alignment) | Low-Medium  | Low-Medium  |
 | B18 | [Override completion offers `final` parent methods](todo/bugs.md#b18-override-completion-offers-final-parent-methods)                                                        | Medium      | Medium      |
 | B19 | [Override completion drops `readonly` from a redeclared property](todo/bugs.md#b19-override-completion-drops-readonly-from-a-redeclared-property)                            | Medium      | Medium      |
+| B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |
+| B21 | [Completion's backward scan is blind to comments](todo/bugs.md#b21-completions-backward-scan-is-blind-to-comments)                                                           | Low         | Medium      |
+| B22 | [A `rules()` method supplied by a trait is not read](todo/bugs.md#b22-a-rules-method-supplied-by-a-trait-is-not-read)                                                        | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

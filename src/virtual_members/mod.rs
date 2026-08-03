@@ -237,11 +237,15 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
             // Types derived from real PHP code ($casts, accessors,
             // relationship methods) still win the tie.
             let existing = &class.properties[idx];
+            // Only the two schema-derived sources count as inferred. A
+            // property with no source recorded is not "inferred from the
+            // schema", it is "provided by something that does not say where
+            // its type came from", so it keeps the tie.
             let overrides_inferred = matches!(property.source, Some(PropertySource::DocblockTag))
                 && existing.is_virtual
                 && matches!(
                     existing.source,
-                    None | Some(
+                    Some(
                         PropertySource::DatabaseColumn { .. }
                             | PropertySource::AttributeDefault { .. }
                     )

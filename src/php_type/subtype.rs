@@ -416,14 +416,22 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
     let sub_l = sub_raw.to_ascii_lowercase();
     let sup_l = sup_raw.to_ascii_lowercase();
 
-    if sub_l == "number" && sup_l == "number" && (sub_raw == "number") != (sup_raw == "number") {
-        // Lowercase `number` is the pseudo-type; any other casing is a real
-        // class identifier. Check this before case-insensitive equality.
-        return false;
-    }
+    // `number` (int|float) and `real` (removed in PHP 8.0) are pseudo-types
+    // only in their exact lowercase spelling. A differently-cased bare `Number`
+    // (e.g. `BcMath\Number`) or `Real` is a real class, so it must not reach
+    // case-insensitive equality or alias normalisation below; nominal class
+    // relationships are resolved by the caller's hierarchy check.
+    let sub_is_pseudo_class = is_lowercase_only_pseudo_type(&sub_l) && sub_raw != sub_l;
+    let sup_is_pseudo_class = is_lowercase_only_pseudo_type(&sup_l) && sup_raw != sup_l;
 
     if sub_l == sup_l {
-        return true;
+        // Two spellings of `Real` are the same class; `Real` and `real` are not
+        // the same thing.
+        return sub_is_pseudo_class == sup_is_pseudo_class;
+    }
+
+    if sub_is_pseudo_class || sup_is_pseudo_class {
+        return false;
     }
 
     // Alias normalisation.
@@ -446,15 +454,6 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
 
     // `void` is only a subtype of `mixed` (handled above) and itself.
     if sub_n == "void" || sup_n == "void" {
-        return false;
-    }
-
-    // `number` is a PHPDoc pseudo-type (int|float) only in its exact lowercase
-    // spelling. A differently-cased bare `Number` (e.g. `BcMath\Number`) is a
-    // real class; the identical-string case was handled above, and nominal
-    // class relationships are resolved by the caller's hierarchy check, so
-    // here it has no scalar sub/supertype relationship.
-    if (sub_l == "number" && sub_raw != "number") || (sup_l == "number" && sup_raw != "number") {
         return false;
     }
 
@@ -672,13 +671,11 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
             .parse_i64()
             .is_some_and(|value| int_literal_is_within_range(value, min, max)),
         TypeKind::Named(sup) => {
-            let sup_l = sup.to_ascii_lowercase();
-            // A differently-cased bare `Number` (e.g. `BcMath\Number`) is a
-            // real class, not the lowercase `number` pseudo-type; a scalar
-            // literal is never a subtype of it.
-            if sup_l == "number" && sup != "number" {
-                return false;
-            }
+            // A differently-cased bare `Number` (e.g. `BcMath\Number`) or
+            // `Real` is a real class, not the lowercase pseudo-type; a scalar
+            // literal is never a subtype of it. `keyword_lowercase` keeps such
+            // a spelling as-is, so it matches none of the arms below.
+            let sup_l = keyword_lowercase(sup);
             // Integer literal → int (and its supertypes).
             if matches!(lit, LiteralValue::Int(_)) {
                 if matches!(

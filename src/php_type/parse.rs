@@ -17,6 +17,14 @@ impl PhpType {
             return PhpType::untyped();
         }
 
+        // `static(Foo)` / `$this(Foo)` is how a bounded late-static type is
+        // displayed, and no PHPDoc grammar covers it, so read it back here.
+        // Without this the bound is silently dropped and an unresolved
+        // `static` keyword comes back out of a value that had a class.
+        if let Some(bounded) = parse_bounded_late_static(input) {
+            return bounded;
+        }
+
         // Replace known hyphenated pseudo-types (e.g. `model-property`)
         // with underscore placeholders so Mago can parse the surrounding
         // type structure.  The placeholders are restored in the result.
@@ -34,6 +42,35 @@ impl PhpType {
             Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
             Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
         }
+    }
+}
+
+/// Read back the display form of a bounded late-static type,
+/// `static(Some\Class)` or `$this(Some\Class)`.
+///
+/// The bound must be a single class name: `static(int)` and
+/// `static(Foo|Bar)` are not shapes the display form ever produces, so they
+/// fall through to the ordinary parser rather than being invented here.  Only
+/// a whole type is read this way; a bound nested in a generic argument
+/// (`list<static(App\Foo)>`) is still lost, since no PHPDoc grammar accepts
+/// the notation there either.
+fn parse_bounded_late_static(input: &str) -> Option<PhpType> {
+    let trimmed = input.trim();
+    let rest = trimmed.strip_suffix(')')?;
+    let (keyword, bound) = rest.split_once('(')?;
+    let bound = bound.trim();
+    if bound.is_empty()
+        || is_keyword_type(bound)
+        || !bound
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+    {
+        return None;
+    }
+    match keyword.trim() {
+        "static" => Some(PhpType::static_type(atom(bound))),
+        "$this" => Some(PhpType::this_type(atom(bound))),
+        _ => None,
     }
 }
 

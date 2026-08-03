@@ -9,6 +9,7 @@
 namespace App;
 
 use App\Http\Requests\StoreBakeryRequest;
+use App\Http\Requests\UpdateBakeryRequest;
 use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
@@ -554,6 +555,27 @@ class Demo
     }
 
 
+    // ── Request input keys inherited through parent::rules() ────────────
+
+    public function inheritedRequestInputKeys(UpdateBakeryRequest $request): void
+    {
+        // UpdateBakeryRequest::rules() is `array_merge(parent::rules(), […])`,
+        // so its contract is both arrays.  The inherited keys complete here
+        // too, and go-to-definition on one jumps to StoreBakeryRequest.
+        $request->input('slug');          // → 'slug' => 'required|string'
+        $request->input('name');          // → inherited from StoreBakeryRequest
+        $request->boolean('apricot');     // → inherited from StoreBakeryRequest
+
+        // An excluded field is validated and then dropped, so it is a key of
+        // the request but not of the validated array.
+        $data = $request->validated();
+
+        $data['slug'];                    // → string
+        $data['name'];                    // → string (inherited rule)
+        $data['reason'];                  // → string, optional (exclude_if)
+    }
+
+
     // ── Request input keys from an inline validate() call ───────────────
 
     public function inlineValidateKeys(Request $request): void
@@ -567,6 +589,21 @@ class Demo
 
         $request->input('headline');      // → from the validate() call above
         $request->filled('published_at'); // → from the validate() call above
+    }
+
+
+    public function branchedValidateKeys(Request $request): void
+    {
+        // Which arm ran is not knowable, so the keys of both describe the
+        // request afterwards.
+        if ($request->boolean('draft')) {
+            $request->validate(['draft_note' => 'required|string']);
+        } else {
+            $request->validate(['published_at' => 'required|date']);
+        }
+
+        $request->input('draft_note');    // → from the if arm
+        $request->input('published_at');  // → from the else arm
     }
 
 

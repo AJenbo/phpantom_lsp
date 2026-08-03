@@ -14,6 +14,14 @@ enum Mode {
     DirectiveArgs(&'static str),
     SkipArgs(&'static str),
     Verbatim,
+    /// The body of a `{{-- ... --}}` comment, emitted as a PHP `/* ... */`
+    /// block. Comment text is neither PHP nor Blade, so nothing in it but the
+    /// `--}}` terminator carries meaning: an apostrophe must not start a
+    /// string literal (the scanner would hunt for a matching closing quote), a
+    /// commented-out `}}`/`!!}` or an `@endphp` in prose must not end the
+    /// comment, and a literal `*/` in the text must not close the emitted
+    /// block. Any of those desyncs the rest of the file.
+    Comment,
     /// The expression of a Blade component bound attribute
     /// (`:name="$expr"` or the `:$var` shorthand). The expression is
     /// emitted verbatim as a real PHP argument to `blade_directive(...)`
@@ -70,14 +78,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     let mut paren_depth = 0;
     let mut in_string: Option<char> = None;
     let mut is_escaped = false;
-    // Whether `mode == Mode::Php` because we're inside a `{{-- ... --}}`
-    // comment (emitted as `/* ... */`) rather than a real echo/expression.
-    // Comment text is neither PHP nor Blade, so nothing in it but the `--}}`
-    // terminator carries meaning: an apostrophe must not start a string
-    // literal (the scanner would hunt for a matching closing quote), and a
-    // commented-out `}}`/`!!}` or an `@endphp` in prose must not end the
-    // comment. Any of those desyncs the rest of the file.
-    let mut in_comment = false;
     // Whether the HTML scanner is currently between the `<` and `>` of a
     // tag, and (when inside a tag) whether it is inside a quoted attribute
     // value. Both persist across lines so multi-line tags are tracked
@@ -140,7 +140,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                 }
             }
 
-            if mode != Mode::Html && !in_comment {
+            if mode != Mode::Html && mode != Mode::Comment {
                 if let Some(quote) = in_string {
                     if is_escaped {
                         is_escaped = false;
@@ -196,8 +196,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         " echo e(".to_string()
                     };
                     match_len = if is_comment || is_raw { 4 } else { 2 };
-                    in_comment = is_comment;
-                    next_mode = Mode::Php;
+                    next_mode = if is_comment { Mode::Comment } else { Mode::Php };
                 } else if remaining.starts_with(&['<', '?', 'p', 'h', 'p']) {
                     // Raw <?php tag embedded directly in the template (not via @php).
                     match_len = 5;
@@ -428,7 +427,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         next_mode = Mode::BoundAttr(Some(quote));
                     }
                 }
-            } else if mode == Mode::Php && in_comment {
+            } else if mode == Mode::Comment {
                 // Inside a comment the only meaningful token is the `--}}`
                 // terminator, which Blade requires to be contiguous. Comment
                 // text is neither PHP nor Blade, so a commented-out echo's
@@ -441,7 +440,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                 {
                     replacement = " */ ".to_string();
                     match_len = 2;
-                    in_comment = false;
                     next_mode = Mode::Html;
                 }
             } else if mode == Mode::Php {
@@ -668,7 +666,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     // An unterminated `{{--` leaves the emitted `/*` open, which would
     // swallow the wrapper's closing brace and make the whole file
     // unparseable. Close it so only the comment itself is lost.
-    if in_comment {
+    if mode == Mode::Comment {
         virtual_php.push_str(" */\n");
     }
 
@@ -713,11 +711,35 @@ fn flush_buffer(
     } else {
         // PHP content — 1:1 mapping
         adjustments.push((blade_start, utf16_count(processed) as u32));
-        processed.push_str(buffer);
+        if mode == Mode::Comment {
+            push_comment_text(processed, buffer);
+        } else {
+            processed.push_str(buffer);
+        }
         adjustments.push((current_utf16_col, utf16_count(processed) as u32));
     }
 
     buffer.clear();
+}
+
+/// Copy Blade comment text into the emitted `/* ... */` block, blanking the
+/// `/` of any `*/` in it. A literal `*/` in the text (common, since
+/// commenting out a block of PHP is the usual reason to write a Blade
+/// comment) would close the block early and turn the remainder of the
+/// comment into live PHP. Replacing one character with a space rather than
+/// escaping the sequence keeps the utf-16 columns aligned with the Blade
+/// source.
+fn push_comment_text(processed: &mut String, buffer: &str) {
+    let mut after_star = false;
+    for c in buffer.chars() {
+        if after_star && c == '/' {
+            processed.push(' ');
+            after_star = false;
+            continue;
+        }
+        after_star = c == '*';
+        processed.push(c);
+    }
 }
 
 fn utf16_count(s: &str) -> usize {
@@ -1685,6 +1707,37 @@ mod tests {
         assert!(
             php.contains("echo e( $after )"),
             "content after the comment should still translate normally: {}",
+            php
+        );
+    }
+
+    /// Commenting out a block of PHP is the usual reason to write a Blade
+    /// comment, so a `*/` in the comment text must not close the emitted
+    /// block comment early — everything after it would become live PHP.
+    #[test]
+    fn test_preprocess_comment_containing_block_comment_end_does_not_desync() {
+        let content = "{{-- see /* legacy */ code --}}\n<p>{{ $after }}</p>\n";
+        let (php, _) = preprocess(content);
+        let body = comment_body(&php);
+        assert!(
+            body.contains("legacy") && body.contains("code"),
+            "the whole comment text should stay inside the block comment: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $after )"),
+            "content after the comment should still translate normally: {}",
+            php
+        );
+        let emitted = php
+            .lines()
+            .find(|l| l.contains("legacy"))
+            .expect("the comment line");
+        assert_eq!(
+            emitted.encode_utf16().count(),
+            content.lines().next().unwrap().encode_utf16().count() + 2,
+            "blanking `*/` must keep the columns aligned; only the \
+             two-character `--}}` terminator grows (to ` */ `): {}",
             php
         );
     }

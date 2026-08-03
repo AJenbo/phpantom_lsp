@@ -56,6 +56,28 @@ impl Backend {
         current_uri: &str,
         current_content: &str,
     ) -> Option<(String, String)> {
+        let uri = self.find_class_file_uri(class_name, current_uri)?;
+
+        // Get the file content.
+        let file_content = if uri == current_uri {
+            current_content.to_string()
+        } else {
+            self.get_file_content(&uri)?
+        };
+
+        Some((uri, file_content))
+    }
+
+    /// The URI of the file that declares `class_name`, without reading it.
+    ///
+    /// The lookup half of [`find_class_file_content`](Self::find_class_file_content),
+    /// for callers that already hold the content or want it as a shared
+    /// `Arc<String>` rather than a copy.
+    pub(crate) fn find_class_file_uri(
+        &self,
+        class_name: &str,
+        current_uri: &str,
+    ) -> Option<String> {
         let last_segment = short_name(class_name);
         let expected_ns: Option<&str> = if class_name.contains('\\') {
             Some(&class_name[..class_name.len() - last_segment.len() - 1])
@@ -64,7 +86,7 @@ impl Backend {
         };
 
         // Search the uri_classes_index for the file containing this class.
-        let uri = {
+        {
             let map = self.symbols.uri_classes_index.read();
             let nmap = self.file_namespaces.read();
 
@@ -130,26 +152,7 @@ impl Backend {
             let file_path =
                 crate::composer::resolve_class_path(&mappings, &workspace_root, class_name)?;
             Some(crate::util::path_to_uri(&file_path))
-        })?;
-
-        // Get the file content.
-        let file_content = if uri == current_uri {
-            current_content.to_string()
-        } else if let Some(stub_key) = uri.strip_prefix("phpantom-stub://") {
-            // Embedded stubs are stored under synthetic URIs and have no
-            // on-disk file.  Retrieve the raw stub source from the
-            // stub_index instead.  The URI suffix is the exact stub key
-            // (which may be a FQN like `BcMath\Number` for namespaced
-            // stubs, not just the short name).
-            {
-                let stub_idx = self.stub_index.read();
-                stub_idx.get(stub_key).map(|s| s.to_string())?
-            }
-        } else {
-            self.get_file_content(&uri)?
-        };
-
-        Some((uri, file_content))
+        })
     }
 
     /// Find the position of a member declaration (method, property, or

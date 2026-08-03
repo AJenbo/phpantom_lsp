@@ -431,6 +431,45 @@ check(
         && (string) (new ReflectionEnum(\App\Models\BatchSize::class))->getBackingType() === 'int'
 );
 
+// ─── Composed rules and excluded fields ─────────────────────────────────────
+
+// Demo::inheritedRequestInputKeys() claims a child request that writes
+// `array_merge(parent::rules(), […])` carries both arrays' keys, and that an
+// `exclude` rule keeps its field out of validated() while `exclude_if` only
+// sometimes does.
+$updateRules = (new \App\Http\Requests\UpdateBakeryRequest())->rules();
+check(
+    'UpdateBakeryRequest::rules() carries its own keys and the inherited ones',
+    array_key_exists('slug', $updateRules)
+        && array_key_exists('name', $updateRules)
+        && array_key_exists('apricot', $updateRules)
+);
+$updateValidated = (new \Illuminate\Validation\Validator(
+    $translator,
+    [
+        'slug' => 'sourdough',
+        'confirm_slug' => 'sourdough',
+        'reason' => 'renamed',
+        'name' => 'Sourdough',
+        'owner' => ['email' => 'baker@example.com'],
+        'flavor' => 'strawberry',
+        'batch_size' => 12,
+    ],
+    $updateRules
+))->validated();
+check(
+    'an inherited rule still validates on the child request',
+    ($updateValidated['name'] ?? null) === 'Sourdough'
+);
+check(
+    'an `exclude` field is validated and then dropped',
+    ! array_key_exists('confirm_slug', $updateValidated)
+);
+check(
+    'an `exclude_if` field is kept when its condition does not hold',
+    ($updateValidated['reason'] ?? null) === 'renamed'
+);
+
 // ─── Resource route URIs ────────────────────────────────────────────────────
 
 // Route::resource() names no URI; the registrar derives one from the resource

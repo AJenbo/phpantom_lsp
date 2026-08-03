@@ -926,6 +926,34 @@ class Machine {
 }
 
 #[test]
+fn inherited_parent_param_resolves_to_the_declaring_classes_parent() {
+    // `parent` in `Mid::take` means `Base`, whatever class the call is made
+    // on, so calling it on a `Leaf` must still accept a `Base` and must not
+    // silently demand a `Mid`.
+    let php = r#"<?php
+class Base {}
+class Other {}
+class Mid extends Base {
+    public function take(parent $p): void {}
+}
+class Leaf extends Mid {}
+class Machine {
+    public Leaf $leaf;
+    public function go(): void {
+        $this->leaf->take(new Base());
+        $this->leaf->take(new Other());
+    }
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert_eq!(
+        msgs,
+        vec!["Argument 1 ($p) expects Base, got Other".to_string()],
+        "an inherited `parent` must stay bound to Base, not to the owner's parent Mid"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_static_param_with_matching_enum_case() {
     let php = r#"<?php
 enum State: string {

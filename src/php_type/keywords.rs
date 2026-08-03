@@ -1,5 +1,30 @@
 //! Keyword and builtin-type name classifiers.
 
+/// Whether a lowercased type name is a pseudo-type that only counts as one
+/// when it is written in lowercase.
+///
+/// PHP's reserved type keywords are case-insensitive, so `FLOAT` is the scalar
+/// and a class can never be named `Float`. These two are different: `number`
+/// is a PHPDoc-only pseudo-type (`int|float`) that PHP has no native spelling
+/// for, and `real` was removed from PHP in 8.0. Both `Number` (PHP 8.4's
+/// `BcMath\Number`) and `Real` are legal, plausible class names, so any casing
+/// other than all-lowercase is a class reference and must not be folded into
+/// the scalar.
+pub(crate) fn is_lowercase_only_pseudo_type(lower: &str) -> bool {
+    matches!(lower, "number" | "real")
+}
+
+/// Lowercase `name` for keyword matching, leaving the casing of a
+/// [`is_lowercase_only_pseudo_type`] name intact so a class of that name falls
+/// through to the caller's class handling instead of matching the pseudo-type.
+pub(crate) fn keyword_lowercase(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    if lower != name && is_lowercase_only_pseudo_type(&lower) {
+        return name.to_string();
+    }
+    lower
+}
+
 /// Whether a type name is a keyword that should never be resolved as a
 /// class name.
 ///
@@ -62,7 +87,7 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
 /// `static`, `parent`, `class-string`, and other PHPDoc pseudo-types.
 pub(crate) fn is_primitive_scalar_name(name: &str) -> bool {
     matches!(
-        name.to_ascii_lowercase().as_str(),
+        keyword_lowercase(name).as_str(),
         "int"
             | "integer"
             | "float"
@@ -264,7 +289,7 @@ pub(crate) fn is_class_like_name(name: &str) -> bool {
 ///
 /// Class names and unrecognised identifiers pass through unchanged.
 pub(crate) fn normalize_keyword_casing(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
+    let lower = keyword_lowercase(name);
     match lower.as_str() {
         // PHP aliases that map to a different canonical name.
         "integer" => "int".to_string(),
@@ -287,8 +312,9 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
         | "closed-resource" | "open-resource" | "callable-object" | "callable-array"
         | "stringable-object"
         | "array-key" | "scalar" | "numeric" => lower,
-        // `number` is a pseudo-type only in lowercase; fall through so a
-        // `Number` class keeps its casing and lowercase `number` stays as-is.
+        // `number` and `real` are pseudo-types only in lowercase; fall through
+        // so a `Number`/`Real` class keeps its casing and the lowercase
+        // spellings stay as-is.
         _ => name.to_string(),
     }
 }
@@ -300,7 +326,7 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
 /// for names that have no single native PHP type (`scalar`, `numeric`,
 /// `array-key`, `number`).  Class names pass through unchanged.
 pub(crate) fn native_scalar_name(name: &str) -> Option<&str> {
-    let lower = name.to_ascii_lowercase();
+    let lower = keyword_lowercase(name);
     match lower.as_str() {
         // Direct native types.
         "int" | "integer" => Some("int"),

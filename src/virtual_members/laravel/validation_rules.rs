@@ -48,8 +48,13 @@ pub(crate) struct ValidationRule {
     /// `"required|string|max:255"`.  Empty when the value is not literal.
     pub rules: String,
     /// Byte offset of the key literal's content (just inside the quotes),
-    /// in the file named by the owning [`RulesSource`].
+    /// in the file named by [`Self::origin`], or by the owning
+    /// [`RulesSource`] when that is `None`.
     pub key_start: usize,
+    /// The file this entry was declared in, when it was merged in from a
+    /// `parent::rules()` call rather than written in the array the owning
+    /// [`ResolvedRules`] names.
+    pub origin: Option<Arc<RulesFile>>,
     /// The enum class named by an enum rule (`new Enum(Role::class)`,
     /// `Rule::enum(Role::class)`), or `None` when the entry has no such rule.
     ///
@@ -71,6 +76,10 @@ pub(crate) struct RulesArray {
     /// shape that omits keys the request really accepts would report valid
     /// input as unknown.
     pub keys_complete: bool,
+    /// Where a `parent::rules()` call appeared among [`Self::entries`], so the
+    /// ancestor's keys can be merged in at the position PHP's `array_merge`
+    /// would put them.  `None` when the array does not compose the parent's.
+    parent_rules_at: Option<usize>,
 }
 
 impl RulesArray {
@@ -78,6 +87,7 @@ impl RulesArray {
         Self {
             entries: Vec::new(),
             keys_complete: true,
+            parent_rules_at: None,
         }
     }
 
@@ -85,6 +95,36 @@ impl RulesArray {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Give up on a recorded `parent::rules()` composition.
+    ///
+    /// Only [`form_request_rules`] can read the ancestor's array; every other
+    /// caller has no class chain to follow, so the keys the call contributes
+    /// stay unknown and the set is no longer complete.
+    fn without_parent_rules(&mut self) {
+        if self.parent_rules_at.take().is_some() {
+            self.keys_complete = false;
+        }
+    }
+
+    /// Add `entry` under PHP's `array_merge` semantics for string keys: a
+    /// repeated key keeps the position of its first occurrence and takes the
+    /// value of its last.
+    fn merge_entry(&mut self, entry: ValidationRule) {
+        match self.entries.iter_mut().find(|e| e.key == entry.key) {
+            Some(existing) => *existing = entry,
+            None => self.entries.push(entry),
+        }
+    }
+}
+
+/// A file a rules array was read from, shared by every entry recovered from it.
+#[derive(Debug)]
+pub(crate) struct RulesFile {
+    /// URI of the file.
+    pub uri: String,
+    /// Content of the file; [`ValidationRule::key_start`] indexes it.
+    pub content: Arc<String>,
 }
 
 /// Which file a resolved rules array was parsed from.
@@ -94,12 +134,7 @@ pub(crate) enum RulesSource {
     /// holds its content, so nothing is cloned.
     CurrentFile,
     /// The rules live in another file (a `FormRequest` class).
-    OtherFile {
-        /// URI of the file holding the rules array.
-        uri: String,
-        /// Content of that file; [`ValidationRule::key_start`] indexes it.
-        content: String,
-    },
+    OtherFile(Arc<RulesFile>),
 }
 
 /// A validation rules array located for a cursor position.
@@ -138,10 +173,26 @@ fn collect_rules_from_expr(expr: &Expression<'_>, content: &str, out: &mut Rules
                 out.keys_complete = false;
             }
         }
+        // `parent::rules()` composes the ancestor's array. The keys are
+        // recoverable, but only by reading the ancestor, so record where they
+        // belong and leave the merge to `form_request_rules`.
+        Expression::Call(Call::StaticMethod(smc)) if is_parent_rules_call(smc) => {
+            if out.parent_rules_at.is_none() {
+                out.parent_rules_at = Some(out.entries.len());
+            }
+        }
         // A spread, a variable, a match — whatever keys it contributes are
         // not recoverable, so the set is no longer known to be complete.
         _ => out.keys_complete = false,
     }
+}
+
+/// Whether a static call is `parent::rules()` (no arguments).
+fn is_parent_rules_call(call: &StaticMethodCall<'_>) -> bool {
+    matches!(call.class, Expression::Parent(_))
+        && matches!(&call.method, ClassLikeMemberSelector::Identifier(ident)
+            if bytes_to_str(ident.value).eq_ignore_ascii_case("rules"))
+        && call.argument_list.arguments.is_empty()
 }
 
 fn collect_rules_from_elements<'a>(
@@ -164,10 +215,11 @@ fn collect_rules_from_elements<'a>(
             out.keys_complete = false;
             continue;
         }
-        out.entries.push(ValidationRule {
+        out.merge_entry(ValidationRule {
             key: key.to_string(),
             rules: render_rule_value(kv.value, content),
             key_start,
+            origin: None,
             enum_class: enum_rule_class(kv.value),
         });
     }
@@ -440,8 +492,18 @@ fn mentions_validation(content: &str) -> bool {
     memchr::memmem::find(content.as_bytes(), b"alidat").is_some()
 }
 
-/// Rules from the last `validate()` / `Validator::make()` call that completes
-/// before `offset` inside the same function body.
+/// The rules in force at `offset` from the `validate()` /
+/// `Validator::make()` calls that complete before it inside the same function
+/// body.
+///
+/// A call the cursor cannot have skipped replaces whatever preceded it: two
+/// `validate()` calls in a row leave only the second in force, the way
+/// `validated()` returns only the last validation's data. A call inside a
+/// branch or a loop may or may not have run, so it is merged with what was in
+/// force instead — with one `validate()` per arm of an `if`/`else`, the keys of
+/// both describe the request the cursor sees. Merging can only over-report the
+/// key set, which is the safe direction: a key wrongly claimed costs a
+/// suggestion, while a key wrongly omitted makes valid input look unknown.
 ///
 /// Returns `None` when the cursor is not inside a function body, or when no
 /// such call precedes it.
@@ -457,8 +519,8 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Rule
     let body = enclosing_body(Node::Program(program), offset as u32)?;
     let cursor = offset as u32;
 
-    let mut best: Option<(u32, RulesArray)> = None;
-    walk_before_cursor(body, cursor, &mut |node| {
+    let mut in_force: Option<RulesArray> = None;
+    walk_candidate_calls(body, cursor, false, &mut |node, conditional| {
         let rules_arg = match node {
             Node::MethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
             Node::NullSafeMethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
@@ -468,24 +530,73 @@ pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Rule
         let Some(arg) = rules_arg else {
             return;
         };
-        let end = node.span().end.offset;
-        if !beats_best(&best, end, cursor) {
+        if node.span().end.offset > cursor {
             return;
         }
         let mut rules = RulesArray::new();
         collect_rules_from_expr(arg, content, &mut rules);
-        // An array whose keys could not all be read is still the nearest
-        // rules array, so it is recorded even when nothing was recovered
-        // from it.  Dropping it would hand the cursor an earlier, unrelated
-        // `validate()` call and describe the request with the wrong keys.
-        if !rules.is_empty() || !rules.keys_complete {
-            best = Some((end, rules));
+        rules.without_parent_rules();
+        // An array whose keys could not all be read still counts, even with
+        // nothing recovered from it: it says the request carries keys this pass
+        // cannot name, which a caller building an array shape has to know.
+        if rules.is_empty() && rules.keys_complete {
+            return;
+        }
+        match (&mut in_force, conditional) {
+            (Some(all), true) => {
+                all.keys_complete &= rules.keys_complete;
+                for entry in rules.entries {
+                    all.merge_entry(entry);
+                }
+            }
+            (slot, _) => *slot = Some(rules),
         }
     });
-    let mut rules = best.map(|(_, rules)| rules)?;
-    // Only the winning array is resolved, and only if it holds an enum rule.
+    let mut rules = in_force?;
     resolve_enum_names_in_program(&mut rules, program);
     Some(rules)
+}
+
+/// Hand every node that starts before `cursor` to `visit`, together with
+/// whether it sits inside a construct that may not have executed.
+///
+/// Walk order is source order, so a `visit` that overwrites its state ends up
+/// holding the last node.
+fn walk_candidate_calls<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    cursor: u32,
+    conditional: bool,
+    visit: &mut impl FnMut(Node<'ast, 'arena>, bool),
+) {
+    visit(node, conditional);
+    let conditional = conditional || introduces_control_flow_choice(node);
+    node.visit_children(|child| {
+        if child.span().start.offset < cursor {
+            walk_candidate_calls(child, cursor, conditional, visit);
+        }
+    });
+}
+
+/// Whether reaching a node's children depends on a runtime choice, so a call
+/// inside it may not have run by the time the cursor is reached.
+///
+/// A closure counts: its body runs whenever (and however often) something
+/// calls it, which is not knowable here.
+fn introduces_control_flow_choice(node: Node<'_, '_>) -> bool {
+    matches!(
+        node,
+        Node::If(_)
+            | Node::Switch(_)
+            | Node::Match(_)
+            | Node::Conditional(_)
+            | Node::While(_)
+            | Node::DoWhile(_)
+            | Node::For(_)
+            | Node::Foreach(_)
+            | Node::Try(_)
+            | Node::Closure(_)
+            | Node::ArrowFunction(_)
+    )
 }
 
 /// Parse a rules array written directly at a call site, e.g. the argument
@@ -505,6 +616,7 @@ pub(crate) fn rules_from_array_text(array_text: &str) -> Option<RulesArray> {
 
     let mut out = RulesArray::new();
     collect_returned_rules(Node::Program(program), &source, &mut out);
+    out.without_parent_rules();
     (!out.is_empty()).then_some(out)
 }
 
@@ -672,7 +784,8 @@ pub(crate) fn is_validated_input(class: &ClassInfo) -> bool {
 }
 
 /// The rules declared by `class`'s own `rules()` method, or the nearest
-/// ancestor that declares one.
+/// ancestor that declares one, with the keys of a composed `parent::rules()`
+/// merged in from the ancestor that declares them.
 ///
 /// Returns `None` when no ancestor declares a `rules()` method with a literal
 /// array return, or when the declaring class's source cannot be located.
@@ -682,25 +795,56 @@ pub(crate) fn form_request_rules(
     current_uri: &str,
     current_content: &str,
 ) -> Option<ResolvedRules> {
-    let mut fqn = class.fqn().to_string();
-    let mut depth = 0u32;
+    form_request_rules_within(
+        backend,
+        &class.fqn(),
+        current_uri,
+        current_content,
+        MAX_INHERITANCE_DEPTH,
+    )
+}
+
+/// [`form_request_rules`] with an explicit budget of parent-chain steps.
+///
+/// Walking up to the next ancestor and following a `parent::rules()` call both
+/// spend a step, so the total work stays bounded even if the class graph is
+/// malformed and its parent links form a cycle.
+fn form_request_rules_within(
+    backend: &Backend,
+    class_fqn: &str,
+    current_uri: &str,
+    current_content: &str,
+    budget: u32,
+) -> Option<ResolvedRules> {
+    let mut fqn = class_fqn.to_string();
+    let mut budget = budget;
 
     loop {
-        let (uri, content) = backend.find_class_file_content(&fqn, current_uri, current_content)?;
-        let rules = rules_from_class_source(&content, short_name(&fqn));
-        if !rules.is_empty() {
-            let source = if uri == current_uri {
-                RulesSource::CurrentFile
-            } else {
-                RulesSource::OtherFile { uri, content }
+        let uri = backend.find_class_file_uri(&fqn, current_uri)?;
+        // The cursor's own file is already in hand; only another class's file
+        // is read, and then as a shared `Arc` rather than a copy.
+        let other = (uri != current_uri)
+            .then(|| backend.get_file_content_arc(&uri))
+            .flatten();
+        let content = other.as_deref().map_or(current_content, String::as_str);
+        let mut rules = rules_from_class_source(content, short_name(&fqn));
+        if !rules.is_empty() || rules.parent_rules_at.is_some() {
+            let source = match other {
+                None => RulesSource::CurrentFile,
+                Some(content) => RulesSource::OtherFile(Arc::new(RulesFile { uri, content })),
             };
-            return Some(ResolvedRules { source, rules });
+            merge_parent_rules(
+                backend,
+                &fqn,
+                current_uri,
+                current_content,
+                &mut rules,
+                budget,
+            );
+            return (!rules.is_empty()).then_some(ResolvedRules { source, rules });
         }
 
-        depth += 1;
-        if depth > MAX_INHERITANCE_DEPTH {
-            return None;
-        }
+        budget = budget.checked_sub(1)?;
         let parent = backend
             .find_or_load_class(&fqn)
             .and_then(|c| c.parent_class)?;
@@ -709,6 +853,63 @@ pub(crate) fn form_request_rules(
         }
         fqn = parent.to_string();
     }
+}
+
+/// Merge the keys of `parent::rules()` into `rules`, at the position the call
+/// occupied in the array.
+///
+/// The ancestor's entries keep pointing at the file that declares them, so
+/// go-to-definition on an inherited key still lands on the parent's rule.
+/// When the ancestor's array cannot be read, the key set is marked incomplete
+/// rather than silently short.
+fn merge_parent_rules(
+    backend: &Backend,
+    fqn: &str,
+    current_uri: &str,
+    current_content: &str,
+    rules: &mut RulesArray,
+    budget: u32,
+) {
+    let Some(at) = rules.parent_rules_at.take() else {
+        return;
+    };
+    let inherited = budget
+        .checked_sub(1)
+        .and_then(|budget| {
+            let parent = backend
+                .find_or_load_class(fqn)
+                .and_then(|c| c.parent_class)?;
+            (parent.as_str() != FORM_REQUEST_FQN).then_some((parent, budget))
+        })
+        .and_then(|(parent, budget)| {
+            form_request_rules_within(backend, &parent, current_uri, current_content, budget)
+        });
+    let Some(inherited) = inherited else {
+        rules.keys_complete = false;
+        return;
+    };
+
+    // Re-merge in `array_merge` order: the entries written before the
+    // `parent::rules()` argument, then the inherited ones, then the rest.
+    let local = std::mem::take(&mut rules.entries);
+    let (before, after) = local.split_at(at.min(local.len()));
+    let inherited_file = match &inherited.source {
+        RulesSource::CurrentFile => None,
+        RulesSource::OtherFile(file) => Some(Arc::clone(file)),
+    };
+    for entry in before
+        .iter()
+        .cloned()
+        .chain(inherited.rules.entries.into_iter().map(|mut entry| {
+            // `origin` is already set on a key the ancestor itself inherited.
+            entry.origin = entry.origin.or_else(|| inherited_file.clone());
+            entry
+        }))
+        .chain(after.iter().cloned())
+    {
+        rules.merge_entry(entry);
+    }
+    rules.keys_complete &= inherited.rules.keys_complete;
 }
 
 /// The rules that describe `class` at `offset`.
@@ -791,6 +992,9 @@ pub(crate) struct RuleField {
     pub rules: String,
     /// Byte offset of the declaring key literal's content.
     pub key_start: usize,
+    /// The file [`Self::key_start`] indexes, when the declaring entry was
+    /// merged in from a `parent::rules()` call. See [`ValidationRule::origin`].
+    pub origin: Option<Arc<RulesFile>>,
 }
 
 /// Expand rule keys into the field names an input accessor accepts.
@@ -812,6 +1016,7 @@ pub(crate) fn rule_fields(rules: &[ValidationRule]) -> Vec<RuleField> {
                 name: rule.key.clone(),
                 rules: rule.rules.clone(),
                 key_start: rule.key_start,
+                origin: rule.origin.clone(),
             });
         }
     }
@@ -828,6 +1033,7 @@ pub(crate) fn rule_fields(rules: &[ValidationRule]) -> Vec<RuleField> {
                 name: root.to_string(),
                 rules: String::new(),
                 key_start: rule.key_start,
+                origin: rule.origin.clone(),
             });
         }
     }

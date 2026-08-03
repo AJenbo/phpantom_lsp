@@ -305,25 +305,25 @@ pub(crate) fn resolve_request_field_definition(
 
     // An exact rule key wins over the root segment it also contributes, so
     // `input('address.city')` lands on that key rather than on `address`.
-    let key_start = rules
+    let (key_start, origin) = rules
         .rules
         .entries
         .iter()
         .find(|rule| rule.key == value)
-        .map(|rule| rule.key_start)
+        .map(|rule| (rule.key_start, rule.origin.as_ref()))
         .or_else(|| {
             fields
                 .iter()
                 .find(|field| field.name == value)
-                .map(|field| field.key_start)
+                .map(|field| (field.key_start, field.origin.as_ref()))
         })?;
 
-    let (target_uri, target_content) = match &rules.source {
-        RulesSource::CurrentFile => (uri, content),
-        RulesSource::OtherFile {
-            uri: other_uri,
-            content: other_content,
-        } => (other_uri.as_str(), other_content.as_str()),
+    // A key merged in from `parent::rules()` lives in the ancestor's file, not
+    // in the file the rules array itself was read from.
+    let (target_uri, target_content) = match (origin, &rules.source) {
+        (Some(origin), _) => (origin.uri.as_str(), origin.content.as_str()),
+        (None, RulesSource::CurrentFile) => (uri, content),
+        (None, RulesSource::OtherFile(file)) => (file.uri.as_str(), file.content.as_str()),
     };
 
     let position = crate::text_position::offset_to_position(target_content, key_start);

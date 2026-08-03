@@ -584,10 +584,7 @@ function test(
         "-1|-2"
     );
     assert_eq!(resolve_literal_test_var(content, "$double_negative"), "7");
-    assert_eq!(
-        resolve_literal_test_var(content, "$negative_broad"),
-        "int|float"
-    );
+    assert_eq!(resolve_literal_test_var(content, "$negative_broad"), "int");
     assert_eq!(resolve_literal_test_var(content, "$positive_broad"), "int");
     assert_eq!(
         resolve_literal_test_var(content, "$broad_coalesced"),
