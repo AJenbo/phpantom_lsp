@@ -850,28 +850,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b5-promote-constructor-param-leaves-an-orphaned-docblock-behind" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B5. "Promote constructor param" leaves an orphaned docblock behind
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B6. "Add <code>final</code>" may insert before a class's opening brace instead of its constructor (needs confirmation)
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -909,17 +887,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B15. <code>IN_CLOSURE_THIS_OVERRIDE</code> is a coarse boolean re-entry guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b17-virtual_membersresolvers-reimplements-generic-substitution-without-right-alignment" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B17. <code>virtual_members/resolve.rs</code> reimplements generic substitution without right-alignment
       </span>
     </span>
   </a>
@@ -975,6 +942,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B23. Three type-engine resolvers are activated for only four consumers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b24-promote-constructor-param-silently-drops-the-propertys-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B24. "Promote constructor param" silently drops the property's attributes
       </span>
     </span>
   </a>
@@ -1471,28 +1449,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b5-promote-constructor-param-leaves-an-orphaned-docblock-behind" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B5. "Promote constructor param" leaves an orphaned docblock behind
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B6. "Add <code>final</code>" may insert before a class's opening brace instead of its constructor (needs confirmation)
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1530,17 +1486,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B15. <code>IN_CLOSURE_THIS_OVERRIDE</code> is a coarse boolean re-entry guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b17-virtual_membersresolvers-reimplements-generic-substitution-without-right-alignment" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B17. <code>virtual_members/resolve.rs</code> reimplements generic substitution without right-alignment
       </span>
     </span>
   </a>
@@ -1596,6 +1541,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B23. Three type-engine resolvers are activated for only four consumers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b24-promote-constructor-param-silently-drops-the-propertys-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B24. "Promote constructor param" silently drops the property's attributes
       </span>
     </span>
   </a>
@@ -1705,67 +1661,6 @@ resolution in <code>virtual_members/</code>.</p>
 <p><strong>Test:</strong> the <code>inheritTemplateParamViaConstructor</code> case in
 <code>tests/psalm_assertions/template_class_template_extends.php</code> carries two
 <code>// SKIP</code> markers that clear when this is fixed.</p>
-<h4 id="b5-promote-constructor-param-leaves-an-orphaned-docblock-behind">B5. "Promote constructor param" leaves an orphaned docblock behind<a class="headerlink" href="#b5-promote-constructor-param-leaves-an-orphaned-docblock-behind" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p>The "Promote property to constructor parameter" code action deletes only
-the property declaration's own line, not a <code>/** @var ... */</code> docblock
-that precedes it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    /** @var int */</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    private int $bar;   // deleted</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    public function __construct(private int $bar) {}   // promoted here</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>Applying the action leaves the now-orphaned <code>/** @var int */</code> sitting
-above the constructor. <code>property_delete_start</code>
-(<code>code_actions/promote_constructor_param.rs</code>) is computed with
-<code>find_line_start</code>, which only walks back to the previous newline on the
-same line — it cannot reach a comment on an earlier line, by design (it
-is also used for the non-docblock leading-whitespace case). There is no
-current test covering a property with a preceding docblock.</p>
-<p><strong>Where to look:</strong> <code>build_promotion_candidate</code> in
-<code>code_actions/promote_constructor_param.rs</code> — extend
-<code>property_delete_start</code> to also swallow an immediately-preceding
-docblock (mirroring how other code actions in this module, e.g.
-<code>update_docblock.rs</code>, locate an existing docblock above a declaration).</p>
-<h4 id="b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation">B6. "Add <code>final</code>" may insert before a class's opening brace instead of its constructor (needs confirmation)<a class="headerlink" href="#b6-add-final-may-insert-before-a-classs-opening-brace-instead-of-its-constructor-needs-confirmation" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>Found by manual trace while cleaning up comments in
-<code>code_actions/phpstan/new_static.rs</code>; not yet confirmed with a failing
-test, so verify before fixing.</p>
-<p><code>build_constructor_info</code> locates where to insert <code>final</code> before an
-unmodified constructor. For a constructor with no explicit visibility
-keyword, where the enclosing class's opening brace sits alone on its
-own line (Allman style):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Foo</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">{</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    function __construct() {}</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>Tracing the offsets by hand: <code>before_kw.trim_end().rfind('\n')</code> (line
-~516) skips backward past the blank run of whitespace between the
-brace line and the <code>function</code> keyword's line, landing right <em>before</em>
-the <code>{</code> rather than at the start of <code>function …</code>. The next check
-(<code>line_trimmed.is_empty()</code>, line ~520-523), meant to detect "no
-modifiers on this line, fall back further", instead sees the lone <code>{</code>
-character as if it were modifier text on the same line as <code>function</code>
-and skips the fallback branch. The final <code>decl_start</code> then points at
-the <code>{</code> character itself, so inserting <code>final</code> would produce
-<code>class Foo\nfinal {\n    function __construct() {}\n}</code> — <code>final</code>
-attached to the brace line, not the constructor — which is invalid
-PHP.</p>
-<p><strong>Where to look:</strong> <code>build_constructor_info</code> in
-<code>code_actions/phpstan/new_static.rs</code>. The line/modifier detection at
-~514-531 needs to distinguish "text on the function's own line" from
-"trailing content from an earlier line that <code>trim_end()</code> bridged past
-a blank line" — e.g. by checking whether <code>decl_start_offset</code> and
-<code>func_kw_offset</code> are on the same source line (count newlines between
-them) rather than only checking whether the slice between them is
-non-empty after trimming.</p>
-<p><strong>To confirm:</strong> add a test with a modifier-less constructor whose
-class brace is on its own line (as above) and assert the insertion
-point lands on the <code>function</code> line, not the brace line.</p>
 <h4 id="b10-extract-functions-by-reference-write-safety-check-can-never-trigger">B10. Extract Function's by-reference-write safety check can never trigger<a class="headerlink" href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p>Found while cleaning up comments in <code>scope_collector/</code>. <code>RangeClassification::reference_writes</code>
@@ -1773,10 +1668,10 @@ point lands on the <code>function</code> line, not the brace line.</p>
 are written by reference (<code>&amp;$var</code>) inside the range") is declared,
 sorted at the end of <code>classify_range</code>, and consumed as a safety gate in
 Extract Function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">// code_actions/extract_function/mod.rs:198</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">if</span><span class="w"> </span><span class="n">scope_map</span><span class="p">.</span><span class="n">uses_reference_params</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">classification</span><span class="p">.</span><span class="n">reference_writes</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">// code_actions/extract_function/mod.rs:198</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">if</span><span class="w"> </span><span class="n">scope_map</span><span class="p">.</span><span class="n">uses_reference_params</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">classification</span><span class="p">.</span><span class="n">reference_writes</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">}</span>
 </code></pre></div>
 <p>but nothing in <code>classify_range</code> ever pushes into it — confirmed via
 <code>git log -S "reference_writes"</code> that no commit has ever added a
@@ -1801,14 +1696,14 @@ equivalent pass keyed on by-reference write accesses.</p>
 <p>Found while cleaning up comments in <code>type_engine/variable/rhs_resolution/</code>.
 <code>resolve_rhs_expression</code> (<code>src/type_engine/variable/rhs_resolution/mod.rs:346</code>)
 guards against unbounded recursion with a thread-local counter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="fm">thread_local!</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">:</span><span class="w"> </span><span class="nc">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="p">}</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">get</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">v</span><span class="p">);</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="p">});</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="k">if</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">depth</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">));</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="fm">vec!</span><span class="p">[];</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="fm">thread_local!</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">:</span><span class="w"> </span><span class="nc">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="p">}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">get</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">v</span><span class="p">);</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="p">});</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">if</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">depth</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">));</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="fm">vec!</span><span class="p">[];</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>This is the exact "depth cap papering over unbounded recursion"
 anti-pattern this project's own conventions warn against (a hard cap is
@@ -1893,53 +1788,6 @@ wrong type.</p>
 entity being resolved (e.g. the closure's span offset or the call-site
 span) in a small visited set, as <code>RESOLVING</code> does for class FQNs, so
 only genuine same-entity cycles short-circuit.</p>
-<h4 id="b17-virtual_membersresolvers-reimplements-generic-substitution-without-right-alignment">B17. <code>virtual_members/resolve.rs</code> reimplements generic substitution without right-alignment<a class="headerlink" href="#b17-virtual_membersresolvers-reimplements-generic-substitution-without-right-alignment" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
-<p>Found while cleaning up comments in <code>virtual_members/resolve.rs</code>. The
-canonical generic-substitution builder,
-<code>build_substitution_map</code>/<code>apply_generic_args</code> in
-<code>src/inheritance/generics.rs</code>, right-aligns a short type-argument list
-against trailing template parameters when every skipped leading
-parameter has a key-like bound (<code>array-key</code>/<code>int</code>/<code>string</code>) — the
-universal convention for collection key parameters, via
-<code>right_align_offset</code> (<code>src/inheritance/generics.rs:478</code>). For example
-<code>@extends Collection&lt;User&gt;</code> against <code>class Collection&lt;TKey, TValue&gt;</code>
-binds <code>TValue =&gt; User</code>, not <code>TKey =&gt; User</code>.</p>
-<p><code>resolve_class_fully_inner</code> in <code>src/virtual_members/resolve.rs</code> (~line
-588) has its own inline copy of this substitution-map building logic,
-used while walking the <code>extends</code> chain to collect and substitute
-<code>@implements</code> generics for virtual-member (<code>@method</code>/<code>@property</code>)
-resolution. Its comment claims it mirrors
-<code>resolve_class_with_inheritance</code>'s logic, but the implementation is a
-plain <code>enumerate()</code> zip:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">param_name</span><span class="p">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">parent</span><span class="p">.</span><span class="n">template_params</span><span class="p">.</span><span class="n">iter</span><span class="p">().</span><span class="n">enumerate</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">args</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">        </span><span class="o">..</span><span class="p">.</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">        </span><span class="n">map</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">param_name</span><span class="p">.</span><span class="n">to_string</span><span class="p">(),</span><span class="w"> </span><span class="n">resolved</span><span class="p">);</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="p">}</span>
-</code></pre></div>
-<p>with no <code>right_align_offset</code> call. When a class in the chain provides
-fewer <code>@extends</code>/<code>@implements</code> type arguments than the parent
-interface's template params, and those params have key-like leading
-bounds, this path binds the short argument to the <em>first</em> (key)
-parameter instead of the trailing (value) parameter that
-<code>build_substitution_map</code> would choose — the opposite of the rest of
-the codebase's convention. This only affects interface-tag merging
-during virtual-member resolution (not the main inheritance-merge
-path), so the practical impact is <code>@method</code>/<code>@property</code> synthesis
-picking up a misbound generic argument for interfaces reached this
-way.</p>
-<p><strong>Where to look:</strong> <code>resolve_class_fully_inner</code> in
-<code>src/virtual_members/resolve.rs</code> (~line 611) — replace the manual
-<code>enumerate()</code> substitution-map loop with a call to
-<code>crate::inheritance::generics::right_align_offset</code> (or, better,
-refactor to share <code>build_substitution_map</code> directly instead of
-duplicating its logic), consistent with CLAUDE.local.md's guidance
-against parallel type-resolution paths. Add a regression test with a
-short <code>@extends</code>/<code>@implements</code> argument list against an interface with
-a key-like leading template param, reached via <code>@mixin</code>/<code>@implements</code>
-tag merging rather than the main inheritance chain.</p>
 <h4 id="b18-override-completion-offers-final-parent-methods">B18. Override completion offers <code>final</code> parent methods<a class="headerlink" href="#b18-override-completion-offers-final-parent-methods" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>collect_overridable_methods</code> in
@@ -1981,7 +1829,7 @@ adding the field touches every <code>PropertyInfo</code> construction site.</p>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>new \Acme\Decimal\Decimal('0.00')</code> resolves to <code>Decimal&lt;bool&gt;</code>, and the
 value is then rejected against a plain <code>Decimal</code> parameter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
 </code></pre></div>
 <p>The generic argument is nonsense: the class is constructed from a string
 literal and nothing in the call binds a <code>bool</code>. Because the reported type
@@ -2012,9 +1860,9 @@ backwards from the cursor over brackets, parentheses, braces, and string
 literals, but does not skip <code>//</code>, <code>#</code>, or <code>/* … */</code> comments. A stray
 bracket or quote in a comment between the call and the cursor unbalances
 the walk, and the completion drops out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">]);</span>
 </code></pre></div>
 <p>It fails closed (no suggestions rather than wrong ones), which is why it
 is low impact. The obstacle is that a backwards scan cannot tell a <code>//</code>
@@ -2052,6 +1900,34 @@ the resolution context the type engine already threads through, so they
 are present by construction and no entry point can forget them; that
 also settles whether they belong on the <code>Backend</code> rather than in
 thread-local state.</p>
+<h4 id="b24-promote-constructor-param-silently-drops-the-propertys-attributes">B24. "Promote constructor param" silently drops the property's attributes<a class="headerlink" href="#b24-promote-constructor-param-silently-drops-the-propertys-attributes" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p>Found while fixing the orphaned-docblock case. A property carrying an
+attribute loses it entirely:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    #[SomeAttr]</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    private int $bar;</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>becomes</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>PlainProperty::span()</code> starts at the first attribute list when there is
+one, so the deletion range in <code>build_promotion_candidate</code>
+(<code>code_actions/promote_constructor_param.rs</code>) already covers the
+attribute, and nothing re-emits it on the promoted parameter. Unlike the
+docblock, an attribute is executable metadata, so losing it changes
+runtime behaviour.</p>
+<p>The fix is to carry the attribute text over to the parameter rather than
+to decline the action. Note that an untargeted attribute on a promoted
+parameter applies to both the parameter and the synthesised property,
+which is not identical to a property-only attribute, so an explicit
+<code>#[\Attribute(\Attribute::TARGET_PROPERTY)]</code> target may need to be
+preserved as-is and a bare attribute may need one added.</p>
 
 
 
