@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| L18 | [`Macroable::mixin()` registrations](todo/laravel.md)                                                                          | Low         | Medium      |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
