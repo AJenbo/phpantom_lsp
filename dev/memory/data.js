@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785792865219,
+  "lastUpdate": 1785792963194,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13531,6 +13531,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "930756eaf42559cbab903559b2b58621f2355522",
+          "message": "A write through `__set` no longer overrides what `__get` returns",
+          "timestamp": "2026-08-03T23:19:47+02:00",
+          "tree_id": "6b48a93c011846eea6edc8362dc151d35494a667",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/930756eaf42559cbab903559b2b58621f2355522"
+        },
+        "date": 1785792959835,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.2,
             "unit": "MiB"
           }
         ]
