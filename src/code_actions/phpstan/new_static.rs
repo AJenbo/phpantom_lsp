@@ -511,34 +511,49 @@ fn build_constructor_info(content: &str, construct_offset: usize) -> Constructor
         construct_offset
     };
 
-    // Find the line start of the first modifier.
+    // Find the line start of the last non-blank content before `function`.
     let before_kw = &content[..func_kw_offset];
-    let mut decl_start_offset = before_kw.trim_end().rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let modifier_line_start = before_kw.trim_end().rfind('\n').map(|p| p + 1).unwrap_or(0);
 
-    // Check if there are modifier keywords on this line.
-    let line_content = &content[decl_start_offset..func_kw_offset];
-    let line_trimmed = line_content.trim();
-    if !line_trimmed.is_empty() {
-        // Modifiers are on the same line as `function`.
-        // `decl_start_offset` already points to the line start.
-    } else {
-        // No modifiers before `function` on this line; the `function`
-        // keyword is the start.
-        decl_start_offset = content[..func_kw_offset]
-            .rfind('\n')
-            .map(|p| p + 1)
+    // `trim_end()` bridges past blank lines, so that line start can belong
+    // to text that has nothing to do with the constructor — the class's own
+    // `{` on its own line, or the `class Foo {` of a single-line class.
+    // Only treat the run before `function` as the declaration's modifiers
+    // when every word in it really is one; otherwise `function` itself is
+    // where the declaration starts.
+    let leading = &content[modifier_line_start..func_kw_offset];
+    let starts_at_modifier = !leading.trim().is_empty()
+        && leading
+            .split_whitespace()
+            .all(|w| METHOD_MODIFIERS.contains(&w));
+
+    let decl_start = if starts_at_modifier {
+        // Skip the line's indentation to land on the first modifier.
+        let first_non_ws = content[modifier_line_start..]
+            .find(|c: char| !c.is_whitespace())
             .unwrap_or(0);
-    }
-
-    // Find the first non-whitespace on the declaration line.
-    let decl_line = &content[decl_start_offset..];
-    let first_non_ws = decl_line.find(|c: char| !c.is_whitespace()).unwrap_or(0);
+        modifier_line_start + first_non_ws
+    } else {
+        func_kw_offset
+    };
 
     ConstructorInfo {
-        decl_start: decl_start_offset + first_non_ws,
+        decl_start,
         has_final,
     }
 }
+
+/// Modifier keywords that may precede `function` in a method declaration.
+/// `final` is included so an existing one is recognised as a modifier
+/// rather than as unrelated text.
+const METHOD_MODIFIERS: [&str; 6] = [
+    "public",
+    "protected",
+    "private",
+    "static",
+    "abstract",
+    "final",
+];
 
 /// Check if the diagnostic is already fixed (stale).
 fn is_already_fixed(content: &str, info: &EnclosingClassInfo) -> bool {
@@ -843,6 +858,36 @@ mod tests {
         let info = find_enclosing_class(src, 4).unwrap();
         assert!(info.constructor.is_some());
         assert!(info.constructor.as_ref().unwrap().has_final);
+    }
+
+    /// The insertion point for `final ` must land on the constructor, not
+    /// on the class's opening brace, when the constructor carries no
+    /// modifiers and the brace sits on its own line.
+    #[test]
+    fn constructor_start_skips_allman_brace() {
+        let src = "<?php\nclass Foo\n{\n    function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 5).unwrap();
+        let ctor = info.constructor.as_ref().unwrap();
+        assert!(!ctor.has_final);
+        assert_eq!(&src[ctor.decl_start..ctor.decl_start + 8], "function");
+    }
+
+    #[test]
+    fn constructor_start_lands_on_first_modifier() {
+        let src = "<?php\nclass Foo\n{\n    public static function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 5).unwrap();
+        let ctor = info.constructor.as_ref().unwrap();
+        assert_eq!(&src[ctor.decl_start..ctor.decl_start + 6], "public");
+    }
+
+    /// An attribute on the constructor's own line is not a modifier;
+    /// `final` belongs after it, not before it.
+    #[test]
+    fn constructor_start_skips_same_line_attribute() {
+        let src = "<?php\nclass Foo\n{\n    #[Attr] public function __construct() {}\n    public function bar() {\n        new static();\n    }\n}\n";
+        let info = find_enclosing_class(src, 5).unwrap();
+        let ctor = info.constructor.as_ref().unwrap();
+        assert_eq!(&src[ctor.decl_start..ctor.decl_start + 8], "function");
     }
 
     // ── find_class_docblock ─────────────────────────────────────────

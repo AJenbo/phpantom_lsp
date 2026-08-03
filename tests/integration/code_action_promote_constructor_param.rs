@@ -199,6 +199,105 @@ class Foo {
     );
 }
 
+// ── Preceding docblock ──────────────────────────────────────────────────────
+
+#[test]
+fn removes_docblock_above_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Foo {
+    /** @var int */
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 5, 32);
+    let action = find_promote_action(&actions).expect("should offer promote action");
+    let result = apply_edit(content, action.edit.as_ref().unwrap());
+
+    assert!(
+        result.contains("private int $bar)"),
+        "parameter should have private visibility: {result}"
+    );
+    assert!(
+        !result.contains("@var int"),
+        "the property's docblock should be removed with it: {result}"
+    );
+}
+
+#[test]
+fn removes_multi_line_docblock_above_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Foo {
+    /**
+     * The bar.
+     *
+     * @var int
+     */
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 9, 32);
+    let action = find_promote_action(&actions).expect("should offer promote action");
+    let result = apply_edit(content, action.edit.as_ref().unwrap());
+
+    assert!(
+        !result.contains("The bar."),
+        "the whole docblock should be removed: {result}"
+    );
+    assert!(
+        !result.contains("/**"),
+        "no docblock fragment should be left behind: {result}"
+    );
+}
+
+#[test]
+fn keeps_unrelated_comment_above_earlier_member() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Foo {
+    /** @var string */
+    private string $keep = '';
+
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 7, 32);
+    let action = find_promote_action(&actions).expect("should offer promote action");
+    let result = apply_edit(content, action.edit.as_ref().unwrap());
+
+    assert!(
+        result.contains("@var string"),
+        "another property's docblock must be untouched: {result}"
+    );
+    assert!(
+        result.contains("private string $keep = '';"),
+        "the other property must be untouched: {result}"
+    );
+    assert!(
+        !result.contains("private int $bar;"),
+        "the promoted property declaration should be removed: {result}"
+    );
+}
+
 // ── Rejection cases ─────────────────────────────────────────────────────────
 
 #[test]

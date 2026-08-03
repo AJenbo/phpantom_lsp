@@ -226,9 +226,14 @@ fn find_promotion_candidate(
     };
 
     // Determine the property deletion span (include leading whitespace
-    // on its line and trailing newline).
+    // on its line and trailing newline).  A `/** @var … */` docblock above
+    // the declaration goes with it — left behind it would sit orphaned
+    // above the constructor.
     let prop_span = property.span();
-    let property_delete_start = find_line_start(content, prop_span.start.offset as usize);
+    let line_start = find_line_start(content, prop_span.start.offset as usize);
+    let property_delete_start =
+        super::docblock_edit::docblock_start_above_offset(content, line_start)
+            .unwrap_or(line_start);
     let property_delete_end = find_line_end(content, prop_span.end.offset as usize);
 
     // Check if the property has a default value that the parameter lacks.

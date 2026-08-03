@@ -90,3 +90,57 @@ pub(crate) fn find_docblock_above_line(content: &str, line: usize) -> Option<Doc
         text,
     })
 }
+
+/// Byte offset of the start of the `/** … */` block sitting above the
+/// declaration whose first line starts at `decl_line_start`, if there is one.
+///
+/// Works entirely in byte offsets, so the result is safe to feed straight
+/// into a deletion edit regardless of line endings.  Blank lines between the
+/// docblock and the declaration are tolerated and included in the returned
+/// span, so deleting `[start, decl_line_end)` removes both.
+pub(crate) fn docblock_start_above_offset(content: &str, decl_line_start: usize) -> Option<usize> {
+    // Walk backwards over blank lines to the line that closes the docblock.
+    let mut line_start = decl_line_start;
+    let closing_line = loop {
+        let prev = prev_line_start(content, line_start)?;
+        let trimmed = content.get(prev..line_start)?.trim();
+        if trimmed.ends_with("*/") {
+            break prev;
+        }
+        if !trimmed.is_empty() {
+            return None;
+        }
+        line_start = prev;
+    };
+
+    // Walk back over the docblock's own lines to its `/**` opener.
+    let mut line_start = closing_line;
+    loop {
+        let line_end = content[line_start..]
+            .find('\n')
+            .map_or(content.len(), |i| line_start + i);
+        let trimmed = content.get(line_start..line_end)?.trim();
+        if trimmed.starts_with("/**") {
+            return Some(line_start);
+        }
+        if !trimmed.starts_with('*') {
+            return None;
+        }
+        line_start = prev_line_start(content, line_start)?;
+    }
+}
+
+/// Start offset of the line preceding the one starting at `line_start`,
+/// or `None` when `line_start` is already the start of the file.
+fn prev_line_start(content: &str, line_start: usize) -> Option<usize> {
+    if line_start == 0 {
+        return None;
+    }
+    let bytes = content.as_bytes();
+    // `line_start - 1` is the newline that terminates the previous line.
+    let mut pos = line_start - 1;
+    while pos > 0 && bytes[pos - 1] != b'\n' {
+        pos -= 1;
+    }
+    Some(pos)
+}

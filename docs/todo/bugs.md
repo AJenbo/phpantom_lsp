@@ -98,83 +98,6 @@ resolution in `virtual_members/`.
 `tests/psalm_assertions/template_class_template_extends.php` carries two
 `// SKIP` markers that clear when this is fixed.
 
-#### B5. "Promote constructor param" leaves an orphaned docblock behind
-
-**Impact: Low · Effort: Low-Medium**
-
-The "Promote property to constructor parameter" code action deletes only
-the property declaration's own line, not a `/** @var ... */` docblock
-that precedes it:
-
-```php
-class Foo {
-    /** @var int */
-    private int $bar;   // deleted
-
-    public function __construct(private int $bar) {}   // promoted here
-}
-```
-
-Applying the action leaves the now-orphaned `/** @var int */` sitting
-above the constructor. `property_delete_start`
-(`code_actions/promote_constructor_param.rs`) is computed with
-`find_line_start`, which only walks back to the previous newline on the
-same line — it cannot reach a comment on an earlier line, by design (it
-is also used for the non-docblock leading-whitespace case). There is no
-current test covering a property with a preceding docblock.
-
-**Where to look:** `build_promotion_candidate` in
-`code_actions/promote_constructor_param.rs` — extend
-`property_delete_start` to also swallow an immediately-preceding
-docblock (mirroring how other code actions in this module, e.g.
-`update_docblock.rs`, locate an existing docblock above a declaration).
-
-#### B6. "Add `final`" may insert before a class's opening brace instead of its constructor (needs confirmation)
-
-**Impact: Low-Medium · Effort: Medium**
-
-Found by manual trace while cleaning up comments in
-`code_actions/phpstan/new_static.rs`; not yet confirmed with a failing
-test, so verify before fixing.
-
-`build_constructor_info` locates where to insert `final ` before an
-unmodified constructor. For a constructor with no explicit visibility
-keyword, where the enclosing class's opening brace sits alone on its
-own line (Allman style):
-
-```php
-class Foo
-{
-    function __construct() {}
-}
-```
-
-Tracing the offsets by hand: `before_kw.trim_end().rfind('\n')` (line
-~516) skips backward past the blank run of whitespace between the
-brace line and the `function` keyword's line, landing right *before*
-the `{` rather than at the start of `    function …`. The next check
-(`line_trimmed.is_empty()`, line ~520-523), meant to detect "no
-modifiers on this line, fall back further", instead sees the lone `{`
-character as if it were modifier text on the same line as `function`
-and skips the fallback branch. The final `decl_start` then points at
-the `{` character itself, so inserting `final ` would produce
-`class Foo\nfinal {\n    function __construct() {}\n}` — `final`
-attached to the brace line, not the constructor — which is invalid
-PHP.
-
-**Where to look:** `build_constructor_info` in
-`code_actions/phpstan/new_static.rs`. The line/modifier detection at
-~514-531 needs to distinguish "text on the function's own line" from
-"trailing content from an earlier line that `trim_end()` bridged past
-a blank line" — e.g. by checking whether `decl_start_offset` and
-`func_kw_offset` are on the same source line (count newlines between
-them) rather than only checking whether the slice between them is
-non-empty after trimming.
-
-**To confirm:** add a test with a modifier-less constructor whose
-class brace is on its own line (as above) and assert the insertion
-point lands on the `function` line, not the brace line.
-
 #### B10. Extract Function's by-reference-write safety check can never trigger
 
 **Impact: Low-Medium · Effort: Medium**
@@ -328,61 +251,6 @@ entity being resolved (e.g. the closure's span offset or the call-site
 span) in a small visited set, as `RESOLVING` does for class FQNs, so
 only genuine same-entity cycles short-circuit.
 
-#### B17. `virtual_members/resolve.rs` reimplements generic substitution without right-alignment
-
-**Impact: Low-Medium · Effort: Low-Medium**
-
-Found while cleaning up comments in `virtual_members/resolve.rs`. The
-canonical generic-substitution builder,
-`build_substitution_map`/`apply_generic_args` in
-`src/inheritance/generics.rs`, right-aligns a short type-argument list
-against trailing template parameters when every skipped leading
-parameter has a key-like bound (`array-key`/`int`/`string`) — the
-universal convention for collection key parameters, via
-`right_align_offset` (`src/inheritance/generics.rs:478`). For example
-`@extends Collection<User>` against `class Collection<TKey, TValue>`
-binds `TValue => User`, not `TKey => User`.
-
-`resolve_class_fully_inner` in `src/virtual_members/resolve.rs` (~line
-588) has its own inline copy of this substitution-map building logic,
-used while walking the `extends` chain to collect and substitute
-`@implements` generics for virtual-member (`@method`/`@property`)
-resolution. Its comment claims it mirrors
-`resolve_class_with_inheritance`'s logic, but the implementation is a
-plain `enumerate()` zip:
-
-```rust
-for (i, param_name) in parent.template_params.iter().enumerate() {
-    if let Some(arg) = args.get(i) {
-        ...
-        map.insert(param_name.to_string(), resolved);
-    }
-}
-```
-
-with no `right_align_offset` call. When a class in the chain provides
-fewer `@extends`/`@implements` type arguments than the parent
-interface's template params, and those params have key-like leading
-bounds, this path binds the short argument to the *first* (key)
-parameter instead of the trailing (value) parameter that
-`build_substitution_map` would choose — the opposite of the rest of
-the codebase's convention. This only affects interface-tag merging
-during virtual-member resolution (not the main inheritance-merge
-path), so the practical impact is `@method`/`@property` synthesis
-picking up a misbound generic argument for interfaces reached this
-way.
-
-**Where to look:** `resolve_class_fully_inner` in
-`src/virtual_members/resolve.rs` (~line 611) — replace the manual
-`enumerate()` substitution-map loop with a call to
-`crate::inheritance::generics::right_align_offset` (or, better,
-refactor to share `build_substitution_map` directly instead of
-duplicating its logic), consistent with CLAUDE.local.md's guidance
-against parallel type-resolution paths. Add a regression test with a
-short `@extends`/`@implements` argument list against an interface with
-a key-like leading template param, reached via `@mixin`/`@implements`
-tag merging rather than the main inheritance chain.
-
 #### B18. Override completion offers `final` parent methods
 
 **Impact: Medium · Effort: Medium**
@@ -523,3 +391,41 @@ the resolution context the type engine already threads through, so they
 are present by construction and no entry point can forget them; that
 also settles whether they belong on the `Backend` rather than in
 thread-local state.
+
+#### B24. "Promote constructor param" silently drops the property's attributes
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+Found while fixing the orphaned-docblock case. A property carrying an
+attribute loses it entirely:
+
+```php
+class Foo {
+    #[SomeAttr]
+    private int $bar;
+
+    public function __construct(int $bar) { $this->bar = $bar; }
+}
+```
+
+becomes
+
+```php
+class Foo {
+    public function __construct(private int $bar) {}
+}
+```
+
+`PlainProperty::span()` starts at the first attribute list when there is
+one, so the deletion range in `build_promotion_candidate`
+(`code_actions/promote_constructor_param.rs`) already covers the
+attribute, and nothing re-emits it on the promoted parameter. Unlike the
+docblock, an attribute is executable metadata, so losing it changes
+runtime behaviour.
+
+The fix is to carry the attribute text over to the parameter rather than
+to decline the action. Note that an untargeted attribute on a promoted
+parameter applies to both the parameter and the synthesised property,
+which is not identical to a property-only attribute, so an explicit
+`#[\Attribute(\Attribute::TARGET_PROPERTY)]` target may need to be
+preserved as-is and a bare attribute may need one added.

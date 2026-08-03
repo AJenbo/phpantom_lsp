@@ -9623,3 +9623,165 @@ async fn test_template_array_bound_identity_generic_resolves_inside_body() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// A short `@implements` argument list right-aligns onto the trailing
+/// template parameter when the leading one is key-like, the same way
+/// `@extends` does on the main inheritance chain.  `@implements Bag<User>`
+/// against `interface Bag<TKey of array-key, TValue>` binds
+/// `TValue => User`, not `TKey => User`.
+#[tokio::test]
+async fn test_short_implements_arg_right_aligns_to_value_param() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///short_implements_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                // 0
+        "class User {\n",                                         // 1
+        "    public function getName(): string { return ''; }\n", // 2
+        "}\n",                                                    // 3
+        "/**\n",                                                  // 4
+        " * @template TKey of array-key\n",                       // 5
+        " * @template TValue\n",                                  // 6
+        " */\n",                                                  // 7
+        "interface Bag {\n",                                      // 8
+        "    /** @return TValue */\n",                            // 9
+        "    public function first(): mixed;\n",                  // 10
+        "}\n",                                                    // 11
+        "/**\n",                                                  // 12
+        " * @implements Bag<User>\n",                             // 13
+        " */\n",                                                  // 14
+        "abstract class UserBag implements Bag {}\n",             // 15
+        "class Svc {\n",                                          // 16
+        "    public function test(UserBag $bag): void {\n",       // 17
+        "        $bag->first()->\n",                              // 18
+        "    }\n",                                                // 19
+        "}\n",                                                    // 20
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 18,
+                character: 23,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "TValue should bind to User, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// The same right-alignment applies while walking the `extends` chain to
+/// collect a parent's `@implements` generics: `@extends BaseBag<User>`
+/// against `BaseBag<PKey of array-key, PValue>` binds `PValue => User`, so
+/// the `@implements Bag<PKey, PValue>` it carries resolves to
+/// `Bag<array-key, User>`.
+#[tokio::test]
+async fn test_short_extends_arg_right_aligns_when_collecting_implements() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///short_extends_implements.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                // 0
+        "class User {\n",                                         // 1
+        "    public function getName(): string { return ''; }\n", // 2
+        "}\n",                                                    // 3
+        "/**\n",                                                  // 4
+        " * @template TKey of array-key\n",                       // 5
+        " * @template TValue\n",                                  // 6
+        " */\n",                                                  // 7
+        "interface Bag {\n",                                      // 8
+        "    /** @return TValue */\n",                            // 9
+        "    public function first(): mixed;\n",                  // 10
+        "}\n",                                                    // 11
+        "/**\n",                                                  // 12
+        " * @template PKey of array-key\n",                       // 13
+        " * @template PValue\n",                                  // 14
+        " * @implements Bag<PKey, PValue>\n",                     // 15
+        " */\n",                                                  // 16
+        "abstract class BaseBag implements Bag {}\n",             // 17
+        "/**\n",                                                  // 18
+        " * @extends BaseBag<User>\n",                            // 19
+        " */\n",                                                  // 20
+        "abstract class UserBag extends BaseBag {}\n",            // 21
+        "class Svc {\n",                                          // 22
+        "    public function test(UserBag $bag): void {\n",       // 23
+        "        $bag->first()->\n",                              // 24
+        "    }\n",                                                // 25
+        "}\n",                                                    // 26
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 24,
+                character: 23,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "PValue, and through it TValue, should bind to User, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

@@ -17,13 +17,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::atom::atom;
 use crate::inheritance::{
-    ClassRef, apply_substitution_to_method, apply_substitution_to_property,
-    enrich_method_arc_from_ancestor, enrich_property_arc_from_ancestor,
+    ClassRef, apply_substitution_to_method, apply_substitution_to_property, build_generic_subs,
+    build_substitution_map, enrich_method_arc_from_ancestor, enrich_property_arc_from_ancestor,
     resolve_class_with_inheritance,
 };
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
-use crate::util::short_name;
 use crate::virtual_members::laravel::patches::apply_laravel_patches;
 
 use super::laravel;
@@ -596,32 +595,11 @@ fn resolve_class_fully_inner(
                 break;
             }
             if let Some(parent) = class_loader(parent_name) {
-                // Build the substitution map for this parent level,
-                // mirroring the logic in resolve_class_with_inheritance.
-                let parent_short = short_name(&parent.name);
-                let type_args = current
-                    .extends_generics
-                    .iter()
-                    .chain(current.implements_generics.iter())
-                    .find(|(name, _)| short_name(name) == parent_short)
-                    .map(|(_, args)| args);
-
-                let mut level_subs = if let Some(args) = type_args {
-                    let mut map = HashMap::new();
-                    for (i, param_name) in parent.template_params.iter().enumerate() {
-                        if let Some(arg) = args.get(i) {
-                            let resolved = if active_subs.is_empty() {
-                                arg.clone()
-                            } else {
-                                arg.substitute(&active_subs)
-                            };
-                            map.insert(param_name.to_string(), resolved);
-                        }
-                    }
-                    map
-                } else {
-                    active_subs.clone()
-                };
+                // Build the substitution map for this parent level with the
+                // same builder the main inheritance merge uses, so a short
+                // `@extends`/`@implements` argument list right-aligns onto
+                // the trailing template params here too.
+                let mut level_subs = build_substitution_map(&current, &parent, &active_subs);
 
                 // If no explicit @extends generics matched but there are
                 // active subs, carry them forward.
@@ -937,11 +915,5 @@ fn build_implements_substitution_map(
         None => return HashMap::new(),
     };
 
-    let mut map = HashMap::new();
-    for (i, param_name) in iface.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            map.insert(param_name.to_string(), arg.clone());
-        }
-    }
-    map
+    build_generic_subs(iface, type_args)
 }
