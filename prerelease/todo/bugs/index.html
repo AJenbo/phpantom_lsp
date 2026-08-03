@@ -850,17 +850,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b12-resolve_rhs_expressions-rhs_expr_depth-cap-silently-returns-empty-past-depth-100" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B12. <code>resolve_rhs_expression</code>'s <code>RHS_EXPR_DEPTH</code> cap silently returns empty past depth 100
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b13-the-hover-scope-cache-is-populated-but-never-read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -942,6 +931,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B24. "Promote constructor param" silently drops the property's attributes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b25-a-very-long-method-chain-overflows-the-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B25. A very long method chain overflows the stack
       </span>
     </span>
   </a>
@@ -1438,17 +1438,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b12-resolve_rhs_expressions-rhs_expr_depth-cap-silently-returns-empty-past-depth-100" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B12. <code>resolve_rhs_expression</code>'s <code>RHS_EXPR_DEPTH</code> cap silently returns empty past depth 100
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b13-the-hover-scope-cache-is-populated-but-never-read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1530,6 +1519,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B24. "Promote constructor param" silently drops the property's attributes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b25-a-very-long-method-chain-overflows-the-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B25. A very long method chain overflows the stack
       </span>
     </span>
   </a>
@@ -1637,43 +1637,6 @@ with those variable names.</p>
 — the <code>parameters</code>/<code>return_values</code>/<code>locals</code> classification loops already
 show the pattern for iterating <code>self.accesses</code> within the range; add an
 equivalent pass keyed on by-reference write accesses.</p>
-<h4 id="b12-resolve_rhs_expressions-rhs_expr_depth-cap-silently-returns-empty-past-depth-100">B12. <code>resolve_rhs_expression</code>'s <code>RHS_EXPR_DEPTH</code> cap silently returns empty past depth 100<a class="headerlink" href="#b12-resolve_rhs_expressions-rhs_expr_depth-cap-silently-returns-empty-past-depth-100" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium-High</strong></p>
-<p>Found while cleaning up comments in <code>type_engine/variable/rhs_resolution/</code>.
-<code>resolve_rhs_expression</code> (<code>src/type_engine/variable/rhs_resolution/mod.rs:346</code>)
-guards against unbounded recursion with a thread-local counter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="fm">thread_local!</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">:</span><span class="w"> </span><span class="nc">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="p">}</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">get</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">v</span><span class="p">);</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="p">});</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">if</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">depth</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">));</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="fm">vec!</span><span class="p">[];</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
-</code></pre></div>
-<p>This is the exact "depth cap papering over unbounded recursion"
-anti-pattern this project's own conventions warn against (a hard cap is
-a safety net, not a fix — see the performance anti-patterns in
-<code>CLAUDE.local.md</code>, item 2), and it isn't one of the previously-known
-instances (<code>MAX_RESOLVE_DEPTH</code>, <code>MAX_LOOP_DEPTH</code>,
-<code>MAX_RESOLVE_TARGET_DEPTH</code>) — <code>RHS_EXPR_DEPTH</code> doesn't follow the
-<code>MAX_*</code> naming convention, so it was easy to miss in a grep sweep for
-those names.</p>
-<p>When the cap fires, <code>resolve_rhs_expression</code> silently returns an empty
-<code>Vec&lt;ResolvedType&gt;</code> — the caller sees "this expression has no type"
-with no indication the resolver bailed rather than genuinely finding
-nothing. Since this function is the single shared entry point for RHS
-expression resolution (feeding assignment tracking, hover, and
-diagnostics type strings per its own doc comment), a pathological or
-deeply-nested chain of calls/match/ternary/<code>??</code> expressions produces
-silently wrong (empty) results rather than a bounded-but-correct one.</p>
-<p><strong>Where to look:</strong> <code>resolve_rhs_expression</code> in
-<code>src/type_engine/variable/rhs_resolution/mod.rs</code> — apply one of the
-standard fixes from this project's own anti-pattern list instead of
-raising the cap: cache resolved expressions by identity so recursive
-resolution of shared sub-expressions is O(1) on re-entry (the approach
-PHPStan/Phpactor use), or break cycles with a keyed visited set that
-returns a defined partial result rather than an empty one.</p>
 <h4 id="b13-the-hover-scope-cache-is-populated-but-never-read">B13. The hover scope cache is populated but never read<a class="headerlink" href="#b13-the-hover-scope-cache-is-populated-but-never-read" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>Found while cleaning up comments in
@@ -1775,7 +1738,7 @@ adding the field touches every <code>PropertyInfo</code> construction site.</p>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>new \Acme\Decimal\Decimal('0.00')</code> resolves to <code>Decimal&lt;bool&gt;</code>, and the
 value is then rejected against a plain <code>Decimal</code> parameter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
 </code></pre></div>
 <p>The generic argument is nonsense: the class is constructed from a string
 literal and nothing in the call binds a <code>bool</code>. Because the reported type
@@ -1806,9 +1769,9 @@ backwards from the cursor over brackets, parentheses, braces, and string
 literals, but does not skip <code>//</code>, <code>#</code>, or <code>/* … */</code> comments. A stray
 bracket or quote in a comment between the call and the cursor unbalances
 the walk, and the completion drops out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">]);</span>
 </code></pre></div>
 <p>It fails closed (no suggestions rather than wrong ones), which is why it
 is low impact. The obstacle is that a backwards scan cannot tell a <code>//</code>
@@ -1850,17 +1813,17 @@ thread-local state.</p>
 <p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
 <p>Found while fixing the orphaned-docblock case. A property carrying an
 attribute loses it entirely:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    #[SomeAttr]</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    private int $bar;</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    #[SomeAttr]</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    private int $bar;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>becomes</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>PlainProperty::span()</code> starts at the first attribute list when there is
 one, so the deletion range in <code>build_promotion_candidate</code>
@@ -1874,6 +1837,30 @@ parameter applies to both the parameter and the synthesised property,
 which is not identical to a property-only attribute, so an explicit
 <code>#[\Attribute(\Attribute::TARGET_PROPERTY)]</code> target may need to be
 preserved as-is and a bare attribute may need one added.</p>
+<h4 id="b25-a-very-long-method-chain-overflows-the-stack">B25. A very long method chain overflows the stack<a class="headerlink" href="#b25-a-very-long-method-chain-overflows-the-stack" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p>Found while stress-testing right-associative chain resolution. A fluent
+chain of roughly 3000 links overflows the 8 MB parse-worker stack and
+aborts the process (<code>SIGSEGV</code>, which <code>catch_unwind</code> cannot catch):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$out = $x-&gt;self()-&gt;self()/* … ~3000 links … */-&gt;self();</span>
+</code></pre></div>
+<p>The recursion is <code>resolve_rhs_call</code> → <code>resolve_rhs_expression</code> →
+<code>resolve_rhs_method_call_inner</code> → <code>resolve_rhs_call</code>, about three frames
+per link, walking from the outermost call down to the receiver. Nothing
+bounds it: the parser's own recursion limit does not apply because a
+postfix chain is parsed in a loop rather than recursively, so the AST can
+nest arbitrarily deep with no parse error. Hand-written code does not
+reach that length, but generated query builders and generated client
+code can.</p>
+<p><strong>Where to look:</strong> <code>resolve_rhs_call</code> /
+<code>resolve_rhs_method_call_inner</code> in
+<code>src/type_engine/variable/rhs_resolution/calls.rs</code>. The receiver spine
+is a chain, not a tree, so collect it into a <code>Vec</code> iteratively (peeling
+one call at a time until the base expression) and then resolve outward
+from the base, the same way <code>??</code> and ternary chains are walked in
+<code>rhs_resolution/mod.rs</code>. Raising the stack size is not a fix (see the
+performance anti-patterns): chain length is unbounded, so any stack size
+has a chain that overflows it.</p>
 
 
 
