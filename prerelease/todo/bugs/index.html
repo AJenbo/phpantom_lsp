@@ -915,17 +915,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b24-promote-constructor-param-silently-drops-the-propertys-attributes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B24. "Promote constructor param" silently drops the property's attributes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1481,17 +1470,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b24-promote-constructor-param-silently-drops-the-propertys-attributes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B24. "Promote constructor param" silently drops the property's attributes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1724,34 +1702,6 @@ the resolution context the type engine already threads through, so they
 are present by construction and no entry point can forget them; that
 also settles whether they belong on the <code>Backend</code> rather than in
 thread-local state.</p>
-<h4 id="b24-promote-constructor-param-silently-drops-the-propertys-attributes">B24. "Promote constructor param" silently drops the property's attributes<a class="headerlink" href="#b24-promote-constructor-param-silently-drops-the-propertys-attributes" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
-<p>Found while fixing the orphaned-docblock case. A property carrying an
-attribute loses it entirely:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    #[SomeAttr]</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    private int $bar;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>becomes</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>PlainProperty::span()</code> starts at the first attribute list when there is
-one, so the deletion range in <code>build_promotion_candidate</code>
-(<code>code_actions/promote_constructor_param.rs</code>) already covers the
-attribute, and nothing re-emits it on the promoted parameter. Unlike the
-docblock, an attribute is executable metadata, so losing it changes
-runtime behaviour.</p>
-<p>The fix is to carry the attribute text over to the parameter rather than
-to decline the action. Note that an untargeted attribute on a promoted
-parameter applies to both the parameter and the synthesised property,
-which is not identical to a property-only attribute, so an explicit
-<code>#[\Attribute(\Attribute::TARGET_PROPERTY)]</code> target may need to be
-preserved as-is and a bare attribute may need one added.</p>
 
 
 
