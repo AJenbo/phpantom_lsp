@@ -606,8 +606,9 @@ fn test_require_once_mixed_forms() {
 fn test_require_once_skips_dynamic_expressions() {
     let content = concat!(
         "<?php\n",
-        "require_once __DIR__ . '/Trustly/exceptions.php';\n",
         "require_once $path;\n",
+        "require_once $dir . '/file.php';\n",
+        "require_once dirname(__FILE__) . '/file.php';\n",
         "require_once 'Trustly/Data/data.php';\n",
     );
     let paths = extract_require_once_paths(content);
@@ -617,6 +618,23 @@ fn test_require_once_skips_dynamic_expressions() {
         "Should skip dynamic expressions and only find the string literal"
     );
     assert_eq!(paths[0], "Trustly/Data/data.php");
+}
+
+#[test]
+fn test_require_once_dir_concatenation() {
+    let content = concat!(
+        "<?php\n",
+        "if (str_starts_with(PHP_VERSION, \"8.1.\")) {\n",
+        "    require_once __DIR__ . '/8.1/url.php';\n",
+        "}\n",
+        "require_once __DIR__ . \"/lib/helpers.php\";\n",
+        "require_once(__DIR__ . '/other.php');\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(paths.len(), 3);
+    assert_eq!(paths[0], "8.1/url.php");
+    assert_eq!(paths[1], "lib/helpers.php");
+    assert_eq!(paths[2], "other.php");
 }
 
 #[test]

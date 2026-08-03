@@ -716,18 +716,21 @@ pub fn resolve_namespace_from_path(
 
 /// Extract file paths from `require_once` statements in PHP source content.
 ///
-/// Handles both the statement form and the function-like form:
+/// Handles the statement form, the function-like form, and the common
+/// `__DIR__ . '...'` concatenation (used by e.g. thecodingmachine/safe
+/// to dispatch to per-PHP-version function definitions):
 /// ```text
 ///     require_once 'Trustly/exceptions.php';
 ///     require_once('Trustly/Data/data.php');
+///     require_once __DIR__ . '/8.1/url.php';
 /// ```
 ///
-/// Only bare string literals are supported — concatenations, variables,
-/// and other dynamic expressions are silently skipped.
+/// Other dynamic expressions (variables, multi-part concatenations)
+/// are silently skipped.
 ///
-/// Returns the raw path strings exactly as written in the source (e.g.
-/// `"Trustly/exceptions.php"`).  The caller is responsible for resolving
-/// them relative to the file's directory.
+/// Returns path strings relative to the file's directory (a leading
+/// `__DIR__ . '/'` is stripped).  The caller is responsible for
+/// resolving them against that directory.
 pub fn extract_require_once_paths(content: &str) -> Vec<String> {
     let mut paths = Vec::new();
 
@@ -756,6 +759,16 @@ pub fn extract_require_once_paths(content: &str) -> Vec<String> {
 
         let rest = rest.trim_end_matches(';').trim();
 
+        // `__DIR__ . '/x.php'` resolves the same as a bare relative
+        // path, since the caller joins against the file's directory.
+        let (rest, from_dir_const) = match rest.strip_prefix("__DIR__") {
+            Some(after) => match after.trim_start().strip_prefix('.') {
+                Some(after_dot) => (after_dot.trim_start(), true),
+                None => continue,
+            },
+            None => (rest, false),
+        };
+
         // Extract string literal — single or double quoted
         let path = if (rest.starts_with('\'') && rest.ends_with('\''))
             || (rest.starts_with('"') && rest.ends_with('"'))
@@ -764,6 +777,15 @@ pub fn extract_require_once_paths(content: &str) -> Vec<String> {
         } else {
             // Not a simple string literal — skip
             continue;
+        };
+
+        // Strip the leading `/` left over from `__DIR__ . '/x.php'` so
+        // the path stays relative (`Path::join` would otherwise treat
+        // it as absolute and discard the base directory).
+        let path = if from_dir_const {
+            path.trim_start_matches('/')
+        } else {
+            path
         };
 
         if !path.is_empty() {
