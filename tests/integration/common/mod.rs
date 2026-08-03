@@ -10,6 +10,40 @@ pub fn create_test_backend() -> Backend {
     Backend::new_test()
 }
 
+/// Run an async LSP request on a thread sized like the server's own
+/// AST-walking threads.
+///
+/// The server gives every thread that parses or walks a PHP AST
+/// [`phpantom_lsp::PARSE_WORKER_STACK_SIZE`], while libtest threads get
+/// the 2 MiB default and an unoptimised test build uses far larger
+/// frames than the release binary.  Tests that feed the walker deeply
+/// nested PHP need the production budget to be measuring the same thing
+/// the server does.
+pub fn with_parse_worker_stack<T, F>(body: F) -> T
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    std::thread::Builder::new()
+        .stack_size(phpantom_lsp::PARSE_WORKER_STACK_SIZE)
+        .spawn(body)
+        .expect("spawn parse-worker-sized test thread")
+        .join()
+        .expect("test body panicked")
+}
+
+/// Block on an async LSP body from a synchronous test, on a runtime
+/// configured like the server's (see [`with_parse_worker_stack`] for why
+/// the stack size matters).
+pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .thread_stack_size(phpantom_lsp::PARSE_WORKER_STACK_SIZE)
+        .build()
+        .expect("build test runtime")
+        .block_on(future)
+}
+
 /// Create a test backend with the **full embedded stub indices** loaded.
 ///
 /// This is much slower than [`create_test_backend`] — only use it for

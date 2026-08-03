@@ -342,25 +342,165 @@ fn resolved_type_with_lookup(
 /// Used by `check_expression_for_assignment` (for `$var = <expr>`),
 /// `check_expression_for_raw_type` (for hover/diagnostics type strings),
 /// and recursively by multi-branch constructs (match, ternary, `??`).
+///
+/// Resolution recurses along the nesting of the expression, so the
+/// three right-associative shapes PHP code really does write long
+/// (`$a ?? $b ?? … ?? $z`, ternaries nested in their own `else` branch,
+/// and stacked `(…)` / `@` wrappers) are walked iteratively here
+/// instead: they nest one AST level per link, and recursing them would
+/// spend a stack frame per link to reach a type the loop below reaches
+/// for free.
 pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
     expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    thread_local! {
-        static RHS_EXPR_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    let expr = peel_type_transparent(expr);
+    match expr {
+        Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
+            resolve_null_coalesce_chain(binary, ctx)
+        }
+        Expression::Conditional(conditional) => resolve_conditional_chain(conditional, ctx),
+        _ => resolve_rhs_expression_inner(expr, ctx),
     }
-    let depth = RHS_EXPR_DEPTH.with(|d| {
-        let v = d.get() + 1;
-        d.set(v);
-        v
-    });
-    if depth > 100 {
-        RHS_EXPR_DEPTH.with(|d| d.set(depth - 1));
-        return vec![];
+}
+
+/// Strip wrappers that cannot change the type of the expression they
+/// wrap: parentheses and the error-suppression operator `@`.
+fn peel_type_transparent<'b>(mut expr: &'b Expression<'b>) -> &'b Expression<'b> {
+    loop {
+        match expr {
+            Expression::Parenthesized(parenthesized) => expr = parenthesized.expression,
+            Expression::UnaryPrefix(unary) if unary.operator.is_error_control() => {
+                expr = unary.operand
+            }
+            _ => return expr,
+        }
     }
-    let result = resolve_rhs_expression_inner(expr, ctx);
-    RHS_EXPR_DEPTH.with(|d| d.set(depth - 1));
-    result
+}
+
+/// Resolve a `??` chain, unioning every operand that can still be
+/// reached at runtime.
+///
+/// `??` is right-associative, so `$a ?? $b ?? $c` nests as
+/// `$a ?? ($b ?? $c)`; the chain is walked down its right spine rather
+/// than recursed into.  Each operand contributes its type with `null`
+/// stripped (the next operand covers the null case), an operand that
+/// resolves to nothing contributes `mixed` (at runtime it holds *some*
+/// value), and an operand that cannot be null at all makes the rest of
+/// the chain dead code.
+fn resolve_null_coalesce_chain<'b>(
+    binary: &'b Binary<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let mut combined: Vec<ResolvedType> = Vec::new();
+    let mut current = binary;
+    loop {
+        // Syntactically non-nullable operands: `new Foo()`, a non-null
+        // literal, an array literal, `clone $x`.
+        let non_nullable = match peel_type_transparent(current.lhs) {
+            Expression::Literal(Literal::Null(_)) => false,
+            Expression::Instantiation(_)
+            | Expression::Literal(_)
+            | Expression::Array(_)
+            | Expression::LegacyArray(_)
+            | Expression::Clone(_) => true,
+            _ => false,
+        };
+        let lhs_results = resolve_rhs_expression(current.lhs, ctx);
+        if lhs_results.is_empty() {
+            // A genuinely unresolvable operand. At runtime it could hold
+            // any value, so represent it as `mixed` and keep unioning
+            // the rest of the chain.
+            ResolvedType::extend_unique(
+                &mut combined,
+                vec![ResolvedType::from_type_string(PhpType::mixed())],
+            );
+        } else if non_nullable {
+            // The remaining operands are unreachable.
+            ResolvedType::extend_unique(&mut combined, lhs_results);
+            return simplify_branch_results(combined);
+        } else {
+            ResolvedType::extend_unique(&mut combined, strip_null_alternatives(lhs_results));
+        }
+        // Always union with the next operand.  Even when the type string
+        // looks non-nullable, the user wrote `??` defensively and both
+        // branches are valid candidates.
+        match peel_type_transparent(current.rhs) {
+            Expression::Binary(next) if next.operator.is_null_coalesce() => current = next,
+            last => {
+                ResolvedType::extend_unique(&mut combined, resolve_rhs_expression(last, ctx));
+                return simplify_branch_results(combined);
+            }
+        }
+    }
+}
+
+/// Drop `null` from each resolved alternative of a `??` operand.
+///
+/// Example: `?Foo ?? Bar` → `Foo|Bar`.  A bare `null` alternative is
+/// dropped entirely; anything else (including `mixed`) passes through.
+fn strip_null_alternatives(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
+    results
+        .into_iter()
+        .filter_map(|mut resolved| match resolved.type_string.non_null_type() {
+            Some(non_null) => {
+                resolved.type_string = non_null;
+                Some(resolved)
+            }
+            None if resolved.type_string == PhpType::null() => None,
+            None => Some(resolved),
+        })
+        .collect()
+}
+
+/// Resolve a ternary, or a chain of ternaries nested in each other's
+/// `else` branch (`$a ? 1 : ($b ? 2 : ($c ? 3 : 4))`), to the union of
+/// the branches that are reachable.
+///
+/// Each branch is resolved with the cursor positioned inside it so that
+/// instanceof / guard narrowing from the condition applies to variable
+/// and property subjects within the branch.  Without this,
+/// `$x instanceof Foo ? $x->m() : null` would resolve `$x->m()` against
+/// the un-narrowed type, the then branch would fail, and the whole
+/// ternary would collapse to the else branch instead of unioning both.
+///
+/// A condition whose PHP truthiness is statically known (`true`,
+/// `false`, `0`, `''`, …) makes one branch unreachable, and the dead
+/// branch must not widen the result into a union.  PHPStan prunes the
+/// same way.
+fn resolve_conditional_chain<'b>(
+    conditional: &'b Conditional<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let mut combined: Vec<ResolvedType> = Vec::new();
+    let mut current = conditional;
+    loop {
+        // A short ternary (`$a ?: $b`) reuses the condition as its then
+        // branch.
+        let then_expr = current.then.unwrap_or(current.condition);
+        let truthiness = static_condition_truthiness(current.condition);
+        if truthiness != Some(false) {
+            let then_ctx = ctx.with_cursor_offset(then_expr.span().start.offset);
+            ResolvedType::extend_unique(
+                &mut combined,
+                resolve_rhs_expression(then_expr, &then_ctx),
+            );
+        }
+        if truthiness == Some(true) {
+            return simplify_branch_results(combined);
+        }
+        match peel_type_transparent(current.r#else) {
+            Expression::Conditional(next) => current = next,
+            _ => {
+                let else_ctx = ctx.with_cursor_offset(current.r#else.span().start.offset);
+                ResolvedType::extend_unique(
+                    &mut combined,
+                    resolve_rhs_expression(current.r#else, &else_ctx),
+                );
+                return simplify_branch_results(combined);
+            }
+        }
+    }
 }
 
 fn resolve_rhs_expression_inner<'b>(
@@ -515,7 +655,6 @@ fn resolve_rhs_expression_inner<'b>(
             }
             result
         }
-        Expression::Parenthesized(p) => resolve_rhs_expression(p.expression, ctx),
         // Unary signs are separate AST nodes rather than part of numeric
         // literals. Resolve the operand first so parenthesized expressions,
         // exact variables, and compound literal branches keep their values.
@@ -536,12 +675,6 @@ fn resolve_rhs_expression_inner<'b>(
             vec![ResolvedType::from_type_string(signed.unwrap_or_else(
                 || PhpType::union(vec![PhpType::int(), PhpType::float()]),
             ))]
-        }
-        // ── Error-suppression prefix: `@expr` ───────────────────────
-        // The `@` operator doesn't change the runtime type of the
-        // expression, so resolve straight through to the operand.
-        Expression::UnaryPrefix(unary) if unary.operator.is_error_control() => {
-            resolve_rhs_expression(unary.operand, ctx)
         }
         Expression::Match(match_expr) => {
             // Two subject shapes carry narrowing information: `match (true)`
@@ -574,94 +707,6 @@ fn resolve_rhs_expression_inner<'b>(
                 ResolvedType::extend_unique(&mut combined, arm_results);
             }
             simplify_branch_results(combined)
-        }
-        Expression::Conditional(cond_expr) => {
-            let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
-            // Resolve each branch with the cursor positioned inside it so
-            // that instanceof / guard narrowing from the ternary condition
-            // applies to variable and property subjects within the branch.
-            // Without this, `$x instanceof Foo ? $x->m() : null` would
-            // resolve `$x->m()` against the un-narrowed type, the then
-            // branch would fail, and the whole ternary would collapse to
-            // the else branch instead of unioning both.
-            let then_ctx = ctx.with_cursor_offset(then_expr.span().start.offset);
-            let else_ctx = ctx.with_cursor_offset(cond_expr.r#else.span().start.offset);
-            // When the condition is a literal with statically known PHP
-            // truthiness (`true`, `false`, `0`, `''`, ...), only one arm is
-            // reachable at runtime, so the dead arm must not widen the
-            // result into a union. PHPStan prunes the same way.
-            match static_condition_truthiness(cond_expr.condition) {
-                Some(true) => simplify_branch_results(resolve_rhs_expression(then_expr, &then_ctx)),
-                Some(false) => {
-                    simplify_branch_results(resolve_rhs_expression(cond_expr.r#else, &else_ctx))
-                }
-                None => {
-                    let mut combined = Vec::new();
-                    ResolvedType::extend_unique(
-                        &mut combined,
-                        resolve_rhs_expression(then_expr, &then_ctx),
-                    );
-                    ResolvedType::extend_unique(
-                        &mut combined,
-                        resolve_rhs_expression(cond_expr.r#else, &else_ctx),
-                    );
-                    simplify_branch_results(combined)
-                }
-            }
-        }
-        Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
-            // When the LHS is syntactically non-nullable (e.g. `new Foo()`,
-            // a literal, `clone $x`), the RHS is dead code — return only
-            // the LHS results.  Otherwise resolve both sides; if the LHS
-            // type string is nullable, strip `null` before unioning.
-            let lhs_non_nullable = match binary.lhs {
-                Expression::Literal(Literal::Null(_)) => false,
-                Expression::Instantiation(_)
-                | Expression::Literal(_)
-                | Expression::Array(_)
-                | Expression::LegacyArray(_)
-                | Expression::Clone(_) => true,
-                _ => false,
-            };
-            let lhs_results = resolve_rhs_expression(binary.lhs, ctx);
-            if !lhs_results.is_empty() && lhs_non_nullable {
-                lhs_results
-            } else if !lhs_results.is_empty() {
-                // Strip `null` entries and nullable wrappers from the
-                // LHS type strings before unioning with the RHS.
-                // Example: `?Foo ?? Bar` → `Foo|Bar`.
-                let mut combined: Vec<ResolvedType> = lhs_results
-                    .into_iter()
-                    .filter_map(|mut rt| {
-                        let parsed = rt.type_string.clone();
-                        match parsed.non_null_type() {
-                            // Nullable/union contained null — use the stripped version.
-                            Some(non_null) => {
-                                rt.type_string = non_null;
-                                Some(rt)
-                            }
-                            // Not nullable/union: bare `null` is filtered out,
-                            // everything else (including `mixed`) passes through.
-                            None if rt.type_string == PhpType::null() => None,
-                            None => Some(rt),
-                        }
-                    })
-                    .collect();
-                // Always union with the RHS.  Even when the LHS type
-                // string looks non-nullable, the user wrote `??`
-                // defensively and both branches are valid candidates.
-                ResolvedType::extend_unique(&mut combined, resolve_rhs_expression(binary.rhs, ctx));
-                simplify_branch_results(combined)
-            } else {
-                // The LHS resolved to nothing typeable (a genuinely
-                // unresolvable expression). At runtime it could be any
-                // value, so represent the unknown LHS as `mixed` and union
-                // it with the RHS, mirroring how a `mixed` LHS is handled
-                // above.
-                let mut combined = vec![ResolvedType::from_type_string(PhpType::mixed())];
-                ResolvedType::extend_unique(&mut combined, resolve_rhs_expression(binary.rhs, ctx));
-                simplify_branch_results(combined)
-            }
         }
         Expression::Clone(clone_expr) => resolve_rhs_clone(clone_expr, ctx),
         // ── Pipe operator (PHP 8.5): `$expr |> callable(...)` ──

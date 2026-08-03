@@ -112,7 +112,6 @@ unlikely to move the needle for most users.
 | B3  | [Property write overrides the declared type even through `__set`](todo/bugs.md#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set)             | Low-Medium  | Medium      |
 | B24 | ["Promote constructor param" silently drops the property's attributes](todo/bugs.md#b24-promote-constructor-param-silently-drops-the-propertys-attributes)                   | Low-Medium  | Low-Medium  |
 | B10 | [Extract Function's by-reference-write safety check can never trigger](todo/bugs.md#b10-extract-functions-by-reference-write-safety-check-can-never-trigger)              | Low-Medium  | Medium      |
-| B12 | [`resolve_rhs_expression`'s `RHS_EXPR_DEPTH` cap silently returns empty past depth 100](todo/bugs.md#b12-resolve_rhs_expressions-rhs_expr_depth-cap-silently-returns-empty-past-depth-100) | Low-Medium  | Medium-High |
 | B13 | [The hover scope cache is populated but never read](todo/bugs.md#b13-the-hover-scope-cache-is-populated-but-never-read)                                                     | Medium      | Medium      |
 | B15 | [`IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard](todo/bugs.md#b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard)                               | Low         | Medium      |
 | B18 | [Override completion offers `final` parent methods](todo/bugs.md#b18-override-completion-offers-final-parent-methods)                                                        | Medium      | Medium      |
@@ -120,6 +119,7 @@ unlikely to move the needle for most users.
 | B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |
 | B21 | [Completion's backward scan is blind to comments](todo/bugs.md#b21-completions-backward-scan-is-blind-to-comments)                                                           | Low         | Medium      |
 | B23 | [Three type-engine resolvers are activated for only four consumers](todo/bugs.md#b23-three-type-engine-resolvers-are-activated-for-only-four-consumers)                      | Medium      | Medium      |
+| B25 | [A very long method chain overflows the stack](todo/bugs.md#b25-a-very-long-method-chain-overflows-the-stack)                                                               | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

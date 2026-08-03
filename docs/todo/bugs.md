@@ -95,51 +95,6 @@ with those variable names.
 show the pattern for iterating `self.accesses` within the range; add an
 equivalent pass keyed on by-reference write accesses.
 
-#### B12. `resolve_rhs_expression`'s `RHS_EXPR_DEPTH` cap silently returns empty past depth 100
-
-**Impact: Low-Medium · Effort: Medium-High**
-
-Found while cleaning up comments in `type_engine/variable/rhs_resolution/`.
-`resolve_rhs_expression` (`src/type_engine/variable/rhs_resolution/mod.rs:346`)
-guards against unbounded recursion with a thread-local counter:
-
-```rust
-thread_local! {
-    static RHS_EXPR_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-let depth = RHS_EXPR_DEPTH.with(|d| { let v = d.get() + 1; d.set(v); v });
-if depth > 100 {
-    RHS_EXPR_DEPTH.with(|d| d.set(depth - 1));
-    return vec![];
-}
-```
-
-This is the exact "depth cap papering over unbounded recursion"
-anti-pattern this project's own conventions warn against (a hard cap is
-a safety net, not a fix — see the performance anti-patterns in
-`CLAUDE.local.md`, item 2), and it isn't one of the previously-known
-instances (`MAX_RESOLVE_DEPTH`, `MAX_LOOP_DEPTH`,
-`MAX_RESOLVE_TARGET_DEPTH`) — `RHS_EXPR_DEPTH` doesn't follow the
-`MAX_*` naming convention, so it was easy to miss in a grep sweep for
-those names.
-
-When the cap fires, `resolve_rhs_expression` silently returns an empty
-`Vec<ResolvedType>` — the caller sees "this expression has no type"
-with no indication the resolver bailed rather than genuinely finding
-nothing. Since this function is the single shared entry point for RHS
-expression resolution (feeding assignment tracking, hover, and
-diagnostics type strings per its own doc comment), a pathological or
-deeply-nested chain of calls/match/ternary/`??` expressions produces
-silently wrong (empty) results rather than a bounded-but-correct one.
-
-**Where to look:** `resolve_rhs_expression` in
-`src/type_engine/variable/rhs_resolution/mod.rs` — apply one of the
-standard fixes from this project's own anti-pattern list instead of
-raising the cap: cache resolved expressions by identity so recursive
-resolution of shared sub-expressions is O(1) on re-entry (the approach
-PHPStan/Phpactor use), or break cycles with a keyed visited set that
-returns a defined partial result rather than an empty one.
-
 #### B13. The hover scope cache is populated but never read
 
 **Impact: Medium · Effort: Medium**
@@ -388,3 +343,34 @@ parameter applies to both the parameter and the synthesised property,
 which is not identical to a property-only attribute, so an explicit
 `#[\Attribute(\Attribute::TARGET_PROPERTY)]` target may need to be
 preserved as-is and a bare attribute may need one added.
+
+#### B25. A very long method chain overflows the stack
+
+**Impact: Low · Effort: Medium**
+
+Found while stress-testing right-associative chain resolution. A fluent
+chain of roughly 3000 links overflows the 8 MB parse-worker stack and
+aborts the process (`SIGSEGV`, which `catch_unwind` cannot catch):
+
+```php
+$out = $x->self()->self()/* … ~3000 links … */->self();
+```
+
+The recursion is `resolve_rhs_call` → `resolve_rhs_expression` →
+`resolve_rhs_method_call_inner` → `resolve_rhs_call`, about three frames
+per link, walking from the outermost call down to the receiver. Nothing
+bounds it: the parser's own recursion limit does not apply because a
+postfix chain is parsed in a loop rather than recursively, so the AST can
+nest arbitrarily deep with no parse error. Hand-written code does not
+reach that length, but generated query builders and generated client
+code can.
+
+**Where to look:** `resolve_rhs_call` /
+`resolve_rhs_method_call_inner` in
+`src/type_engine/variable/rhs_resolution/calls.rs`. The receiver spine
+is a chain, not a tree, so collect it into a `Vec` iteratively (peeling
+one call at a time until the base expression) and then resolve outward
+from the base, the same way `??` and ternary chains are walked in
+`rhs_resolution/mod.rs`. Raising the stack size is not a fix (see the
+performance anti-patterns): chain length is unbounded, so any stack size
+has a chain that overflows it.

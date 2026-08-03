@@ -1,4 +1,4 @@
-use crate::common::create_test_backend;
+use crate::common::{block_on, create_test_backend, with_parse_worker_stack};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -1693,6 +1693,146 @@ async fn test_completion_ternary_instanceof_subclass() {
     assert!(
         labels.iter().any(|l| l.starts_with("getLog")),
         "Should include getLog (from Loggable interface), got: {:?}",
+        labels
+    );
+}
+
+// ─── Long chains ────────────────────────────────────────────────────────────
+//
+// `??` is right-associative and a ternary chain nests inside its own
+// `else` branch, so both shapes grow one level per link.  Resolution
+// walks those spines iteratively, so a chain of any length still
+// contributes every branch that can be reached at runtime.
+//
+// Both tests run on a parse-worker-sized stack because the libtest
+// default is a quarter of what the server gives every thread that walks
+// a PHP AST.
+
+/// Every operand of a long `??` chain contributes its type, including
+/// the one at the very end of the chain.
+#[test]
+fn test_completion_long_null_coalescing_chain() {
+    const LINKS: usize = 150;
+
+    let mut text = String::from(
+        "<?php\nclass Head {\n    public function headOp(): void {}\n}\n\nclass Tail {\n    public function tailOp(): void {}\n}\n\nclass App {\n    public function run(?Head $maybe): void {\n",
+    );
+    for index in 0..LINKS {
+        text.push_str(&format!("        $a{index} = $maybe;\n"));
+    }
+    let operands: Vec<String> = (0..LINKS).map(|index| format!("$a{index}")).collect();
+    text.push_str(&format!(
+        "        $result = {} ?? new Tail();\n",
+        operands.join(" ?? ")
+    ));
+    text.push_str("        $result->\n    }\n}\n");
+    // The `$result->` line follows the 11-line preamble, one line per
+    // link, and the assignment itself.
+    let trigger_line = (LINKS + 12) as u32;
+
+    let labels = with_parse_worker_stack(move || {
+        block_on(async move {
+            let backend = create_test_backend();
+            let uri = Url::parse("file:///coalesce_long_chain.php").unwrap();
+            backend
+                .did_open(DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "php".to_string(),
+                        version: 1,
+                        text,
+                    },
+                })
+                .await;
+
+            let params = CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    position: Position {
+                        line: trigger_line,
+                        character: 17,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            };
+            backend
+                .completion(params)
+                .await
+                .unwrap()
+                .map(extract_labels)
+        })
+    });
+
+    let labels =
+        labels.expect("Completion should return results for $result-> from a long ?? chain");
+    assert!(
+        labels.iter().any(|l| l.starts_with("headOp")),
+        "Should include headOp from the leading operands of a {LINKS}-link ?? chain, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("tailOp")),
+        "Should include tailOp from the last operand of a {LINKS}-link ?? chain, got: {:?}",
+        labels
+    );
+}
+
+/// A ternary chain nested in its own `else` branch resolves the class
+/// contributed by the innermost branch, however deep the chain is.
+#[test]
+fn test_completion_long_nested_ternary_chain() {
+    const LINKS: usize = 150;
+
+    let mut chain = String::from("new Innermost()");
+    for _ in 0..LINKS {
+        chain = format!("$flag ? null : ({chain})");
+    }
+    let text = format!(
+        "<?php\nclass Innermost {{\n    public function innermostOp(): void {{}}\n}}\n\nclass App {{\n    public function run(bool $flag): void {{\n        $result = {chain};\n        $result->\n    }}\n}}\n"
+    );
+
+    let labels = with_parse_worker_stack(move || {
+        block_on(async move {
+            let backend = create_test_backend();
+            let uri = Url::parse("file:///ternary_long_chain.php").unwrap();
+            backend
+                .did_open(DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "php".to_string(),
+                        version: 1,
+                        text,
+                    },
+                })
+                .await;
+
+            let params = CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    position: Position {
+                        line: 8,
+                        character: 17,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            };
+            backend
+                .completion(params)
+                .await
+                .unwrap()
+                .map(extract_labels)
+        })
+    });
+
+    let labels =
+        labels.expect("Completion should return results for $result-> from a deep ternary chain");
+    assert!(
+        labels.iter().any(|l| l.starts_with("innermostOp")),
+        "Should include innermostOp from the innermost branch of a {LINKS}-deep ternary chain, got: {:?}",
         labels
     );
 }
