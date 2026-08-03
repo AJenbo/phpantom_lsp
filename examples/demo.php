@@ -3944,7 +3944,9 @@ class ExtractFunctionDemo
 // Place cursor on a constructor parameter (e.g. `string $name`) and trigger
 // code actions to see "Promote to constructor property".  The action removes
 // the property declaration, removes the `$this->name = $name;` assignment,
-// and adds the visibility modifier directly on the parameter.
+// and adds the visibility modifier directly on the parameter.  Attributes on
+// the property move onto the parameter with it, so promoting `$slug` gives
+// `#[DemoColumn(type: 'string')] private string $slug`.
 
 class PromoteConstructorParamDemo
 {
@@ -3952,10 +3954,14 @@ class PromoteConstructorParamDemo
     protected int $age;
     private readonly string $email;
 
-    public function __construct(string $name, int $age, string $email) {
+    #[DemoColumn(type: 'string')]
+    private string $slug;
+
+    public function __construct(string $name, int $age, string $email, string $slug) {
         $this->name = $name;
         $this->age = $age;
         $this->email = $email;
+        $this->slug = $slug;
     }
 }
 
@@ -4414,6 +4420,19 @@ class LazyInitNarrowingDemo
 class ReflectedWidget
 {
     public function label(): string { return 'widget'; }
+}
+
+// ── Promote Constructor Parameter scaffolding ───────────────────────────────
+// Targets both a property and a parameter, because PHP applies an attribute
+// written on a promoted parameter to both of them.
+
+#[Attribute(Attribute::TARGET_PROPERTY | Attribute::TARGET_PARAMETER)]
+class DemoColumn
+{
+    public function __construct(
+        public string $type,
+        public bool $nullable = false,
+    ) {}
 }
 
 // ── Class-body root member completion scaffolding ───────────────────────────

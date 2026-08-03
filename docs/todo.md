@@ -108,7 +108,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B24 | ["Promote constructor param" silently drops the property's attributes](todo/bugs.md#b24-promote-constructor-param-silently-drops-the-propertys-attributes)                   | Low-Medium  | Low-Medium  |
 | B10 | [Extract Function's by-reference-write safety check can never trigger](todo/bugs.md#b10-extract-functions-by-reference-write-safety-check-can-never-trigger)              | Low-Medium  | Medium      |
 | B13 | [The hover scope cache is populated but never read](todo/bugs.md#b13-the-hover-scope-cache-is-populated-but-never-read)                                                     | Medium      | Medium      |
 | B15 | [`IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard](todo/bugs.md#b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard)                               | Low         | Medium      |

@@ -32,6 +32,8 @@ use crate::atom::bytes_to_str;
 struct PromotionCandidate {
     /// The text to insert before the parameter's type hint (or variable
     /// if there is no type hint) — e.g. `"private "`, `"public readonly "`.
+    /// Any attributes carried over from the property declaration are
+    /// prepended, since PHP requires them ahead of the modifiers.
     prefix: String,
     /// Byte span of the property declaration to delete (includes leading
     /// whitespace on its line and trailing newline).
@@ -196,11 +198,13 @@ fn find_promotion_candidate(
     let visibility = extract_visibility_keyword(plain_prop.modifiers.iter());
     let is_readonly = has_readonly(plain_prop.modifiers.iter());
 
+    let attributes = render_carried_attributes(plain_prop, param, content);
+
     let vis_str = visibility.unwrap_or("public");
     let prefix = if is_readonly {
-        format!("{vis_str} readonly ")
+        format!("{attributes}{vis_str} readonly ")
     } else {
-        format!("{vis_str} ")
+        format!("{attributes}{vis_str} ")
     };
 
     // Find the `$this->name = $name;` assignment in the constructor body.
@@ -283,6 +287,69 @@ fn find_matching_property<'a>(
         }
     }
     None
+}
+
+/// Render the property's attributes as the leading text of the promoted
+/// parameter, e.g. `"#[SomeAttr] "`.  Returns an empty string when the
+/// property has no attributes.
+///
+/// An attribute is executable metadata, so dropping it along with the
+/// property declaration would change runtime behaviour.  PHP applies an
+/// attribute written on a promoted parameter to both the parameter and the
+/// synthesised property, and has no syntax for targeting only one of the
+/// two, so the promoted form is not a perfect equivalent of a
+/// property-only attribute.  Keeping it is still much closer than losing
+/// it, and only reflection over the constructor's parameters can observe
+/// the difference.
+///
+/// Each attribute gets its own `#[…]` group (`#[A, B]` becomes
+/// `#[A] #[B]`, which PHP treats identically) so that one the parameter
+/// already carries can be skipped individually: repeating an attribute
+/// that is not `Attribute::IS_REPEATABLE` is a fatal error.
+fn render_carried_attributes(
+    plain: &PlainProperty<'_>,
+    param: &FunctionLikeParameter<'_>,
+    content: &str,
+) -> String {
+    let mut out = String::new();
+
+    for attribute in plain
+        .attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        let already_on_param = param
+            .attribute_lists
+            .iter()
+            .flat_map(|list| list.attributes.iter())
+            .any(|existing| attribute_names_match(existing, attribute));
+        if already_on_param {
+            continue;
+        }
+
+        let span = attribute.span();
+        let Some(text) = content.get(span.start.offset as usize..span.end.offset as usize) else {
+            continue;
+        };
+
+        out.push_str("#[");
+        out.push_str(text);
+        out.push_str("] ");
+    }
+
+    out
+}
+
+/// Whether two attribute names are spelled the same, case-insensitively as
+/// PHP resolves class names.
+///
+/// Only identical spellings count.  `\Foo` and `Foo` name the same class in
+/// the global namespace but different ones inside a `namespace`, and
+/// wrongly treating them as equal would drop an attribute — the very thing
+/// this carry-over exists to prevent.  Leaving a genuine duplicate in place
+/// is the safer error: PHP reports it immediately.
+fn attribute_names_match(a: &Attribute<'_>, b: &Attribute<'_>) -> bool {
+    a.name.value().eq_ignore_ascii_case(b.name.value())
 }
 
 fn extract_visibility_keyword<'a>(
@@ -611,6 +678,224 @@ class Foo {
         let result = apply_candidate(php, &c);
         let count = result.matches("= 'active'").count();
         assert_eq!(count, 1, "should not duplicate default: {result}");
+    }
+
+    // ── Attribute carry-over ────────────────────────────────────────────
+
+    #[test]
+    fn carries_over_attribute() {
+        let php = "\
+<?php
+class Foo {
+    #[SomeAttr]
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            result.contains("#[SomeAttr] private int $bar)"),
+            "attribute should move onto the parameter: {result}"
+        );
+        assert_eq!(
+            result.matches("#[SomeAttr]").count(),
+            1,
+            "attribute should not be duplicated: {result}"
+        );
+    }
+
+    #[test]
+    fn carries_over_attribute_with_arguments() {
+        let php = "\
+<?php
+class Foo {
+    #[Column(type: 'integer', nullable: true)]
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            result.contains("#[Column(type: 'integer', nullable: true)] private int $bar)"),
+            "arguments should carry over verbatim: {result}"
+        );
+    }
+
+    #[test]
+    fn carries_over_multiple_attribute_lists() {
+        let php = "\
+<?php
+class Foo {
+    #[First]
+    #[Second]
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            result.contains("#[First] #[Second] private int $bar)"),
+            "both attributes should carry over on one line: {result}"
+        );
+    }
+
+    #[test]
+    fn splits_grouped_attributes_into_separate_groups() {
+        let php = "\
+<?php
+class Foo {
+    #[First, Second]
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            result.contains("#[First] #[Second] private int $bar)"),
+            "a grouped list should become one group per attribute: {result}"
+        );
+    }
+
+    #[test]
+    fn carries_attribute_ahead_of_readonly() {
+        let php = "\
+<?php
+class Foo {
+    #[SomeAttr]
+    private readonly int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            result.contains("#[SomeAttr] private readonly int $bar)"),
+            "attributes must precede the modifiers: {result}"
+        );
+    }
+
+    #[test]
+    fn carries_attribute_when_parameter_has_no_type_hint() {
+        let php = "\
+<?php
+class Foo {
+    #[SomeAttr]
+    private $bar;
+
+    public function __construct($bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("__construct($bar").unwrap() as u32 + 13;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            result.contains("#[SomeAttr] private $bar)"),
+            "attribute should sit before the visibility keyword: {result}"
+        );
+    }
+
+    #[test]
+    fn skips_attribute_the_parameter_already_carries() {
+        // Repeating an attribute that is not `IS_REPEATABLE` is a fatal
+        // error, so the duplicate must be dropped rather than emitted.
+        let php = "\
+<?php
+class Foo {
+    #[SomeAttr]
+    private int $bar;
+
+    public function __construct(#[SomeAttr] int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("] int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert_eq!(
+            result.matches("#[SomeAttr]").count(),
+            1,
+            "the attribute should appear exactly once: {result}"
+        );
+        assert!(
+            result.contains("#[SomeAttr] private int $bar)"),
+            "the parameter's own attribute should be kept: {result}"
+        );
+    }
+
+    #[test]
+    fn keeps_a_parameter_attribute_the_property_lacks() {
+        let php = "\
+<?php
+class Foo {
+    #[FromProperty]
+    private int $bar;
+
+    public function __construct(#[FromParam] int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("] int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            result.contains("#[FromParam] #[FromProperty] private int $bar)"),
+            "both attributes should survive, in source order: {result}"
+        );
+    }
+
+    #[test]
+    fn removes_docblock_but_keeps_attribute() {
+        let php = "\
+<?php
+class Foo {
+    /** @var int */
+    #[SomeAttr]
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+        let pos = php.find("int $bar)").unwrap() as u32;
+        let c = find_candidate(php, pos).expect("should find candidate");
+        let result = apply_candidate(php, &c);
+        assert!(
+            !result.contains("@var int"),
+            "the docblock should go with the property: {result}"
+        );
+        assert!(
+            result.contains("#[SomeAttr] private int $bar)"),
+            "the attribute should carry over: {result}"
+        );
     }
 
     // ── No visibility on property ───────────────────────────────────────

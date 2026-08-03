@@ -298,6 +298,68 @@ class Foo {
     );
 }
 
+// ── Attribute carry-over ────────────────────────────────────────────────────
+
+#[test]
+fn carries_attribute_onto_promoted_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Foo {
+    #[SomeAttr]
+    private int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 5, 32);
+    let action = find_promote_action(&actions).expect("should offer promote action");
+    let result = apply_edit(content, action.edit.as_ref().unwrap());
+
+    assert!(
+        result.contains("#[SomeAttr] private int $bar)"),
+        "the property's attribute should move onto the parameter: {result}"
+    );
+    assert_eq!(
+        result.matches("#[SomeAttr]").count(),
+        1,
+        "the attribute should appear exactly once: {result}"
+    );
+}
+
+#[test]
+fn carries_several_attributes_onto_readonly_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Foo {
+    #[First]
+    #[Second(name: 'bar')]
+    private readonly int $bar;
+
+    public function __construct(int $bar) {
+        $this->bar = $bar;
+    }
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 6, 32);
+    let action = find_promote_action(&actions).expect("should offer promote action");
+    let result = apply_edit(content, action.edit.as_ref().unwrap());
+
+    assert!(
+        result.contains("#[First] #[Second(name: 'bar')] private readonly int $bar)"),
+        "both attributes should carry over ahead of the modifiers: {result}"
+    );
+    assert!(
+        !result.contains("private readonly int $bar;"),
+        "the property declaration should be removed: {result}"
+    );
+}
+
 // ── Rejection cases ─────────────────────────────────────────────────────────
 
 #[test]
