@@ -102,6 +102,31 @@ class UpdatePostRequest extends StorePostRequest {
 }
 ";
 
+/// A trait that supplies a `rules()` method to whichever request uses it.
+const HAS_POST_RULES_TRAIT_PHP: &str = "\
+<?php
+namespace App\\Http\\Requests\\Concerns;
+trait HasPostRules {
+    public function rules(): array {
+        return [
+            'headline' => 'required|string|max:255',
+            'summary' => 'nullable|string',
+        ];
+    }
+}
+";
+
+/// A request that declares no `rules()` of its own and gets one from a trait.
+const TRAIT_POST_REQUEST_PHP: &str = "\
+<?php
+namespace App\\Http\\Requests;
+use App\\Http\\Requests\\Concerns\\HasPostRules;
+use Illuminate\\Foundation\\Http\\FormRequest;
+class TraitPostRequest extends FormRequest {
+    use HasPostRules;
+}
+";
+
 fn base_files() -> Vec<(&'static str, &'static str)> {
     vec![
         ("vendor/illuminate/Http/Request.php", REQUEST_PHP),
@@ -124,6 +149,14 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         (
             "src/Http/Requests/UpdatePostRequest.php",
             UPDATE_POST_REQUEST_PHP,
+        ),
+        (
+            "src/Http/Requests/Concerns/HasPostRules.php",
+            HAS_POST_RULES_TRAIT_PHP,
+        ),
+        (
+            "src/Http/Requests/TraitPostRequest.php",
+            TRAIT_POST_REQUEST_PHP,
         ),
     ]
 }
@@ -281,6 +314,50 @@ class PostController {
             "expected '{expected}' from the merged parent rules, got: {labels:?}"
         );
     }
+}
+
+/// A `rules()` method a trait supplies is the request's own method as far as
+/// PHP is concerned, so its keys must reach completion.
+#[tokio::test]
+async fn trait_supplied_rules_drive_input_completion() {
+    let controller = "\
+<?php
+namespace App;
+use App\\Http\\Requests\\TraitPostRequest;
+class PostController {
+    public function store(TraitPostRequest $request) {
+        $request->input('§');
+    }
+}
+";
+    let labels = complete_labels("src/PostController.php", controller).await;
+    for expected in ["headline", "summary"] {
+        assert!(
+            labels.contains(&expected.to_string()),
+            "expected '{expected}' from the trait's rules(), got: {labels:?}"
+        );
+    }
+}
+
+/// Go-to-definition on a trait-supplied key lands on the trait, not on the
+/// class that uses it.
+#[tokio::test]
+async fn definition_of_a_trait_supplied_key_jumps_to_the_trait() {
+    let controller = "\
+<?php
+namespace App;
+use App\\Http\\Requests\\TraitPostRequest;
+class PostController {
+    public function store(TraitPostRequest $request) {
+        $request->input('head§line');
+    }
+}
+";
+    let (file, line) = definition_line("src/PostController.php", controller)
+        .await
+        .expect("expected a definition for the trait-supplied 'headline'");
+    assert_eq!(file, "HasPostRules.php");
+    assert_eq!(line, "'headline' => 'required|string|max:255',");
 }
 
 #[tokio::test]

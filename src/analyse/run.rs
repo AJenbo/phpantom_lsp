@@ -190,6 +190,13 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         // Discover the Eloquent morph map so alias strings are validated the
         // same way here as in the LSP.
         backend.build_laravel_morph_map_index();
+        // Scan the whole FQN → URI index for Artisan commands and for macro
+        // registrations.  `update_ast` only refreshes these from the files it
+        // parses, which here is the project's own source, so without a full
+        // scan the indexes hold no vendor entries and every framework command
+        // name and vendor-registered macro reads as unknown.
+        backend.build_laravel_command_index();
+        backend.build_laravel_macro_index();
     }
 
     // ── Phase 1.5: Eager class population ───────────────────────────
@@ -474,16 +481,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             );
                         }
 
-                        // For Blade files, translate diagnostic ranges from
-                        // virtual PHP coordinates back to original Blade
-                        // coordinates so line numbers match the source file.
-                        let is_blade = crate::blade::is_blade_file(uri);
-                        let source_map = if is_blade {
-                            backend.blade_source_maps.read().get(uri.as_str()).cloned()
-                        } else {
-                            None
-                        };
-
+                        // Diagnostic ranges are already in original-file
+                        // coordinates: every collector builds its range through
+                        // `Backend::offset_range_to_lsp_range`, which maps a
+                        // Blade file's virtual-PHP range back through the source
+                        // map. Translating again here would shift every Blade
+                        // diagnostic up by `blade::PROLOGUE_LINES`.
                         let mut filtered: Vec<FileDiagnostic> = raw
                             .into_iter()
                             .filter_map(|d| {
@@ -495,13 +498,8 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                     Some(NumberOrString::String(s)) => Some(s.clone()),
                                     _ => None,
                                 };
-                                let line = if let Some(ref map) = source_map {
-                                    map.php_to_blade(d.range.start).line + 1
-                                } else {
-                                    d.range.start.line + 1
-                                };
                                 Some(FileDiagnostic {
-                                    line,
+                                    line: d.range.start.line + 1,
                                     message: d.message,
                                     identifier,
                                     severity: sev,

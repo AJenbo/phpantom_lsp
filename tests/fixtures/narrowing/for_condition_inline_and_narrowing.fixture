@@ -1,0 +1,25 @@
+// test: instanceof on LHS of && narrows type on RHS within a for condition
+// feature: completion
+// expect: getText(
+// expect_absent: getSrc(
+---
+<?php
+
+class TextNode {
+    public function getText(): string { return ''; }
+}
+
+class ImageNode {
+    public function getSrc(): string { return ''; }
+}
+
+class Walker {
+    public function current(): TextNode|ImageNode { return new TextNode(); }
+    public function next(): TextNode|ImageNode { return new TextNode(); }
+}
+
+function walk(Walker $iter): void {
+    for ($e = $iter->current(); $e instanceof TextNode && $e-><>getText(); $e = $iter->next()) {
+        // body
+    }
+}

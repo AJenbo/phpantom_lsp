@@ -416,7 +416,7 @@ impl Backend {
             };
             if !known
                 && let Some(range) =
-                    offset_range_to_lsp_range(content, *start as usize, *end as usize)
+                    self.offset_range_to_lsp_range(uri, content, *start as usize, *end as usize)
             {
                 let label = if *is_option { "option" } else { "argument" };
                 out.push(helpers::make_diagnostic(
@@ -593,7 +593,7 @@ impl Backend {
             };
             if !valid
                 && let Some(range) =
-                    offset_range_to_lsp_range(content, *start as usize, *end as usize)
+                    self.offset_range_to_lsp_range(uri, content, *start as usize, *end as usize)
             {
                 out.push(helpers::make_diagnostic(
                     range,

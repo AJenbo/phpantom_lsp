@@ -39,6 +39,20 @@ class UpdateUserRequest extends FormRequest {
 }
 
 #[test]
+fn parses_rules_method_declared_in_a_trait() {
+    let content = "<?php
+namespace App\\Http\\Requests\\Concerns;
+trait HasPostRules {
+    public function rules(): array {
+        return ['headline' => 'required|string'];
+    }
+}
+";
+    let rules = rules_from_class_source(content, "HasPostRules");
+    assert_eq!(keys(&rules), vec!["headline"]);
+}
+
+#[test]
 fn ignores_rules_method_of_another_class() {
     let content = "<?php
 class OtherRequest extends FormRequest {

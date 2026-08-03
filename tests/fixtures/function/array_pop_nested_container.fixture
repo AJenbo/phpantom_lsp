@@ -1,0 +1,17 @@
+// test: array_pop on a nested container unwraps one level
+// feature: completion
+// `array_pop` on `list<list<Item>>` yields `list<Item>`, so iterating the
+// result gives `Item` — not `list<Item>` (which is what returning the
+// container type unchanged would produce).
+// expect: itemMethod(
+---
+<?php
+class Item {
+    public function itemMethod(): void {}
+}
+
+/** @var list<list<Item>> $matrix */
+$row = array_pop($matrix);
+foreach ($row as $cell) {
+    $cell-><>
+}

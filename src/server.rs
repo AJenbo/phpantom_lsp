@@ -1900,7 +1900,7 @@ impl Backend {
     /// each imported class is scanned as a one-level helper candidate. Called
     /// once after indexing for Laravel projects. Files are byte-prefiltered for
     /// `macro(` so only candidates are parsed.
-    fn build_laravel_macro_index(&self) {
+    pub(crate) fn build_laravel_macro_index(&self) {
         let php_version = Some(*self.workspace.php_version.lock());
 
         let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();

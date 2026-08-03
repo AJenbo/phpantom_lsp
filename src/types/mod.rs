@@ -2163,6 +2163,7 @@ impl ClassInfo {
             || self.attribute_targets != other.attribute_targets
             || self.template_params != other.template_params
             || self.template_param_bounds != other.template_param_bounds
+            || self.template_param_defaults != other.template_param_defaults
             || self.extends_generics != other.extends_generics
             || self.implements_generics != other.implements_generics
             || self.use_generics != other.use_generics

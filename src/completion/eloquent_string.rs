@@ -223,13 +223,23 @@ pub(crate) fn detect_eloquent_string_context(
     })
 }
 
+/// How far back `find_matching_open_paren` will scan for the call's `(`.
+///
+/// Mid-edit or malformed source can leave an unbalanced `)`/`]` before the
+/// real opening paren, in which case the depth counter never returns to 0
+/// and an unbounded scan would run to the start of the file on every
+/// keystroke inside a string literal. A real argument list never spans
+/// anywhere near this much text.
+const MAX_OPEN_PAREN_SCAN: usize = 2000;
+
 /// Find the opening paren for the method call, scanning backwards.
 /// Handles the case where we might be past a comma (second+ argument).
 fn find_matching_open_paren(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
+    let floor = bytes.len().saturating_sub(MAX_OPEN_PAREN_SCAN);
     let mut depth = 0i32;
     let mut i = bytes.len();
-    while i > 0 {
+    while i > floor {
         i -= 1;
         match bytes[i] {
             b')' | b']' => depth += 1,

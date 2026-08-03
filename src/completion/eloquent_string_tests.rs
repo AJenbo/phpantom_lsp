@@ -123,3 +123,29 @@ fn test_detect_orderby_column() {
     assert_eq!(ctx.kind, EloquentStringKind::Column);
     assert_eq!(ctx.partial, "na");
 }
+
+/// Build `User::with('a', 'a', …, '` with `args` preceding arguments, so the
+/// call's opening paren sits `args * 5` bytes before the cursor's quote.
+fn with_call_of_length(args: usize) -> (String, Position) {
+    let prefix = "User::with(";
+    let line = format!("{prefix}{}'", "'a', ".repeat(args));
+    let character = line.chars().count() as u32;
+    (format!("<?php\n{line}"), Position { line: 1, character })
+}
+
+#[test]
+fn test_open_paren_scan_finds_paren_within_bound() {
+    let (content, pos) = with_call_of_length(100);
+    let ctx = detect_eloquent_string_context(&content, pos).unwrap();
+    assert_eq!(ctx.kind, EloquentStringKind::Relation);
+    assert_eq!(ctx.subject, "User");
+}
+
+#[test]
+fn test_open_paren_scan_is_bounded() {
+    let (content, pos) = with_call_of_length(MAX_OPEN_PAREN_SCAN / 5 + 10);
+    assert!(
+        detect_eloquent_string_context(&content, pos).is_none(),
+        "the backward paren scan must stop at MAX_OPEN_PAREN_SCAN bytes"
+    );
+}

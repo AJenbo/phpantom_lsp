@@ -235,11 +235,13 @@ fn infer_element_type_precise<'b>(
     }
 }
 
-/// For known array functions, resolve the **raw output type**
+/// For known array-producing functions, resolve the **raw output type**
 /// (e.g. `list<User>`) from the input arguments.
 ///
 /// Used by foreach and destructuring resolution so that iterating over
-/// `array_filter(...)` etc. preserves element types.
+/// `array_filter(...)` etc. preserves element types.  Element-extracting
+/// functions are handled by [`resolve_array_func_element_type`], which the
+/// caller consults first.
 pub(in crate::type_engine) fn resolve_array_func_raw_type(
     func_name: &str,
     args: &ArgumentList<'_>,
@@ -294,20 +296,6 @@ pub(in crate::type_engine) fn resolve_array_func_raw_type(
             (None, Some(v)) => Some(PhpType::list(v)),
             _ => Some(PhpType::array()),
         };
-    }
-
-    // Element-extracting functions: return the input container type so
-    // it can be used as an iterable raw type (its element type is the
-    // extracted element).
-    if ARRAY_ELEMENT_FUNCS
-        .iter()
-        .any(|f| f.eq_ignore_ascii_case(func_name))
-    {
-        let arr_expr = super::resolution::first_arg_expr(args)?;
-        let raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
-        if raw.extract_value_type(true).is_some() {
-            return Some(raw);
-        }
     }
 
     None

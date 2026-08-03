@@ -690,6 +690,8 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
         "function demo(): void {\n",
         "    ex\n",
         "}\n",
+        "enum Status ex\n",
+        "interface Marker ex\n",
     )
     .to_string();
 
@@ -792,7 +794,7 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
     // `function demo() { ex| }` should NOT suggest extends.
     let fn_extends_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position {
                 line: 5,
                 character: 6,
@@ -814,6 +816,69 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
             .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
         "Function scope should not suggest `extends`, got: {:?}",
         fn_items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+
+    // `enum Status ex|` should NOT suggest extends — PHP enums cannot extend.
+    let enum_extends_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 7,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let enum_result = backend.completion(enum_extends_params).await.unwrap();
+    let enum_items = match enum_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !enum_items
+            .iter()
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Enum declaration header should not suggest `extends`, got: {:?}",
+        enum_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `interface Marker ex|` should suggest extends.
+    let iface_extends_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let iface_extends_items = match backend
+        .completion(iface_extends_params)
+        .await
+        .unwrap()
+        .unwrap()
+    {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        iface_extends_items
+            .iter()
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Interface declaration header should suggest `extends`, got: {:?}",
+        iface_extends_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
     );
 }
 

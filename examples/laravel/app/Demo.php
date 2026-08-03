@@ -414,6 +414,10 @@ class Demo
         Artisan::call('bakery:sync');
         Artisan::queue('reports:generate');
 
+        // Commands the framework itself ships count too, not just the
+        // project's own.
+        Artisan::call('queue:work');
+
         // Scheduled commands name the same declarations.
         Schedule::command('bakery:sync')->daily();
 

@@ -80,10 +80,13 @@ impl Backend {
         group_prefix: Option<&str>,
         use_map: &mut HashMap<String, String>,
     ) {
-        let item_name = bytes_to_str(item.name.value());
+        // `use \Foo\Bar;` is legal PHP, but every FQN this codebase stores
+        // is unprefixed, so normalize here rather than leaving each
+        // consumer of the use_map to strip it.
+        let item_name = bytes_to_str(item.name.value()).trim_start_matches('\\');
 
         let fqn = if let Some(prefix) = group_prefix {
-            format!("{}\\{}", prefix, item_name)
+            format!("{}\\{}", prefix.trim_start_matches('\\'), item_name)
         } else {
             item_name.to_string()
         };

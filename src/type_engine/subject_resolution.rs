@@ -15,6 +15,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
 use crate::types::ClassInfo;
+use crate::util::resolve_to_fqn;
 
 /// Context for resolving a subject expression to its type.
 pub(crate) struct SubjectResolutionCtx<'a> {
@@ -113,35 +114,5 @@ fn find_enclosing_class_fqn(
         Some(format!("{}\\{}", ns, cls.name))
     } else {
         Some(cls.name.to_string())
-    }
-}
-
-/// Resolve a class name to its FQN using the use-map and namespace.
-fn resolve_to_fqn(
-    name: &str,
-    use_map: &HashMap<String, String>,
-    namespace: &Option<String>,
-) -> String {
-    // Already fully qualified.
-    if name.starts_with('\\') {
-        return name.trim_start_matches('\\').to_string();
-    }
-
-    // Check use-map (by short name / first segment).
-    let first_segment = name.split('\\').next().unwrap_or(name);
-    if let Some(fqn) = use_map.get(first_segment) {
-        if name.contains('\\') {
-            // Multi-segment: replace first segment with the imported FQN.
-            let rest = &name[first_segment.len()..];
-            return format!("{}{}", fqn.trim_start_matches('\\'), rest);
-        }
-        return fqn.trim_start_matches('\\').to_string();
-    }
-
-    // Fall back to namespace-qualified.
-    if let Some(ns) = namespace {
-        format!("{}\\{}", ns, name)
-    } else {
-        name.to_string()
     }
 }

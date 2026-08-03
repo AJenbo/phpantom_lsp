@@ -7,40 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B1. `analyze` flags framework Artisan commands as unknown
-
-**Impact: Medium · Effort: Low**
-
-`phpantom_lsp analyze` reports `Unknown command: 'queue:work'` for a
-command the framework itself ships. Reproduce by adding
-`Artisan::call('queue:work');` to `examples/laravel/app/Demo.php` and
-running a **release** build of
-`analyze --project-root examples/laravel` (a debug build runs a reduced
-collector list that excludes the Laravel string-key checks, so the
-false positive is invisible there).
-
-The cause is which files populate the command index. The LSP's
-`initialized` handler calls `build_laravel_command_index`, which scans
-the whole FQN → URI index — vendor packages included. The headless
-pipeline in `analyse/run.rs` never calls it, and instead gets entries
-only from `refresh_laravel_command_index`, which `update_ast` fires per
-parsed file. `analyze` parses user files, so the index ends up holding
-the project's own commands and nothing else. Since it is then non-empty,
-the "index is empty, discovery must have failed" guard in
-`collect_invalid_laravel_string_key_diagnostics` does not fire, and every
-vendor command name is reported as unknown.
-
-`build_laravel_macro_index` is missing from the same block, with the same
-shape of consequence: only macros registered in parsed user files are
-recovered, so a macro registered by a vendor package's service provider
-can produce a false-positive unknown member.
-
-**Where to change:** call `build_laravel_command_index` and
-`build_laravel_macro_index` from the Laravel block in `analyse/run.rs`,
-next to `build_laravel_date_class`, `build_provider_resources`, and
-`build_laravel_morph_map_index`.
-
-
 #### B2. A property assigned inside a guarded `if` keeps its declared type after the block
 
 **Impact: Medium · Effort: Medium**
@@ -132,55 +98,6 @@ resolution in `virtual_members/`.
 `tests/psalm_assertions/template_class_template_extends.php` carries two
 `// SKIP` markers that clear when this is fixed.
 
-#### B4. `analyze` reports Blade type diagnostics six lines too early
-
-**Impact: Medium · Effort: Low**
-
-Diagnostics that a Blade template reports through the type-mismatch
-passes land six lines above the code that produced them, so the CLI
-points at unrelated markup:
-
-```
-resources/views/pages/invoice.blade.php
-  545   Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal<bool>
-```
-
-The call is on line 551. The offset is exactly `blade::PROLOGUE_LINES`,
-and it is a double translation. `Backend::offset_range_to_lsp_range`
-(`diagnostics/mod.rs`) already maps a Blade file's virtual-PHP range back
-to Blade coordinates via `map.php_to_blade`, and then `analyse/run.rs`
-maps the same range a second time:
-
-```rust
-let line = if let Some(ref map) = source_map {
-    map.php_to_blade(d.range.start).line + 1
-} else {
-    d.range.start.line + 1
-};
-```
-
-The Laravel string-key diagnostics (`invalid_laravel_view`,
-`invalid_laravel_route`, …) are unaffected because they build their range
-with the *free* `offset_range_to_lsp_range(content, …)`, which does no
-Blade translation, so `run.rs` supplies the only one they need. Every
-pass that goes through the `&self` method — the three `type_mismatch_*`
-collectors, `unknown_member`, `unknown_variable` — is shifted.
-
-The LSP path does not double-translate, so this is `analyze`-only.
-
-The fix is to pick one owner for the translation. Having every collector
-emit Blade coordinates (what the `&self` method already does) and
-dropping the `php_to_blade` call in `run.rs` is the smaller change, but
-it needs an audit that no collector still emits virtual-PHP coordinates.
-
-**Where to look:** `src/analyse/run.rs` (the `source_map` branch),
-`Backend::offset_range_to_lsp_range` and the free
-`offset_range_to_lsp_range` in `src/diagnostics/mod.rs`.
-
-**Reproduce:** point `analyze` at any project whose Blade templates
-trigger a `type_mismatch_argument`, and compare the reported line with
-the source.
-
 #### B5. "Promote constructor param" leaves an orphaned docblock behind
 
 **Impact: Low · Effort: Low-Medium**
@@ -258,85 +175,6 @@ non-empty after trimming.
 class brace is on its own line (as above) and assert the insertion
 point lands on the `function` line, not the brace line.
 
-#### B7. Eloquent string-completion's backward paren scan has no bound
-
-**Impact: Low · Effort: Low**
-
-Found while cleaning up comments in `completion/eloquent_string.rs`.
-`detect_string_call_context` calls `find_matching_open_paren` on
-`content[..quote_pos]` (everything in the file before the cursor's
-opening quote) with no length cap. The function scans backward byte by
-byte tracking bracket depth; if the preceding source has an unbalanced
-`)`/`]` before the real matching `(` — e.g. the cursor's string
-literal is itself inside a malformed/mid-edit expression — depth never
-returns to 0 and the scan runs all the way to the start of the file.
-
-This mirrors a case already fixed elsewhere in the codebase: the
-`function`-keyword backward scan in
-`code_actions/phpstan/add_throws.rs`'s `find_enclosing_docblock` had
-the same unbounded-backward-scan shape and was capped at 2000 bytes.
-`find_matching_open_paren` has no equivalent cap, and it is on the
-completion hot path (triggered on every keystroke inside a string
-literal argument), so a large file with an unbalanced bracket before
-the cursor pays for an O(file size) scan on every trigger.
-
-**Where to look:** `find_matching_open_paren` in
-`completion/eloquent_string.rs` — give the backward scan a byte-offset
-floor (matching the pattern and rationale already used in
-`add_throws.rs`) so pathological/mid-edit source can't force an
-unbounded scan.
-
-#### B8. `extends` keyword completion offered inside `enum` declaration headers
-
-**Impact: Low · Effort: Low**
-
-Found while cleaning up comments in `completion/context/keyword_completion.rs`.
-`build_keyword_context` sets
-`in_extends_declaration_header: decl_kind.is_some()`, which is `true`
-whenever `decl_kind` is `Class`, `Interface`, *or* `Enum`. PHP enums
-cannot use `extends` (only `implements`), so typing `enum Foo ext|`
-offers an `extends` completion that will always produce invalid PHP.
-`in_implements_declaration_header` a few lines below already gets this
-right, restricting itself to `Class | Enum`.
-
-**Where to look:** `build_keyword_context` in
-`completion/context/keyword_completion.rs` — change
-`in_extends_declaration_header` to
-`matches!(decl_kind, Some(DeclarationHeaderKind::Class | DeclarationHeaderKind::Interface))`,
-matching the pattern already used for `in_implements_declaration_header`.
-No existing test exercises this path; add one for `enum Foo ext|` (no
-completion) and `interface Foo ext|` (completion offered, extends
-existing coverage of the Class case).
-
-#### B9. `class_level_signature_eq` never compares `template_param_defaults`
-
-**Impact: Low · Effort: Low**
-
-Found while cleaning up comments in `types/mod.rs`. `ClassInfo::template_param_defaults`
-(`@template T = default` clauses) feeds conditional-return-type default
-evaluation, per its own doc comment. `class_level_signature_eq` compares
-`template_params` and `template_param_bounds` but not
-`template_param_defaults`:
-
-```rust
-|| self.template_params != other.template_params
-|| self.template_param_bounds != other.template_param_bounds
-// template_param_defaults is missing here
-|| self.extends_generics != other.extends_generics
-```
-
-If only a `@template T = default` value changes (e.g.
-`@template TAsync of bool = false` → `= true`) with no other tracked
-field changing, `signature_eq` returns `true`, so a cache entry keyed on
-it is not evicted and conditional return types depending on that default
-can resolve stale. Unlike `links`/`see_refs` (legitimately excluded as
-display-only), there is no comment or rationale suggesting this
-exclusion is intentional.
-
-**Where to look:** `class_level_signature_eq` in `src/types/mod.rs`
-(~line 2165) — add `|| self.template_param_defaults != other.template_param_defaults`
-alongside the `template_param_bounds` comparison.
-
 #### B10. Extract Function's by-reference-write safety check can never trigger
 
 **Impact: Low-Medium · Effort: Medium**
@@ -374,39 +212,6 @@ with those variable names.
 — the `parameters`/`return_values`/`locals` classification loops already
 show the pattern for iterating `self.accesses` within the range; add an
 equivalent pass keyed on by-reference write accesses.
-
-#### B11. `type_engine/subject_resolution.rs` duplicates `util::resolve_to_fqn` with a subtle behavioral difference
-
-**Impact: Low · Effort: Low**
-
-Found while cleaning up comments in `type_engine/subject_expr.rs`.
-`type_engine/subject_resolution.rs` has its own private
-`resolve_to_fqn(name, use_map, namespace)` (~line 120) that duplicates
-the public `crate::util::resolve_to_fqn` (`src/util.rs:41`) instead of
-calling it. The two differ in one place: when a short name resolves via
-`use_map`, the `type_engine` copy does
-`fqn.trim_start_matches('\\').to_string()` on the matched value, while
-`util::resolve_to_fqn` returns `fqn.clone()` unmodified. If a `use_map`
-entry is ever stored with a leading `\` (worth checking how entries are
-populated — some paths in this codebase do store FQNs with a leading
-backslash), the two functions return different strings for the same
-input, and only one of them strips it.
-
-This is the kind of parallel resolution path the project's type-engine
-conventions warn against: a second implementation of "resolve a name to
-its FQN" that can silently drift from the canonical one in `util.rs`.
-It is currently used for two call sites in `subject_resolution.rs`
-(parent-class and general subject FQN resolution feeding `SubjectExpr`
-resolution), not the main shared `resolve_rhs_expression` pipeline, so
-the blast radius is contained, but a future fix to `util::resolve_to_fqn`
-(e.g. a `use_map` normalization change) would not automatically apply
-here.
-
-**Where to look:** `resolve_to_fqn` in `src/type_engine/subject_resolution.rs`
-— replace its two call sites with `crate::util::resolve_to_fqn` and
-delete the local duplicate, after confirming `use_map` entries are
-consistently normalized (with or without a leading `\`) so removing the
-`trim_start_matches` step doesn't change behavior for either call site.
 
 #### B12. `resolve_rhs_expression`'s `RHS_EXPR_DEPTH` cap silently returns empty past depth 100
 
@@ -500,41 +305,6 @@ the comment describes), or delete the cache entirely
 calls) before choosing — if the O(n²) problem the cache was built for
 is real, the read path is the right fix.
 
-#### B14. `array_pop`/`array_shift` on nested containers resolve to the container type
-
-**Impact: Low-Medium · Effort: Low**
-
-Found while cleaning up comments in
-`type_engine/variable/raw_type_inference.rs`. For element-extracting
-functions (`ARRAY_ELEMENT_FUNCS`: `array_pop`, `array_shift`, etc.),
-`resolve_rhs_function_call` in
-`src/type_engine/variable/rhs_resolution/calls.rs` (~line 845) tries
-`resolve_array_func_element_type` first, but only returns its result
-when `type_hint_to_classes_typed` resolves the element type to at
-least one class. When the element type is not class-like — e.g.
-popping a `list<list<int>>` yields element type `list<int>` — the
-correct result is discarded and control falls through to the
-`resolve_array_func_raw_type` branch, whose `ARRAY_ELEMENT_FUNCS` arm
-returns the *input container type unchanged* as a type-string-only
-result.
-
-So `$row = array_pop($matrix)` with `$matrix: list<list<int>>` resolves
-`$row` to `list<list<int>>` instead of `list<int>`, and
-`foreach (array_pop($matrix) as $x)` resolves `$x` to `list<int>`
-instead of `int` — one level of unwrapping is missed whenever the
-element type doesn't name a class. The simple class case
-(`array_pop($users)` on `list<User>`) is unaffected because the
-element-type branch resolves `User` and returns early.
-
-**Where to look:** the element-type branch in
-`resolve_rhs_function_call` should return the element type as a
-type-string-only result (mirroring what the raw-type branch below it
-already does for unresolvable-but-informative types) instead of
-falling through. The `ARRAY_ELEMENT_FUNCS` arm of
-`resolve_array_func_raw_type` then only fires when no element type
-could be computed at all; whether it should keep returning the
-container at that point is worth revisiting at the same time.
-
 #### B15. `IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard
 
 **Impact: Low · Effort: Medium**
@@ -557,44 +327,6 @@ wrong type.
 entity being resolved (e.g. the closure's span offset or the call-site
 span) in a small visited set, as `RESOLVING` does for class FQNs, so
 only genuine same-entity cycles short-circuit.
-
-#### B16. Cursor-position narrowing inside a `for` condition isn't applied
-
-**Impact: Low · Effort: Low**
-
-Found while cleaning up comments in `type_engine/variable/forward_walk/mod.rs`.
-`walk_body_forward`'s cursor-narrowing pass applies `instanceof`/guard
-narrowing when the cursor sits inside an `if` or `while` condition:
-
-```rust
-match stmt {
-    Statement::If(if_stmt) => { ... apply_cursor_ternary_narrowing(if_stmt.condition, ...) }
-    Statement::While(while_stmt) => { ... apply_cursor_ternary_narrowing(while_stmt.condition, ...) }
-    _ => {}
-}
-```
-
-There is no `Statement::For` arm, so the same narrowing never applies
-inside a `for` loop's condition list, e.g.:
-
-```php
-for ($e = $iter->current(); $e instanceof Foo && $e->x; $e = $iter->next()) {
-    // cursor on `$e->x` above doesn't get instanceof narrowing
-}
-```
-
-`Statement::For`'s `conditions` field is `&[Expression]` (PHP allows
-comma-separated conditions, unlike `if`/`while`'s single expression),
-so the fix isn't a direct copy-paste of the `If`/`While` arms — each
-condition in the list needs the cursor-containment check, and (per PHP
-semantics) only the last one's boolean value controls loop
-continuation, though any of them could be the one the cursor is on.
-
-**Where to look:** `walk_body_forward` in
-`src/type_engine/variable/forward_walk/mod.rs`, the cursor-narrowing
-`match stmt` block — add a `Statement::For` arm that iterates
-`for_stmt.conditions` and applies `apply_cursor_ternary_narrowing` to
-whichever condition contains the cursor.
 
 #### B17. `virtual_members/resolve.rs` reimplements generic substitution without right-alignment
 
@@ -755,21 +487,6 @@ inside a string from the start of a comment without a forward pass, so
 the fix likely means scanning the enclosing statement forward once and
 masking comments before the backwards walk, the way the Blade
 preprocessor masks non-PHP text.
-
-#### B22. A `rules()` method supplied by a trait is not read
-
-**Impact: Low · Effort: Low**
-
-`collect_rules_method` in
-`src/virtual_members/laravel/validation_rules.rs` only looks at
-`Node::Class`, so a `FormRequest` that gets its `rules()` from a trait
-offers no request-input keys and no `validated()` shape. The parent-chain
-walk covers `extends`, but nothing follows a `use SomeTrait;`.
-
-**Where to change:** resolve the class's used traits (the class index
-already carries them) and read `rules()` out of the trait's file with the
-same `rules_from_class_source` pass, keeping the trait's own file as the
-entry `origin` so go-to-definition lands on the trait.
 
 #### B23. Three type-engine resolvers are activated for only four consumers
 

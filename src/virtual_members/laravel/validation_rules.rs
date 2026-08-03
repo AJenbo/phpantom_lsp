@@ -844,6 +844,13 @@ fn form_request_rules_within(
             return (!rules.is_empty()).then_some(ResolvedRules { source, rules });
         }
 
+        // The class body declares no `rules()`. A trait it uses may supply
+        // one, and PHP treats that as the class's own method, so it is
+        // consulted before the parent chain.
+        if let Some(resolved) = trait_rules(backend, &fqn, current_uri, current_content, budget) {
+            return Some(resolved);
+        }
+
         budget = budget.checked_sub(1)?;
         let parent = backend
             .find_or_load_class(&fqn)
@@ -853,6 +860,64 @@ fn form_request_rules_within(
         }
         fqn = parent.to_string();
     }
+}
+
+/// The rules declared by a `rules()` method that one of `class_fqn`'s traits
+/// supplies, searched in `use` order and then into each trait's own traits.
+///
+/// Entries keep the declaring trait's file as their source, so go-to-definition
+/// on an inherited key lands on the trait rather than on the using class. A
+/// `parent::rules()` written inside a trait resolves against the *using*
+/// class's parent, which is why `class_fqn` — not the trait — is what
+/// [`merge_parent_rules`] is given.
+fn trait_rules(
+    backend: &Backend,
+    class_fqn: &str,
+    current_uri: &str,
+    current_content: &str,
+    budget: u32,
+) -> Option<ResolvedRules> {
+    let budget = budget.checked_sub(1)?;
+    let class = backend.find_or_load_class(class_fqn)?;
+
+    for trait_name in class.used_traits.iter() {
+        let Some(uri) = backend.find_class_file_uri(trait_name, current_uri) else {
+            continue;
+        };
+        let other = (uri != current_uri)
+            .then(|| backend.get_file_content_arc(&uri))
+            .flatten();
+        let content = other.as_deref().map_or(current_content, String::as_str);
+        let mut rules = rules_from_class_source(content, short_name(trait_name));
+
+        if rules.is_empty() && rules.parent_rules_at.is_none() {
+            // The trait itself may compose its `rules()` from another trait.
+            if let Some(resolved) =
+                trait_rules(backend, trait_name, current_uri, current_content, budget)
+            {
+                return Some(resolved);
+            }
+            continue;
+        }
+
+        let source = match other {
+            None => RulesSource::CurrentFile,
+            Some(content) => RulesSource::OtherFile(Arc::new(RulesFile { uri, content })),
+        };
+        merge_parent_rules(
+            backend,
+            class_fqn,
+            current_uri,
+            current_content,
+            &mut rules,
+            budget,
+        );
+        if !rules.is_empty() {
+            return Some(ResolvedRules { source, rules });
+        }
+    }
+
+    None
 }
 
 /// Merge the keys of `parent::rules()` into `rules`, at the position the call
@@ -955,11 +1020,18 @@ pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> RulesA
 }
 
 fn collect_rules_method(node: Node<'_, '_>, class_name: &str, content: &str, out: &mut RulesArray) {
-    if let Node::Class(class) = node {
-        if !bytes_to_str(class.name.value).eq_ignore_ascii_case(class_name) {
+    // A trait declares `rules()` the same way a class does, and a
+    // `FormRequest` is free to get its method from one.
+    let declaration = match node {
+        Node::Class(class) => Some((bytes_to_str(class.name.value), &class.members)),
+        Node::Trait(trait_) => Some((bytes_to_str(trait_.name.value), &trait_.members)),
+        _ => None,
+    };
+    if let Some((name, members)) = declaration {
+        if !name.eq_ignore_ascii_case(class_name) {
             return;
         }
-        for member in class.members.iter() {
+        for member in members.iter() {
             if let ClassLikeMember::Method(method) = member
                 && bytes_to_str(method.name.value).eq_ignore_ascii_case("rules")
                 && let MethodBody::Concrete(block) = &method.body

@@ -280,7 +280,11 @@ pub(crate) fn build_keyword_context(
         in_loop,
         in_switch,
         in_top_level,
-        in_extends_declaration_header: decl_kind.is_some(),
+        // PHP enums cannot `extends`, only `implements`.
+        in_extends_declaration_header: matches!(
+            decl_kind,
+            Some(DeclarationHeaderKind::Class | DeclarationHeaderKind::Interface)
+        ),
         in_implements_declaration_header: matches!(
             decl_kind,
             Some(DeclarationHeaderKind::Class | DeclarationHeaderKind::Enum)

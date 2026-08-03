@@ -765,6 +765,17 @@ pub(super) fn resolve_rhs_function_call<'b>(
         if !resolved.is_empty() {
             return ResolvedType::from_classes_with_hint(resolved, element_type);
         }
+        // The element type is not class-like (`array_pop` on a
+        // `list<list<int>>` yields `list<int>`), but it is still the right
+        // answer. Returning it as a type-string-only result keeps the one
+        // level of unwrapping; falling through to the raw-type branch below
+        // would hand back the container type unchanged.
+        return vec![resolved_type_with_lookup(
+            element_type,
+            current_class_name,
+            all_classes,
+            class_loader,
+        )];
     }
 
     // For type-preserving functions (array_filter, array_values, etc.)
