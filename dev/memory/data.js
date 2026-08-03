@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785792963194,
+  "lastUpdate": 1785799507469,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13565,6 +13565,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "78dc2febba8d948df6890aa50b34b21dfd4e5190",
+          "message": "A very long fluent chain no longer crashes the language server",
+          "timestamp": "2026-08-04T01:09:53+02:00",
+          "tree_id": "183243570dd74c8e5ef6a8c14fa7e3861c1b7baf",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/78dc2febba8d948df6890aa50b34b21dfd4e5190"
+        },
+        "date": 1785799504601,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.7,
             "unit": "MiB"
           }
         ]
