@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B3. A property write overrides the declared type even when it goes through <code>__set</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1416,17 +1405,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B3. A property write overrides the declared type even when it goes through <code>__set</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1566,47 +1544,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set">B3. A property write overrides the declared type even when it goes through <code>__set</code><a class="headerlink" href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p><code>$obj-&gt;prop = expr</code> records the assigned type under a property-path key
-(<code>assignment.rs</code>, the <code>Expression::Access(Access::Property(_) | ...)</code>
-branch) so that a later read of the same path resolves through the
-assignment "rather than the declaring class's declared property hints".
-That is right for a real declared property, and it is what makes
-<code>stdClass</code> chains resolve. It is wrong when the write dispatches to
-<code>__set</code>, which is free to transform, reroute, or drop the value instead
-of storing it as given. <code>__get</code> then decides what a read returns, and the
-recorded write type has no authority over it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @template TData of array */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class DataBag {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    /** @param TData $data */</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    public function __construct(private array $data) {}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    /** @return TData[K] */</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    public function __get(string $property) { return $this-&gt;data[$property]; }</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    /** @param TData[K] $value */</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    public function __set(string $property, $value) { /* may store anything */ }</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">}</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">/** @extends DataBag&lt;array{a: int, b: string}&gt; */</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">class FooBag extends DataBag {}</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">$foo = new FooBag([&quot;a&quot; =&gt; 5, &quot;b&quot; =&gt; &quot;hello&quot;]);</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">$foo-&gt;a = 9;</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">$a = $foo-&gt;a;   // PHPantom: 9      Psalm: int (via __get&#39;s TData[K])</span>
-</code></pre></div>
-<p>The write should not be recorded when the property is undeclared on the
-subject's class <em>and</em> that class declares <code>__set</code>; the read should keep
-resolving through <code>__get</code>. Psalm and PHPStan both treat magic property
-writes as opaque for this reason.</p>
-<p>This predates literal preservation in expression resolution: the recorded
-type used to coincide with the declared type (<code>int</code> either way), so the
-override was invisible. It surfaced when the write started recording <code>9</code>.</p>
-<p><strong>Where to look:</strong> the property-assignment branch of
-<code>type_engine/variable/forward_walk/assignment.rs</code>, and the magic-member
-resolution in <code>virtual_members/</code>.</p>
-<p><strong>Test:</strong> the <code>inheritTemplateParamViaConstructor</code> case in
-<code>tests/psalm_assertions/template_class_template_extends.php</code> carries two
-<code>// SKIP</code> markers that clear when this is fixed.</p>
 <h4 id="b10-extract-functions-by-reference-write-safety-check-can-never-trigger">B10. Extract Function's by-reference-write safety check can never trigger<a class="headerlink" href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p>Found while cleaning up comments in <code>scope_collector/</code>. <code>RangeClassification::reference_writes</code>
@@ -1614,10 +1551,10 @@ resolution in <code>virtual_members/</code>.</p>
 are written by reference (<code>&amp;$var</code>) inside the range") is declared,
 sorted at the end of <code>classify_range</code>, and consumed as a safety gate in
 Extract Function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">// code_actions/extract_function/mod.rs:198</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">if</span><span class="w"> </span><span class="n">scope_map</span><span class="p">.</span><span class="n">uses_reference_params</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">classification</span><span class="p">.</span><span class="n">reference_writes</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1">// code_actions/extract_function/mod.rs:198</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">if</span><span class="w"> </span><span class="n">scope_map</span><span class="p">.</span><span class="n">uses_reference_params</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">classification</span><span class="p">.</span><span class="n">reference_writes</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">}</span>
 </code></pre></div>
 <p>but nothing in <code>classify_range</code> ever pushes into it — confirmed via
 <code>git log -S "reference_writes"</code> that no commit has ever added a
@@ -1738,7 +1675,7 @@ adding the field touches every <code>PropertyInfo</code> construction site.</p>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>new \Acme\Decimal\Decimal('0.00')</code> resolves to <code>Decimal&lt;bool&gt;</code>, and the
 value is then rejected against a plain <code>Decimal</code> parameter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
 </code></pre></div>
 <p>The generic argument is nonsense: the class is constructed from a string
 literal and nothing in the call binds a <code>bool</code>. Because the reported type
@@ -1769,9 +1706,9 @@ backwards from the cursor over brackets, parentheses, braces, and string
 literals, but does not skip <code>//</code>, <code>#</code>, or <code>/* … */</code> comments. A stray
 bracket or quote in a comment between the call and the cursor unbalances
 the walk, and the completion drops out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">]);</span>
 </code></pre></div>
 <p>It fails closed (no suggestions rather than wrong ones), which is why it
 is low impact. The obstacle is that a backwards scan cannot tell a <code>//</code>
@@ -1813,17 +1750,17 @@ thread-local state.</p>
 <p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
 <p>Found while fixing the orphaned-docblock case. A property carrying an
 attribute loses it entirely:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    #[SomeAttr]</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    private int $bar;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    #[SomeAttr]</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    private int $bar;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>becomes</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>PlainProperty::span()</code> starts at the first attribute list when there is
 one, so the deletion range in <code>build_promotion_candidate</code>
@@ -1842,7 +1779,7 @@ preserved as-is and a bare attribute may need one added.</p>
 <p>Found while stress-testing right-associative chain resolution. A fluent
 chain of roughly 3000 links overflows the 8 MB parse-worker stack and
 aborts the process (<code>SIGSEGV</code>, which <code>catch_unwind</code> cannot catch):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$out = $x-&gt;self()-&gt;self()/* … ~3000 links … */-&gt;self();</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$out = $x-&gt;self()-&gt;self()/* … ~3000 links … */-&gt;self();</span>
 </code></pre></div>
 <p>The recursion is <code>resolve_rhs_call</code> → <code>resolve_rhs_expression</code> →
 <code>resolve_rhs_method_call_inner</code> → <code>resolve_rhs_call</code>, about three frames
