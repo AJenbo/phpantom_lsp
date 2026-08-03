@@ -258,15 +258,17 @@ pub(crate) fn process_if_statement_body<'b>(
         *scope = merged;
     }
 
-    // Remove synthetic property access keys that were seeded by
-    // condition narrowing inside branches.  These represent narrowed
-    // types that only hold within specific branches, not after the
-    // if/elseif/else block.  This must run BEFORE guard clause
-    // narrowing so that guard-clause-narrowed property keys (e.g.
-    // `$this->model` narrowed to `Order` after
-    // `if (!$this->model instanceof Order) { return; }`) survive
-    // into the post-if scope.
-    strip_synthetic_property_keys(scope);
+    // Drop synthetic property access keys that only some branches
+    // established: those represent narrowing (or an assignment) that
+    // holds within one branch and says nothing about the others.  Keys
+    // every surviving path carries are kept, so their merged union is
+    // the type the property has once the branches reconverge.  This
+    // must run BEFORE guard clause narrowing so that
+    // guard-clause-narrowed property keys (e.g. `$this->model`
+    // narrowed to `Order` after
+    // `if (!$this->model instanceof Order) { return; }`) survive into
+    // the post-if scope.
+    retain_synthetic_keys_common_to_all(scope, &surviving_scopes);
 
     // Guard clause narrowing: when the if body unconditionally exits
     // and there are no elseif/else branches, apply inverse narrowing.

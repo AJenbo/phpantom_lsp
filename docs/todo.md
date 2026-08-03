@@ -30,7 +30,6 @@ within the same impact tier.
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
-| B2  | [Property assigned inside a guarded `if` keeps its declared type](todo/bugs.md#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block)                | Medium      | Medium      |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 

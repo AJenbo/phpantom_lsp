@@ -7,47 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B2. A property assigned inside a guarded `if` keeps its declared type after the block
-
-**Impact: Medium · Effort: Medium**
-
-The lazy-initialisation idiom leaves a property at its declared type
-once the `if` closes, so returning it from a method with a narrower
-return type is reported as a mismatch:
-
-```php
-protected ?AbstractType $instance = null;
-
-public function getType(): ConcreteType
-{
-    if (!$this->instance instanceof ConcreteType) {
-        $this->instance = $this->context->makeConcrete();  // : ConcreteType
-    }
-
-    return $this->instance;   // false positive: ?AbstractType
-}
-```
-
-Both paths out of the `if` give `ConcreteType`: the implicit else is the
-negation of the condition, and the then-branch assigns one. The two need
-to be merged the way the forward walker already merges branch outcomes
-for local variables. Property keys are seeded into the walker's scope for
-`instanceof` narrowing (`seed_property_keys_into_scope`), so the missing
-piece is recording a property *assignment* into that scope and joining
-the branches at the end of the block, not new machinery.
-
-Surfaced by removing the supertype-where-subtype escape hatch from the
-argument/return compatibility layer, which is what made the stale type
-visible. Reproducible in an open-source project: PDepend's
-`ASTClassReference::getType()` and `ASTTraitReference::getType()` are the
-two remaining diagnostics `analyze` reports there, and PHPStan at level
-max reports neither.
-
-**Where to look:** `type_engine/variable/forward_walk/` (branch merging
-and `seed_property_keys_into_scope`) and
-`type_engine/resolver/property_narrowing.rs`.
-
-
 #### B3. A property write overrides the declared type even when it goes through `__set`
 
 **Impact: Low-Medium · Effort: Medium**

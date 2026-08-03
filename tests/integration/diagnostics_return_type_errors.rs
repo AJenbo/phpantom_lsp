@@ -3203,3 +3203,74 @@ class Runner {
         "an arm narrowed to C cannot satisfy A|B"
     );
 }
+
+// ─── Lazy initialisation inside a guarded `if` ──────────────────────────────
+//
+// Property paths resolve through the forward walker's scope snapshots,
+// which only the full slow-diagnostic pass builds — so these go through
+// `collect_slow_diagnostics` rather than the bare collector `collect`
+// calls.
+
+fn collect_via_slow_pass(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+    out
+}
+
+#[test]
+fn lazy_initialisation_in_guarded_if_narrows_the_property_after_the_block() {
+    let php = r#"<?php
+abstract class AbstractType {}
+class ConcreteType extends AbstractType {}
+class Context {
+    public function makeConcrete(): ConcreteType { return new ConcreteType(); }
+}
+class Holder {
+    protected ?AbstractType $instance = null;
+    public function __construct(private Context $context) {}
+
+    public function getType(): ConcreteType
+    {
+        if (!$this->instance instanceof ConcreteType) {
+            $this->instance = $this->context->makeConcrete();
+        }
+
+        return $this->instance;
+    }
+}
+"#;
+    let diags = collect_via_slow_pass(php);
+    assert!(
+        !has_return_error(&diags),
+        "both paths out of the guard give ConcreteType, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
+fn a_property_narrowed_only_inside_a_branch_does_not_leak_past_the_block() {
+    let php = r#"<?php
+abstract class AbstractType {}
+class ConcreteType extends AbstractType {}
+class Holder {
+    protected ?AbstractType $instance = null;
+
+    public function getType(): ConcreteType
+    {
+        if ($this->instance instanceof ConcreteType) {
+            echo 'yes';
+        }
+
+        return $this->instance;
+    }
+}
+"#;
+    let diags = collect_via_slow_pass(php);
+    assert!(
+        has_return_error(&diags),
+        "the branch proves nothing about the implicit-else path"
+    );
+}

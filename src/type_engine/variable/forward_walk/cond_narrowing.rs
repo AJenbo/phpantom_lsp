@@ -1893,15 +1893,38 @@ pub(crate) fn collect_condition_var_names(expr: &Expression<'_>) -> Vec<String> 
     names
 }
 
+/// Whether a scope key is a synthetic property/array access key
+/// (e.g. `$this->cache`, `$row["id"]`) rather than a plain variable.
+pub(crate) fn is_synthetic_key(key: &str) -> bool {
+    key.contains("->") || key.contains("[\"")
+}
+
 /// Remove synthetic property/array access keys from the scope.
 /// Called after loop merges and other scope transitions where
 /// condition-based narrowing no longer holds.
-///
-/// Synthetic keys contain `->` (property access) or `["` (array access).
 pub(crate) fn strip_synthetic_property_keys(scope: &mut ScopeState) {
-    scope
-        .locals
-        .retain(|key, _| !key.contains("->") && !key.contains("[\""));
+    scope.locals.retain(|key, _| !is_synthetic_key(key));
+}
+
+/// Keep only the synthetic property/array access keys that *every*
+/// surviving path out of a branching statement established a type for.
+///
+/// A key that only some paths carry is narrowing (or an assignment)
+/// that holds inside one branch and says nothing about the others, so
+/// the merged union would be an unsound claim about the program point
+/// after the statement. A key every path carries is a genuine join:
+/// each branch contributed its own truth, so the union is exactly the
+/// type the property can have once the branches reconverge. That is
+/// what makes the lazy-initialisation idiom resolve — the then-branch
+/// assigns the concrete type and the implicit else path narrows to it
+/// via the negated condition, so both agree.
+pub(crate) fn retain_synthetic_keys_common_to_all(
+    scope: &mut ScopeState,
+    surviving: &[&ScopeState],
+) {
+    scope.locals.retain(|key, _| {
+        !is_synthetic_key(key) || surviving.iter().all(|s| s.locals.contains_key(key))
+    });
 }
 
 /// Seed a synthetic scope entry for a compound key (property access

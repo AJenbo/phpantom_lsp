@@ -4386,6 +4386,26 @@ class ReflectionInstantiationDemo
     }
 }
 
+// ── Lazy initialisation inside a guarded `if` ───────────────────────────────
+// A property assigned inside a guard keeps the assigned type once the block
+// closes.  Both ways out give the same type: the then-branch assigns it, and
+// the implicit else path is the negation of the condition.
+
+class LazyInitNarrowingDemo
+{
+    private ?Pen $marker = null;
+
+    public function marker(): Marker
+    {
+        if (!$this->marker instanceof Marker) {
+            $this->marker = new Marker();
+        }
+
+        // Try: `$this->marker->` — Marker members (highlight(), write(), …)
+        return $this->marker;                     // Marker, not ?Pen
+    }
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
@@ -7680,6 +7700,10 @@ function runDemoAssertions(): void
         assert($dirEntry instanceof \DirectoryIterator, 'DirectoryIterator foreach element must be DirectoryIterator');
         break;
     }
+
+    // ── Lazy initialisation inside a guarded `if` ───────────────────────
+    $lazy = new LazyInitNarrowingDemo();
+    assert($lazy->marker() instanceof Marker, 'a property assigned inside a guard keeps that type after the block');
 
     echo "All assertions passed.\n";
 }
