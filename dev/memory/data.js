@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785750802444,
+  "lastUpdate": 1785792865219,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13497,6 +13497,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ca4fe8418e743873767ae5a4f240d627fd57df23",
+          "message": "chore: remove L18 from todo sprint table",
+          "timestamp": "2026-08-03T23:17:42+02:00",
+          "tree_id": "c5f6c10a352b4c2afc238329d652c54ff7f2ec7c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ca4fe8418e743873767ae5a4f240d627fd57df23"
+        },
+        "date": 1785792862089,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.8,
             "unit": "MiB"
           }
         ]
