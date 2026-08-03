@@ -1036,6 +1036,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B20. A class constructed from a string literal picks up a <code>bool</code> generic argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b21-completions-backward-scan-is-blind-to-comments" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B21. Completion's backward scan is blind to comments
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b22-a-rules-method-supplied-by-a-trait-is-not-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B22. A <code>rules()</code> method supplied by a trait is not read
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1712,6 +1745,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B20. A class constructed from a string literal picks up a <code>bool</code> generic argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b21-completions-backward-scan-is-blind-to-comments" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B21. Completion's backward scan is blind to comments
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b22-a-rules-method-supplied-by-a-trait-is-not-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B22. A <code>rules()</code> method supplied by a trait is not read
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2299,6 +2365,62 @@ where to read it from during parsing. Once <code>PropertyInfo</code> carries it,
 visibility keyword whenever <code>include_declaration</code> is set. Same blast
 radius caveat as <a href="#b18-override-completion-offers-final-parent-methods">B18</a>:
 adding the field touches every <code>PropertyInfo</code> construction site.</p>
+<h4 id="b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument">B20. A class constructed from a string literal picks up a <code>bool</code> generic argument<a class="headerlink" href="#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><code>new \Acme\Decimal\Decimal('0.00')</code> resolves to <code>Decimal&lt;bool&gt;</code>, and the
+value is then rejected against a plain <code>Decimal</code> parameter:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
+</code></pre></div>
+<p>The generic argument is nonsense: the class is constructed from a string
+literal and nothing in the call binds a <code>bool</code>. Because the reported type
+is wrong, the diagnostic is a false positive, and it accounts for the
+argument mismatches the analyzer reports on large Laravel projects.</p>
+<p>Two contributing factors are worth separating when it is fixed:</p>
+<ol>
+<li>Whatever binds <code>bool</code> as the template argument of a class constructed
+   from a string literal. Start at <code>classify_template_binding</code> /
+   <code>remap_inherited_ctor_subs</code> in
+   <code>type_engine/variable/rhs_resolution/instantiation.rs</code>, and check what
+   the class's own <code>@template</code> bound resolves to when the constructor
+   argument is a literal.</li>
+<li><code>is_type_compatible</code>'s unloadable-short-name escape hatch only
+   inspects <code>TypeKind::Named</code>, so a <code>Generic</code> whose base name cannot be
+   loaded (here <code>Decimal</code> written without its namespace) skips the hatch
+   and is compared anyway. Widening the hatch does not fix the wrong
+   type, but it stops a name the project cannot even load from producing
+   a mismatch.</li>
+</ol>
+<p><strong>Reproduce:</strong> point <code>analyze</code> at a project that constructs a generic
+class from a string literal and passes it to a parameter typed with the
+bare class.</p>
+<h4 id="b21-completions-backward-scan-is-blind-to-comments">B21. Completion's backward scan is blind to comments<a class="headerlink" href="#b21-completions-backward-scan-is-blind-to-comments" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p><code>scan_back_to_opener</code> in <code>src/completion/source/helpers.rs</code> walks
+backwards from the cursor over brackets, parentheses, braces, and string
+literals, but does not skip <code>//</code>, <code>#</code>, or <code>/* … */</code> comments. A stray
+bracket or quote in a comment between the call and the cursor unbalances
+the walk, and the completion drops out:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">]);</span>
+</code></pre></div>
+<p>It fails closed (no suggestions rather than wrong ones), which is why it
+is low impact. The obstacle is that a backwards scan cannot tell a <code>//</code>
+inside a string from the start of a comment without a forward pass, so
+the fix likely means scanning the enclosing statement forward once and
+masking comments before the backwards walk, the way the Blade
+preprocessor masks non-PHP text.</p>
+<h4 id="b22-a-rules-method-supplied-by-a-trait-is-not-read">B22. A <code>rules()</code> method supplied by a trait is not read<a class="headerlink" href="#b22-a-rules-method-supplied-by-a-trait-is-not-read" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><code>collect_rules_method</code> in
+<code>src/virtual_members/laravel/validation_rules.rs</code> only looks at
+<code>Node::Class</code>, so a <code>FormRequest</code> that gets its <code>rules()</code> from a trait
+offers no request-input keys and no <code>validated()</code> shape. The parent-chain
+walk covers <code>extends</code>, but nothing follows a <code>use SomeTrait;</code>.</p>
+<p><strong>Where to change:</strong> resolve the class's used traits (the class index
+already carries them) and read <code>rules()</code> out of the trait's file with the
+same <code>rules_from_class_source</code> pass, keeping the trait's own file as the
+entry <code>origin</code> so go-to-definition lands on the trait.</p>
 
 
 
