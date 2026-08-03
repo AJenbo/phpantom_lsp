@@ -254,8 +254,19 @@ pub(super) fn resolve_rhs_property_access(
             // We reject widening assignments (e.g. narrowed type is
             // `object` but declared type is `Foo`) to avoid losing
             // declared type information.
+            //
+            // A property that only exists through `__set` / `__get` is
+            // excluded: the setter is free to transform, reroute, or
+            // drop the value, so the assignment says nothing about what
+            // a later read returns.
             if let Expression::Variable(Variable::Direct(dv)) = obj
                 && dv.name == b"$this"
+                && !crate::virtual_members::property_write_is_magic(
+                    ctx.current_class,
+                    &prop_name,
+                    class_loader,
+                    ctx.resolved_class_cache,
+                )
             {
                 let narrowed = try_resolve_this_property_from_assignment(&prop_name, ctx);
                 if !narrowed.is_empty() {

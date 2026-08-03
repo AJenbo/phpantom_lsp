@@ -9,7 +9,7 @@ use crate::parser::with_parsed_program;
 use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
-use crate::types::ResolvedType;
+use crate::types::{ClassInfo, ResolvedType};
 
 // ─── Statement processing ───────────────────────────────────────────────────
 
@@ -1162,6 +1162,16 @@ pub(crate) fn process_assignment_expr<'b>(
                 return;
             }
             if let Some(key) = narrowing::expr_to_subject_key(assignment.lhs) {
+                // A write that dispatches to `__set` is opaque: the
+                // magic setter may transform, reroute, or drop the
+                // value, and a later read goes through `__get`, which
+                // decides what comes back.  Drop whatever was known
+                // about the path instead of recording the written type.
+                if property_write_dispatches_to_magic_set(assignment.lhs, scope, ctx) {
+                    scope.remove(&key);
+                    scope.invalidate_dependent_keys(&key);
+                    return;
+                }
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
                 if !rhs_types.is_empty() {
                     scope.set(&key, rhs_types);
@@ -1201,6 +1211,58 @@ pub(crate) fn process_assignment_expr<'b>(
             scope.set_empty(&lhs_name);
         }
     }
+}
+
+/// Whether `$obj->prop = …` writes through the subject class's `__set`
+/// magic method instead of storing the value in a real property.
+///
+/// Returns `false` whenever no subject class resolves: without a class
+/// there is no evidence of a magic setter, and the write is recorded as
+/// before.
+fn property_write_dispatches_to_magic_set(
+    lhs: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let (object, selector) = match lhs {
+        Expression::Access(Access::Property(pa)) => (pa.object, &pa.property),
+        Expression::Access(Access::NullSafeProperty(pa)) => (pa.object, &pa.property),
+        _ => return false,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return false;
+    };
+    let prop_name = bytes_to_str(ident.value);
+    let is_magic = |cls: &ClassInfo| {
+        crate::virtual_members::property_write_is_magic(
+            cls,
+            prop_name,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        )
+    };
+
+    // `$this` and plain variables are answered from the walker's own
+    // state, so the common write shapes cost no resolution.  A union
+    // subject is magic as soon as one member routes the write through
+    // `__set`: the recorded type would have no authority over what that
+    // member's `__get` returns.
+    let object = unwrap_parens(object);
+    if let Expression::Variable(Variable::Direct(dv)) = object {
+        let var_name = bytes_to_str(dv.name);
+        if var_name == "$this" {
+            return is_magic(ctx.current_class);
+        }
+        return scope
+            .get(var_name)
+            .iter()
+            .filter_map(|rt| rt.class_info.as_deref())
+            .any(is_magic);
+    }
+    resolve_rhs_with_scope(object, scope, ctx)
+        .iter()
+        .filter_map(|rt| rt.class_info.as_deref())
+        .any(is_magic)
 }
 
 /// Process compound assignment operators (`+=`, `-=`, `/=`, `*=`, etc.).

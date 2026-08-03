@@ -246,6 +246,41 @@ pub fn resolve_class_fully_maybe_cached(
     result
 }
 
+/// Whether writing `prop_name` on `class` dispatches to the class's
+/// `__set` magic method rather than storing the value in a property.
+///
+/// PHP calls `__set` for every property that is not present on the
+/// object, from inside the class as well as from outside it.  Such a
+/// write is opaque: the setter may transform, reroute, or drop the
+/// value, and a later read goes through `__get`, which decides what
+/// comes back.  Callers that record a written type against a property
+/// must therefore leave magic writes alone (Psalm and PHPStan treat
+/// them the same way).
+///
+/// `@property` tags count as declared: they name a type for the path,
+/// which the write is expected to respect.
+pub fn property_write_is_magic(
+    class: &ClassInfo,
+    prop_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&ResolvedClassCache>,
+) -> bool {
+    if class.has_property(prop_name) {
+        return false;
+    }
+    // The property and `__set` may each come from a parent, a trait, a
+    // `@mixin`, or an `@property` tag, so the negative answer above is
+    // the only one the unmerged class can give.  Fall back to the
+    // ambient cache when the caller has none, so a read-heavy walk does
+    // not re-merge the same class per write.
+    let ambient = match cache {
+        Some(_) => None,
+        None => active_resolved_class_cache(),
+    };
+    let merged = resolve_class_fully_maybe_cached(class, class_loader, cache.or(ambient));
+    merged.has_method("__set") && !merged.has_property(prop_name)
+}
+
 /// Reserved generic-args marker for [`resolve_class_base_cached`]'s cache
 /// key. Contains a NUL byte, which `PhpType::to_string()` never produces,
 /// so it can never collide with a real `(FQN, generic_args)` key.

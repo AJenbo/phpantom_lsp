@@ -62,7 +62,7 @@ pub(crate) use cache::{
 };
 pub(crate) use resolve::resolve_class_base_cached;
 pub use resolve::{
-    populate_from_sorted, resolve_class_fully, resolve_class_fully_cached,
+    populate_from_sorted, property_write_is_magic, resolve_class_fully, resolve_class_fully_cached,
     resolve_class_fully_maybe_cached, resolve_class_fully_with_generics,
     resolve_class_fully_with_type_args,
 };

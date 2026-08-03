@@ -11650,6 +11650,124 @@ function test(): void {
     );
 }
 
+/// A write to a property that only exists through `__set` is opaque: the
+/// setter may transform, reroute, or drop the value, so a later read
+/// still resolves through `__get` instead of through the written value.
+#[test]
+fn hover_magic_set_write_does_not_override_magic_get() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @template TData as array
+ */
+abstract class DataBag {
+    /** @var TData */
+    protected $data;
+
+    /** @param TData $data */
+    public function __construct(array $data) {
+        $this->data = $data;
+    }
+
+    /**
+     * @template K as key-of<TData>
+     * @param K $property
+     * @return TData[K]
+     */
+    public function __get(string $property) {
+        return $this->data[$property];
+    }
+
+    /**
+     * @template K as key-of<TData>
+     * @param K $property
+     * @param TData[K] $value
+     */
+    public function __set(string $property, $value) {
+        $this->data[$property] = $value;
+    }
+}
+
+/** @extends DataBag<array{a: int, b: string}> */
+class FooBag extends DataBag {}
+
+function test(): void {
+    $foo = new FooBag(['a' => 5, 'b' => 'hello']);
+    $foo->a = 9;
+    $a = $foo->a;
+}
+"#;
+    // Hover on `$a`, assigned from the read `$foo->a` one line after the
+    // magic write (line 38).
+    let hover = hover_at(&backend, uri, content, 38, 5).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int") && !text.contains('9'),
+        "a read after a `__set` write should resolve through `__get`, got: {}",
+        text
+    );
+}
+
+/// `__set` also fires for writes from inside the class, so the property
+/// read there must not pick up the written type either.
+#[test]
+fn hover_magic_set_write_inside_class_does_not_override_magic_get() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Bag {
+    /** @var array<string, int> */
+    private array $data = [];
+
+    public function __get(string $property): int {
+        return $this->data[$property];
+    }
+
+    public function __set(string $property, int $value): void {
+        $this->data[$property] = $value;
+    }
+
+    public function run(): void {
+        $this->answer = 9;
+        $a = $this->answer;
+    }
+}
+"#;
+    // Hover on `$a` (line 15).
+    let hover = hover_at(&backend, uri, content, 15, 9).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int") && !text.contains('9'),
+        "a `$this` read after a `__set` write should resolve through `__get`, got: {}",
+        text
+    );
+}
+
+/// A dynamic property on a class without `__set` is stored as written,
+/// so the written type still wins there.
+#[test]
+fn hover_dynamic_property_write_without_magic_set_keeps_written_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Plain {
+    public function run(): void {
+        $this->dyn = 9;
+        $a = $this->dyn;
+    }
+}
+"#;
+    // Hover on `$a` (line 4).
+    let hover = hover_at(&backend, uri, content, 4, 9).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains('9') || text.contains("int"),
+        "a dynamic property write should still type the later read, got: {}",
+        text
+    );
+}
+
 #[test]
 fn hover_while_loop_exit_narrows_to_null_multi_namespace() {
     let backend = create_test_backend();
