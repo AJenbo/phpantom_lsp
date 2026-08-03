@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A property assigned inside a guarded <code>if</code> keeps its declared type after the block
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1427,17 +1416,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A property assigned inside a guarded <code>if</code> keeps its declared type after the block
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1588,38 +1566,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block">B2. A property assigned inside a guarded <code>if</code> keeps its declared type after the block<a class="headerlink" href="#b2-a-property-assigned-inside-a-guarded-if-keeps-its-declared-type-after-the-block" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>The lazy-initialisation idiom leaves a property at its declared type
-once the <code>if</code> closes, so returning it from a method with a narrower
-return type is reported as a mismatch:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">protected ?AbstractType $instance = null;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">public function getType(): ConcreteType</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">{</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    if (!$this-&gt;instance instanceof ConcreteType) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        $this-&gt;instance = $this-&gt;context-&gt;makeConcrete();  // : ConcreteType</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    }</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    return $this-&gt;instance;   // false positive: ?AbstractType</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">}</span>
-</code></pre></div>
-<p>Both paths out of the <code>if</code> give <code>ConcreteType</code>: the implicit else is the
-negation of the condition, and the then-branch assigns one. The two need
-to be merged the way the forward walker already merges branch outcomes
-for local variables. Property keys are seeded into the walker's scope for
-<code>instanceof</code> narrowing (<code>seed_property_keys_into_scope</code>), so the missing
-piece is recording a property <em>assignment</em> into that scope and joining
-the branches at the end of the block, not new machinery.</p>
-<p>Surfaced by removing the supertype-where-subtype escape hatch from the
-argument/return compatibility layer, which is what made the stale type
-visible. Reproducible in an open-source project: PDepend's
-<code>ASTClassReference::getType()</code> and <code>ASTTraitReference::getType()</code> are the
-two remaining diagnostics <code>analyze</code> reports there, and PHPStan at level
-max reports neither.</p>
-<p><strong>Where to look:</strong> <code>type_engine/variable/forward_walk/</code> (branch merging
-and <code>seed_property_keys_into_scope</code>) and
-<code>type_engine/resolver/property_narrowing.rs</code>.</p>
 <h4 id="b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set">B3. A property write overrides the declared type even when it goes through <code>__set</code><a class="headerlink" href="#b3-a-property-write-overrides-the-declared-type-even-when-it-goes-through-__set" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p><code>$obj-&gt;prop = expr</code> records the assigned type under a property-path key
@@ -1631,22 +1577,22 @@ That is right for a real declared property, and it is what makes
 <code>__set</code>, which is free to transform, reroute, or drop the value instead
 of storing it as given. <code>__get</code> then decides what a read returns, and the
 recorded write type has no authority over it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @template TData of array */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class DataBag {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    /** @param TData $data */</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function __construct(private array $data) {}</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    /** @return TData[K] */</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    public function __get(string $property) { return $this-&gt;data[$property]; }</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    /** @param TData[K] $value */</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    public function __set(string $property, $value) { /* may store anything */ }</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">/** @extends DataBag&lt;array{a: int, b: string}&gt; */</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">class FooBag extends DataBag {}</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">$foo = new FooBag([&quot;a&quot; =&gt; 5, &quot;b&quot; =&gt; &quot;hello&quot;]);</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">$foo-&gt;a = 9;</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">$a = $foo-&gt;a;   // PHPantom: 9      Psalm: int (via __get&#39;s TData[K])</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @template TData of array */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class DataBag {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    /** @param TData $data */</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    public function __construct(private array $data) {}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    /** @return TData[K] */</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    public function __get(string $property) { return $this-&gt;data[$property]; }</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    /** @param TData[K] $value */</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    public function __set(string $property, $value) { /* may store anything */ }</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">}</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">/** @extends DataBag&lt;array{a: int, b: string}&gt; */</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">class FooBag extends DataBag {}</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">$foo = new FooBag([&quot;a&quot; =&gt; 5, &quot;b&quot; =&gt; &quot;hello&quot;]);</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">$foo-&gt;a = 9;</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">$a = $foo-&gt;a;   // PHPantom: 9      Psalm: int (via __get&#39;s TData[K])</span>
 </code></pre></div>
 <p>The write should not be recorded when the property is undeclared on the
 subject's class <em>and</em> that class declares <code>__set</code>; the read should keep
@@ -1668,10 +1614,10 @@ resolution in <code>virtual_members/</code>.</p>
 are written by reference (<code>&amp;$var</code>) inside the range") is declared,
 sorted at the end of <code>classify_range</code>, and consumed as a safety gate in
 Extract Function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">// code_actions/extract_function/mod.rs:198</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">if</span><span class="w"> </span><span class="n">scope_map</span><span class="p">.</span><span class="n">uses_reference_params</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">classification</span><span class="p">.</span><span class="n">reference_writes</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">// code_actions/extract_function/mod.rs:198</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">if</span><span class="w"> </span><span class="n">scope_map</span><span class="p">.</span><span class="n">uses_reference_params</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">classification</span><span class="p">.</span><span class="n">reference_writes</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
 </code></pre></div>
 <p>but nothing in <code>classify_range</code> ever pushes into it — confirmed via
 <code>git log -S "reference_writes"</code> that no commit has ever added a
@@ -1696,14 +1642,14 @@ equivalent pass keyed on by-reference write accesses.</p>
 <p>Found while cleaning up comments in <code>type_engine/variable/rhs_resolution/</code>.
 <code>resolve_rhs_expression</code> (<code>src/type_engine/variable/rhs_resolution/mod.rs:346</code>)
 guards against unbounded recursion with a thread-local counter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="fm">thread_local!</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">:</span><span class="w"> </span><span class="nc">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="p">}</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">get</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">v</span><span class="p">);</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="p">});</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">if</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">depth</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">));</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="fm">vec!</span><span class="p">[];</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="fm">thread_local!</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">:</span><span class="w"> </span><span class="nc">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">cell</span><span class="p">::</span><span class="n">Cell</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="p">}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">get</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">v</span><span class="p">);</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="p">});</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">if</span><span class="w"> </span><span class="n">depth</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="n">RHS_EXPR_DEPTH</span><span class="p">.</span><span class="n">with</span><span class="p">(</span><span class="o">|</span><span class="n">d</span><span class="o">|</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">depth</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">));</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="fm">vec!</span><span class="p">[];</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
 </code></pre></div>
 <p>This is the exact "depth cap papering over unbounded recursion"
 anti-pattern this project's own conventions warn against (a hard cap is
@@ -1829,7 +1775,7 @@ adding the field touches every <code>PropertyInfo</code> construction site.</p>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>new \Acme\Decimal\Decimal('0.00')</code> resolves to <code>Decimal&lt;bool&gt;</code>, and the
 value is then rejected against a plain <code>Decimal</code> parameter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
 </code></pre></div>
 <p>The generic argument is nonsense: the class is constructed from a string
 literal and nothing in the call binds a <code>bool</code>. Because the reported type
@@ -1860,9 +1806,9 @@ backwards from the cursor over brackets, parentheses, braces, and string
 literals, but does not skip <code>//</code>, <code>#</code>, or <code>/* … */</code> comments. A stray
 bracket or quote in a comment between the call and the cursor unbalances
 the walk, and the completion drops out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">]);</span>
 </code></pre></div>
 <p>It fails closed (no suggestions rather than wrong ones), which is why it
 is low impact. The obstacle is that a backwards scan cannot tell a <code>//</code>
@@ -1904,17 +1850,17 @@ thread-local state.</p>
 <p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
 <p>Found while fixing the orphaned-docblock case. A property carrying an
 attribute loses it entirely:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    #[SomeAttr]</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    private int $bar;</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    #[SomeAttr]</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    private int $bar;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    public function __construct(int $bar) { $this-&gt;bar = $bar; }</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>becomes</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    public function __construct(private int $bar) {}</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>PlainProperty::span()</code> starts at the first attribute list when there is
 one, so the deletion range in <code>build_promotion_candidate</code>
