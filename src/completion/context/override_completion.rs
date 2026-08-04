@@ -230,6 +230,14 @@ pub(crate) fn build_override_completions(
 
     let mut items = Vec::new();
     for (method, declaring, skip_override_attr) in methods {
+        // PHPDoc is inherited from parent classes and interfaces, but not
+        // from traits, so an override of a trait method restates the
+        // docblock-only types above the new declaration.
+        let doc_edit = if *skip_override_attr {
+            trait_override_docblock_edit(method, opts)
+        } else {
+            override_edit.clone()
+        };
         let params = format_params(method, opts.use_map, opts.file_namespace);
         let return_type = format_return_type(method, opts.use_map, opts.file_namespace);
         let label = if return_type.is_empty() {
@@ -283,11 +291,7 @@ pub(crate) fn build_override_completions(
                 range: opts.replace_range,
                 new_text: insert_text,
             })),
-            additional_text_edits: if *skip_override_attr {
-                None
-            } else {
-                override_edit.clone().map(|e| vec![e])
-            },
+            additional_text_edits: doc_edit.map(|e| vec![e]),
             label_details: Some(CompletionItemLabelDetails {
                 detail: None,
                 description: Some(short_name(declaring).to_string()),
@@ -298,6 +302,81 @@ pub(crate) fn build_override_completions(
 
     items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
     items
+}
+
+/// Build the docblock inserted above a trait-method override, restating
+/// the `@param` and `@return` types that only exist in PHPDoc.
+///
+/// Returns `None` when every type is already fully expressed by the
+/// native signature.
+fn trait_override_docblock_edit(
+    method: &MethodInfo,
+    opts: &OverrideCompletionOpts<'_>,
+) -> Option<TextEdit> {
+    let mut lines: Vec<String> = Vec::new();
+
+    for param in method.parameters.iter() {
+        let Some(hint) = param.type_hint.as_ref() else {
+            continue;
+        };
+        if param.native_type_hint.as_ref() == Some(hint) {
+            continue;
+        }
+        let ty = shorten_type_display(hint, opts.use_map, opts.file_namespace);
+        if ty.is_empty() {
+            continue;
+        }
+        let name = param.name.as_str();
+        let dollar = if name.starts_with('$') { "" } else { "$" };
+        lines.push(format!("@param {ty} {dollar}{name}"));
+    }
+
+    if let Some(ret) = method.return_type.as_ref()
+        && method.native_return_type.as_ref() != Some(ret)
+    {
+        let ty = shorten_type_display(ret, opts.use_map, opts.file_namespace);
+        if !ty.is_empty() {
+            lines.push(format!("@return {ty}"));
+        }
+    }
+
+    if lines.is_empty() {
+        return None;
+    }
+
+    // The restated types may reference the method's own `@template`
+    // params, which are not inherited either — declare them again above
+    // the tags that use them.
+    let template_lines: Vec<String> = method
+        .template_params
+        .iter()
+        .map(|tparam| match method.template_param_bounds.get(tparam) {
+            Some(bound) => {
+                let bound = shorten_type_display(bound, opts.use_map, opts.file_namespace);
+                format!("@template {tparam} of {bound}")
+            }
+            None => format!("@template {tparam}"),
+        })
+        .collect();
+    lines.splice(0..0, template_lines);
+
+    let indent = opts.indent;
+    let mut text = format!("{indent}/**\n");
+    for line in &lines {
+        text.push_str(indent);
+        text.push_str(" * ");
+        text.push_str(line);
+        text.push('\n');
+    }
+    text.push_str(indent);
+    text.push_str(" */\n");
+    Some(TextEdit {
+        range: Range {
+            start: opts.line_start,
+            end: opts.line_start,
+        },
+        new_text: text,
+    })
 }
 
 /// Collect public/protected properties from parents that the class can still

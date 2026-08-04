@@ -491,8 +491,10 @@ pub(crate) fn format_params(
 /// native hints in generated method stubs.
 fn is_valid_native_hint(ty: &PhpType) -> bool {
     match ty.kind() {
-        // Plain named types and their nullable wrappers are always valid.
-        TypeKind::Named(_) => true,
+        // Plain named types and their nullable wrappers are always valid —
+        // except variable references like `$this`, which only exist in
+        // PHPDoc.
+        TypeKind::Named(n) => !n.starts_with('$'),
         TypeKind::Nullable(inner) => is_valid_native_hint(inner),
         // Union types are valid only when every member is valid (PHP 8+
         // union return types like `int|string|null` are legal).
@@ -523,13 +525,26 @@ pub(crate) fn format_return_type(
     // syntax. Docblock types may contain generic annotations (e.g.
     // `array<TKey, TValue>`) that are not legal as native return type hints.
     if let Some(ref ret) = method.return_type {
-        let shortened = shorten_php_type_direct(ret, use_map, file_namespace);
-        if is_valid_native_hint(ret) && !shortened.is_empty() {
+        // `@return $this` has no native spelling; `static` is the hint PHP
+        // itself uses for fluent returns.
+        let ret = replace_this_with_static(ret);
+        let shortened = shorten_php_type_direct(&ret, use_map, file_namespace);
+        if is_valid_native_hint(&ret) && !shortened.is_empty() {
             return format!(": {}", shortened);
         }
     }
 
     String::new()
+}
+
+/// Replace every `$this` in the type tree with `static`, the closest
+/// native return type hint.
+fn replace_this_with_static(ty: &PhpType) -> PhpType {
+    if !ty.contains_self_ref() {
+        return ty.clone();
+    }
+    let subs = HashMap::from([("$this".to_string(), PhpType::static_())]);
+    ty.substitute(&subs)
 }
 
 /// Shorten a fully-qualified type name using the file's use-map and
@@ -789,6 +804,36 @@ mod tests {
         assert_eq!(
             format_return_type(&method, &HashMap::new(), &None),
             ": void"
+        );
+    }
+
+    #[test]
+    fn format_return_type_this_becomes_static() {
+        // `@return $this` with no native hint: `$this` is PHPDoc-only,
+        // the native spelling of a fluent return is `static`.
+        let method = MethodInfo {
+            native_return_type: None,
+            return_type: Some(PhpType::parse("$this")),
+            ..MethodInfo::virtual_method("test", Some("$this"))
+        };
+
+        assert_eq!(
+            format_return_type(&method, &HashMap::new(), &None),
+            ": static"
+        );
+    }
+
+    #[test]
+    fn format_return_type_nullable_this_becomes_nullable_static() {
+        let method = MethodInfo {
+            native_return_type: None,
+            return_type: Some(PhpType::parse("$this|null")),
+            ..MethodInfo::virtual_method("test", None)
+        };
+
+        assert_eq!(
+            format_return_type(&method, &HashMap::new(), &None),
+            ": static|null"
         );
     }
 

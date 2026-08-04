@@ -3237,12 +3237,22 @@ class UnknownMemberDemo
 
 class ClassRootCompletionDemo extends OverridableWidget
 {
+    use WidgetSlug;
+
     // Try: type `o` on the line below and trigger completion.  Both
     // `$oneTimeToken` and `onChange()` appear with full declarations,
     // even though this comment sits between them and the class brace.
 
     // Try: type `O` for the inherited constant — `ONE_TIME_TTL` is offered
     // as `public const string ONE_TIME_TTL = '15m';`, keeping its type.
+
+    // Try: type `w` — `withLabel()` from OverridableWidget declares
+    // `@return $this`, which is PHPDoc-only, so the generated override
+    // ends in `: static`, never the invalid `: $this`.
+
+    // Try: type `s` — `slug()` comes from the WidgetSlug trait, whose
+    // PHPDoc is NOT inherited by an override, so the completion restates
+    // `@param list<string> $parts` and `@return $this` above the method.
 
 }
 
@@ -4437,6 +4447,15 @@ class DemoColumn
 
 // ── Class-body root member completion scaffolding ───────────────────────────
 
+trait WidgetSlug
+{
+    /**
+     * @param list<string> $parts
+     * @return $this
+     */
+    public function slug(array $parts) { return $this; }
+}
+
 class OverridableWidget
 {
     public const string ONE_TIME_TTL = '15m';
@@ -4446,6 +4465,9 @@ class OverridableWidget
 
     public function onChange(callable $callback): static { return $this; }
     protected function onInitialize(): void {}
+
+    /** @return $this */
+    public function withLabel(string $label) { return $this; }
 }
 
 // ── @phpstan-require-extends scaffolding ────────────────────────────────────
@@ -6509,6 +6531,11 @@ function runDemoAssertions(): void
     $page = new TestablePage();
     assert($page->assertSee('a') instanceof TestablePage, 'trait return $this resolves to the using class');
     assert($page->assertSee('a')->assertSee('b')->status === 200, 'chained trait return $this keeps the using class members');
+
+    // ── Override completion scaffolding (@return $this) ─────────────────
+    $rootDemo = new ClassRootCompletionDemo();
+    assert($rootDemo->withLabel('x') instanceof ClassRootCompletionDemo, '@return $this on withLabel() returns the instance itself');
+    assert($rootDemo->slug(['a', 'b']) instanceof ClassRootCompletionDemo, 'trait slug() @return $this returns the using class');
 
     // ── Ternary Condition Narrowing ─────────────────────────────────────
     $penTool = new TernaryNarrowingDemo(new Pen());

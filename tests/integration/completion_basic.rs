@@ -2449,3 +2449,161 @@ async fn test_completion_shared_trait_on_parent_and_child_uses_override() {
         item.additional_text_edits
     );
 }
+
+#[tokio::test]
+async fn test_completion_override_this_return_becomes_static() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_this_return.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Builder {\n",
+        "    /** @return $this */\n",
+        "    public function withTitle(string $title) { return $this; }\n",
+        "}\n",
+        "class PostBuilder extends Builder {\n",
+        "    public function with\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("withTitle"))
+        .expect("withTitle override");
+    let insert = item
+        .insert_text
+        .as_deref()
+        .or_else(|| {
+            item.text_edit.as_ref().map(|te| match te {
+                CompletionTextEdit::Edit(e) => e.new_text.as_str(),
+                CompletionTextEdit::InsertAndReplace(e) => e.new_text.as_str(),
+            })
+        })
+        .unwrap_or("");
+    assert!(
+        !insert.contains("$this)")
+            && !insert.contains("\\$this\n")
+            && !insert.contains(": \\$this"),
+        "a `@return $this` docblock must not become a native `$this` hint, got: {insert}"
+    );
+    assert!(
+        insert.contains(": static"),
+        "a `@return $this` docblock should generate `: static`, got: {insert}"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_trait_override_restates_docblock_types() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_override_docblock.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Sortable {\n",
+        "    /**\n",
+        "     * @param list<string> $columns\n",
+        "     * @return $this\n",
+        "     */\n",
+        "    public function sortBy(array $columns) { return $this; }\n",
+        "}\n",
+        "class Grid {\n",
+        "    use Sortable;\n",
+        "    public function sort\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("sortBy"))
+        .expect("sortBy trait override");
+
+    // Traits do not pass their PHPDoc down to an override the way parent
+    // classes and interfaces do, so the docblock-only types must be
+    // restated above the generated declaration.
+    let additional = item
+        .additional_text_edits
+        .as_ref()
+        .expect("trait override with docblock-only types should inject a docblock");
+    let doc = additional
+        .iter()
+        .map(|e| e.new_text.as_str())
+        .collect::<String>();
+    assert!(
+        doc.contains("@param list<string> $columns"),
+        "docblock should restate the @param type, got: {doc:?}"
+    );
+    assert!(
+        doc.contains("@return $this"),
+        "docblock should restate the @return type, got: {doc:?}"
+    );
+    assert!(
+        !doc.contains("#[\\Override]"),
+        "trait overrides must not insert #[\\Override], got: {doc:?}"
+    );
+}
