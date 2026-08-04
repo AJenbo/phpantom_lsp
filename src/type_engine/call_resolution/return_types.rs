@@ -547,17 +547,15 @@ impl Backend {
                                 calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                                 is_static: true,
                             };
-                            let results = Self::resolve_method_return_types_with_args(
-                                owner,
-                                method_name,
-                                text_args,
-                                &mr_ctx,
+                            ClassInfo::extend_unique_arc(
+                                &mut union_results,
+                                Self::resolve_method_return_types_with_args(
+                                    owner,
+                                    method_name,
+                                    text_args,
+                                    &mr_ctx,
+                                ),
                             );
-                            for r in results {
-                                if !union_results.iter().any(|existing| existing.name == r.name) {
-                                    union_results.push(r);
-                                }
-                            }
                         }
                         if !union_results.is_empty() {
                             return union_results;

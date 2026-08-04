@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{block_on, create_psr4_workspace, create_test_backend};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -595,8 +595,8 @@ async fn test_multiline_chain_same_line_after_bracket_close_does_not_misresolve(
     );
 }
 
-#[tokio::test]
-async fn test_long_union_return_chain_completes_quickly() {
+#[test]
+fn test_long_union_return_chain_completes_quickly() {
     // Each link of a fluent chain whose methods return a union
     // (`A|B`, both declaring the same method) used to double the
     // receiver set: every member of the union resolved the same
@@ -606,7 +606,19 @@ async fn test_long_union_return_chain_completes_quickly() {
     // which hung the analyzer and exhausted memory (issue #320).
     // With per-link dedup the receiver set stays at 2 and a long
     // chain completes instantly.
-    let backend = create_test_backend();
+    //
+    // `A` and `B` each carry a method the other lacks, so the
+    // assertions below distinguish "the union was deduped" from
+    // "the union collapsed to its first member".
+    //
+    // The completion runs on its own thread and is collected through a
+    // `recv_timeout`, because a regression here does not return a wrong
+    // answer: it runs for 2^38 steps while allocating. Nothing inside
+    // the completion path yields, so `tokio::time::timeout` cannot
+    // interrupt it (verified: it reports the deadline only after the
+    // work finishes). Without a hard bound the whole test binary hangs
+    // until CI gives up, or the OOM killer takes every other test in it
+    // down as collateral.
     let uri = Url::parse("file:///union_chain_blowup.php").unwrap();
     let mut text = concat!(
         "<?php\n",
@@ -616,6 +628,7 @@ async fn test_long_union_return_chain_completes_quickly() {
         "}\n",
         "class B {\n",
         "    public function m(): A|B { return new B(); }\n",
+        "    public function onlyB(): string { return ''; }\n",
         "}\n",
         "class Chained {\n",
         "    public function run(A $a): void {\n",
@@ -627,8 +640,24 @@ async fn test_long_union_return_chain_completes_quickly() {
     }
     text.push_str("            ->\n    }\n}\n");
 
-    let cursor_line = 11 + 38;
-    let names = complete_at(&backend, &uri, &text, cursor_line, 14).await;
+    let cursor_line = 12 + 38;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .stack_size(phpantom_lsp::PARSE_WORKER_STACK_SIZE)
+        .spawn(move || {
+            let backend = create_test_backend();
+            let names = block_on(complete_at(&backend, &uri, &text, cursor_line, 14));
+            let _ = tx.send(names);
+        })
+        .expect("spawn union-chain completion thread");
+
+    // Generous next to the ~2 ms this takes with the dedup in place, and
+    // nowhere near enough for the blowup: even a 20-link chain took two
+    // and a half minutes before the fix.
+    let names = rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("38-link union-return chain should complete, not blow up exponentially");
     assert!(
         names.iter().any(|n| n.starts_with("m(")),
         "Union-return chain should offer m() at every depth, got: {names:?}"
@@ -636,5 +665,9 @@ async fn test_long_union_return_chain_completes_quickly() {
     assert!(
         names.iter().any(|n| n.starts_with("onlyA(")),
         "Union member A should survive the chain walk, got: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.starts_with("onlyB(")),
+        "Union member B should survive the chain walk, got: {names:?}"
     );
 }

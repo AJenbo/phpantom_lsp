@@ -92,6 +92,11 @@ pub struct AnalyseOptions {
     pub use_colour: bool,
     /// Output format.
     pub output_format: OutputFormat,
+    /// Print each file path as it is processed (and disable the
+    /// progress bar) so a hang is attributable to a specific file.
+    pub debug: bool,
+    /// Verbosity level: 0 = normal, 1 = -v, 2 = -vv, 3+ = -vvv.
+    pub verbosity: u8,
 }
 
 /// A single diagnostic result for the analyse output.

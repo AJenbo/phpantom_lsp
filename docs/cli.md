@@ -122,6 +122,7 @@ phpantom_lsp analyze --severity warning          # errors and warnings only
 phpantom_lsp analyze --severity error            # errors only
 phpantom_lsp analyze --project-root /path/to/app # explicit project root
 phpantom_lsp analyze --no-colour                 # plain text output
+phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 ```
 
 ### Options
@@ -132,6 +133,9 @@ phpantom_lsp analyze --no-colour                 # plain text output
 | `--severity <LEVEL>`       | Minimum severity: `all` (default), `warning`, or `error`.        |
 | `--project-root <DIR>`     | Project root directory. Defaults to the current working directory.|
 | `--no-colour`              | Disable ANSI colour output.                                      |
+| `--format <FORMAT>`        | Output format: `table` (default), `github`, or `json`.           |
+| `--debug`                  | Print each file path as it is analyzed and disable the progress bar. Also reports files that take unusually long. |
+| `-v`, `-vv`, `-vvv`        | Increase verbosity. With `--debug`: `-v` adds per-file durations, `-vv` adds worker ids and parse-phase tracing, `-vvv` adds memory usage. `-vv` and above imply `--debug`. `-v` alone prints a timing summary for the parse, class-population, and diagnostic phases. |
 
 ### Exit codes
 

@@ -74,6 +74,15 @@ enum Command {
         /// automatically includes workflow annotations alongside the table.
         #[arg(long, value_name = "FORMAT")]
         format: Option<FormatArg>,
+
+        /// Print each file path as it is analyzed and disable the progress
+        /// bar. Combine with -v/-vv/-vvv for timing and memory detail.
+        #[arg(long)]
+        debug: bool,
+
+        /// Increase verbosity (-v, -vv, -vvv). -vv and above imply --debug.
+        #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+        verbose: u8,
     },
 
     /// Apply automated code fixes across PHP files.
@@ -258,6 +267,8 @@ async fn async_main() {
             no_colour,
             project_root,
             format,
+            debug,
+            verbose,
         }) => {
             let workspace_root = project_root
                 .or_else(|| std::env::current_dir().ok())
@@ -278,6 +289,8 @@ async fn async_main() {
                 severity_filter: severity.into(),
                 use_colour,
                 output_format,
+                debug: debug || verbose >= 2,
+                verbosity: verbose,
             };
 
             let exit_code = phpantom_lsp::analyse::run(options).await;

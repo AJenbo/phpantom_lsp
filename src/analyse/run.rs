@@ -113,6 +113,11 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     let severity_filter = options.severity_filter;
     let use_colour = options.use_colour;
     let output_format = options.output_format;
+    let debug = options.debug;
+    let verbosity = options.verbosity;
+    // Per-file lines and the `\r`-rewritten progress bar would clobber
+    // each other, so --debug replaces the bar entirely.
+    let show_progress = use_colour && output_format == OutputFormat::Table && !debug;
     let n_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
@@ -123,14 +128,15 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     //
     // Parsing is fast, so the progress bar is drawn at 0% before Phase 1
     // and only advances during Phase 2 (the expensive diagnostic pass).
-    if use_colour && output_format == OutputFormat::Table {
+    if show_progress {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count));
     }
+    let parse_t0 = Instant::now();
     let next_idx = AtomicUsize::new(0);
 
     let file_data: Vec<Option<(String, String)>> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..n_threads)
-            .map(|_| {
+            .map(|worker| {
                 let backend = &backend;
                 let next_idx = &next_idx;
                 let files = &files;
@@ -146,6 +152,11 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             }
 
                             let file_path = &files[i];
+                            if debug && verbosity >= 2 {
+                                let display =
+                                    file_path.strip_prefix(root).unwrap_or(file_path).display();
+                                eprintln!("[w{worker:02}] parse {display}");
+                            }
                             let content = match std::fs::read_to_string(file_path) {
                                 Ok(c) => c,
                                 Err(_) => continue,
@@ -171,6 +182,8 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         }
         indexed
     });
+    let parse_elapsed = parse_t0.elapsed();
+    let populate_t0 = Instant::now();
 
     // ── Discover the configured Laravel date class ──────────────────
     // The `now()`/`today()` helpers and the Date facade / DateFactory
@@ -221,9 +234,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         &backend.resolved_class_cache,
         &class_loader,
     );
+    let populate_elapsed = populate_t0.elapsed();
+
     // ── Phase 2: Collect diagnostics (parallel) ─────────────────────
     // Call individual collectors directly (instead of the grouped
     // collect_slow_diagnostics) so we can time each one independently.
+    let diagnose_t0 = Instant::now();
     let next_idx = AtomicUsize::new(0);
     let done_count = AtomicUsize::new(0);
 
@@ -235,7 +251,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     let mut all_file_diagnostics: Vec<(String, Vec<FileDiagnostic>)> = std::thread::scope(|s| {
         let handles: Vec<_> =
             (0..n_threads)
-                .map(|_| {
+                .map(|worker| {
                     let backend = &backend;
                     let next_idx = &next_idx;
                     let done_count = &done_count;
@@ -256,6 +272,20 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             Some(pair) => (&pair.0, &pair.1),
                             None => continue, // file that failed to read
                         };
+
+                        // Announce the file when it *starts* so that on a
+                        // hang the started-but-not-done lines are exactly
+                        // the in-flight files.
+                        if debug {
+                            let display =
+                                files[i].strip_prefix(root).unwrap_or(&files[i]).display();
+                            if verbosity >= 2 {
+                                eprintln!("[w{worker:02}] {display}");
+                            } else {
+                                eprintln!(" {display}");
+                            }
+                        }
+                        let file_t0 = Instant::now();
 
                         // For Blade files, use the preprocessed virtual PHP
                         // content instead of the raw Blade template.  The
@@ -400,6 +430,10 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             }
 
                             let file_elapsed = file_start.elapsed();
+                            // The leading newline escapes the `\r`-rewritten
+                            // progress-bar line; without the bar it would
+                            // just leave blank lines.
+                            let nl = if show_progress { "\n" } else { "" };
                             if timed_out {
                                 let display =
                                     files[i].strip_prefix(root).unwrap_or(&files[i]).display();
@@ -409,12 +443,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                     .map(|(d, name)| format!("{}={:.1}s", name, d.as_secs_f64()))
                                     .collect();
                                 eprintln!(
-                                    "\n  \u{23f1} timed out after {:.0}s: {}\n    {}",
+                                    "{nl}  \u{23f1} timed out after {:.0}s: {}\n    {}",
                                     file_elapsed.as_secs_f64(),
                                     display,
                                     breakdown.join(", "),
                                 );
-                            } else if file_elapsed.as_secs() >= 5 {
+                            } else if debug && file_elapsed.as_secs() >= 5 {
                                 let display =
                                     files[i].strip_prefix(root).unwrap_or(&files[i]).display();
                                 let breakdown: Vec<String> = timings
@@ -423,7 +457,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                     .map(|(d, name)| format!("{}={:.1}s", name, d.as_secs_f64()))
                                     .collect();
                                 eprintln!(
-                                    "\n  \u{26a0} slow file ({:.1}s): {}\n    {}",
+                                    "{nl}  \u{26a0} slow file ({:.1}s): {}\n    {}",
                                     file_elapsed.as_secs_f64(),
                                     display,
                                     breakdown.join(", "),
@@ -440,11 +474,11 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             backend.collect_slow_diagnostics(uri, content, &mut raw);
                             let slow_elapsed = slow_t0.elapsed();
                             let total = scope_elapsed + fast_elapsed + slow_elapsed;
-                            if total.as_secs() >= 2 {
+                            if debug && total.as_secs() >= 2 {
                                 let display =
                                     files[i].strip_prefix(root).unwrap_or(&files[i]).display();
                                 eprintln!(
-                                    "\n  \u{26a0} slow file ({:.1}s): {}\n    scope={:.1}s, fast={:.1}s, slow={:.1}s",
+                                    "  \u{26a0} slow file ({:.1}s): {}\n    scope={:.1}s, fast={:.1}s, slow={:.1}s",
                                     total.as_secs_f64(),
                                     display,
                                     scope_elapsed.as_secs_f64(),
@@ -507,8 +541,28 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // processed so the count reflects completed work,
                         // not work that has merely been started.
                         let completed = done_count.fetch_add(1, Ordering::Relaxed) + 1;
-                        if use_colour && output_format == OutputFormat::Table {
+                        if show_progress {
                             eprint!("\r\x1b[2K {}", progress_bar(completed, file_count));
+                        }
+                        if debug && verbosity >= 1 {
+                            let display =
+                                files[i].strip_prefix(root).unwrap_or(&files[i]).display();
+                            let secs = file_t0.elapsed().as_secs_f64();
+                            let prefix = if verbosity >= 2 {
+                                format!("[w{worker:02}] ")
+                            } else {
+                                " ".to_string()
+                            };
+                            // Only read /proc at -vvv: `rss_bytes()` is a
+                            // file read per file analyzed, so it must not
+                            // run just to be discarded at -v/-vv.
+                            match if verbosity >= 3 { rss_bytes() } else { None } {
+                                Some(rss) => eprintln!(
+                                    "{prefix}done {display} ({secs:.2}s, rss {} MB)",
+                                    rss / (1024 * 1024),
+                                ),
+                                None => eprintln!("{prefix}done {display} ({secs:.2}s)"),
+                            }
                         }
 
                         if !filtered.is_empty() {
@@ -538,8 +592,22 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         merged
     });
 
-    if use_colour && output_format == OutputFormat::Table {
+    if show_progress {
         eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count));
+    }
+    if verbosity >= 1 {
+        // Every phase is listed, including the class population between
+        // parsing and diagnostics: on a large project it can outweigh
+        // both, and a summary that omits it leaves the bulk of the run
+        // unaccounted for.
+        eprintln!(
+            " parse: {:.1}s, populate: {:.1}s, diagnose: {:.1}s, files: {}, threads: {}",
+            parse_elapsed.as_secs_f64(),
+            populate_elapsed.as_secs_f64(),
+            diagnose_t0.elapsed().as_secs_f64(),
+            file_count,
+            n_threads,
+        );
     }
 
     #[cfg(feature = "mem-audit")]
@@ -742,6 +810,21 @@ pub(crate) fn discover_user_files(
     files.sort();
     files.dedup();
     files
+}
+
+/// Current process resident-set size in bytes, for the -vvv per-file
+/// completion lines. Linux-only; other platforms report no rss.
+#[cfg(target_os = "linux")]
+fn rss_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|l| l.starts_with("VmRSS:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn rss_bytes() -> Option<u64> {
+    None
 }
 
 // ── Severity helpers ────────────────────────────────────────────────────────
