@@ -202,6 +202,7 @@ fn resolve_var_types(
         ctx.content,
         cursor_offset,
         ctx.class_loader,
+        ctx.backend,
         Loaders::with_function(ctx.function_loader()),
     )
 }

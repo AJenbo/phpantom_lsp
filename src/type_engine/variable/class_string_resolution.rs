@@ -34,6 +34,7 @@ pub(in crate::type_engine) fn resolve_class_string_targets(
     content: &str,
     cursor_offset: u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
 ) -> Vec<ClassInfo> {
     with_parsed_program(
         content,
@@ -46,6 +47,7 @@ pub(in crate::type_engine) fn resolve_class_string_targets(
                 content,
                 cursor_offset,
                 class_loader,
+                backend,
                 loaders: Loaders::default(),
                 resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
                 enclosing_return_type: None,

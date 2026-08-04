@@ -271,6 +271,7 @@ pub(super) fn build_docblock_plain(
     _file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> String {
     match context {
@@ -283,6 +284,7 @@ pub(super) fn build_docblock_plain(
             _file_namespace,
             local_classes,
             class_loader,
+            backend,
             function_loader,
         ),
         DocblockContext::ClassLike => build_class_plain(sym, indent, class_loader),
@@ -312,6 +314,7 @@ pub(super) fn build_docblock_snippet(
     _file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> String {
     match context {
@@ -324,6 +327,7 @@ pub(super) fn build_docblock_snippet(
             _file_namespace,
             local_classes,
             class_loader,
+            backend,
             function_loader,
         ),
         DocblockContext::ClassLike => build_class_snippet(sym, indent, class_loader),
@@ -351,6 +355,7 @@ fn build_function_snippet(
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> String {
     let throws_ctx = ThrowsContext {
@@ -402,6 +407,7 @@ fn build_function_snippet(
             position,
             local_classes,
             class_loader,
+            backend,
             function_loader,
         );
         let inferred = body_inferred.filter(|t| {
@@ -476,6 +482,7 @@ fn build_function_plain(
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> String {
     let throws_ctx = ThrowsContext {
@@ -514,6 +521,7 @@ fn build_function_plain(
             position,
             local_classes,
             class_loader,
+            backend,
             function_loader,
         );
         // Filter out types that don't need a @return tag (void, scalars
@@ -739,6 +747,7 @@ pub(crate) fn infer_inline_variable_type(
     position: Position,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     function_loader: FunctionLoaderFn<'_>,
 ) -> Option<PhpType> {
     let var_name = sym.variable_name.as_deref()?;
@@ -773,6 +782,7 @@ pub(crate) fn infer_inline_variable_type(
         current_class,
         all_classes,
         class_loader,
+        backend,
         crate::type_engine::resolver::Loaders::with_function(function_loader),
     )
 }

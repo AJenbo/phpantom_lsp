@@ -368,7 +368,7 @@ impl Backend {
         // return type, a docblock's inferred `@return`).  This handler
         // fetches its own file content, so it activates the type-engine
         // resolvers itself rather than going through `with_file_content`.
-        let _resolver_guard = self.activate_type_engine_resolvers();
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
         let result = match data.action_kind.as_str() {
             // ── PHPStan quickfixes ──────────────────────────────────

@@ -46,6 +46,7 @@ pub(crate) fn resolve_var_type(
         current_class,
         &ctx.classes,
         &class_loader,
+        Some(backend),
         loaders,
     )
 }

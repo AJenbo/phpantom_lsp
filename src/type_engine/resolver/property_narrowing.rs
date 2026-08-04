@@ -42,6 +42,7 @@ pub(crate) fn apply_property_narrowing(
                 content: rctx.content,
                 cursor_offset: rctx.cursor_offset,
                 class_loader: rctx.class_loader,
+                backend: rctx.backend,
                 loaders: Loaders::with_function(rctx.function_loader),
                 resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
                 enclosing_return_type: None,

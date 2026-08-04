@@ -498,6 +498,7 @@ fn resolve_subject_to_class(
         namespace: ctx.namespace,
         content,
         class_loader: &class_loader,
+        backend: Some(backend),
         function_loader: &function_loader,
     };
 

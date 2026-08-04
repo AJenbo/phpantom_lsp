@@ -158,6 +158,7 @@ impl Backend {
                 ctx.content,
                 ctx.cursor_offset,
                 class_loader,
+                ctx.backend,
                 Loaders::with_function(ctx.function_loader),
             );
             if !resolved.is_empty() {

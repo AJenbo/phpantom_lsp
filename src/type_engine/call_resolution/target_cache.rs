@@ -1,42 +1,24 @@
-/// Thread-local caches and RAII activation guards for call resolution.
+/// Request-scoped memos for call resolution, plus body-return-type
+/// inference.
 ///
-/// Bundles the callable-target cache, body-return-type inference memo,
-/// and guard-aware auth user resolver, plus
-/// [`Backend::activate_type_engine_resolvers`], which activates all of
-/// them together at request entry points.
+/// Bundles the callable-target cache and the body-return-inference memo
+/// behind [`activate_type_engine_caches`], which every request entry
+/// point activates so the two memos live exactly as long as one request
+/// (or one file's diagnostic pass).
+///
+/// The facilities that need project-wide state — inferring a return type
+/// from a method body, the model behind an auth guard, the validation
+/// rules describing a request — read the `Backend` off the resolution
+/// context instead, so a caller cannot forget to install them.
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
 use crate::types::*;
 
-// ─── Thread-local caches and body return inference ──────────────────────────
-
-/// Closure type for body return type inference.
-///
-/// Takes `(class_fqn, &MethodInfo)` and returns `Some(PhpType)` when the
-/// method body can be scanned for return statements.
-type BodyReturnInferrerFn = Box<dyn Fn(&str, &MethodInfo) -> Option<PhpType>>;
-
-/// Closure type for guard-aware auth user model resolution.
-///
-/// Takes an optional guard name (`None` for the default guard) and
-/// returns the model type configured for that guard in
-/// `config/auth.php`, or `None` when no concrete model can be pinned
-/// down.
-type AuthUserResolverFn = Box<dyn Fn(Option<&str>) -> Option<PhpType>>;
-
-/// Closure type for looking up the validation rules that describe a
-/// request-like receiver.
-///
-/// Takes `(receiver_fqn, file_content, call_offset)` and returns the rules
-/// array in scope: a `FormRequest`'s own `rules()`, or the nearest preceding
-/// `validate()` / `Validator::make()` call in the same function body.
-type ValidationRulesResolverFn =
-    Box<dyn Fn(&str, &str, u32) -> Option<crate::virtual_members::laravel::RulesArray>>;
+// ─── Thread-local memos ─────────────────────────────────────────────────────
 
 /// Memoized body-return-inference results, keyed by `(FQN, method)`.
 type BodyInferMemo = HashMap<(Atom, Atom), Option<PhpType>>;
@@ -44,18 +26,8 @@ type BodyInferMemo = HashMap<(Atom, Atom), Option<PhpType>>;
 thread_local! {
     /// When `Some`, `resolve_instance_method_callable` caches results
     /// by `"FQN::method_lower"`.  Activated by
-    /// [`with_callable_target_cache`], cleared on guard drop.
+    /// [`activate_type_engine_caches`], cleared on guard drop.
     pub(super) static CALLABLE_TARGET_CACHE: RefCell<Option<HashMap<String, Option<ResolvedCallableTarget>>>> =
-        const { RefCell::new(None) };
-
-    /// When `Some`, methods without a declared return type can have
-    /// their return type inferred by scanning the method body.
-    ///
-    /// The closure takes `(class_fqn, &MethodInfo)` and returns
-    /// `Some(PhpType)` when inference succeeds.  Set up by
-    /// [`with_body_return_inferrer`] at request entry points that
-    /// have access to `Backend`.
-    static BODY_RETURN_INFERRER: RefCell<Option<BodyReturnInferrerFn>> =
         const { RefCell::new(None) };
 
     /// Re-entry guard for body return inference.  Tracks
@@ -66,9 +38,8 @@ thread_local! {
         RefCell::new(HashSet::new());
 
     /// When `Some`, memoizes completed body return inference results by
-    /// `(FQN, method)`.  Activated together with [`BODY_RETURN_INFERRER`]
-    /// and cleared when the owning guard drops, so the memo lives exactly
-    /// as long as one request / one file's diagnostic pass.
+    /// `(FQN, method)`.  Cleared when the owning guard drops, so the memo
+    /// lives exactly as long as one request / one file's diagnostic pass.
     ///
     /// Without this memo, every call site that needs a method's inferred
     /// return type re-walks the entire method body.  On large legacy
@@ -84,31 +55,6 @@ thread_local! {
     /// (forward walker + full resolution), so even non-recursive
     /// chains are expensive.
     static BODY_INFER_DEPTH: Cell<u8> = const { Cell::new(0) };
-
-    /// When `Some`, `user()` calls on an auth entry point (a `Guard` or
-    /// `Request` subtype) resolve the model configured in
-    /// `config/auth.php` for the guard named at the call site.
-    ///
-    /// The closure takes an optional guard name (from `auth('admin')`,
-    /// `Auth::guard('admin')`, `->guard('admin')`, or
-    /// `$request->user('admin')`; `None` for the default guard) and
-    /// returns the resolved model type.  Set up by
-    /// [`Backend::activate_auth_user_resolver`] at request entry points
-    /// that have access to `Backend` (which holds the config and class
-    /// index the traversal needs).
-    pub(super) static AUTH_USER_RESOLVER: RefCell<Option<AuthUserResolverFn>> =
-        const { RefCell::new(None) };
-
-    /// When `Some`, `validated()` / `validate()` calls on a request-like
-    /// receiver resolve to the array shape the validation rules in scope
-    /// describe, instead of plain `array`.
-    ///
-    /// Set up by [`Backend::activate_validation_rules_resolver`] at request
-    /// entry points, which is where the class index needed to read a
-    /// `FormRequest`'s `rules()` from another file is available.
-    pub(crate) static VALIDATION_RULES_RESOLVER: RefCell<Option<ValidationRulesResolverFn>> =
-        const { RefCell::new(None) };
-
 }
 
 pub(crate) struct CallableTargetCacheGuard {
@@ -145,17 +91,14 @@ fn with_callable_target_cache() -> CallableTargetCacheGuard {
 
 // ── Body return type inference ──────────────────────────────────────────────
 
-/// RAII guard that clears [`BODY_RETURN_INFERRER`] on drop.
-pub(crate) struct BodyReturnInferrerGuard {
+/// RAII guard that clears [`BODY_INFER_MEMO`] on drop.
+pub(crate) struct BodyInferMemoGuard {
     owns: bool,
 }
 
-impl Drop for BodyReturnInferrerGuard {
+impl Drop for BodyInferMemoGuard {
     fn drop(&mut self) {
         if self.owns {
-            BODY_RETURN_INFERRER.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
             BODY_INFER_MEMO.with(|cell| {
                 *cell.borrow_mut() = None;
             });
@@ -163,35 +106,18 @@ impl Drop for BodyReturnInferrerGuard {
     }
 }
 
-/// Activate body return type inference for the current thread.
-///
-/// The provided closure is called when `resolve_method_return_types_with_args`
-/// encounters a real (non-virtual, non-stub) method that has no declared
-/// return type and no `@return` docblock.  It receives the owning class's
-/// FQN and the `MethodInfo`, and should return `Some(PhpType)` when the
-/// method body can be scanned for return statements.
-///
-/// Returns an RAII guard that clears the inferrer on drop.
-fn with_body_return_inferrer(inferrer: BodyReturnInferrerFn) -> BodyReturnInferrerGuard {
-    let already_active = BODY_RETURN_INFERRER.with(|cell| cell.borrow().is_some());
+/// Activate the body-return-inference memo for the current thread.
+fn with_body_infer_memo() -> BodyInferMemoGuard {
+    let already_active = BODY_INFER_MEMO.with(|cell| cell.borrow().is_some());
     if already_active {
-        return BodyReturnInferrerGuard { owns: false };
+        return BodyInferMemoGuard { owns: false };
     }
-    BODY_RETURN_INFERRER.with(|cell| {
-        *cell.borrow_mut() = Some(inferrer);
-    });
     BODY_INFER_MEMO.with(|cell| {
         *cell.borrow_mut() = Some(HashMap::new());
     });
-    BodyReturnInferrerGuard { owns: true }
+    BodyInferMemoGuard { owns: true }
 }
 
-/// Try to infer a method's return type from its body using the
-/// thread-local [`BODY_RETURN_INFERRER`].
-///
-/// Returns `None` when no inferrer is active, when the method is
-/// already being inferred (re-entry), or when inference itself
-/// produces no result.
 /// Maximum nesting depth for body return inference chains.
 ///
 /// A→B→C is 3 levels deep.  Real PHP code rarely has long chains of
@@ -200,7 +126,18 @@ fn with_body_return_inferrer(inferrer: BodyReturnInferrerFn) -> BodyReturnInferr
 /// sequential scans on pathological code.
 const MAX_BODY_INFER_DEPTH: u8 = 3;
 
-pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -> Option<PhpType> {
+/// Infer a method's return type by scanning its body.
+///
+/// Called when `resolve_method_return_types_with_args` encounters a real
+/// (non-virtual, non-stub) method that has no declared return type and
+/// no `@return` docblock.  Returns `None` when the method is already
+/// being inferred (re-entry), when the chain is too deep, or when
+/// inference itself produces no useful result.
+pub(crate) fn try_infer_body_return_type(
+    backend: &Backend,
+    class_fqn: &str,
+    method: &MethodInfo,
+) -> Option<PhpType> {
     // Build the memo / re-entry key as an interned `(FQN, method)`
     // tuple.  Both halves come from bounded symbol-name spaces and are
     // already interned, so the key allocates nothing and adds no new
@@ -234,14 +171,10 @@ pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -
 
     BODY_INFER_DEPTH.with(|cell| cell.set(depth + 1));
 
-    let result = BODY_RETURN_INFERRER.with(|cell| {
-        let borrow = cell.borrow();
-        let inferrer = borrow.as_ref()?;
-        let inferred = inferrer(class_fqn, method);
-        // Filter out `mixed` and `void` — these are not useful as
-        // inferred return types for completion/hover.
-        inferred.filter(|t| !t.is_mixed() && !t.is_void())
-    });
+    // Filter out `mixed` and `void` — these are not useful as
+    // inferred return types for completion/hover.
+    let result = infer_body_return_type(backend, class_fqn, method)
+        .filter(|t| !t.is_mixed() && !t.is_void());
 
     // Restore depth and remove from visited set so the same method
     // can be inferred again from a different call chain.
@@ -250,7 +183,7 @@ pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -
         cell.borrow_mut().remove(&key);
     });
 
-    // Memoize only completed inferrer runs (the depth-cap and re-entry
+    // Memoize only completed runs (the depth-cap and re-entry
     // short-circuits above return early and are never stored, so a
     // cut-off `None` cannot shadow a later real result).  A result
     // computed mid-chain may itself have had its nested inference
@@ -265,230 +198,106 @@ pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -
     result
 }
 
-// ── Guard-aware auth user model resolution ──────────────────────────────────
+/// Scan a method body for its return type.
+///
+/// Delegates to [`Backend::infer_return_type_for_function`], which has
+/// the full resolution infrastructure (use maps, namespace resolution,
+/// function loader, class loader with stubs/class index/PSR-4).
+fn infer_body_return_type(
+    backend: &Backend,
+    class_fqn: &str,
+    method: &MethodInfo,
+) -> Option<PhpType> {
+    // The method may have been inherited from a trait or parent class
+    // declared in a *different* file.  `method.name_offset` is relative
+    // to that declaring file, so reading the receiver's own file at
+    // that offset would land on the wrong location.  Resolve the class
+    // that actually declares the method and read *its* file.
+    let file_uri = backend
+        .find_or_load_class(class_fqn)
+        .map(|receiver| {
+            let loader = |name: &str| backend.find_or_load_class(name);
+            crate::hover::find_declaring_class(
+                &receiver,
+                &method.name,
+                &crate::hover::MemberKindForOrigin::Method,
+                &loader,
+            )
+        })
+        .and_then(|decl| {
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get(&decl.fqn())
+                .cloned()
+        })
+        // Fall back to the receiver's own file when the declaring
+        // class could not be located (e.g. only known via the AST).
+        .or_else(|| backend.symbols.fqn_uri_index.read().get(class_fqn).cloned())?;
 
-/// RAII guard that clears [`AUTH_USER_RESOLVER`] on drop.
-pub(crate) struct AuthUserResolverGuard {
-    owns: bool,
-}
+    let content = backend.get_file_content(&file_uri)?;
 
-impl Drop for AuthUserResolverGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            AUTH_USER_RESOLVER.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
+    // Convert method name_offset to a 0-based line number.
+    let offset = method.name_offset as usize;
+    if offset >= content.len() {
+        return None;
+    }
+    let func_line = content[..offset].matches('\n').count();
+
+    // Walk backwards from the method name to find the function
+    // keyword line (the declaration may start on an earlier line).
+    // infer_return_type_for_function expects the line of the
+    // `function` keyword.
+    let lines: Vec<&str> = content.lines().collect();
+    let mut decl_line = func_line;
+    for i in (0..=func_line).rev() {
+        let trimmed = lines.get(i).map(|l| l.trim()).unwrap_or("");
+        if trimmed.contains("function ")
+            || trimmed.contains("function(")
+            || trimmed.starts_with("function")
+        {
+            decl_line = i;
+            break;
+        }
+        if trimmed.ends_with('}') || trimmed.ends_with(';') {
+            break;
         }
     }
-}
 
-/// Activate guard-aware auth user model resolution for the current thread.
-///
-/// The provided closure maps an optional guard name to the model type
-/// configured for that guard in `config/auth.php`.  Returns an RAII
-/// guard that clears the resolver on drop.
-fn with_auth_user_resolver(resolver: AuthUserResolverFn) -> AuthUserResolverGuard {
-    let already_active = AUTH_USER_RESOLVER.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return AuthUserResolverGuard { owns: false };
-    }
-    AUTH_USER_RESOLVER.with(|cell| {
-        *cell.borrow_mut() = Some(resolver);
-    });
-    AuthUserResolverGuard { owns: true }
-}
+    let result = backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
 
-// ── Validation rules resolution ─────────────────────────────────────────────
-
-/// RAII guard that clears [`VALIDATION_RULES_RESOLVER`] on drop.
-pub(crate) struct ValidationRulesResolverGuard {
-    owns: bool,
-}
-
-impl Drop for ValidationRulesResolverGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            VALIDATION_RULES_RESOLVER.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
-/// Activate validation-rule lookup for the current thread.
-///
-/// Returns an RAII guard that clears the resolver on drop.
-fn with_validation_rules_resolver(
-    resolver: ValidationRulesResolverFn,
-) -> ValidationRulesResolverGuard {
-    let already_active = VALIDATION_RULES_RESOLVER.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return ValidationRulesResolverGuard { owns: false };
-    }
-    VALIDATION_RULES_RESOLVER.with(|cell| {
-        *cell.borrow_mut() = Some(resolver);
-    });
-    ValidationRulesResolverGuard { owns: true }
+    // Prefer the effective type (richer, e.g. `list<string>`)
+    // over the native type (e.g. `array`).
+    Some(result.effective.unwrap_or(result.native))
 }
 
 // ── Bundled request-scope activation ────────────────────────────────────────
 
-/// Every request-scoped resolver the type engine consults, activated as
-/// a unit.
+/// The request-scoped memos the type engine keeps, activated as a unit.
 ///
-/// The resolvers are not optional extras: without them the type engine
-/// answers the same question worse (a method with no declared return
-/// type has no return type, `auth()->user()` is the framework contract
-/// rather than the configured model, `$request->validated()` is a plain
-/// `array` rather than an array shape).  A feature that resolved an
-/// expression without them diverged from one that had them, so they are
-/// activated together at the chokepoints every request passes through
-/// instead of being opted into per feature.
-pub(crate) struct TypeEngineResolvers {
+/// Both are pure memos: without them the type engine reaches the same
+/// answers, just by re-doing work it has already done for this file.
+/// They are activated at the chokepoints every request passes through so
+/// no feature pays for a cold cache the one next to it already warmed.
+pub(crate) struct TypeEngineCaches {
     _callable_target: CallableTargetCacheGuard,
-    _body_return: BodyReturnInferrerGuard,
-    _auth_user: AuthUserResolverGuard,
-    _validation_rules: ValidationRulesResolverGuard,
+    _body_infer: BodyInferMemoGuard,
 }
 
-/// Build the guard-aware auth user model resolver closure.
+/// Activate every request-scoped type-engine memo for the current
+/// thread, returning one RAII guard that clears them all on drop.
 ///
-/// Maps an optional guard name to the model type configured for that
-/// guard in `config/auth.php`.
-fn auth_user_resolver(backend: Arc<Backend>) -> AuthUserResolverFn {
-    Box::new(move |guard: Option<&str>| -> Option<PhpType> {
-        let loader = |name: &str| backend.find_or_load_class(name);
-        crate::virtual_members::laravel::resolve_auth_user_type(&backend, guard, &loader)
-    })
-}
-
-/// Build the validation rules resolver closure, which lets
-/// `$request->validated()` resolve to the array shape its rules describe.
-fn validation_rules_resolver(backend: Arc<Backend>) -> ValidationRulesResolverFn {
-    Box::new(move |fqn: &str, content: &str, offset: u32| {
-        crate::virtual_members::laravel::rules_for_receiver(&backend, fqn, content, offset)
-    })
-}
-
-impl Backend {
-    /// Activate every request-scoped type-engine resolver for the
-    /// current thread, returning one RAII guard that deactivates them
-    /// all on drop.
-    ///
-    /// Called from [`Backend::with_file_content`], which every LSP
-    /// handler goes through, and from the few entry points that fetch
-    /// their own file content (completion, completion/code-action
-    /// resolve, the diagnostic pass, and the `analyse` CLI).  Nested
-    /// activation is a no-op, so an inner pass cannot clobber the
-    /// resolvers an outer one installed.
-    ///
-    /// [`Backend::with_file_content`]: Backend::with_file_content
-    pub(crate) fn activate_type_engine_resolvers(&self) -> TypeEngineResolvers {
-        // Every guard below is individually re-entrancy safe, but
-        // building the closures means cloning the `Backend`, which the
-        // nested case would then throw away.  Skip that work when the
-        // resolvers this thread needs are already installed.
-        let all_active = CALLABLE_TARGET_CACHE.with(|cell| cell.borrow().is_some())
-            && BODY_RETURN_INFERRER.with(|cell| cell.borrow().is_some())
-            && AUTH_USER_RESOLVER.with(|cell| cell.borrow().is_some())
-            && VALIDATION_RULES_RESOLVER.with(|cell| cell.borrow().is_some());
-        if all_active {
-            return TypeEngineResolvers {
-                _callable_target: CallableTargetCacheGuard { owns: false },
-                _body_return: BodyReturnInferrerGuard { owns: false },
-                _auth_user: AuthUserResolverGuard { owns: false },
-                _validation_rules: ValidationRulesResolverGuard { owns: false },
-            };
-        }
-
-        // One `Backend` clone shared by all three closures.  Every field
-        // is `Arc`-wrapped so the clone is cheap, but it is not free and
-        // this runs on every request.
-        let backend = Arc::new(self.clone_for_diagnostic_worker());
-
-        TypeEngineResolvers {
-            _callable_target: with_callable_target_cache(),
-            _body_return: with_body_return_inferrer(body_return_inferrer(Arc::clone(&backend))),
-            _auth_user: with_auth_user_resolver(auth_user_resolver(Arc::clone(&backend))),
-            _validation_rules: with_validation_rules_resolver(validation_rules_resolver(backend)),
-        }
+/// Called from [`Backend::with_file_content`], which every LSP handler
+/// goes through, and from the few entry points that fetch their own file
+/// content (completion, completion/code-action resolve, the diagnostic
+/// pass, and the `analyse` CLI).  Nested activation is a no-op, so an
+/// inner pass cannot clobber the memos an outer one installed.
+///
+/// [`Backend::with_file_content`]: Backend::with_file_content
+pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
+    TypeEngineCaches {
+        _callable_target: with_callable_target_cache(),
+        _body_infer: with_body_infer_memo(),
     }
-}
-
-/// Build the body return type inferrer closure.
-///
-/// Called when `resolve_method_return_types_with_args` encounters a real
-/// (non-virtual, non-stub) method that has no declared return type and
-/// no `@return` docblock.  Delegates to
-/// [`Backend::infer_return_type_for_function`], which has the full
-/// resolution infrastructure (use maps, namespace resolution, function
-/// loader, class loader with stubs/class index/PSR-4).
-fn body_return_inferrer(backend: Arc<Backend>) -> BodyReturnInferrerFn {
-    Box::new(
-        move |class_fqn: &str, method: &MethodInfo| -> Option<PhpType> {
-            // The method may have been inherited from a trait or parent class
-            // declared in a *different* file.  `method.name_offset` is relative
-            // to that declaring file, so reading the receiver's own file at
-            // that offset would land on the wrong location.  Resolve the class
-            // that actually declares the method and read *its* file.
-            let file_uri = backend
-                .find_or_load_class(class_fqn)
-                .map(|receiver| {
-                    let loader = |name: &str| backend.find_or_load_class(name);
-                    crate::hover::find_declaring_class(
-                        &receiver,
-                        &method.name,
-                        &crate::hover::MemberKindForOrigin::Method,
-                        &loader,
-                    )
-                })
-                .and_then(|decl| {
-                    backend
-                        .symbols
-                        .fqn_uri_index
-                        .read()
-                        .get(&decl.fqn())
-                        .cloned()
-                })
-                // Fall back to the receiver's own file when the declaring
-                // class could not be located (e.g. only known via the AST).
-                .or_else(|| backend.symbols.fqn_uri_index.read().get(class_fqn).cloned())?;
-
-            let content = backend.get_file_content(&file_uri)?;
-
-            // Convert method name_offset to a 0-based line number.
-            let offset = method.name_offset as usize;
-            if offset >= content.len() {
-                return None;
-            }
-            let func_line = content[..offset].matches('\n').count();
-
-            // Walk backwards from the method name to find the function
-            // keyword line (the declaration may start on an earlier line).
-            // infer_return_type_for_function expects the line of the
-            // `function` keyword.
-            let lines: Vec<&str> = content.lines().collect();
-            let mut decl_line = func_line;
-            for i in (0..=func_line).rev() {
-                let trimmed = lines.get(i).map(|l| l.trim()).unwrap_or("");
-                if trimmed.contains("function ")
-                    || trimmed.contains("function(")
-                    || trimmed.starts_with("function")
-                {
-                    decl_line = i;
-                    break;
-                }
-                if trimmed.ends_with('}') || trimmed.ends_with(';') {
-                    break;
-                }
-            }
-
-            let result =
-                backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
-
-            // Prefer the effective type (richer, e.g. `list<string>`)
-            // over the native type (e.g. `array`).
-            Some(result.effective.unwrap_or(result.native))
-        },
-    )
 }

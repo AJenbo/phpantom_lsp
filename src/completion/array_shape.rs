@@ -541,6 +541,7 @@ impl Backend {
             content,
             cursor_offset as u32,
             &class_loader,
+            Some(self),
             Loaders {
                 function_loader: Some(&function_loader),
                 config_resolver: Some(&config_resolver),

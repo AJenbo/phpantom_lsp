@@ -1526,6 +1526,7 @@ impl LanguageServer for Backend {
             &ctx.namespace,
             &ctx.classes,
             &class_loader,
+            Some(self),
             Some(&function_loader),
         );
 
@@ -1801,7 +1802,7 @@ impl Backend {
         // signature help, code actions, rename, and inlay hints resolve an
         // expression with the same facilities hover and diagnostics have,
         // instead of a poorer answer for the identical code.
-        let _resolver_guard = self.activate_type_engine_resolvers();
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
         crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
@@ -2563,6 +2564,7 @@ impl Backend {
                 content,
                 cursor_offset: reg.name_offset,
                 class_loader: &class_loader,
+                backend: Some(self),
                 laravel_macro_this_resolver: None,
                 resolved_class_cache: Some(&self.resolved_class_cache),
                 function_loader: Some(&function_loader),
@@ -2613,6 +2615,7 @@ impl Backend {
             content: &content,
             cursor_offset: reg.name_offset,
             class_loader: &class_loader,
+            backend: Some(self),
             laravel_macro_this_resolver: None,
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader),

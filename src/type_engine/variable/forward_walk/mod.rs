@@ -246,6 +246,7 @@ pub(crate) fn resolve_in_method_body<'b>(
             all_classes: ctx.all_classes,
             content: ctx.content,
             class_loader: ctx.class_loader,
+            backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: ctx.enclosing_return_type.clone(),

@@ -560,6 +560,7 @@ impl Backend {
             content,
             cursor_offset,
             class_loader: &class_loader,
+            backend: Some(self),
             laravel_macro_this_resolver: None,
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader_cl),

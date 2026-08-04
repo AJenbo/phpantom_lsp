@@ -22,7 +22,7 @@ use crate::type_engine::conditional_resolution::{
 };
 use crate::type_engine::resolver::ResolutionCtx;
 
-use super::target_cache::{AUTH_USER_RESOLVER, try_infer_body_return_type};
+use super::target_cache::try_infer_body_return_type;
 
 /// Bundled parameters for [`Backend::resolve_method_return_types_with_args`].
 ///
@@ -34,6 +34,9 @@ pub(crate) struct MethodReturnCtx<'a> {
     pub all_classes: &'a [Arc<ClassInfo>],
     /// Cross-file class resolution callback.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Server state for project-wide answers.  See
+    /// [`ResolutionCtx::backend`].
+    pub backend: Option<&'a Backend>,
     /// Template substitution map (method-level `@template` bindings).
     pub template_subs: &'a HashMap<String, PhpType>,
     /// Resolves a variable name to class-string values (for conditional
@@ -69,6 +72,7 @@ pub(super) fn build_var_resolver<'a>(
                 ctx.content,
                 ctx.cursor_offset,
                 ctx.class_loader,
+                ctx.backend,
             )
             .iter()
             .map(|c| c.name.to_string())
@@ -87,7 +91,8 @@ pub(super) fn build_var_resolver<'a>(
 ///
 /// * the receiver is not a `Guard`/`Request` subtype (so this is some
 ///   unrelated `user()` method),
-/// * no [`AUTH_USER_RESOLVER`] is active on this thread, or
+/// * the context carries no `Backend` (the config and class index the
+///   traversal needs), or
 /// * the guard's provider maps to no concrete model.
 ///
 /// `base` is the receiver expression (used to recover the guard name
@@ -100,12 +105,9 @@ fn resolve_auth_user_at_call(
     owners: &[ResolvedType],
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<Arc<ClassInfo>>> {
-    // Cheap gate first: without an active resolver there is nothing to
+    // Cheap gate first: without the server state there is nothing to
     // refine, so skip the (comparatively expensive) subtype walk below.
-    let is_resolver_active = AUTH_USER_RESOLVER.with(|cell| cell.borrow().is_some());
-    if !is_resolver_active {
-        return None;
-    }
+    let backend = ctx.backend?;
 
     // Only intercept `user()` on an actual auth entry point.  Every
     // other class with a `user()` method must resolve normally.
@@ -127,8 +129,12 @@ fn resolve_auth_user_at_call(
     }
 
     let guard = auth_guard_name(base, user_args);
-    let model_type =
-        AUTH_USER_RESOLVER.with(|cell| cell.borrow().as_ref().and_then(|f| f(guard.as_deref())))?;
+    let loader = |name: &str| backend.find_or_load_class(name);
+    let model_type = crate::virtual_members::laravel::resolve_auth_user_type(
+        backend,
+        guard.as_deref(),
+        &loader,
+    )?;
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &model_type,
@@ -168,6 +174,7 @@ fn resolve_validated_shape_at_call(
         ctx.content,
         ctx.cursor_offset,
         ctx.class_loader,
+        ctx.backend,
     )
 }
 
@@ -468,6 +475,7 @@ impl Backend {
                     let mr_ctx = MethodReturnCtx {
                         all_classes: ctx.all_classes,
                         class_loader: ctx.class_loader,
+                        backend: ctx.backend,
                         template_subs: &template_subs,
                         var_resolver: Some(&var_resolver),
                         cache: ctx.resolved_class_cache,
@@ -524,6 +532,7 @@ impl Backend {
                             let mr_ctx = MethodReturnCtx {
                                 all_classes: ctx.all_classes,
                                 class_loader: ctx.class_loader,
+                                backend: ctx.backend,
                                 template_subs: &template_subs,
                                 var_resolver: Some(&var_resolver),
                                 cache: ctx.resolved_class_cache,
@@ -599,6 +608,7 @@ impl Backend {
                     let mr_ctx = MethodReturnCtx {
                         all_classes: ctx.all_classes,
                         class_loader: ctx.class_loader,
+                        backend: ctx.backend,
                         template_subs: &template_subs,
                         var_resolver: Some(&var_resolver),
                         cache: ctx.resolved_class_cache,
@@ -1278,7 +1288,9 @@ impl Backend {
             // lack a return type declaration and docblock @return tag.
             if method.name_offset != 0
                 && !method.is_virtual
-                && let Some(inferred) = try_infer_body_return_type(&class_info.fqn(), method)
+                && let Some(backend) = mr_ctx.backend
+                && let Some(inferred) =
+                    try_infer_body_return_type(backend, &class_info.fqn(), method)
             {
                 // A body-inferred `return $this` yields a self-like marker.
                 // Map it to the receiver class so the chain continues with

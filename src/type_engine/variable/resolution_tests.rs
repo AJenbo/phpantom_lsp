@@ -306,6 +306,7 @@ function test() {
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     ));
 
@@ -447,6 +448,7 @@ function test() {
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     ));
 
@@ -475,6 +477,7 @@ function test(bool $flag): void {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -493,6 +496,7 @@ fn resolve_literal_test_var(content: &str, var_name: &str) -> String {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
     ResolvedType::types_joined(&results).to_string()
@@ -1035,6 +1039,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1070,6 +1075,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1102,6 +1108,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1150,6 +1157,7 @@ function test() {
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     );
 
@@ -1185,6 +1193,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1216,6 +1225,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1249,6 +1259,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1280,6 +1291,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1376,6 +1388,7 @@ class LoggedConnection extends BaseConnector {
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     ));
 
@@ -1406,6 +1419,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1436,6 +1450,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1467,6 +1482,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1518,6 +1534,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders {
             function_loader: Some(&func_loader),
             ..Loaders::default()
@@ -1561,6 +1578,7 @@ function test() {
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders {
             function_loader: Some(&func_loader),
             ..Loaders::default()
@@ -1601,6 +1619,7 @@ $foo;
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1637,6 +1656,7 @@ $foo;
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1671,6 +1691,7 @@ $foo;
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1704,6 +1725,7 @@ $foo;
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1748,6 +1770,7 @@ $foo;
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     );
 
@@ -1791,6 +1814,7 @@ $foo;
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     );
 
@@ -1836,6 +1860,7 @@ $foo;
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     );
 
@@ -1873,6 +1898,7 @@ $foo;
         content,
         cursor_offset,
         &|_| None,
+        None,
         Loaders::default(),
     );
 
@@ -1920,6 +1946,7 @@ $foo;
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders::default(),
     );
 
@@ -1980,6 +2007,7 @@ function test() {
         content,
         cursor_offset,
         &class_loader,
+        None,
         Loaders {
             function_loader: Some(&func_loader),
             ..Loaders::default()

@@ -610,6 +610,7 @@ fn resolve_target_classes_expr_inner(
                     ctx.content,
                     ctx.cursor_offset,
                     class_loader,
+                    ctx.backend,
                     Loaders::with_function(ctx.function_loader),
                 );
                 if !resolved.is_empty() {
@@ -738,6 +739,7 @@ fn resolve_target_classes_expr_inner(
                         ctx.content,
                         ctx.cursor_offset,
                         class_loader,
+                        ctx.backend,
                         Loaders::with_function(ctx.function_loader),
                     );
                     if resolved.is_empty() {
@@ -1028,6 +1030,7 @@ pub(crate) fn resolve_subject_outcome(
                 ctx.current_class,
                 ctx.all_classes,
                 ctx.class_loader,
+                ctx.backend,
                 Loaders::with_function(ctx.function_loader),
             )
         && let Some(unresolved) = check_unresolvable_class_name(&resolved_type, ctx.class_loader)
@@ -1247,6 +1250,7 @@ fn resolve_variable_fallback(
                 ctx.content,
                 ctx.cursor_offset,
                 class_loader,
+                ctx.backend,
             );
         if !class_string_targets.is_empty() {
             return class_string_targets
@@ -1290,6 +1294,7 @@ fn resolve_variable_fallback(
                 ctx.content,
                 ctx.cursor_offset,
                 class_loader,
+                ctx.backend,
                 Loaders::with_function(function_loader),
             )
         }

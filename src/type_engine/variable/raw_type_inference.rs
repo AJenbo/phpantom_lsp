@@ -222,6 +222,7 @@ fn infer_element_type_precise<'b>(
                 current_class,
                 ctx.all_classes,
                 ctx.class_loader,
+                ctx.backend,
                 crate::type_engine::resolver::Loaders::with_function(ctx.function_loader()),
             )
         }
@@ -487,6 +488,7 @@ fn infer_callback_return_type(
         content: ctx.content,
         cursor_offset: body_offset,
         class_loader: ctx.class_loader,
+        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: None,

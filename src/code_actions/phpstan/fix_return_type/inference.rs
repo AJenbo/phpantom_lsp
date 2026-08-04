@@ -77,6 +77,7 @@ impl Backend {
             func_line,
             &local_classes,
             &class_loader,
+            Some(self),
             Some(&function_loader),
             self_as_marker,
         )
@@ -115,6 +116,7 @@ pub(crate) fn infer_return_type(
     func_line: usize,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
     self_as_marker: bool,
 ) -> Option<InferredReturnType> {
@@ -183,6 +185,7 @@ pub(crate) fn infer_return_type(
                     content,
                     cursor_offset: start as u32,
                     class_loader,
+                    backend,
                     loaders: Loaders::with_function(function_loader),
                     resolved_class_cache: None,
                     enclosing_return_type: None,
@@ -286,6 +289,7 @@ pub(crate) fn enrichment_return_type(
     position: Position,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> Option<PhpType> {
     // The position is on or near the docblock / function signature.
@@ -301,6 +305,7 @@ pub(crate) fn enrichment_return_type(
         func_line,
         local_classes,
         class_loader,
+        backend,
         function_loader,
         // Docblock generation wants a concrete written type, not a `$this`
         // marker, so resolve `return $this` to the enclosing class.

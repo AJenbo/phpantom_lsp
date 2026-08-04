@@ -385,6 +385,7 @@ impl Backend {
                 content,
                 cursor_offset,
                 class_loader,
+                Some(self),
                 crate::type_engine::resolver::Loaders::default(),
             );
             for rt in &results {

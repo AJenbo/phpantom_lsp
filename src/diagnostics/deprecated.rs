@@ -168,6 +168,7 @@ impl Backend {
                                     content,
                                     cursor_offset: span.start,
                                     class_loader: &class_loader,
+                                    backend: Some(self),
                                     laravel_macro_this_resolver: None,
                                     resolved_class_cache: Some(cache),
                                     function_loader: Some(&function_loader),
@@ -392,6 +393,9 @@ fn resolve_subject_to_class_name(
         namespace: file_namespace,
         content: "",
         class_loader: &dummy_class_loader,
+        // Non-variable subjects (keywords, bare class names) resolve from
+        // the file's own use-map, so no server state is needed.
+        backend: None,
         function_loader: &dummy_function_loader,
     };
 

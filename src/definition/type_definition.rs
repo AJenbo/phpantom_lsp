@@ -65,6 +65,7 @@ impl Backend {
                         current_class,
                         &ctx,
                         &class_loader,
+                        Some(self),
                         &function_loader,
                     )
                     .into_iter()
@@ -91,6 +92,7 @@ impl Backend {
                     content,
                     cursor_offset: offset,
                     class_loader: &class_loader,
+                    backend: Some(self),
                     laravel_macro_this_resolver: None,
                     resolved_class_cache: Some(&self.resolved_class_cache),
                     function_loader: Some(
@@ -294,6 +296,7 @@ impl Backend {
 ///
 /// This is a free function to avoid clippy's too-many-arguments lint
 /// on `&self` methods.
+#[allow(clippy::too_many_arguments)]
 fn resolve_variable_type_names(
     name: &str,
     content: &str,
@@ -301,6 +304,7 @@ fn resolve_variable_type_names(
     current_class: Option<&ClassInfo>,
     ctx: &FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
     function_loader: &dyn Fn(&str, u32) -> Option<FunctionInfo>,
 ) -> Option<PhpType> {
     // $this resolves to the enclosing class.
@@ -316,6 +320,7 @@ fn resolve_variable_type_names(
         current_class,
         &ctx.classes,
         class_loader,
+        backend,
         Loaders::with_function(Some(function_loader)),
     );
 

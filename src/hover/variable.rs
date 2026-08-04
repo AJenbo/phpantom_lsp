@@ -87,6 +87,7 @@ impl Backend {
                 current_class,
                 &ctx.classes,
                 &class_loader,
+                Some(self),
                 loaders,
             )
         {

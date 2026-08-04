@@ -45,6 +45,7 @@ impl Backend {
                     position,
                     &ctx.classes,
                     &class_loader,
+                    Some(self),
                     Some(
                         &function_loader
                             as &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,

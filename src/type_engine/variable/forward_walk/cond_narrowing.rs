@@ -1177,6 +1177,7 @@ pub(crate) fn build_var_ctx<'a>(
         content: ctx.content,
         cursor_offset: ctx.cursor_offset,
         class_loader: ctx.class_loader,
+        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: ctx.enclosing_return_type.clone(),

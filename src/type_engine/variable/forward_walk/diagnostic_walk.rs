@@ -804,6 +804,7 @@ pub(crate) fn build_diagnostic_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
 ) {
@@ -831,6 +832,7 @@ pub(crate) fn build_diagnostic_scopes(
         content,
         local_classes,
         class_loader,
+        backend,
         loaders,
         resolved_class_cache,
     };
@@ -862,6 +864,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         content: diag_ctx.content,
         cursor_offset: u32::MAX,
         class_loader: diag_ctx.class_loader,
+        backend: diag_ctx.backend,
         loaders: diag_ctx.loaders,
         resolved_class_cache: diag_ctx.resolved_class_cache,
         enclosing_return_type: None,
@@ -1036,6 +1039,7 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     content: &'a str,
     local_classes: &'a [Arc<ClassInfo>],
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&'a crate::Backend>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
 }
@@ -1062,6 +1066,7 @@ pub(crate) fn analyze_function_body<'b>(
         content: diag_ctx.content,
         cursor_offset: u32::MAX,
         class_loader: diag_ctx.class_loader,
+        backend: diag_ctx.backend,
         loaders: diag_ctx.loaders,
         resolved_class_cache: diag_ctx.resolved_class_cache,
         enclosing_return_type: None,
@@ -1162,6 +1167,7 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
         content: ctx.content,
         cursor_offset: ctx.cursor_offset,
         class_loader: ctx.class_loader,
+        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: None,

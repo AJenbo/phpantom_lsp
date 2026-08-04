@@ -172,6 +172,7 @@ impl Backend {
             content,
             &ctx.classes,
             &class_loader,
+            Some(self),
             Some(&function_loader),
             &ctx.use_map,
             &ctx.namespace,
@@ -185,6 +186,7 @@ impl Backend {
             content,
             &ctx.classes,
             &class_loader,
+            Some(self),
             Some(&function_loader),
             &ctx.use_map,
             &ctx.namespace,
@@ -550,11 +552,13 @@ fn detect_indent(content: &str, docblock_start: usize) -> String {
 // ── Diff and update logic ───────────────────────────────────────────────────
 
 /// Check whether the docblock needs updating.
+#[allow(clippy::too_many_arguments)]
 fn check_needs_update(
     info: &FunctionWithDocblock,
     content: &str,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
@@ -662,6 +666,7 @@ fn check_needs_update(
                 info.docblock_position,
                 local_classes,
                 class_loader,
+                backend,
                 function_loader,
             )
             && !enriched.is_void()
@@ -752,11 +757,13 @@ fn is_type_contradiction(doc_type: &PhpType, native_type: &PhpType) -> bool {
 }
 
 /// Build the updated docblock text.
+#[allow(clippy::too_many_arguments)]
 fn build_updated_docblock(
     info: &FunctionWithDocblock,
     content: &str,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
@@ -955,6 +962,7 @@ fn build_updated_docblock(
                 info.docblock_position,
                 local_classes,
                 class_loader,
+                backend,
                 function_loader,
             )
             && !enriched.is_void()

@@ -219,31 +219,3 @@ inside a string from the start of a comment without a forward pass, so
 the fix likely means scanning the enclosing statement forward once and
 masking comments before the backwards walk, the way the Blade
 preprocessor masks non-PHP text.
-
-#### B49. The type-engine resolvers are ambient thread-local state
-
-**Impact: Low · Effort: Medium**
-
-`Backend::activate_type_engine_resolvers` installs the body-return
-inferrer, the auth user resolver, the validation rules resolver, and the
-callable target cache into thread-locals. Every LSP request activates it
-at one chokepoint (`Backend::with_file_content`), and the handlers that
-fetch their own file content (completion, completion resolve, code
-action resolve, the diagnostic pass, the `analyse` CLI) each call it
-themselves. That is enough for every feature to resolve an expression
-with the same facilities available, which is what made hover and
-go-to-definition disagree, but the resolvers are still ambient state
-rather than part of the resolution context the type engine already
-threads through: a new entry point that fetches its own content can
-forget them, and nothing in the type engine can tell a missing resolver
-from a genuine absence of an answer.
-
-**Where to change:** `src/type_engine/call_resolution/target_cache.rs`
-holds the thread-locals and the bundled activation;
-`call_resolution/return_types.rs` reads them. Carrying them on
-`ResolutionCtx` (`src/type_engine/resolver/context.rs`) instead would
-make them present by construction, at the cost of touching the ~35
-places that build a context. It also settles whether they belong on the
-`Backend`: each closure captures nothing but a `Backend` clone, so the
-closure indirection buys nothing once the context is available where the
-resolver is read.

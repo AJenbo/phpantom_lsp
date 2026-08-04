@@ -398,6 +398,9 @@ pub(crate) struct ForwardWalkCtx<'a> {
     pub cursor_offset: u32,
     /// Cross-file class resolution callback.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Server state for project-wide answers.  See
+    /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
+    pub backend: Option<&'a crate::Backend>,
     /// Cross-file loader callbacks (function loader, constant loader).
     pub loaders: Loaders<'a>,
     /// Shared cache of fully-resolved classes.
@@ -425,6 +428,7 @@ impl<'a> ForwardWalkCtx<'a> {
             content: self.content,
             cursor_offset,
             class_loader: self.class_loader,
+            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
@@ -453,6 +457,7 @@ impl<'a> ForwardWalkCtx<'a> {
             content: self.content,
             cursor_offset,
             class_loader: self.class_loader,
+            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),

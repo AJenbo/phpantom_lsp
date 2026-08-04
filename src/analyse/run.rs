@@ -282,7 +282,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             with_active_resolved_class_cache(&backend.resolved_class_cache);
                         let _chain_guard =
                             crate::type_engine::resolver::with_chain_resolution_cache();
-                        let _resolver_guard = backend.activate_type_engine_resolvers();
+                        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
                         // ── Forward-walked diagnostic scope cache ───
                         // Walk every function/method body once with the
@@ -310,6 +310,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 content,
                                 &file_ctx.classes,
                                 &class_loader,
+                                Some(backend),
                                 loaders,
                                 Some(&backend.resolved_class_cache),
                             );

@@ -293,7 +293,7 @@ impl Backend {
         // example `Builder::where` is looked up once and reused for
         // every `$q->where(...)`, `$query->where(...)`, and
         // `Product::query()->where(...)` call site in the file.
-        let _resolver_guard = self.activate_type_engine_resolvers();
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
         // ── Phase 2: forward-walked diagnostic scope cache ──────
         // Walk every function/method body in the file once with the
@@ -331,6 +331,7 @@ impl Backend {
                 content,
                 &ctx.file.classes,
                 &class_loader,
+                Some(self),
                 loaders,
                 Some(&self.resolved_class_cache),
             );

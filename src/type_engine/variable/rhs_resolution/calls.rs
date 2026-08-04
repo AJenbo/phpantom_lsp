@@ -411,6 +411,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
         rctx.content,
         rctx.cursor_offset,
         rctx.class_loader,
+        rctx.backend,
         Loaders::with_function(rctx.function_loader),
     );
     if resolved.is_empty() {
@@ -1178,10 +1179,9 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     //
     // `validate([…])` reads its rules from its own argument, so it works
     // wherever it is written; every other form asks the scope for them and is
-    // a no-op without an active resolver.
-    let shape_call = validated_shape::shape_bearing_method(&method_name).filter(|call| {
-        *call == validated_shape::ShapeCall::Validate || validated_shape::rules_resolver_active()
-    });
+    // a no-op without the server state that reads them.
+    let shape_call = validated_shape::shape_bearing_method(&method_name)
+        .filter(|call| *call == validated_shape::ShapeCall::Validate || ctx.backend.is_some());
 
     for owner in &owner_classes {
         if let Some(result) =
@@ -1618,6 +1618,7 @@ pub(super) fn resolve_owner_method_call(
     let mr_ctx = MethodReturnCtx {
         all_classes: ctx.all_classes,
         class_loader: ctx.class_loader,
+        backend: ctx.backend,
         template_subs,
         var_resolver: Some(&var_resolver),
         cache: ctx.resolved_class_cache,
@@ -1808,7 +1809,9 @@ pub(super) fn resolve_owner_method_call(
     // array shapes) that resolve_method_return_types_with_args cannot
     // represent.
     if method_ref.is_some_and(|m| m.return_type.is_none() && m.name_offset != 0 && !m.is_virtual)
+        && let Some(backend) = ctx.backend
         && let Some(inferred) = crate::type_engine::call_resolution::try_infer_body_return_type(
+            backend,
             &owner.fqn(),
             method_ref.unwrap(),
         )
@@ -1859,6 +1862,7 @@ pub(super) fn resolve_rhs_static_call(
                     ctx.content,
                     ctx.cursor_offset,
                     ctx.class_loader,
+                    ctx.backend,
                 );
             // When there are multiple possible class targets (union class-string),
             // resolve the method return type through each and union the results.
@@ -1885,6 +1889,7 @@ pub(super) fn resolve_rhs_static_call(
                         let mr_ctx = MethodReturnCtx {
                             all_classes: ctx.all_classes,
                             class_loader: ctx.class_loader,
+                            backend: ctx.backend,
                             template_subs: &template_subs,
                             var_resolver: Some(&var_resolver),
                             cache: ctx.resolved_class_cache,
@@ -2027,6 +2032,7 @@ pub(super) fn resolve_rhs_static_call(
                     ctx.content,
                     ctx.class_loader,
                     ctx.resolved_class_cache,
+                    ctx.backend,
                 )
             } else {
                 None
@@ -2095,17 +2101,17 @@ fn facade_accessor_concrete_owner(
     content: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&crate::virtual_members::ResolvedClassCache>,
+    backend: Option<&Backend>,
 ) -> Option<ClassInfo> {
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(facade, class_loader, cache);
 
     // When the facade is declared in the current file, read its
-    // `getFacadeAccessor()` return directly from source: the body walker
-    // that `try_infer_body_return_type` relies on is not always active in
-    // the hover/completion paths, and it honours the declared `: string`
-    // return type rather than the `::class` value we need. Scope the parse
-    // to the facade's own class so a file declaring several facades does
-    // not cross-resolve.
+    // `getFacadeAccessor()` return directly from source: body-return
+    // inference honours the declared `: string` return type rather than
+    // the `::class` value we need here. Scope the parse to the facade's
+    // own class so a file declaring several facades does not
+    // cross-resolve.
     if let Some(concrete) =
         crate::virtual_members::laravel::parse_facade_accessor_for_class(content, &facade.name)
             .and_then(facade_accessor_to_class_name)
@@ -2118,8 +2124,12 @@ fn facade_accessor_concrete_owner(
     if let Some(accessor) = facade
         .get_method_ci("getFacadeAccessor")
         .or_else(|| merged.get_method_ci("getFacadeAccessor"))
-        && let Some(inferred) =
-            crate::type_engine::call_resolution::try_infer_body_return_type(&facade.fqn(), accessor)
+        && let Some(backend) = backend
+        && let Some(inferred) = crate::type_engine::call_resolution::try_infer_body_return_type(
+            backend,
+            &facade.fqn(),
+            accessor,
+        )
         && let Some(concrete_name) = facade_accessor_class_name(&inferred)
         && let Some(concrete) = class_loader(&concrete_name)
         && class_has_method(&concrete, method_name, class_loader, cache)
@@ -2158,6 +2168,7 @@ fn try_resolve_validated_shape(
         ctx.content,
         object.span().end.offset,
         ctx.as_resolution_ctx().class_loader,
+        ctx.backend,
     )
 }
 

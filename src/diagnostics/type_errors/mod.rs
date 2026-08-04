@@ -328,6 +328,7 @@ impl Backend {
                         content,
                         cursor_offset: *args_start,
                         class_loader: &class_loader,
+                        backend: Some(self),
                         loaders,
                         resolved_class_cache: Some(&self.resolved_class_cache),
                         enclosing_return_type: None,

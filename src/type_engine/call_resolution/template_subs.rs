@@ -847,6 +847,7 @@ impl Backend {
                         ctx.content,
                         ctx.cursor_offset,
                         ctx.class_loader,
+                        ctx.backend,
                         Loaders::with_function(ctx.function_loader),
                     )
                 }
@@ -859,6 +860,7 @@ impl Backend {
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            backend: ctx.backend,
             laravel_macro_this_resolver: ctx.laravel_macro_this_resolver,
             resolved_class_cache: ctx.resolved_class_cache,
             function_loader: ctx.function_loader,

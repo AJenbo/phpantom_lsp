@@ -299,6 +299,7 @@ fn resolve_return_and_push(
                 content,
                 cursor_offset: start as u32,
                 class_loader,
+                backend: Some(backend),
                 loaders,
                 resolved_class_cache: Some(&backend.resolved_class_cache),
                 enclosing_return_type: None,

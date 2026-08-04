@@ -566,6 +566,7 @@ impl Backend {
             namespace,
             content,
             class_loader: &class_loader,
+            backend: Some(self),
             function_loader: &function_loader,
         };
 

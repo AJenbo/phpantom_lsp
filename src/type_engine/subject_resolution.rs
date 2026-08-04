@@ -29,6 +29,9 @@ pub(crate) struct SubjectResolutionCtx<'a> {
     pub content: &'a str,
     /// Class loader.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Server state for project-wide answers.  See
+    /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
+    pub backend: Option<&'a crate::Backend>,
     /// Function loader (for variable resolution via the forward walker).
     pub function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
 }
@@ -77,6 +80,7 @@ pub(crate) fn resolve_subject_type(
                 current_class,
                 ctx.local_classes,
                 ctx.class_loader,
+                ctx.backend,
                 Loaders::with_function(Some(ctx.function_loader)),
             )
         }

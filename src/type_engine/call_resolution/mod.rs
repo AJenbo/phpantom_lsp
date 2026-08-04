@@ -34,11 +34,14 @@
 //!
 //! The logic is spread across sibling files:
 //!
-//! - [`target_cache`]: thread-local caches and RAII activation guards
-//!   (callable target cache, body-return-type inference memo, guard-aware
-//!   auth user resolver, validation rules resolver), activated as a unit
-//!   by `Backend::activate_type_engine_resolvers` so every feature
-//!   resolves an expression with the same facilities available.
+//! - [`target_cache`]: the request-scoped memos (callable target cache,
+//!   body-return-type inference memo) and the body-return-type inference
+//!   they serve.  The memos are activated as a unit by
+//!   `activate_type_engine_caches`; the project-wide facilities the type
+//!   engine consults (body-return inference, auth guard models,
+//!   validation rules) come off the `Backend` carried on the resolution
+//!   context, so every feature resolves an expression with the same
+//!   facilities available.
 //! - [`callable_target`]: resolving a call expression to a
 //!   [`ResolvedCallableTarget`] (signature help, named-argument completion).
 //! - [`return_types`]: the primary call return-type resolution entry
@@ -55,4 +58,4 @@ mod target_cache;
 mod template_subs;
 
 pub(crate) use return_types::MethodReturnCtx;
-pub(crate) use target_cache::{VALIDATION_RULES_RESOLVER, try_infer_body_return_type};
+pub(crate) use target_cache::{activate_type_engine_caches, try_infer_body_return_type};

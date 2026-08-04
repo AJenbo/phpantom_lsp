@@ -357,6 +357,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         content: ctx.content,
         cursor_offset: rhs_start as u32,
         class_loader: ctx.class_loader,
+        backend: Some(ctx.backend),
         loaders,
         resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
         enclosing_return_type: None,

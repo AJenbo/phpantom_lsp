@@ -257,6 +257,7 @@ pub(super) fn resolve_rhs_instantiation(
                 ctx.content,
                 ctx.cursor_offset,
                 ctx.class_loader,
+                ctx.backend,
             );
         if !resolved.is_empty() {
             return ResolvedType::from_classes(resolved.into_iter().map(Arc::new).collect());

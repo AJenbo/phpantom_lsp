@@ -574,6 +574,7 @@ fn resolve_assertion_template_type(
                 ctx.content,
                 arg_expr.span().start.offset,
                 ctx.class_loader,
+                ctx.backend,
             );
         if let Some(first) = targets.into_iter().next() {
             return PhpType::named(atom(first.name.as_ref()));

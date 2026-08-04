@@ -164,6 +164,7 @@ fn generates_function_snippet_no_indent_in_continuation() {
         &[],
         &no_classes,
         None,
+        None,
     );
     // No line should start with the base indent "    ".
     for (i, line) in snippet.lines().enumerate() {
@@ -200,6 +201,7 @@ fn snippet_escapes_dollar_in_param_names() {
         &file_ns,
         &[],
         &no_classes,
+        None,
         None,
     );
     // The `$` in `$data` must be escaped as `\$` so the snippet
@@ -254,6 +256,7 @@ fn generates_function_snippet_skips_fully_typed_params() {
         &[],
         &loader,
         None,
+        None,
     );
     // All params are fully typed, return type is non-template class.
     // Should be a summary-only skeleton with no tags.
@@ -295,6 +298,7 @@ fn generates_function_snippet_for_untyped_params() {
         &file_ns,
         &[],
         &no_classes,
+        None,
         None,
     );
     // Only $data (untyped) should get @param, not $name (string).
@@ -343,6 +347,7 @@ fn generates_function_snippet_for_array_param_and_return() {
         &[],
         &no_classes,
         None,
+        None,
     );
     assert!(snippet.contains("@param"), "array param should get @param");
     assert!(snippet.contains("$items"), "Should reference $items");
@@ -374,6 +379,7 @@ fn generates_void_function_snippet_without_return() {
         &[],
         &no_classes,
         None,
+        None,
     );
     assert!(snippet.contains("@param"));
     assert!(
@@ -403,6 +409,7 @@ fn paramless_void_generates_summary_skeleton() {
         &file_ns,
         &[],
         &no_classes,
+        None,
         None,
     );
     assert!(
@@ -581,6 +588,7 @@ fn param_names_are_space_aligned() {
         &[],
         &no_classes,
         None,
+        None,
     );
     // Both params are untyped → both get mixed placeholders.
     // The `$` names should start at the same column.
@@ -634,6 +642,7 @@ fn param_names_aligned_with_mixed_enrichment_widths() {
         &file_ns,
         &[],
         &loader,
+        None,
         None,
     );
     let param_lines: Vec<&str> = snippet.lines().filter(|l| l.contains("@param")).collect();
@@ -710,6 +719,7 @@ fn blank_separator_between_tag_groups() {
         &file_ns,
         &[],
         &no_classes,
+        None,
         None,
     );
     // @param, @throws and @return should all be present.

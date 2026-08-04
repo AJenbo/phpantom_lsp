@@ -34,7 +34,6 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::php_type::{PhpType, ShapeEntry};
-use crate::type_engine::call_resolution::VALIDATION_RULES_RESOLVER;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::{AccessKind, BackedEnumType, ClassInfo, ClassLikeKind};
@@ -119,15 +118,17 @@ fn narrow_shape(shape: &PhpType, keys: &[String], keep: bool) -> Option<PhpType>
 /// `Request`, a `Validator`, a `ValidatedInput`) is described by the nearest
 /// `validate()` / `Validator::make()` call preceding `offset`.
 ///
-/// Called through the thread-local resolver so the type engine can reach the
-/// class index without owning a `Backend` handle.
-pub(crate) fn rules_for_receiver(
+/// `receiver` is re-read from the index by FQN rather than used directly: the
+/// class the type engine holds may be a generic substitution or a bare
+/// local-file parse, and the parent walk that recognises a `FormRequest`
+/// needs the indexed entry.
+fn lookup_rules(
     backend: &Backend,
-    receiver_fqn: &str,
+    receiver: &ClassInfo,
     content: &str,
     offset: u32,
 ) -> Option<RulesArray> {
-    let class = backend.find_or_load_class(receiver_fqn)?;
+    let class = backend.find_or_load_class(&receiver.fqn())?;
     // The type engine has no document URI to offer, so the class lookup falls
     // back to the FQN index.  Only the entries are wanted here — which file
     // they came from matters to go-to-definition, not to a type, and the
@@ -180,6 +181,7 @@ pub(crate) fn shape_bearing_method(method: &str) -> Option<ShapeCall> {
 /// because tracing that hop parses the file, and `only`/`except` are common
 /// names on `Collection` and `Arr` too: only the arm that reaches a real
 /// `ValidatedInput` may pay for it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_shape_at_call(
     receiver: &ClassInfo,
     call: ShapeCall,
@@ -188,11 +190,12 @@ pub(crate) fn resolve_shape_at_call(
     content: &str,
     offset: u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
 ) -> Option<PhpType> {
     match call {
         // `$request->validate([...])` returns exactly what its own argument
         // describes, so the rules come from the call site rather than scope —
-        // which is why this arm needs no active resolver.
+        // which is why this arm needs no server state.
         ShapeCall::Validate if is_request_like(receiver, class_loader) => {
             let mut rules = rules_from_array_text(args.first()?)?;
             // The rules array is written at the call site, so an enum rule in
@@ -203,7 +206,7 @@ pub(crate) fn resolve_shape_at_call(
         ShapeCall::Validated
             if is_request_like(receiver, class_loader) || is_validator(receiver, class_loader) =>
         {
-            let rules = lookup_rules(receiver, content, offset)?;
+            let rules = lookup_rules(backend?, receiver, content, offset)?;
             match args.first() {
                 None => rules_to_shape(&rules, class_loader),
                 // `validated($key)` returns one field's value, never the whole
@@ -216,30 +219,13 @@ pub(crate) fn resolve_shape_at_call(
         // reads raw input, which the rules do not describe.
         ShapeCall::Only | ShapeCall::Except if is_validated_input(receiver) => {
             let source = safe_source()?;
-            let rules = lookup_rules(&source, content, offset)?;
+            let rules = lookup_rules(backend?, &source, content, offset)?;
             let shape = rules_to_shape(&rules, class_loader)?;
             let keys = key_list(args)?;
             narrow_shape(&shape, &keys, call == ShapeCall::Only)
         }
         _ => None,
     }
-}
-
-/// Whether the rules resolver is active on this thread.
-///
-/// Callers use it as a free early-out: outside the request entry points that
-/// activate it there are no rules to find, so the whole feature is a no-op.
-pub(crate) fn rules_resolver_active() -> bool {
-    VALIDATION_RULES_RESOLVER.with(|cell| cell.borrow().is_some())
-}
-
-/// Ask the active resolver for the rules describing `receiver` at the cursor.
-fn lookup_rules(receiver: &ClassInfo, content: &str, offset: u32) -> Option<RulesArray> {
-    VALIDATION_RULES_RESOLVER.with(|cell| {
-        let borrowed = cell.borrow();
-        let resolver = borrowed.as_ref()?;
-        resolver(&receiver.fqn(), content, offset)
-    })
 }
 
 /// Whether `class` is a validator.

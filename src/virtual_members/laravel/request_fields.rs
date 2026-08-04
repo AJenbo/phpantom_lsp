@@ -223,6 +223,7 @@ pub(crate) fn request_fields_at_position(
             content,
             cursor_offset,
             &class_loader,
+            backend,
         )?;
         // `$safe = $request->safe()` narrows the request's own rules array,
         // so follow the assignment back to the request: `ValidatedInput`
@@ -237,6 +238,7 @@ pub(crate) fn request_fields_at_position(
                 content,
                 cursor_offset,
                 &class_loader,
+                backend,
             )
         {
             resolved = request;
@@ -265,6 +267,7 @@ pub(crate) fn request_fields_at_position(
 }
 
 /// Resolve a `$variable` receiver to the class it holds.
+#[allow(clippy::too_many_arguments)]
 fn resolve_variable_class(
     variable: &str,
     current_class: Option<&ClassInfo>,
@@ -272,6 +275,7 @@ fn resolve_variable_class(
     content: &str,
     cursor_offset: u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: &Backend,
 ) -> Option<Arc<ClassInfo>> {
     let fallback = ClassInfo::default();
     let types = crate::type_engine::variable::resolution::resolve_variable_types(
@@ -281,6 +285,7 @@ fn resolve_variable_class(
         content,
         cursor_offset,
         class_loader,
+        Some(backend),
         crate::type_engine::resolver::Loaders::default(),
     );
     types

@@ -86,7 +86,7 @@ impl Backend {
     /// resolved to a meaningful description, or `None` when resolution
     /// fails or the cursor is not on a navigable symbol.
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
-        let _resolver_guard = self.activate_type_engine_resolvers();
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let offset = crate::text_position::position_to_offset(content, position);
 
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)
@@ -174,6 +174,7 @@ impl Backend {
                     content,
                     cursor_offset,
                     class_loader: &class_loader,
+                    backend: Some(self),
                     laravel_macro_this_resolver: None,
                     resolved_class_cache: Some(&self.resolved_class_cache),
                     function_loader: Some(&function_loader),

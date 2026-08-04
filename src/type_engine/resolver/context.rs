@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::Backend;
 use crate::atom::AtomMap;
 
 use crate::php_type::PhpType;
@@ -140,6 +141,15 @@ pub(crate) struct ResolutionCtx<'a> {
     pub cursor_offset: u32,
     /// Cross-file class resolution callback.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// The server state the type engine consults for answers that need
+    /// the whole project rather than the current file: inferring a
+    /// method's return type from its body, the model configured for an
+    /// auth guard, and the validation rules describing a request.
+    ///
+    /// `None` only where no server state exists (free-function callers
+    /// and unit tests), in which case those answers are unavailable —
+    /// not wrong.
+    pub backend: Option<&'a Backend>,
     /// Optional Laravel macro callback `$this` resolver.
     pub laravel_macro_this_resolver: LaravelMacroThisResolverFn<'a>,
     /// Shared cache of fully-resolved classes, keyed by FQN.
@@ -186,6 +196,8 @@ pub(crate) struct VarResolutionCtx<'a> {
     pub content: &'a str,
     pub cursor_offset: u32,
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::backend`].
+    pub backend: Option<&'a Backend>,
     /// Cross-file loader callbacks (function loader, constant loader).
     pub loaders: Loaders<'a>,
     /// Shared cache of fully-resolved classes, keyed by FQN.
@@ -233,6 +245,7 @@ impl<'a> VarResolutionCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            backend: self.backend,
             laravel_macro_this_resolver: None,
             function_loader: self.loaders.function_loader,
             resolved_class_cache: self.resolved_class_cache,
@@ -266,6 +279,7 @@ impl<'a> VarResolutionCtx<'a> {
             content: self.content,
             cursor_offset,
             class_loader: self.class_loader,
+            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
@@ -292,6 +306,7 @@ impl<'a> VarResolutionCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),

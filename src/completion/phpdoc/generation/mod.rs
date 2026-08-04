@@ -65,6 +65,7 @@ pub(crate) use build::{
 ///
 /// Returns `None` when the cursor is not at a `/**` trigger position or
 /// when the declaration below cannot be identified.
+#[allow(clippy::too_many_arguments)]
 pub fn try_generate_docblock(
     content: &str,
     position: Position,
@@ -72,6 +73,7 @@ pub fn try_generate_docblock(
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> Option<CompletionResponse> {
     let (trigger_range, indent) = trigger::detect_docblock_trigger(content, position)?;
@@ -105,6 +107,7 @@ pub fn try_generate_docblock(
         file_namespace,
         local_classes,
         class_loader,
+        backend,
         function_loader,
     );
 
@@ -158,6 +161,7 @@ pub fn try_generate_docblock(
 /// docblock, and returns `TextEdit`s that replace the empty block with
 /// a filled one.  Returns `None` when the cursor is not inside a fresh
 /// empty docblock.
+#[allow(clippy::too_many_arguments)]
 pub fn try_generate_docblock_on_enter(
     content: &str,
     position: Position,
@@ -165,6 +169,7 @@ pub fn try_generate_docblock_on_enter(
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> Option<Vec<TextEdit>> {
     let (block_range, _block_indent, after_block) =
@@ -203,6 +208,7 @@ pub fn try_generate_docblock_on_enter(
         file_namespace,
         local_classes,
         class_loader,
+        backend,
         function_loader,
     );
 

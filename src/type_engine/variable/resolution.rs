@@ -21,6 +21,7 @@ use crate::php_type::{
 };
 use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
 
+use crate::Backend;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 
 /// Build a [`VarClassStringResolver`] closure from a [`VarResolutionCtx`].
@@ -39,6 +40,7 @@ pub(in crate::type_engine) fn build_var_resolver_from_ctx<'a>(
             ctx.content,
             ctx.cursor_offset,
             ctx.class_loader,
+            ctx.backend,
         )
         .iter()
         .map(|c| c.name.to_string())
@@ -105,6 +107,7 @@ pub(super) fn enrich_builder_type_in_scope(
 /// forward walker's pre-computed snapshots).  On cache miss, parses the
 /// file and delegates to the forward walker via
 /// [`resolve_variable_in_statements`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_variable_types(
     var_name: &str,
     current_class: &ClassInfo,
@@ -112,6 +115,7 @@ pub(crate) fn resolve_variable_types(
     content: &str,
     cursor_offset: u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
     loaders: Loaders<'_>,
 ) -> Vec<ResolvedType> {
     // ── Diagnostic scope cache fast path ─────────────────────────
@@ -145,6 +149,7 @@ pub(crate) fn resolve_variable_types(
             content,
             cursor_offset,
             class_loader,
+            backend,
             loaders,
             resolved_class_cache: active_cache,
             enclosing_return_type: None,
@@ -175,6 +180,7 @@ pub(crate) fn resolve_variable_types(
 ///
 /// Consumers: hover, go-to-type-definition, find-references (variable
 /// subject resolution), deprecated diagnostics, code actions.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_variable_php_type(
     var_name: &str,
     content: &str,
@@ -182,6 +188,7 @@ pub(crate) fn resolve_variable_php_type(
     current_class: Option<&ClassInfo>,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
     loaders: Loaders<'_>,
 ) -> Option<PhpType> {
     // Ensure the variable name is $-prefixed for docblock lookups.
@@ -223,6 +230,7 @@ pub(crate) fn resolve_variable_php_type(
         content,
         cursor_offset,
         class_loader,
+        backend,
         loaders,
     );
 
@@ -556,6 +564,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             content: ctx.content,
             cursor_offset: u32::MAX,
             class_loader: ctx.class_loader,
+            backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
@@ -587,6 +596,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: ctx.enclosing_return_type.clone(),
@@ -719,6 +729,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
@@ -986,6 +997,7 @@ fn try_resolve_in_function(
         content: ctx.content,
         cursor_offset: ctx.cursor_offset,
         class_loader: ctx.class_loader,
+        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: enclosing_ret,
@@ -1109,6 +1121,7 @@ fn resolve_variable_in_members<'b>(
                         content: ctx.content,
                         cursor_offset: ctx.cursor_offset,
                         class_loader: ctx.class_loader,
+                        backend: ctx.backend,
                         loaders: ctx.loaders,
                         resolved_class_cache: ctx.resolved_class_cache,
                         enclosing_return_type: enclosing_ret,
@@ -1180,6 +1193,7 @@ fn resolve_abstract_method_param(
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
@@ -1924,6 +1938,7 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
                 ctx.content,
                 offset as u32,
                 ctx.class_loader,
+                ctx.backend,
                 Loaders::with_function(ctx.function_loader()),
             )
         };

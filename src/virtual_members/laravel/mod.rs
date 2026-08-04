@@ -155,8 +155,7 @@ pub(crate) use provider_resources::{ProviderResources, extract_provider_resource
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{RouteEntry, enumerate_all_routes, route_uri_parameters};
 pub(crate) use trans_keys::collect_trans_declarations;
-pub(crate) use validated_shape::rules_for_receiver;
-pub(crate) use validation_rules::{RulesArray, safe_call_receiver_variable, safe_source_variable};
+pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 
 pub(crate) use builder_injection::{try_inject_builder_scopes, try_inject_mixin_builder_scopes};
 pub(crate) use higher_order_proxy::{
