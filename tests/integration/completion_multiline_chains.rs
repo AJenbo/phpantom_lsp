@@ -594,3 +594,47 @@ async fn test_multiline_chain_same_line_after_bracket_close_does_not_misresolve(
         "Should not resolve Box::open() from a malformed collapsed expression, got: {names:?}"
     );
 }
+
+#[tokio::test]
+async fn test_long_union_return_chain_completes_quickly() {
+    // Each link of a fluent chain whose methods return a union
+    // (`A|B`, both declaring the same method) used to double the
+    // receiver set: every member of the union resolved the same
+    // union again and the results were concatenated without dedup,
+    // so a chain of n calls built 2^n receivers. Real-world Pest
+    // test files chain 20+ `->and(...)->toBe(...)` expectations,
+    // which hung the analyzer and exhausted memory (issue #320).
+    // With per-link dedup the receiver set stays at 2 and a long
+    // chain completes instantly.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///union_chain_blowup.php").unwrap();
+    let mut text = concat!(
+        "<?php\n",
+        "class A {\n",
+        "    public function m(): A|B { return new A(); }\n",
+        "    public function onlyA(): string { return ''; }\n",
+        "}\n",
+        "class B {\n",
+        "    public function m(): A|B { return new B(); }\n",
+        "}\n",
+        "class Chained {\n",
+        "    public function run(A $a): void {\n",
+        "        $a->m()\n",
+    )
+    .to_string();
+    for _ in 0..38 {
+        text.push_str("            ->m()\n");
+    }
+    text.push_str("            ->\n    }\n}\n");
+
+    let cursor_line = 11 + 38;
+    let names = complete_at(&backend, &uri, &text, cursor_line, 14).await;
+    assert!(
+        names.iter().any(|n| n.starts_with("m(")),
+        "Union-return chain should offer m() at every depth, got: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.starts_with("onlyA(")),
+        "Union member A should survive the chain walk, got: {names:?}"
+    );
+}

@@ -485,17 +485,25 @@ impl Backend {
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&owner, method_name, ctx.class_loader)
                     {
-                        results.push(date_class);
+                        ClassInfo::push_unique_arc(&mut results, date_class);
                         if let Some(ref mut hint_out) = return_type_hint_out {
                             **hint_out = Some(date_return_type);
                         }
                     } else {
-                        results.extend(Self::resolve_method_return_types_with_args(
-                            &owner,
-                            method_name,
-                            text_args,
-                            &mr_ctx,
-                        ));
+                        // Dedup by class name: a union receiver whose members
+                        // all declare the same return type (e.g. a fluent
+                        // chain through `Expectation|HigherOrderExpectation`)
+                        // would otherwise double the result set at every
+                        // link, growing 2^n over the chain.
+                        ClassInfo::extend_unique_arc(
+                            &mut results,
+                            Self::resolve_method_return_types_with_args(
+                                &owner,
+                                method_name,
+                                text_args,
+                                &mr_ctx,
+                            ),
+                        );
                     }
                 }
                 results
