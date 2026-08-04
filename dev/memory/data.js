@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785808742525,
+  "lastUpdate": 1785875581617,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13803,6 +13803,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "1a781704a47f9b2ee4ebcd73a1be2c264aa67aa3",
+          "message": "feat: add config toggle for variable linked editing ranges\n\nAdd a [linked_editing] section to .phpantom.toml with a `variables`\ntoggle (default: true) that controls whether placing the cursor on a\nvariable activates linked editing mode. When set to false, the handler\nreturns None and the editor falls back to explicit rename.\n\nThe server capability stays registered so future linked editing kinds\ncan be added independently.\n\nChanges:\n- src/config.rs: LinkedEditingConfig struct with variables_enabled()\n  accessor and three unit tests\n- src/linked_editing.rs: early return when variables disabled\n- config-schema.json: linked_editing section for TOML schema support\n- docs/CHANGELOG.md: user-facing entry",
+          "timestamp": "2026-08-04T15:16:02-05:00",
+          "tree_id": "242f5c231351750ab2b0e1259f4cecb4343c2ed0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1a781704a47f9b2ee4ebcd73a1be2c264aa67aa3"
+        },
+        "date": 1785875575139,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 67.7,
             "unit": "MiB"
           }
         ]
