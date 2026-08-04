@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785807723243,
+  "lastUpdate": 1785808742525,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13769,6 +13769,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b47e2783683612b8851b2909ae389866cc1a41a8",
+          "message": "Fix a few more override generation issues",
+          "timestamp": "2026-08-04T03:41:48+02:00",
+          "tree_id": "214f69833b607d0671506e643e25757ab9b8a80b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b47e2783683612b8851b2909ae389866cc1a41a8"
+        },
+        "date": 1785808738653,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.7,
             "unit": "MiB"
           }
         ]
