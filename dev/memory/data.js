@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785801216281,
+  "lastUpdate": 1785803293368,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13667,6 +13667,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "be0988c9e9834ea93f2a7c0eee4a8b4a1cf71b39",
+          "message": "Every feature now resolves a type as well as hover does",
+          "timestamp": "2026-08-04T02:11:42+02:00",
+          "tree_id": "48cef0f653cb4625cabc49b19c91e2511c794910",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/be0988c9e9834ea93f2a7c0eee4a8b4a1cf71b39"
+        },
+        "date": 1785803289346,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.8,
             "unit": "MiB"
           }
         ]
