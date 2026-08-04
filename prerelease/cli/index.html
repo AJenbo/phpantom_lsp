@@ -1999,6 +1999,7 @@ fewer with each release. If you hit one, please
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>error<span class="w">            </span><span class="c1"># errors only</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
 </code></pre></div>
 <h3 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h3>
 <table>
@@ -2024,6 +2025,18 @@ fewer with each release. If you hit one, please
 <tr>
 <td><code>--no-colour</code></td>
 <td>Disable ANSI colour output.</td>
+</tr>
+<tr>
+<td><code>--format &lt;FORMAT&gt;</code></td>
+<td>Output format: <code>table</code> (default), <code>github</code>, or <code>json</code>.</td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td>Print each file path as it is analyzed and disable the progress bar. Also reports files that take unusually long.</td>
+</tr>
+<tr>
+<td><code>-v</code>, <code>-vv</code>, <code>-vvv</code></td>
+<td>Increase verbosity. With <code>--debug</code>: <code>-v</code> adds per-file durations, <code>-vv</code> adds worker ids and parse-phase tracing, <code>-vvv</code> adds memory usage. <code>-vv</code> and above imply <code>--debug</code>. <code>-v</code> alone prints a timing summary for the parse, class-population, and diagnostic phases.</td>
 </tr>
 </tbody>
 </table>
