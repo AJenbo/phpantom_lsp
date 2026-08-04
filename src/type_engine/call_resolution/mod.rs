@@ -36,7 +36,9 @@
 //!
 //! - [`target_cache`]: thread-local caches and RAII activation guards
 //!   (callable target cache, body-return-type inference memo, guard-aware
-//!   auth user resolver).
+//!   auth user resolver, validation rules resolver), activated as a unit
+//!   by `Backend::activate_type_engine_resolvers` so every feature
+//!   resolves an expression with the same facilities available.
 //! - [`callable_target`]: resolving a call expression to a
 //!   [`ResolvedCallableTarget`] (signature help, named-argument completion).
 //! - [`return_types`]: the primary call return-type resolution entry
@@ -53,6 +55,4 @@ mod target_cache;
 mod template_subs;
 
 pub(crate) use return_types::MethodReturnCtx;
-pub(crate) use target_cache::{
-    VALIDATION_RULES_RESOLVER, try_infer_body_return_type, with_callable_target_cache,
-};
+pub(crate) use target_cache::{VALIDATION_RULES_RESOLVER, try_infer_body_return_type};

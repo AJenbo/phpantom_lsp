@@ -5046,3 +5046,66 @@ async fn test_untyped_inference_skipped_when_docblock_type_exists() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+/// A method with no declared return type and no `@return` docblock only
+/// has a type at all if its body is scanned for `return` statements.
+/// Hover has always done that; go-to-definition resolves the same
+/// expression, so it must land on the member too.
+#[tokio::test]
+async fn test_goto_definition_through_body_inferred_return_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                       // 0
+        "class Widget {\n",                              // 1
+        "    public function spin(): void {}\n",         // 2
+        "}\n",                                           // 3
+        "class Factory {\n",                             // 4
+        "    public function make() {\n",                // 5
+        "        return new Widget();\n",                // 6
+        "    }\n",                                       // 7
+        "}\n",                                           // 8
+        "class Client {\n",                              // 9
+        "    public function run(Factory $f): void {\n", // 10
+        "        $f->make()->spin();\n",                 // 11
+        "    }\n",                                       // 12
+        "}\n",                                           // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Click on "spin" in `$f->make()->spin()`.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    let result = result.expect("make()'s return type is inferable from its body");
+    match result {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "spin() is declared on Widget (line 2)"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

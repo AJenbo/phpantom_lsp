@@ -287,16 +287,13 @@ impl Backend {
         // and deprecated collectors.
         let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
 
-        // Activate the callable target cache so that the same method
-        // on the same class is resolved at most once across all
-        // diagnostic collectors.  For example, `Builder::where` is
-        // looked up once and reused for every `$q->where(...)`,
-        // `$query->where(...)`, and `Product::query()->where(...)`
-        // call site in the file.
-        let _callable_guard = crate::type_engine::call_resolution::with_callable_target_cache();
-        let _body_infer_guard = self.activate_body_return_inferrer();
-        let _auth_user_guard = self.activate_auth_user_resolver();
-        let _validation_rules_guard = self.activate_validation_rules_resolver();
+        // Activate the type-engine resolvers.  This also brings up the
+        // callable target cache, so the same method on the same class is
+        // resolved at most once across all diagnostic collectors: for
+        // example `Builder::where` is looked up once and reused for
+        // every `$q->where(...)`, `$query->where(...)`, and
+        // `Product::query()->where(...)` call site in the file.
+        let _resolver_guard = self.activate_type_engine_resolvers();
 
         // ── Phase 2: forward-walked diagnostic scope cache ──────
         // Walk every function/method body in the file once with the

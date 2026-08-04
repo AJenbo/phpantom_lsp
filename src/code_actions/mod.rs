@@ -364,6 +364,12 @@ impl Backend {
         // without this guard each walk would re-parse the same file.
         let _parse_guard = crate::parser::with_parse_cache(&content);
 
+        // Resolving an action can need types (an extracted function's
+        // return type, a docblock's inferred `@return`).  This handler
+        // fetches its own file content, so it activates the type-engine
+        // resolvers itself rather than going through `with_file_content`.
+        let _resolver_guard = self.activate_type_engine_resolvers();
+
         let result = match data.action_kind.as_str() {
             // ── PHPStan quickfixes ──────────────────────────────────
             "phpstan.addThrows" => {

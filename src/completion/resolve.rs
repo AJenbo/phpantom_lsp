@@ -115,6 +115,12 @@ impl Backend {
             return item;
         };
 
+        // This handler builds the same hovers `textDocument/hover` does
+        // but fetches the file content itself, so it has to activate the
+        // type-engine resolvers on its own to describe a member the same
+        // way hover would.
+        let _resolver_guard = self.activate_type_engine_resolvers();
+
         let ctx = self.file_context(&data.uri);
         let content = self.get_file_content(&data.uri).unwrap_or_default();
 

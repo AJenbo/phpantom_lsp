@@ -160,9 +160,7 @@ impl Backend {
             // prefixes are resolved once and reused within this completion
             // request.  The guard is re-entrant safe.
             let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
-            let _body_infer_guard = self.activate_body_return_inferrer();
-            let _auth_user_guard = self.activate_auth_user_resolver();
-            let _validation_rules_guard = self.activate_validation_rules_resolver();
+            let _resolver_guard = self.activate_type_engine_resolvers();
             let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
                 &self.resolved_class_cache,
             );

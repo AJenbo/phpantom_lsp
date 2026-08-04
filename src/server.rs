@@ -1794,6 +1794,15 @@ impl Backend {
         // diagnostics.  The guard is re-entrant safe: if a diagnostic pass
         // already activated the cache, this is a no-op.
         let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
+
+        // Activate the type-engine resolvers here rather than per feature.
+        // Every LSP handler needs the file content, so this is the one
+        // place none of them can bypass: go-to-definition, find-references,
+        // signature help, code actions, rename, and inlay hints resolve an
+        // expression with the same facilities hover and diagnostics have,
+        // instead of a poorer answer for the identical code.
+        let _resolver_guard = self.activate_type_engine_resolvers();
+
         crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
 

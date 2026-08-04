@@ -86,9 +86,7 @@ impl Backend {
     /// resolved to a meaningful description, or `None` when resolution
     /// fails or the cursor is not on a navigable symbol.
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
-        let _body_infer_guard = self.activate_body_return_inferrer();
-        let _auth_user_guard = self.activate_auth_user_resolver();
-        let _validation_rules_guard = self.activate_validation_rules_resolver();
+        let _resolver_guard = self.activate_type_engine_resolvers();
         let offset = crate::text_position::position_to_offset(content, position);
 
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)

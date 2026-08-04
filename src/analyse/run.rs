@@ -282,12 +282,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             with_active_resolved_class_cache(&backend.resolved_class_cache);
                         let _chain_guard =
                             crate::type_engine::resolver::with_chain_resolution_cache();
-                        let _callable_guard =
-                            crate::type_engine::call_resolution::with_callable_target_cache();
-                        let _body_infer_guard = backend.activate_body_return_inferrer();
-                        let _auth_user_guard = backend.activate_auth_user_resolver();
-                        let _validation_rules_guard =
-                            backend.activate_validation_rules_resolver();
+                        let _resolver_guard = backend.activate_type_engine_resolvers();
 
                         // ── Forward-walked diagnostic scope cache ───
                         // Walk every function/method body once with the

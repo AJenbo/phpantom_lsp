@@ -616,3 +616,75 @@ class C {
         "did not expect the default guard's User::isActive, got: {labels:?}"
     );
 }
+
+/// Completion is not the only feature that resolves `user()` through the
+/// guard config: go-to-definition on a member of the named guard's model
+/// lands on that model's declaration instead of coming up empty against
+/// the `Authenticatable` contract.
+#[tokio::test]
+async fn goto_definition_lands_on_the_named_guards_model_member() {
+    let mut files = base_files();
+    files.push(MULTI_GUARD_CONFIG);
+
+    let controller = "\
+<?php
+namespace App;
+class C {
+    public function show() {
+        auth('admin')->user()->isSuperUser();
+    }
+}
+";
+
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    for (path, text) in [
+        ("src/helpers.php", AUTH_HELPER_PHP),
+        ("src/C.php", controller),
+    ] {
+        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri,
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .await;
+    }
+
+    // Cursor on `isSuperUser` in `auth('admin')->user()->isSuperUser()`.
+    let uri = Url::from_file_path(dir.path().join("src/C.php")).unwrap();
+    let result = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 4,
+                    character: 33,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let location = match result.expect("isSuperUser() should resolve on the admin guard's model") {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(locations) => {
+            locations.into_iter().next().expect("at least one location")
+        }
+        other => panic!("Expected a location, got: {other:?}"),
+    };
+    assert!(
+        location.uri.as_str().ends_with("/src/Models/Admin.php"),
+        "should jump to the Admin model, got: {}",
+        location.uri
+    );
+    assert_eq!(
+        location.range.start.line, 5,
+        "isSuperUser() is declared on line 5 of Admin.php"
+    );
+}

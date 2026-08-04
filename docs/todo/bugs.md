@@ -220,38 +220,30 @@ the fix likely means scanning the enclosing statement forward once and
 masking comments before the backwards walk, the way the Blade
 preprocessor masks non-PHP text.
 
-#### B23. Three type-engine resolvers are activated for only four consumers
+#### B49. The type-engine resolvers are ambient thread-local state
 
-**Impact: Medium · Effort: Medium**
+**Impact: Low · Effort: Medium**
 
-`activate_body_return_inferrer`, `activate_auth_user_resolver`, and
-`activate_validation_rules_resolver` install thread-locals that the type
-engine consults while resolving an expression, and all three are
-activated at exactly four sites: `hover/mod.rs`, `diagnostics/mod.rs`,
-`completion/handler/mod.rs`, and `analyse/run.rs`. Every other feature
-resolves the same expression with those resolvers absent, so it gets a
-different, poorer answer than hover does for the identical code:
-`$request->validated()` is a plain `array` rather than an array shape,
-`auth()->user()` is the framework contract rather than the model the
-guard is configured with, and a function whose return type is only
-knowable from its body has none.
-
-Go-to-definition, find-references, signature help, code actions, rename,
-and inlay hints are all on the wrong side of that line. Hovering
-`auth()->user()->email` resolves the model and shows the property, while
-go-to-definition on the same `email` has nothing to jump to.
-
-This is exactly anti-pattern 4 (consumer-gated caches): a facility that
-is live for one consumer and not others makes the two code paths
-diverge. Fixing it for one feature at a time would just add a fifth and
-sixth activation site.
+`Backend::activate_type_engine_resolvers` installs the body-return
+inferrer, the auth user resolver, the validation rules resolver, and the
+callable target cache into thread-locals. Every LSP request activates it
+at one chokepoint (`Backend::with_file_content`), and the handlers that
+fetch their own file content (completion, completion resolve, code
+action resolve, the diagnostic pass, the `analyse` CLI) each call it
+themselves. That is enough for every feature to resolve an expression
+with the same facilities available, which is what made hover and
+go-to-definition disagree, but the resolvers are still ambient state
+rather than part of the resolution context the type engine already
+threads through: a new entry point that fetches its own content can
+forget them, and nothing in the type engine can tell a missing resolver
+from a genuine absence of an answer.
 
 **Where to change:** `src/type_engine/call_resolution/target_cache.rs`
-holds the thread-locals and the three `activate_*` methods. The cheap
-version is to bundle the three guards into one request-scope helper on
-`Backend` and call it from every LSP entry point rather than four of
-them. The version that removes the pattern is to carry the resolvers on
-the resolution context the type engine already threads through, so they
-are present by construction and no entry point can forget them; that
-also settles whether they belong on the `Backend` rather than in
-thread-local state.
+holds the thread-locals and the bundled activation;
+`call_resolution/return_types.rs` reads them. Carrying them on
+`ResolutionCtx` (`src/type_engine/resolver/context.rs`) instead would
+make them present by construction, at the cost of touching the ~35
+places that build a context. It also settles whether they belong on the
+`Backend`: each closure captures nothing but a `Backend` clone, so the
+closure indirection buys nothing once the context is available where the
+resolver is read.
