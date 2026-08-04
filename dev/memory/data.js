@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785807399987,
+  "lastUpdate": 1785807723243,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13735,6 +13735,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "be4383c82615fb4dbd633daa347649067d58ed29",
+          "message": "Override completion writes `static`, not `$this`, as the return type",
+          "timestamp": "2026-08-04T03:25:23+02:00",
+          "tree_id": "c0cbb54d2cbef5d0816e98cb958320e91753bc4c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/be4383c82615fb4dbd633daa347649067d58ed29"
+        },
+        "date": 1785807718966,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71,
             "unit": "MiB"
           }
         ]
