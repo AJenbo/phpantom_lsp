@@ -89,6 +89,10 @@ impl Backend {
 
         match &span.kind {
             SymbolKind::Variable { name } => {
+                if !self.config().linked_editing.variables_enabled() {
+                    return None;
+                }
+
                 // Property declarations should not trigger linked editing —
                 // renaming a property requires cross-file awareness. This
                 // includes constructor-promoted properties, which are

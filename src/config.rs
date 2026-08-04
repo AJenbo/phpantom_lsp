@@ -37,6 +37,8 @@ pub struct Config {
     pub mago: MagoConfig,
     /// Laravel-specific analysis settings.
     pub laravel: LaravelConfig,
+    /// Linked editing range settings.
+    pub linked_editing: LinkedEditingConfig,
 }
 
 /// `[semantic_tokens]` section — controls LSP semantic highlighting.
@@ -133,6 +135,33 @@ pub struct LaravelMigrationsConfig {
 impl LaravelMigrationsConfig {
     pub fn enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
+    }
+}
+
+/// `[linked_editing]` section — controls linked editing ranges.
+///
+/// Linked editing lets the editor rename all occurrences of a symbol
+/// simultaneously as you type.  The `variables` toggle controls whether
+/// variables participate; other symbol kinds may gain their own toggles
+/// in the future.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct LinkedEditingConfig {
+    /// Enable linked editing for variables.
+    ///
+    /// On by default.  When enabled, placing the cursor on a variable
+    /// highlights every occurrence in its definition region and typing
+    /// a new name updates them all at once.  Set to `false` to disable
+    /// this and rely on explicit rename (`textDocument/rename`) instead.
+    pub variables: Option<bool>,
+}
+
+impl LinkedEditingConfig {
+    /// Whether linked editing of variables is enabled.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn variables_enabled(&self) -> bool {
+        self.variables.unwrap_or(true)
     }
 }
 
@@ -1395,5 +1424,32 @@ paths = ["database/schema", "extra/schema.sql"]
         merge_toml(&mut base, overlay);
         let config: Config = base.try_into().unwrap();
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+    }
+
+    #[test]
+    fn linked_editing_variables_defaults_to_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.linked_editing.variables_enabled());
+    }
+
+    #[test]
+    fn parses_linked_editing_variables_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[linked_editing]\nvariables = false\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(!config.linked_editing.variables_enabled());
+    }
+
+    #[test]
+    fn parses_linked_editing_variables_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[linked_editing]\nvariables = true\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.linked_editing.variables_enabled());
     }
 }
