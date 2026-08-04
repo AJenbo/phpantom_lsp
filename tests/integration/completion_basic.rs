@@ -2519,8 +2519,10 @@ async fn test_completion_override_this_return_becomes_static() {
             && !insert.contains(": \\$this"),
         "a `@return $this` docblock must not become a native `$this` hint, got: {insert}"
     );
+    // The bound must not leak either: `static(Builder)` is the display
+    // form of a resolved late-static type, not something PHP accepts.
     assert!(
-        insert.contains(": static"),
+        insert.contains("): static\n"),
         "a `@return $this` docblock should generate `: static`, got: {insert}"
     );
 }
@@ -2598,12 +2600,234 @@ async fn test_completion_trait_override_restates_docblock_types() {
         doc.contains("@param list<string> $columns"),
         "docblock should restate the @param type, got: {doc:?}"
     );
+    // `$this(Grid)` is the display form of a resolved late-static type and
+    // is not valid PHPDoc, so the tag must end at the bare `$this`.
     assert!(
-        doc.contains("@return $this"),
+        doc.contains("@return $this\n"),
         "docblock should restate the @return type, got: {doc:?}"
     );
     assert!(
         !doc.contains("#[\\Override]"),
         "trait overrides must not insert #[\\Override], got: {doc:?}"
+    );
+}
+
+/// A trait override only restates what the generated signature cannot say:
+/// a docblock type the native hint carries verbatim, an implicit-nullable
+/// parameter, and a fully-native method all stay bare.
+#[tokio::test]
+async fn test_completion_trait_override_skips_redundant_docblock() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_override_no_docblock.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Probe {\n",
+        "    /** @return string */\n",
+        "    public function zzPlain() { return ''; }\n",
+        "    /** @return static */\n",
+        "    public function zzStatic() { return $this; }\n",
+        "    public function zzNullDefault(string $a = null) {}\n",
+        "    public function zzNative(int $x): void {}\n",
+        "}\n",
+        "class Host {\n",
+        "    use Probe;\n",
+        "    public function zz\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 11,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    for name in ["zzPlain", "zzStatic", "zzNullDefault", "zzNative"] {
+        let item = items
+            .iter()
+            .find(|i| i.filter_text.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("{name} trait override"));
+        assert!(
+            item.additional_text_edits.is_none(),
+            "{name}: the generated signature already carries every type, \
+             so no docblock should be injected, got: {:?}",
+            item.additional_text_edits
+        );
+    }
+}
+
+/// A `@template` param is PHPDoc-only: emitting it as a native return hint
+/// declares a return of the nonexistent class `T`.  It belongs in the
+/// restated docblock instead, alongside its `@template` declaration.
+#[tokio::test]
+async fn test_completion_trait_override_template_return_is_not_a_native_hint() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_override_template.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Maker {\n",
+        "    /**\n",
+        "     * @template T of object\n",
+        "     * @param class-string<T> $class\n",
+        "     * @return T\n",
+        "     */\n",
+        "    public function make(string $class) { return new $class(); }\n",
+        "}\n",
+        "class Host {\n",
+        "    use Maker;\n",
+        "    public function ma\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 11,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("make"))
+        .expect("make trait override");
+    assert_eq!(
+        item.label, "make(string $class)",
+        "a `@template` param must not be emitted as a native return hint"
+    );
+
+    let doc = item
+        .additional_text_edits
+        .as_ref()
+        .expect("docblock-only return type should be restated")
+        .iter()
+        .map(|e| e.new_text.as_str())
+        .collect::<String>();
+    assert!(
+        doc.contains("@template T of object") && doc.contains("@return T"),
+        "the template param and the return type it names should both be \
+         restated, got: {doc:?}"
+    );
+}
+
+/// A variadic's `@param` type describes one element, so the restated tag
+/// keeps the `...`.
+#[tokio::test]
+async fn test_completion_trait_override_restates_variadic_param() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_override_variadic.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Joiner {\n",
+        "    /** @param non-empty-string ...$parts */\n",
+        "    public function join(string ...$parts) {}\n",
+        "}\n",
+        "class Host {\n",
+        "    use Joiner;\n",
+        "    public function jo\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("join"))
+        .expect("join trait override");
+    let doc = item
+        .additional_text_edits
+        .as_ref()
+        .expect("variadic docblock type should be restated")
+        .iter()
+        .map(|e| e.new_text.as_str())
+        .collect::<String>();
+    assert!(
+        doc.contains("@param non-empty-string ...$parts"),
+        "the restated tag should keep the `...`, got: {doc:?}"
     );
 }

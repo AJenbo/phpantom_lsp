@@ -11,9 +11,10 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::atom::Atom;
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::offset_to_position;
-use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
+use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, ParameterInfo, Visibility};
 
 impl Backend {
     /// Collect "Implement missing methods" code actions for the cursor position.
@@ -489,18 +490,25 @@ pub(crate) fn format_params(
 /// Docblock-only types (generics, array shapes, callables with signatures,
 /// conditional types, template variables, etc.) must not be emitted as
 /// native hints in generated method stubs.
-fn is_valid_native_hint(ty: &PhpType) -> bool {
+fn is_valid_native_hint(ty: &PhpType, template_params: &[Atom]) -> bool {
     match ty.kind() {
         // Plain named types and their nullable wrappers are always valid —
-        // except variable references like `$this`, which only exist in
-        // PHPDoc.
-        TypeKind::Named(n) => !n.starts_with('$'),
-        TypeKind::Nullable(inner) => is_valid_native_hint(inner),
+        // except variable references like `$this` and the method's own
+        // `@template` params, which only exist in PHPDoc.  A bare `T`
+        // emitted as a hint reads to PHP as a class named `T`.
+        TypeKind::Named(n) => {
+            !n.starts_with('$') && !template_params.iter().any(|t| t.as_str() == n.as_str())
+        }
+        TypeKind::Nullable(inner) => is_valid_native_hint(inner, template_params),
         // Union types are valid only when every member is valid (PHP 8+
         // union return types like `int|string|null` are legal).
-        TypeKind::Union(members) => members.iter().all(is_valid_native_hint),
+        TypeKind::Union(members) => members
+            .iter()
+            .all(|m| is_valid_native_hint(m, template_params)),
         // Intersection types (`A&B`) are valid PHP 8.1+ hints.
-        TypeKind::Intersection(members) => members.iter().all(is_valid_native_hint),
+        TypeKind::Intersection(members) => members
+            .iter()
+            .all(|m| is_valid_native_hint(m, template_params)),
         // Everything else is a docblock-only construct and must not be
         // used as a native return type hint.
         _ => false,
@@ -529,12 +537,49 @@ pub(crate) fn format_return_type(
         // itself uses for fluent returns.
         let ret = replace_this_with_static(ret);
         let shortened = shorten_php_type_direct(&ret, use_map, file_namespace);
-        if is_valid_native_hint(&ret) && !shortened.is_empty() {
+        if is_valid_native_hint(&ret, &method.template_params) && !shortened.is_empty() {
             return format!(": {}", shortened);
         }
     }
 
     String::new()
+}
+
+/// Whether the hint [`format_return_type`] generates expresses `method`'s
+/// documented return type in full.
+///
+/// `false` when the hint is dropped entirely (a docblock-only type such as
+/// a generic, an array shape, or a `@template` param) and when it is a
+/// lossy stand-in (`@return $this` becomes `: static`, which no longer
+/// promises the same instance back).  Both are cases where a generated
+/// override has to restate the documented type in a docblock.
+pub(crate) fn native_hint_expresses_return_type(method: &MethodInfo) -> bool {
+    let Some(ret) = method.return_type.as_ref() else {
+        return true;
+    };
+    if let Some(native) = method.native_return_type.as_ref() {
+        return native == ret;
+    }
+    replace_this_with_static(ret) == *ret && is_valid_native_hint(ret, &method.template_params)
+}
+
+/// The effective type of the native hint a generated signature carries for
+/// `param`.
+///
+/// A literal `null` default makes a native hint implicitly nullable, and
+/// the parser folds that into the effective `type_hint`.  The generated
+/// signature carries the default along with the hint, so `string $a = null`
+/// already says everything `@param ?string $a` would.
+pub(crate) fn native_param_hint(param: &ParameterInfo) -> Option<PhpType> {
+    let native = param.native_type_hint.clone()?;
+    if param
+        .default_value
+        .as_deref()
+        .is_some_and(|d| d.eq_ignore_ascii_case("null"))
+    {
+        return Some(native.or_null());
+    }
+    Some(native)
 }
 
 /// Replace every `$this` in the type tree with `static`, the closest
@@ -821,6 +866,21 @@ mod tests {
             format_return_type(&method, &HashMap::new(), &None),
             ": static"
         );
+    }
+
+    #[test]
+    fn format_return_type_template_param_is_omitted() {
+        // `@return T` names a template param, not a class.  Emitting it as
+        // a native hint declares a return of the nonexistent class `T`.
+        let method = MethodInfo {
+            native_return_type: None,
+            return_type: Some(PhpType::parse("T")),
+            template_params: vec![crate::atom::atom("T")],
+            ..MethodInfo::virtual_method("test", Some("T"))
+        };
+
+        assert_eq!(format_return_type(&method, &HashMap::new(), &None), "");
+        assert!(!native_hint_expresses_return_type(&method));
     }
 
     #[test]

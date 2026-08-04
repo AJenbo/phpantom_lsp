@@ -18,7 +18,8 @@ use tower_lsp::lsp_types::{
 
 use crate::class_lookup::find_class_at_offset;
 use crate::code_actions::implement_methods::{
-    detect_class_indent, format_params, format_return_type,
+    detect_class_indent, format_params, format_return_type, native_hint_expresses_return_type,
+    native_param_hint,
 };
 use crate::php_type::PhpType;
 use crate::text_position::position_to_offset;
@@ -308,7 +309,7 @@ pub(crate) fn build_override_completions(
 /// the `@param` and `@return` types that only exist in PHPDoc.
 ///
 /// Returns `None` when every type is already fully expressed by the
-/// native signature.
+/// generated signature.
 fn trait_override_docblock_edit(
     method: &MethodInfo,
     opts: &OverrideCompletionOpts<'_>,
@@ -319,7 +320,7 @@ fn trait_override_docblock_edit(
         let Some(hint) = param.type_hint.as_ref() else {
             continue;
         };
-        if param.native_type_hint.as_ref() == Some(hint) {
+        if native_param_hint(param).as_ref() == Some(hint) {
             continue;
         }
         let ty = shorten_type_display(hint, opts.use_map, opts.file_namespace);
@@ -328,11 +329,15 @@ fn trait_override_docblock_edit(
         }
         let name = param.name.as_str();
         let dollar = if name.starts_with('$') { "" } else { "$" };
-        lines.push(format!("@param {ty} {dollar}{name}"));
+        // A variadic's `@param` type describes one element, so the tag
+        // needs the `...` back or it reads as the type of the whole
+        // collected array.
+        let ellipsis = if param.is_variadic { "..." } else { "" };
+        lines.push(format!("@param {ty} {ellipsis}{dollar}{name}"));
     }
 
     if let Some(ret) = method.return_type.as_ref()
-        && method.native_return_type.as_ref() != Some(ret)
+        && !native_hint_expresses_return_type(method)
     {
         let ty = shorten_type_display(ret, opts.use_map, opts.file_namespace);
         if !ty.is_empty() {
