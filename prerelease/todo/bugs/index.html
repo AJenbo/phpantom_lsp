@@ -904,17 +904,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b22-a-union-of-two-classes-sharing-a-short-name-collapses-to-the-first" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B22. A union of two classes sharing a short name collapses to the first
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1459,17 +1448,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b22-a-union-of-two-classes-sharing-a-short-name-collapses-to-the-first" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B22. A union of two classes sharing a short name collapses to the first
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1672,41 +1650,6 @@ inside a string from the start of a comment without a forward pass, so
 the fix likely means scanning the enclosing statement forward once and
 masking comments before the backwards walk, the way the Blade
 preprocessor masks non-PHP text.</p>
-<h4 id="b22-a-union-of-two-classes-sharing-a-short-name-collapses-to-the-first">B22. A union of two classes sharing a short name collapses to the first<a class="headerlink" href="#b22-a-union-of-two-classes-sharing-a-short-name-collapses-to-the-first" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Candidate classes are deduplicated by short name, not by FQN.
-<code>ClassInfo::push_unique_arc</code> and <code>ClassInfo::push_unique</code>
-(<code>src/types/mod.rs</code>) compare <code>c.name == cls.name</code>, and <code>name</code> holds the
-unqualified class name. Two distinct classes that happen to share a
-short name across namespaces are therefore treated as one, and every
-member of the second is lost:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">namespace NsA { class Thing { public function onlyNsA(): string { return &#39;&#39;; } } }</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">namespace NsB { class Thing { public function onlyNsB(): string { return &#39;&#39;; } } }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">class Maker {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    /** @return \NsA\Thing|\NsB\Thing */</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function make() { return new \NsA\Thing(); }</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">$maker-&gt;make()-&gt;onlyNsB();</span>
-</code></pre></div>
-<p>The call reports a false positive:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Method &#39;onlyNsB&#39; not found on class &#39;NsA\Thing&#39;
-</code></pre></div>
-<p>Completion on <code>$maker-&gt;make()-&gt;</code> offers <code>onlyNsA()</code> alone, and
-go-to-definition on <code>onlyNsB</code> has nothing to jump to. Same-short-name
-classes are common in real projects (an <code>Exception</code>, <code>Client</code>, <code>Config</code>,
-or <code>Response</code> per namespace), so any union that spans two of them
-resolves to half its members.</p>
-<p>The dedup itself is wanted: it is what stops a fluent chain through a
-union return type from doubling the receiver set at every link. The key
-is what is wrong, so the fix is to compare <code>fqn()</code> rather than <code>name</code>.
-Both helpers are shared by completion and resolution, so a switch to FQN
-comparison needs a pass over the call sites that currently rely on the
-looser match (a resolved stub and its project counterpart can share a
-short name and legitimately need collapsing).</p>
-<p><strong>Reproduce:</strong> the snippet above, checked with unknown-member
-diagnostics and with completion after <code>make()-&gt;</code>.</p>
 
 
 
