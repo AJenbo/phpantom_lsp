@@ -3384,9 +3384,9 @@ the inferred types into a signature docblock.</p>
 <p>Other Blade-aware editors ship a full structure view, folding builder,
 and formatter alongside their directive inspections.
 <code>document_symbols.rs</code>, <code>folding.rs</code>, and <code>formatting.rs</code> have no Blade
-awareness at all today, unlike <code>inlay_hints.rs</code>, <code>semantic_tokens.rs</code>,
-and <code>linked_editing.rs</code>, which all check <code>is_blade_file</code> and translate
-positions through <code>BladeSourceMap</code>. These items close that gap.</p>
+awareness at all today, unlike <code>inlay_hints.rs</code> and <code>semantic_tokens.rs</code>,
+which both check <code>is_blade_file</code> and translate positions through
+<code>BladeSourceMap</code>. These items close that gap.</p>
 <h3 id="bl13-mismatched-and-unbalanced-directive-diagnostics">BL13. Mismatched and unbalanced directive diagnostics<a class="headerlink" href="#bl13-mismatched-and-unbalanced-directive-diagnostics" title="Permanent link">&para;</a></h3>
 <p><code>translate_directive</code> (<code>src/blade/directives.rs</code>) maps each directive
 to PHP independently by name, with no check that a closing directive
@@ -3655,10 +3655,10 @@ call missing a required variable gets a diagnostic.</p>
 <h3 id="step-10-editor-tooling-parity-bl13-bl16">Step 10: Editor tooling parity (BL13-BL16)<a class="headerlink" href="#step-10-editor-tooling-parity-bl13-bl16" title="Permanent link">&para;</a></h3>
 <p>Implement directive-pair validation (BL13), then Blade-position
 translation for folding (BL14) and document symbols (BL15) — both
-follow the same <code>php_to_blade</code> pattern already used by inlay hints,
-semantic tokens, and linked editing. Formatting (BL16) starts with
-disabling the feature safely for <code>.blade.php</code> and defers the full
-indentation model.</p>
+follow the same <code>php_to_blade</code> pattern already used by inlay hints
+and semantic tokens. Formatting (BL16) starts with disabling the
+feature safely for <code>.blade.php</code> and defers the full indentation
+model.</p>
 <p><strong>Deliverable:</strong> <code>@foreach ... @endif</code> is flagged as a diagnostic.
 Folding and the outline view work correctly on <code>.blade.php</code> files.
 <code>textDocument/formatting</code> no longer risks corrupting a Blade file.</p>
