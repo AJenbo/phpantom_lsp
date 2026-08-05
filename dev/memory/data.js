@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785875989309,
+  "lastUpdate": 1785928595947,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13871,6 +13871,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "08592e1eb3fd1142716388209f5022d19d21b583",
+          "message": "Remove Linked Editing support",
+          "timestamp": "2026-08-05T13:00:35+02:00",
+          "tree_id": "390ce924a9eb0b54d2dbeee62a86fa10b7d73732",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/08592e1eb3fd1142716388209f5022d19d21b583"
+        },
+        "date": 1785928592869,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.1,
             "unit": "MiB"
           }
         ]
