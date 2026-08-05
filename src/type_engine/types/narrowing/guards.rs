@@ -2,14 +2,17 @@
 //! class-string and member-existence guards, `in_array` element
 //! narrowing, and guard-clause (early-return) narrowing.
 
+use std::sync::Arc;
+
 use crate::atom::bytes_to_str;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ResolvedType};
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
-use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn, VarResolutionCtx};
 
 use super::*;
 
@@ -161,26 +164,37 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
 /// }
 /// // $var is Foo here
 /// ```
-pub(in crate::type_engine) fn statement_unconditionally_exits(stmt: &Statement<'_>) -> bool {
+///
+/// A call to a function or method declared `never` also exits, which
+/// takes type information rather than the AST alone; [`ExitCtx`] carries
+/// what that lookup needs.
+pub(in crate::type_engine) fn statement_unconditionally_exits(
+    stmt: &Statement<'_>,
+    ctx: &ExitCtx<'_>,
+) -> bool {
     match stmt {
         Statement::Return(_) => true,
         Statement::Continue(_) => true,
         Statement::Break(_) => true,
         // `throw new …;` is parsed as an expression statement
         // containing a Throw expression.
-        Statement::Expression(es) => matches!(
-            es.expression,
-            Expression::Throw(_)
-                | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
-                | Expression::Construct(mago_syntax::cst::Construct::Die(_))
-        ),
-        // A block exits if its last statement exits.
+        Statement::Expression(es) => {
+            matches!(
+                es.expression,
+                Expression::Throw(_)
+                    | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
+                    | Expression::Construct(mago_syntax::cst::Construct::Die(_))
+            ) || expression_is_never_call(es.expression, ctx)
+        }
+        // A block exits if any statement in it exits — everything after
+        // the first exiting statement is unreachable, so a trailing
+        // assignment does not make the block fall through.
         Statement::Block(block) => block
             .statements
-            .last()
-            .is_some_and(statement_unconditionally_exits),
+            .iter()
+            .any(|s| statement_unconditionally_exits(s, ctx)),
         // An if/else exits if ALL branches exist and ALL exit.
-        Statement::If(if_stmt) => if_body_unconditionally_exits(&if_stmt.body),
+        Statement::If(if_stmt) => if_body_unconditionally_exits(&if_stmt.body, ctx),
         _ => false,
     }
 }
@@ -190,43 +204,43 @@ pub(in crate::type_engine) fn statement_unconditionally_exits(stmt: &Statement<'
 ///   - The then-body exits, AND
 ///   - All elseif bodies exit, AND
 ///   - An else clause exists and exits.
-fn if_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
+fn if_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
     match body {
         IfBody::Statement(stmt_body) => {
-            if !statement_unconditionally_exits(stmt_body.statement) {
+            if !statement_unconditionally_exits(stmt_body.statement, ctx) {
                 return false;
             }
             if !stmt_body
                 .else_if_clauses
                 .iter()
-                .all(|ei| statement_unconditionally_exits(ei.statement))
+                .all(|ei| statement_unconditionally_exits(ei.statement, ctx))
             {
                 return false;
             }
             stmt_body
                 .else_clause
                 .as_ref()
-                .is_some_and(|ec| statement_unconditionally_exits(ec.statement))
+                .is_some_and(|ec| statement_unconditionally_exits(ec.statement, ctx))
         }
         IfBody::ColonDelimited(colon_body) => {
             if !colon_body
                 .statements
-                .last()
-                .is_some_and(statement_unconditionally_exits)
+                .iter()
+                .any(|s| statement_unconditionally_exits(s, ctx))
             {
                 return false;
             }
             if !colon_body.else_if_clauses.iter().all(|ei| {
                 ei.statements
-                    .last()
-                    .is_some_and(statement_unconditionally_exits)
+                    .iter()
+                    .any(|s| statement_unconditionally_exits(s, ctx))
             }) {
                 return false;
             }
             colon_body.else_clause.as_ref().is_some_and(|ec| {
                 ec.statements
-                    .last()
-                    .is_some_and(statement_unconditionally_exits)
+                    .iter()
+                    .any(|s| statement_unconditionally_exits(s, ctx))
             })
         }
     }
@@ -235,14 +249,173 @@ fn if_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
 /// Check whether an `if` body's then-branch unconditionally exits.
 /// Used for guard clause detection where we only need the then-body
 /// to exit (no else clause required).
-fn then_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
+fn then_body_unconditionally_exits(body: &IfBody<'_>, ctx: &ExitCtx<'_>) -> bool {
     match body {
-        IfBody::Statement(stmt_body) => statement_unconditionally_exits(stmt_body.statement),
+        IfBody::Statement(stmt_body) => statement_unconditionally_exits(stmt_body.statement, ctx),
         IfBody::ColonDelimited(colon_body) => colon_body
             .statements
-            .last()
-            .is_some_and(statement_unconditionally_exits),
+            .iter()
+            .any(|s| statement_unconditionally_exits(s, ctx)),
     }
+}
+
+/// The type information [`statement_unconditionally_exits`] needs to
+/// recognise a call to a `never`-returning function or method.
+///
+/// Every consumer that asks "does this branch terminate?" builds one
+/// from its own resolution context, so a guard clause ending in
+/// `abort()` terminates the branch identically for local variables
+/// (forward walker) and for properties (property narrowing).
+pub(in crate::type_engine) struct ExitCtx<'a> {
+    /// Enclosing class, used for `$this->…`, `self::`, `static::` and
+    /// `parent::` receivers and for namespace-relative name resolution.
+    pub current_class: &'a ClassInfo,
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub function_loader: FunctionLoaderFn<'a>,
+    pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
+    /// Resolves a `$`-prefixed local variable to its types, when the
+    /// caller has a scope to consult.  Without it, only `$this` can be
+    /// typed as a method-call receiver.
+    pub var_types: ScopeVarResolverFn<'a>,
+}
+
+impl<'a> ExitCtx<'a> {
+    /// Build an exit context from a variable-resolution context.
+    pub(in crate::type_engine) fn from_var_ctx(ctx: &'a VarResolutionCtx<'a>) -> Self {
+        Self {
+            current_class: ctx.current_class,
+            class_loader: ctx.class_loader,
+            function_loader: ctx.loaders.function_loader,
+            resolved_class_cache: ctx.resolved_class_cache,
+            var_types: ctx.scope_var_resolver,
+        }
+    }
+}
+
+/// Check whether an expression is a call to a `never`-returning
+/// function or method, which terminates the enclosing code path.
+fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
+    let Expression::Call(call) = expr else {
+        return false;
+    };
+    match call {
+        Call::Function(fc) => {
+            let Expression::Identifier(ident) = &fc.function else {
+                return false;
+            };
+            let Some(function_loader) = ctx.function_loader else {
+                return false;
+            };
+            function_loader(bytes_to_str(ident.value()), fc.function.span().start.offset)
+                .is_some_and(|fi| type_is_never(fi.return_type.as_ref()))
+        }
+        Call::Method(mc) => {
+            let Some(method_name) = member_selector_name(&mc.method) else {
+                return false;
+            };
+            let receivers = receiver_class_names(mc.object, ctx);
+            !receivers.is_empty()
+                && receivers
+                    .iter()
+                    .all(|class_name| class_has_never_method(class_name, method_name, ctx))
+        }
+        Call::StaticMethod(sc) => {
+            let Some(method_name) = member_selector_name(&sc.method) else {
+                return false;
+            };
+            let class_name = match &sc.class {
+                // A source-level reference: PHP resolves an unqualified
+                // name against the current namespace before the global
+                // scope, so a same-namespace class must win over a
+                // global class of the same short name.
+                Expression::Identifier(ident) => crate::util::resolve_source_class_name(
+                    bytes_to_str(ident.value()),
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.class_loader,
+                ),
+                // `never` is the bottom type, so a child override can
+                // only narrow to `never` again — reading `static::`
+                // off the current class is sound.
+                Expression::Self_(_) | Expression::Static(_) => ctx.current_class.fqn().to_string(),
+                Expression::Parent(_) => match ctx.current_class.parent_class.as_ref() {
+                    Some(parent) => parent.to_string(),
+                    None => return false,
+                },
+                _ => return false,
+            };
+            class_has_never_method(&class_name, method_name, ctx)
+        }
+        // `$x?->fail()` is skipped entirely when `$x` is null, so it
+        // does not unconditionally exit.
+        Call::NullSafeMethod(_) => false,
+    }
+}
+
+fn member_selector_name<'s>(selector: &ClassLikeMemberSelector<'s>) -> Option<&'s str> {
+    match selector {
+        ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value)),
+        _ => None,
+    }
+}
+
+/// Resolve the class names a method-call receiver can hold.
+///
+/// `$this` comes from the enclosing class; any other variable is read
+/// from the caller's scope when one was supplied.  Anything else (a
+/// property chain, a call result) is left unresolved rather than
+/// re-entering expression resolution from a control-flow predicate.
+fn receiver_class_names(object: &Expression<'_>, ctx: &ExitCtx<'_>) -> Vec<String> {
+    let Expression::Variable(Variable::Direct(dv)) = object else {
+        return Vec::new();
+    };
+    let var_name = bytes_to_str(dv.name);
+    if var_name == "$this" {
+        return vec![ctx.current_class.fqn().to_string()];
+    }
+    let Some(var_types) = ctx.var_types else {
+        return Vec::new();
+    };
+    var_types(var_name)
+        .iter()
+        .filter_map(|rt| rt.class_info.as_ref().map(|ci| ci.fqn().to_string()))
+        .collect()
+}
+
+fn class_has_never_method(class_name: &str, method_name: &str, ctx: &ExitCtx<'_>) -> bool {
+    // A method declared on the class itself is the common case; only
+    // fall back to an inheritance merge when the class does not declare
+    // the method, so trait and parent declarations are still found.
+    if ctx.current_class.fqn().eq_ignore_ascii_case(class_name)
+        && let Some(is_never) = declared_method_returns_never(ctx.current_class, method_name)
+    {
+        return is_never;
+    }
+    let Some(class_info) = (ctx.class_loader)(class_name) else {
+        return false;
+    };
+    if let Some(is_never) = declared_method_returns_never(&class_info, method_name) {
+        return is_never;
+    }
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &class_info,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    declared_method_returns_never(&merged, method_name).unwrap_or(false)
+}
+
+/// `Some(true)`/`Some(false)` when `class_info` declares `method_name`,
+/// `None` when it does not declare it at all.
+fn declared_method_returns_never(class_info: &ClassInfo, method_name: &str) -> Option<bool> {
+    class_info
+        .methods
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case(method_name))
+        .map(|m| type_is_never(m.return_type.as_ref()))
+}
+
+fn type_is_never(return_type: Option<&PhpType>) -> bool {
+    return_type.is_some_and(|t| t.is_never())
 }
 
 /// Apply guard clause narrowing after an `if` statement whose
@@ -264,7 +437,7 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
-    if !then_body_unconditionally_exits(&if_stmt.body) {
+    if !then_body_unconditionally_exits(&if_stmt.body, &ExitCtx::from_var_ctx(ctx)) {
         return;
     }
     if if_stmt.body.has_else_clause() || if_stmt.body.has_else_if_clauses() {

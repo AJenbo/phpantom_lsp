@@ -2299,11 +2299,6 @@ pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &m
     }
 }
 
-/// Check if a statement unconditionally exits (return/throw/continue/break).
-pub(crate) fn statement_unconditionally_exits(stmt: &Statement<'_>) -> bool {
-    narrowing::statement_unconditionally_exits(stmt)
-}
-
 /// Check whether a statement exits via `break` or `continue` (loop-local
 /// exit) rather than `return` or `throw` (function exit).
 ///

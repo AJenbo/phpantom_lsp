@@ -1,0 +1,32 @@
+// test: property guard calling a never-returning function narrows the property
+// feature: completion
+// A property guard must terminate on `never` exactly as it does on `return`
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+function abort_now(): never {
+    throw new \RuntimeException();
+}
+
+class Holder {
+    /** @var Foo|Bar */
+    public $prop;
+
+    public function test(): void {
+        if (!$this->prop instanceof Foo) {
+            abort_now();
+        }
+
+        $this->prop-><>
+    }
+}

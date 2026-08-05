@@ -33,7 +33,8 @@ mod context;
 mod property_narrowing;
 
 pub(crate) use context::{
-    FunctionLoaderFn, Loaders, ResolutionCtx, VarResolutionCtx, with_chain_resolution_cache,
+    FunctionLoaderFn, Loaders, ResolutionCtx, ScopeVarResolverFn, VarResolutionCtx,
+    with_chain_resolution_cache,
 };
 pub(crate) use property_narrowing::apply_property_narrowing;
 

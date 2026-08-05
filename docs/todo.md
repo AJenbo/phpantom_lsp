@@ -97,7 +97,6 @@ unlikely to move the needle for most users.
 | T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Low-Medium  |
 | T4  | Non-empty-\* type narrowing and propagation                                                                                                                                 | Low         | Low         |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Low         |
-| T9  | [Dead-code elimination after `never`-returning calls](todo/type-inference.md#t9-dead-code-elimination-after-never-returning-calls)                                          | Low         | Low-Medium  |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium  |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Low-Medium  |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
@@ -115,6 +114,9 @@ unlikely to move the needle for most users.
 | B19 | [Override completion drops `readonly` from a redeclared property](todo/bugs.md#b19-override-completion-drops-readonly-from-a-redeclared-property)                            | Medium      | Medium      |
 | B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |
 | B21 | [Completion's backward scan is blind to comments](todo/bugs.md#b21-completions-backward-scan-is-blind-to-comments)                                                           | Low         | Medium      |
+| B22 | [Hover collapses a branch-merged union to its first member](todo/bugs.md#b22-hover-collapses-a-branch-merged-union-to-its-first-member)                                  | Medium      | Medium      |
+| B23 | [A top-level function body resolves source-level class names without a namespace](todo/bugs.md#b23-a-top-level-function-body-resolves-source-level-class-names-without-a-namespace) | Medium      | Medium      |
+| B24 | [Alternative `if:` / `endif;` syntax never narrows after a guard](todo/bugs.md#b24-alternative-if--endif-syntax-never-narrows-after-a-guard)                                | Low-Medium  | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

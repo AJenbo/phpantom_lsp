@@ -1,0 +1,27 @@
+// test: instanceof guard with never-returning function narrows type
+// feature: completion
+// After `if (!$x instanceof Foo) { abort(); }`, $x is narrowed to Foo
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+function abort(): never {
+    throw new \RuntimeException();
+}
+
+function test(Foo|Bar $x): void {
+    if (!$x instanceof Foo) {
+        abort();
+    }
+
+    $x-><>
+}

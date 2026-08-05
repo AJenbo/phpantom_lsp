@@ -219,3 +219,95 @@ inside a string from the start of a comment without a forward pass, so
 the fix likely means scanning the enclosing statement forward once and
 masking comments before the backwards walk, the way the Blade
 preprocessor masks non-PHP text.
+
+#### B22. Hover collapses a branch-merged union to its first member
+
+**Impact: Medium · Effort: Medium**
+
+When a variable is assigned different types in different branches of an
+`if`, the forward walker merges the branches correctly (completion after
+the `if` offers members of every branch's type), but hover reports only
+the first branch's type:
+
+```php
+function test(): void {
+    if (rand(0, 1)) { $x = 'a'; } else { $x = 42; }
+    take($x); // hover on $x says 'a'; it is 'a'|42
+}
+```
+
+The same holds for objects: `$x = new Foo(); if (rand(0, 1)) { $x = new
+Bar(); }` hovers as `Foo` while completion on `$x->` correctly offers
+both `Foo` and `Bar` members. Hover is not incapable of showing several
+types (a `Foo|Bar` parameter renders as two sections), so the union
+survives the walk and is dropped somewhere between the merged scope and
+the hover renderer.
+
+Found while writing fixtures for `never`-returning calls: the whole
+class of "variable keeps its pre-branch type" assertions cannot be
+expressed as a hover fixture until this is fixed, which is why
+`tests/fixtures/type/never_return_type.fixture` asserts through
+completion instead.
+
+**Reproduce:** hover a variable after an `if`/`else` that assigns a
+different type in each branch.
+
+#### B23. A top-level function body resolves source-level class names without a namespace
+
+**Impact: Medium · Effort: Medium**
+
+Source-level class references (`new Foo`, `Foo::bar()`, `Foo::CONST`)
+are resolved with `resolve_source_class_name`, which needs the enclosing
+namespace so that a same-namespace class outranks a global class of the
+same short name. Every call site reads it from
+`current_class.file_namespace`, but when the cursor is inside a plain
+function (or top-level code) there is no enclosing class and the callers
+fall back to `ClassInfo::default()`, whose `file_namespace` is `None`:
+
+```php
+namespace App;
+
+function test(): void {
+    Aborter::fail(); // resolves to \Aborter, not App\Aborter
+}
+```
+
+Inside a method of a class in the same file the resolution is correct,
+so the gap is specific to function and top-level scopes. The fix is to
+give the synthesised placeholder class the namespace that contains the
+cursor (`Backend::namespace_at_offset` already computes it for the
+multi-namespace case) rather than leaving it empty, so every consumer of
+`current_class.file_namespace` gets the right answer.
+
+**Reproduce:** in a namespaced file that also declares a global class of
+the same short name, reference the class unqualified from a plain
+function body.
+
+#### B24. Alternative `if:` / `endif;` syntax never narrows after a guard
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+`process_if_colon_body` in
+`src/type_engine/variable/forward_walk/control_flow.rs` merges every
+branch scope unconditionally: unlike its brace-syntax counterpart
+`process_if_statement_body`, it never asks whether a branch terminates.
+A guard clause written in the alternative syntax therefore does not
+narrow, even with a plain `return`:
+
+```php
+if (!$x instanceof Foo):
+    return;
+endif;
+
+$x->fooMethod(); // $x is still Foo|Bar
+```
+
+The brace form of the same guard narrows correctly. The exit check the
+brace path uses (`statement_unconditionally_exits`, which also
+recognises `never`-returning calls) already handles colon-delimited
+bodies, so the fix is to compute a per-branch `exits` flag in
+`process_if_colon_body` and drop terminating branches from the merge the
+way `process_if_statement_body` does.
+
+**Reproduce:** write an `instanceof` guard with `if (…): return; endif;`
+and complete on the guarded variable afterwards.

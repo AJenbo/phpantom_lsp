@@ -213,36 +213,6 @@ See `ClosureBindDynamicReturnTypeExtension` and
 
 
 
-## T9. Dead-code elimination after `never`-returning calls
-**Impact: Low · Effort: Low-Medium**
-
-When a function or method has return type `never`, any code path that
-calls it is guaranteed to terminate. Variables assigned before the
-`never` call in a conditional branch should not have their type
-polluted by the branch's assignments.
-
-```php
-$x = 'hello';
-if (rand(0,1)) {
-    $x = 'other';
-    abort(); // returns never
-}
-$x; // should be "hello", not "hello"|"other"
-```
-
-Today PHPantom's branch-merging logic unions all branch assignments
-regardless of whether the branch terminates. Recognising `never` as a
-terminating statement (alongside `return`, `throw`, `die`, `exit`)
-would fix this.
-
-**Fixture to activate:**
-
-- `type/never_return_type.fixture`
-
-**phpactor ref:** `type/never.test`
-
----
-
 ## T10. Ternary expression as RHS of list destructuring
 **Impact: Low · Effort: Low-Medium**
 

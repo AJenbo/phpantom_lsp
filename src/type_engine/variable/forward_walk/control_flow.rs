@@ -7,6 +7,7 @@ use mago_syntax::cst::argument::Argument;
 use crate::atom::{atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::{PhpType, TypeKind};
+use crate::type_engine::types::narrowing;
 use crate::types::ResolvedType;
 
 // ─── Control flow handling ──────────────────────────────────────────────────
@@ -138,7 +139,7 @@ pub(crate) fn process_if_statement_body<'b>(
     let mut then_scope = scope.clone();
     apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
     walk_body_forward(std::iter::once(body.statement), &mut then_scope, ctx);
-    let then_exits = statement_unconditionally_exits(body.statement);
+    let then_exits = branch_exits(body.statement, &then_scope, ctx);
 
     let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::new();
     for ei in body.else_if_clauses.iter() {
@@ -161,7 +162,7 @@ pub(crate) fn process_if_statement_body<'b>(
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(std::iter::once(ei.statement), &mut ei_scope, ctx);
-        let exits = statement_unconditionally_exits(ei.statement);
+        let exits = branch_exits(ei.statement, &ei_scope, ctx);
         elseif_scopes.push((ei_scope, exits));
     }
 
@@ -178,7 +179,7 @@ pub(crate) fn process_if_statement_body<'b>(
             record_scope_snapshot(else_clause.statement.span().start.offset, &else_scope);
         }
         walk_body_forward(std::iter::once(else_clause.statement), &mut else_scope, ctx);
-        let exits = statement_unconditionally_exits(else_clause.statement);
+        let exits = branch_exits(else_clause.statement, &else_scope, ctx);
         (Some(else_scope), exits)
     } else {
         (None, false)
@@ -423,6 +424,26 @@ pub(crate) fn process_if_colon_body<'b>(
         }
         *scope = merged;
     }
+}
+
+/// Check whether an if/elseif/else branch terminates, so its
+/// assignments must not be merged into the post-if scope.
+///
+/// The branch's own scope is passed along so that a `never`-returning
+/// method called on a local variable (`$aborter->fail()`) is recognised,
+/// not just `$this->fail()`.
+fn branch_exits(stmt: &Statement<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) -> bool {
+    let var_types = |var_name: &str| scope.get(var_name).to_vec();
+    narrowing::statement_unconditionally_exits(
+        stmt,
+        &narrowing::ExitCtx {
+            current_class: ctx.current_class,
+            class_loader: ctx.class_loader,
+            function_loader: ctx.loaders.function_loader,
+            resolved_class_cache: ctx.resolved_class_cache,
+            var_types: Some(&var_types),
+        },
+    )
 }
 
 /// Compute the assignment dependency depth for a loop body.

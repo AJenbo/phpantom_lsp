@@ -1,14 +1,21 @@
 // test: never return type is treated as dead code — variable retains pre-branch type
-// feature: hover
+// feature: completion
 // Adapted from phpactor type/never.test
-// After a branch that calls a never-returning function, the variable keeps its original type
-// ignore: dead-code elimination after never-returning function calls not implemented
-// expect_hover: $foobar => string
+// `never_return()` terminates the branch, so `$obj = new Bar()` is dead
+// and $obj is still Foo after the if.  Asserted through completion rather
+// than hover because hover collapses a branch-merged union to its first
+// member (B22).
+// expect: fooMethod(
+// expect_absent: barMethod(
 ---
 <?php
 
-class Foobar {
+class Foo {
     public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
 }
 
 function never_return(): never
@@ -16,11 +23,13 @@ function never_return(): never
     die('nope');
 }
 
-$foobar = 'hello';
+function test(): void {
+    $obj = new Foo();
 
-if (rand(0, 1)) {
-    $foobar = 'other';
-    never_return();
+    if (rand(0, 1)) {
+        $obj = new Bar();
+        never_return();
+    }
+
+    $obj-><>
 }
-
-$foobar<>;

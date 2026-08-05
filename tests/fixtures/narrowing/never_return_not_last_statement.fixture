@@ -1,0 +1,28 @@
+// test: statements after a never-returning call are unreachable
+// feature: completion
+// The trailing assignment is dead code and must not make the branch fall through
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+function abort_now(): never {
+    throw new \RuntimeException();
+}
+
+function test(Foo|Bar $x): void {
+    if (!$x instanceof Foo) {
+        abort_now();
+        $unreachable = 1;
+    }
+
+    $x-><>
+}

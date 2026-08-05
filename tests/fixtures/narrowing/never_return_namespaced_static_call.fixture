@@ -1,0 +1,42 @@
+// test: a same-namespace class shadows a global one in a never check
+// feature: completion
+// `Aborter::fail()` means App\Aborter::fail(), which returns void, so the
+// branch does not terminate and both members stay available.  The guard
+// sits in a method because a top-level function body resolves source-level
+// class names without a namespace (B23).
+// expect: fooMethod(
+// expect: barMethod(
+---
+<?php
+
+namespace {
+    class Aborter {
+        public static function fail(): never {
+            throw new \RuntimeException();
+        }
+    }
+}
+
+namespace App {
+    class Aborter {
+        public static function fail(): void {}
+    }
+
+    class Foo {
+        public function fooMethod(): void {}
+    }
+
+    class Bar {
+        public function barMethod(): void {}
+    }
+
+    class Runner {
+        public function test(Foo|Bar $x): void {
+            if (!$x instanceof Foo) {
+                Aborter::fail();
+            }
+
+            $x-><>
+        }
+    }
+}
