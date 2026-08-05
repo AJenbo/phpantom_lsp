@@ -1,5 +1,6 @@
 //! Tests for the ScopeCollector infrastructure.
 
+use super::scope_map::RangeClassification;
 use super::*;
 use crate::parser::with_parsed_program;
 use mago_syntax::cst::{ClassLikeMember, MethodBody, Statement};
@@ -478,7 +479,24 @@ function test() {
     assert!(!scope_map.has_this_or_self);
 }
 
-// ─── Reference parameters ───────────────────────────────────────────────────
+// ─── Reference bindings ─────────────────────────────────────────────────────
+
+/// Helper: names of all recorded reference bindings.
+fn bound_names(scope_map: &ScopeMap) -> Vec<&str> {
+    scope_map
+        .reference_bindings
+        .iter()
+        .map(|b| b.name.as_str())
+        .collect()
+}
+
+/// Helper: classify the range covering `snippet` in the first function
+/// of `php`.
+fn classify_snippet(php: &str, snippet: &str) -> RangeClassification {
+    let scope_map = collect_from_function(php);
+    let start = php.find(snippet).expect("snippet not found in source") as u32;
+    scope_map.classify_range(start, start + snippet.len() as u32)
+}
 
 #[test]
 fn reference_parameter_detected() {
@@ -488,7 +506,7 @@ function test(&$x) {
 }
 "#;
     let scope_map = collect_from_function(php);
-    assert!(scope_map.has_reference_params);
+    assert_eq!(bound_names(&scope_map), vec!["$x"]);
 }
 
 #[test]
@@ -499,7 +517,113 @@ function test($x) {
 }
 "#;
     let scope_map = collect_from_function(php);
-    assert!(!scope_map.has_reference_params);
+    assert!(scope_map.reference_bindings.is_empty());
+}
+
+#[test]
+fn write_to_reference_parameter_is_a_reference_write() {
+    let php = r#"<?php
+function test(&$x) {
+    $x = 1;
+}
+"#;
+    let classification = classify_snippet(php, "$x = 1;");
+    assert_eq!(classification.reference_writes, vec!["$x".to_string()]);
+}
+
+#[test]
+fn read_of_reference_parameter_is_not_a_reference_write() {
+    let php = r#"<?php
+function test(&$x) {
+    $y = $x + 1;
+}
+"#;
+    let classification = classify_snippet(php, "$y = $x + 1;");
+    assert!(
+        classification.reference_writes.is_empty(),
+        "reading a by-reference parameter is safe to extract, got: {:?}",
+        classification
+    );
+}
+
+#[test]
+fn write_to_by_reference_foreach_binding_is_a_reference_write() {
+    let php = r#"<?php
+function test(array $items) {
+    foreach ($items as &$item) {
+        $item = trim($item);
+    }
+}
+"#;
+    let classification = classify_snippet(php, "$item = trim($item);");
+    assert_eq!(classification.reference_writes, vec!["$item".to_string()]);
+}
+
+#[test]
+fn write_through_reference_assignment_is_a_reference_write() {
+    let php = r#"<?php
+function test() {
+    $total = 0;
+    $ref = &$total;
+    $ref += 5;
+    return $total;
+}
+"#;
+    let scope_map = collect_from_function(php);
+    assert_eq!(bound_names(&scope_map), vec!["$ref", "$total"]);
+
+    let classification = classify_snippet(php, "$ref += 5;");
+    assert_eq!(classification.reference_writes, vec!["$ref".to_string()]);
+}
+
+#[test]
+fn write_before_the_binding_is_not_a_reference_write() {
+    let php = r#"<?php
+function test() {
+    $x = 1;
+    $ref = &$x;
+    return $ref;
+}
+"#;
+    let classification = classify_snippet(php, "$x = 1;");
+    assert!(
+        classification.reference_writes.is_empty(),
+        "a write that precedes the `&$x` binding is safe to extract, got: {:?}",
+        classification
+    );
+}
+
+#[test]
+fn closure_reference_parameter_does_not_bind_the_outer_variable() {
+    let php = r#"<?php
+function test() {
+    $x = 1;
+    $fn = function (&$x) { $x = 2; };
+    $x = 3;
+    return $x;
+}
+"#;
+    let classification = classify_snippet(php, "$x = 3;");
+    assert!(
+        classification.reference_writes.is_empty(),
+        "the closure's `&$x` is a separate scope, got: {:?}",
+        classification
+    );
+}
+
+#[test]
+fn write_to_by_reference_capture_is_a_reference_write() {
+    let php = r#"<?php
+function test() {
+    $count = 0;
+    $fn = function () use (&$count) {
+        $count = $count + 1;
+    };
+    return $count;
+}
+"#;
+    let classification = classify_snippet(php, "$count = $count + 1;");
+    assert_eq!(classification.reference_writes, vec!["$count".to_string()]);
 }
 
 // ─── Static and global declarations ─────────────────────────────────────────

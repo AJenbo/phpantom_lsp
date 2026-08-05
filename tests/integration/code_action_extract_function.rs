@@ -1337,3 +1337,82 @@ class C {
         "extracted method should keep the original return expression:\n{result}"
     );
 }
+
+// ── By-reference safety ─────────────────────────────────────────────────────
+
+#[test]
+fn no_edit_when_selection_writes_through_a_reference_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo(array &$out, string $value) {
+    $trimmed = trim($value);
+    $out[] = $trimmed;
+}
+";
+    // Select both statements.  `$out` is bound by reference, so moving
+    // the append into a new function would drop the mutation.
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 22);
+    let action = find_extract_action(&actions).expect("Phase 1 offers the action");
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), Arc::new(content.to_string()));
+    let (resolved, _) = backend.resolve_code_action(action.clone());
+    assert!(
+        resolved.edit.is_none(),
+        "writing through `&$out` must not be extracted"
+    );
+}
+
+#[test]
+fn no_edit_when_selection_writes_through_a_by_reference_foreach() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo(array $items) {
+    foreach ($items as &$item) {
+        $item = trim($item);
+    }
+}
+";
+    // Select the whole loop: `$items` is mutated through `&$item`, so
+    // an extracted function receiving a copy would drop the changes.
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 4, 5);
+    let action = find_extract_action(&actions).expect("Phase 1 offers the action");
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), Arc::new(content.to_string()));
+    let (resolved, _) = backend.resolve_code_action(action.clone());
+    assert!(
+        resolved.edit.is_none(),
+        "writing through a `&$item` foreach binding must not be extracted"
+    );
+}
+
+#[test]
+fn extracts_when_reference_parameter_is_only_read() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo(array &$out) {
+    $count = count($out);
+    echo $count;
+}
+";
+    // `$out` is never written in the selection, so passing it by value
+    // to the extracted function is safe.
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 25);
+    let action = find_extract_action(&actions).expect("should offer extract action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+
+    assert!(
+        result.contains("$count = "),
+        "call site should keep assigning $count:\n{result}"
+    );
+}

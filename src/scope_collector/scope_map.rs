@@ -45,6 +45,27 @@ pub(crate) enum AccessKind {
     ReadWrite,
 }
 
+/// A variable bound by reference (`&$var`).
+///
+/// A write to a reference-bound variable also mutates whatever the
+/// binding aliases: the caller's argument for a `&$param`, the array
+/// element a `foreach (… as &$v)` is walking, the variable on the right
+/// of a `$a = &$b`, or the enclosing scope's variable for a closure
+/// `use (&$x)`.  Moving such a write into a new function scope severs
+/// the alias, so Extract Function has to refuse those ranges.
+#[derive(Debug, Clone)]
+pub(crate) struct ReferenceBinding {
+    /// Variable name **with** `$` prefix.
+    pub name: String,
+    /// Byte offset from which the binding is live.  Parameters use the
+    /// parameter's own offset, which precedes the frame body.
+    pub offset: u32,
+    /// `start` of the frame that owns the binding, so a `&$x` inside a
+    /// nested closure does not mark an unrelated `$x` outside it.
+    /// `catch` blocks are transparent, matching [`ScopeMap::accesses_in_frame`].
+    pub frame_start: u32,
+}
+
 /// A single variable access (read or write) at a specific byte offset.
 #[derive(Debug, Clone)]
 pub(crate) struct VarAccess {
@@ -128,23 +149,11 @@ pub(crate) struct ScopeMap {
     /// Whether `$this`, `self::`, `static::`, or `parent::` appears
     /// anywhere in the collected region.  Set during collection.
     pub has_this_or_self: bool,
-    /// Whether any by-reference parameter (`&$var`) was encountered.
+    /// Every `&$var` binding encountered, in source order.
     ///
     /// Used by Extract Function to detect when by-reference semantics
     /// would make extraction unsafe.
-    pub has_reference_params: bool,
-}
-
-impl ScopeMap {
-    /// Whether the enclosing scope uses by-reference parameters.
-    ///
-    /// When `true`, variable extraction must be careful about
-    /// reference semantics — a variable modified via `&$var` in the
-    /// extracted range may need to be passed by reference to the new
-    /// function.
-    pub(crate) fn uses_reference_params(&self) -> bool {
-        self.has_reference_params
-    }
+    pub reference_bindings: Vec<ReferenceBinding>,
 }
 
 /// Variables classified by their role relative to a byte range.
@@ -167,8 +176,9 @@ pub(crate) struct RangeClassification {
     /// Whether `$this`, `self::`, `static::`, or `parent::` appears
     /// in the range.
     pub uses_this: bool,
-    /// Variables that are written by reference (`&$var`) inside the
-    /// range.
+    /// Variables bound by reference (`&$var`) that are written inside
+    /// the range.  Writing one of these mutates the aliased value, which
+    /// an extracted function receiving a copy could no longer do.
     pub reference_writes: Vec<String>,
 }
 
@@ -191,6 +201,22 @@ impl ScopeMap {
             .iter()
             .rev()
             .find(|f| start >= f.start && end <= f.end)
+    }
+
+    /// The `start` of the frame that owns `frame`'s reference bindings.
+    ///
+    /// A `catch` block is not a variable scope in PHP, so a `&$var`
+    /// recorded inside one belongs to the enclosing function, method, or
+    /// closure frame.
+    fn binding_scope_start(&self, frame: &Frame) -> u32 {
+        if frame.kind != FrameKind::Catch {
+            return frame.start;
+        }
+        self.frames
+            .iter()
+            .rev()
+            .find(|f| f.kind != FrameKind::Catch && frame.start >= f.start && frame.end <= f.end)
+            .map_or(frame.start, |f| f.start)
     }
 
     /// Return all accesses of variable `name` within the given frame,
@@ -261,8 +287,29 @@ impl ScopeMap {
             ..Default::default()
         };
 
+        let binding_scope = self.binding_scope_start(frame);
+
         for var_name in &var_names {
             let frame_accesses = self.accesses_in_frame(var_name, frame);
+
+            // A write through a live `&$var` binding also mutates what
+            // the binding aliases, which a copy in a new function scope
+            // could not do.  Bindings created after the write (`$x = 1;
+            // $r = &$x;`) leave the write itself safe to move.
+            if let Some(bound_from) = self
+                .reference_bindings
+                .iter()
+                .filter(|b| b.frame_start == binding_scope && b.name == *var_name)
+                .map(|b| b.offset)
+                .min()
+                && frame_accesses.iter().any(|a| {
+                    a.offset >= start.max(bound_from)
+                        && a.offset < end
+                        && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+                })
+            {
+                result.reference_writes.push(var_name.clone());
+            }
 
             let has_write_before = frame_accesses.iter().any(|a| {
                 a.offset < start && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)

@@ -16,7 +16,11 @@ pub(super) struct Collector<'a> {
     pub(super) accesses: Vec<VarAccess>,
     pub(super) frames: Vec<Frame>,
     pub(super) has_this_or_self: bool,
-    pub(super) has_reference_params: bool,
+    pub(super) reference_bindings: Vec<ReferenceBinding>,
+    /// Frames currently being walked, innermost last, as
+    /// `(start, kind)`.  Used to attribute a `&$var` binding to the
+    /// scope that owns it.
+    scope_stack: Vec<(u32, FrameKind)>,
     /// Optional callback that resolves by-reference parameter positions
     /// for function/static-method/constructor calls.
     by_ref_resolver: Option<ByRefResolver<'a>>,
@@ -31,7 +35,8 @@ impl<'a> Collector<'a> {
             accesses: Vec::new(),
             frames: Vec::new(),
             has_this_or_self: false,
-            has_reference_params: false,
+            reference_bindings: Vec::new(),
+            scope_stack: Vec::new(),
             by_ref_resolver: None,
             enclosing_class_name: None,
         }
@@ -39,12 +44,8 @@ impl<'a> Collector<'a> {
 
     pub(super) fn with_resolver(resolver: ByRefResolver<'a>) -> Self {
         Collector {
-            accesses: Vec::new(),
-            frames: Vec::new(),
-            has_this_or_self: false,
-            has_reference_params: false,
             by_ref_resolver: Some(resolver),
-            enclosing_class_name: None,
+            ..Collector::new()
         }
     }
 
@@ -56,11 +57,33 @@ impl<'a> Collector<'a> {
         self.accesses.push(VarAccess { name, offset, kind });
     }
 
+    /// Record that `name` is bound by reference from `offset` onwards.
+    ///
+    /// The binding is attributed to the innermost enclosing frame that
+    /// is a real variable scope; `catch` blocks are skipped because PHP
+    /// leaks their variables into the surrounding function.
+    pub(super) fn push_reference_binding(&mut self, name: String, offset: u32) {
+        let frame_start = self
+            .scope_stack
+            .iter()
+            .rev()
+            .find(|(_, kind)| *kind != FrameKind::Catch)
+            .map_or(0, |(start, _)| *start);
+        self.reference_bindings.push(ReferenceBinding {
+            name,
+            offset,
+            frame_start,
+        });
+    }
+
     pub(super) fn push_frame(&mut self, frame: Frame) {
+        self.scope_stack.push((frame.start, frame.kind));
         self.frames.push(frame);
     }
 
-    pub(super) fn pop_frame(&mut self) {}
+    pub(super) fn pop_frame(&mut self) {
+        self.scope_stack.pop();
+    }
 }
 
 // ─── Statement walker ───────────────────────────────────────────────────────
@@ -118,6 +141,9 @@ pub(super) fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>
                 // ReadWrite so the unused-variable diagnostic does
                 // not fire on the foreach variable.
                 walk_expression_as_readwrite(value_expr, collector);
+                if let Some((name, offset)) = direct_variable(value_expr) {
+                    collector.push_reference_binding(name, offset);
+                }
             } else {
                 walk_expression_as_write(value_expr, collector);
             }
@@ -677,6 +703,19 @@ fn walk_expression_as_readwrite(expr: &Expression<'_>, collector: &mut Collector
     }
 }
 
+/// The name and offset of the plain `$var` an expression denotes, after
+/// unwrapping parentheses and a leading `&`.  `None` for anything that
+/// is not a direct variable (`$obj->prop`, `$arr[0]`, `$$name`, …).
+fn direct_variable(expr: &Expression<'_>) -> Option<(String, u32)> {
+    match unwrap_parens(expr) {
+        Expression::Variable(Variable::Direct(dv)) => {
+            Some((bytes_to_str(dv.name).to_string(), dv.span().start.offset))
+        }
+        Expression::UnaryPrefix(up) if up.operator.is_reference() => direct_variable(up.operand),
+        _ => None,
+    }
+}
+
 /// Walk a variable in read position.
 fn walk_variable_read(var: &Variable<'_>, collector: &mut Collector<'_>) {
     match var {
@@ -717,6 +756,16 @@ fn walk_assignment(assignment: &Assignment<'_>, collector: &mut Collector<'_>) {
 
     // RHS is always read.
     walk_expression(assignment.rhs, collector);
+
+    // Reference assignment (`$a = &$b`): both sides now alias the same
+    // value, so a later write to either one is a write by reference.
+    if !is_compound && assignment.rhs.is_reference() {
+        for side in [assignment.lhs, assignment.rhs] {
+            if let Some((name, offset)) = direct_variable(side) {
+                collector.push_reference_binding(name, offset);
+            }
+        }
+    }
 }
 
 /// Walk arguments in a function/method call.
@@ -1111,15 +1160,19 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
     for param in closure.parameter_list.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
-        collector.push_access(name, offset, AccessKind::Write);
+        collector.push_access(name.clone(), offset, AccessKind::Write);
         if param.ampersand.is_some() {
-            collector.has_reference_params = true;
+            collector.push_reference_binding(name, offset);
         }
     }
 
-    // Record captures as writes in the closure frame.
-    for (cap_name, _is_ref) in &captures {
+    // Record captures as writes in the closure frame.  A `use (&$x)`
+    // capture aliases the outer variable for the whole closure body.
+    for (cap_name, is_ref) in &captures {
         collector.push_access(cap_name.clone(), body_start, AccessKind::Write);
+        if *is_ref {
+            collector.push_reference_binding(cap_name.clone(), body_start);
+        }
     }
 
     for stmt in closure.body.statements.iter() {
@@ -1155,9 +1208,9 @@ fn walk_arrow_function(arrow: &ArrowFunction<'_>, collector: &mut Collector<'_>)
     for param in arrow.parameter_list.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
-        collector.push_access(name, offset, AccessKind::Write);
+        collector.push_access(name.clone(), offset, AccessKind::Write);
         if param.ampersand.is_some() {
-            collector.has_reference_params = true;
+            collector.push_reference_binding(name, offset);
         }
     }
 

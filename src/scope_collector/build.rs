@@ -166,33 +166,32 @@ pub(crate) fn collect_scope_with_resolver(
         accesses: collector.accesses,
         frames: collector.frames,
         has_this_or_self: collector.has_this_or_self,
-        has_reference_params: collector.has_reference_params,
+        reference_bindings: collector.reference_bindings,
     }
 }
 
 /// Collect scope information for a set of function parameters.
 ///
-/// Records each parameter as a `Write` access at its offset.
-pub(crate) fn collect_parameters(
-    params: &FunctionLikeParameterList<'_>,
-    collector_accesses: &mut Vec<VarAccess>,
-    collector_has_reference: &mut bool,
-) {
+/// Records each parameter as a `Write` access at its offset, and each
+/// `&$param` as a reference binding live for the whole body.
+///
+/// The frame the parameters belong to must already be pushed.
+fn collect_parameters(params: &FunctionLikeParameterList<'_>, collector: &mut Collector<'_>) {
     for param in params.parameters.iter() {
         let name = bytes_to_str(param.variable.name).to_string();
         let offset = param.variable.span().start.offset;
-        collector_accesses.push(VarAccess {
-            name,
+        collector.accesses.push(VarAccess {
+            name: name.clone(),
             offset,
             kind: AccessKind::Write,
         });
         if param.ampersand.is_some() {
-            *collector_has_reference = true;
+            collector.push_reference_binding(name, offset);
         }
         if let Some(ref default) = param.default_value {
             let mut tmp = Collector::new();
             walk_expression(default.value, &mut tmp);
-            collector_accesses.extend(tmp.accesses);
+            collector.accesses.extend(tmp.accesses);
         }
     }
 }
@@ -277,11 +276,7 @@ pub(crate) fn collect_function_scope_with_kind_and_resolver<'a>(
     });
 
     // Record parameters as writes.
-    collect_parameters(
-        params,
-        &mut collector.accesses,
-        &mut collector.has_reference_params,
-    );
+    collect_parameters(params, &mut collector);
 
     for stmt in body {
         walk_statement(stmt, &mut collector);
@@ -295,6 +290,6 @@ pub(crate) fn collect_function_scope_with_kind_and_resolver<'a>(
         accesses: collector.accesses,
         frames: collector.frames,
         has_this_or_self: collector.has_this_or_self,
-        has_reference_params: collector.has_reference_params,
+        reference_bindings: collector.reference_bindings,
     }
 }

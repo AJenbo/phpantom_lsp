@@ -195,7 +195,10 @@ impl Backend {
             false
         };
 
-        if scope_map.uses_reference_params() && !classification.reference_writes.is_empty() {
+        // Writing to a `&$var` inside the selection mutates whatever the
+        // reference aliases.  The extracted function would receive a
+        // copy, silently dropping the mutation.
+        if !classification.reference_writes.is_empty() {
             return None;
         }
 

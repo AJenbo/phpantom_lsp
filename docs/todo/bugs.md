@@ -7,44 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B10. Extract Function's by-reference-write safety check can never trigger
-
-**Impact: Low-Medium · Effort: Medium**
-
-Found while cleaning up comments in `scope_collector/`. `RangeClassification::reference_writes`
-(`src/scope_collector/scope_map.rs:172`, documented as "Variables that
-are written by reference (`&$var`) inside the range") is declared,
-sorted at the end of `classify_range`, and consumed as a safety gate in
-Extract Function:
-
-```rust
-// code_actions/extract_function/mod.rs:198
-if scope_map.uses_reference_params() && !classification.reference_writes.is_empty() {
-    return None;
-}
-```
-
-but nothing in `classify_range` ever pushes into it — confirmed via
-`git log -S "reference_writes"` that no commit has ever added a
-`.push()` call since the field was introduced. Since it is always
-empty, this guard (meant to block extracting a range that writes to a
-by-reference variable, which would silently break the reference
-semantics once moved into a new function scope) can never fire.
-
-The collector already tracks the pieces needed to populate it
-correctly: `AccessKind` on each `VarAccess`, and the `ByRefResolver` /
-`ByRefCallKind` machinery in the same module that resolves which call
-arguments bind by reference. `classify_range` needs to identify
-accesses inside `[start, end)` that write through a `&$var` binding
-(a reference parameter, a `foreach (... as &$v)`, or an argument passed
-to a by-ref parameter per the resolver) and populate `reference_writes`
-with those variable names.
-
-**Where to look:** `classify_range` in `src/scope_collector/scope_map.rs`
-— the `parameters`/`return_values`/`locals` classification loops already
-show the pattern for iterating `self.accesses` within the range; add an
-equivalent pass keyed on by-reference write accesses.
-
 #### B13. The hover scope cache is populated but never read
 
 **Impact: Medium · Effort: Medium**
