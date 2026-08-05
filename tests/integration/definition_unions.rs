@@ -698,3 +698,87 @@ async fn test_goto_definition_union_return_type_cross_file() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+/// A union over two classes that share a short name across namespaces
+/// (`NsA\Thing|NsB\Thing`) must resolve members of both.  Candidate class
+/// dedup keyed on the short name collapsed the pair, so go-to-definition on
+/// `onlyNsB` had nothing to jump to.
+#[tokio::test]
+async fn test_goto_definition_union_of_same_short_name_classes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///short_name_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "namespace NsA {\n",                                    // 1
+        "    class Thing {\n",                                  // 2
+        "        public function onlyNsA(): string {\n",        // 3
+        "            return '';\n",                             // 4
+        "        }\n",                                          // 5
+        "    }\n",                                              // 6
+        "}\n",                                                  // 7
+        "namespace NsB {\n",                                    // 8
+        "    class Thing {\n",                                  // 9
+        "        public function onlyNsB(): string {\n",        // 10
+        "            return '';\n",                             // 11
+        "        }\n",                                          // 12
+        "    }\n",                                              // 13
+        "}\n",                                                  // 14
+        "namespace App {\n",                                    // 15
+        "    class Maker {\n",                                  // 16
+        "        /** @return \\NsA\\Thing|\\NsB\\Thing */\n",   // 17
+        "        public function make() {\n",                   // 18
+        "            return new \\NsA\\Thing();\n",             // 19
+        "        }\n",                                          // 20
+        "    }\n",                                              // 21
+        "    class Consumer {\n",                               // 22
+        "        public function test(Maker $maker): void {\n", // 23
+        "            $maker->make()->onlyNsA();\n",             // 24
+        "            $maker->make()->onlyNsB();\n",             // 25
+        "        }\n",                                          // 26
+        "    }\n",                                              // 27
+        "}\n",                                                  // 28
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // (call site line, declaration line) — the second member is the one the
+    // short-name collapse used to lose.
+    for (call_line, decl_line) in [(24u32, 3u32), (25, 10)] {
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: call_line,
+                    character: 30,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let result = backend.goto_definition(params).await.unwrap();
+        match result {
+            Some(GotoDefinitionResponse::Scalar(location)) => {
+                assert_eq!(
+                    location.range.start.line, decl_line,
+                    "call on line {} should resolve to the declaration on line {}",
+                    call_line, decl_line
+                );
+            }
+            other => panic!(
+                "Expected a Scalar location for the call on line {}, got: {:?}",
+                call_line, other
+            ),
+        }
+    }
+}

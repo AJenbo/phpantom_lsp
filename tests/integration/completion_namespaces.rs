@@ -599,3 +599,88 @@ namespace B {
         labels
     );
 }
+
+/// A union whose members share a short name across namespaces
+/// (`NsA\Thing|NsB\Thing`) must keep both receivers.  Candidate classes
+/// are deduplicated so a fluent chain through a union does not double the
+/// receiver set at every link; keying that dedup on the short name instead
+/// of the FQN collapsed the two `Thing` classes into one and lost every
+/// member of the second.
+#[tokio::test]
+async fn test_completion_union_of_same_short_name_classes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///short_name_union.php").unwrap();
+    let text = r#"<?php
+namespace NsA {
+    class Thing {
+        public function onlyNsA(): string { return ''; }
+    }
+}
+namespace NsB {
+    class Thing {
+        public function onlyNsB(): string { return ''; }
+    }
+}
+namespace App {
+    class Maker {
+        /** @return \NsA\Thing|\NsB\Thing */
+        public function make() { return new \NsA\Thing(); }
+    }
+    class Consumer {
+        public function test(Maker $maker) {
+            $maker->make()->
+        }
+    }
+}
+"#
+    .to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.clone(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let trigger_line = text
+        .lines()
+        .position(|l| l.trim() == "$maker->make()->")
+        .expect("trigger line not found") as u32;
+    let character = text.lines().nth(trigger_line as usize).unwrap().len() as u32;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: trigger_line,
+                    character,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let items = match result {
+        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::Array(items)) => items,
+        None => panic!("Expected completions, got None"),
+    };
+
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+
+    for expected in ["onlyNsA", "onlyNsB"] {
+        assert!(
+            labels.iter().any(|l| l.starts_with(expected)),
+            "Expected '{}' from the NsA\\Thing|NsB\\Thing union, got: {:?}",
+            expected,
+            labels
+        );
+    }
+}

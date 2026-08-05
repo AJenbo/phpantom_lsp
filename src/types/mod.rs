@@ -2265,24 +2265,31 @@ impl ClassInfo {
     }
 
     /// Push a `ClassInfo` into `results` only if no existing entry shares
-    /// the same class name.  This is the single place where completion /
+    /// the same FQN.  This is the single place where completion /
     /// resolution code deduplicates candidate classes.
+    ///
+    /// The comparison is on the FQN, not the short name: two classes with
+    /// the same short name in different namespaces (`NsA\Thing` and
+    /// `NsB\Thing`) are distinct receivers and both must survive, or a
+    /// union spanning them loses every member of the second.
     pub(crate) fn push_unique(results: &mut Vec<ClassInfo>, cls: ClassInfo) {
-        if !results.iter().any(|c| c.name == cls.name) {
+        let fqn = cls.fqn();
+        if !results.iter().any(|c| c.fqn() == fqn) {
             results.push(cls);
         }
     }
 
     /// Push an `Arc<ClassInfo>` into `results` only if no existing entry
-    /// shares the same class name.
+    /// shares the same FQN.
     pub(crate) fn push_unique_arc(results: &mut Vec<Arc<ClassInfo>>, cls: Arc<ClassInfo>) {
-        if !results.iter().any(|c| c.name == cls.name) {
+        let fqn = cls.fqn();
+        if !results.iter().any(|c| c.fqn() == fqn) {
             results.push(cls);
         }
     }
 
     /// Extend `results` with entries from `new_classes`, skipping any whose
-    /// name already appears in `results`.
+    /// FQN already appears in `results`.
     pub(crate) fn extend_unique_arc(
         results: &mut Vec<Arc<ClassInfo>>,
         new_classes: Vec<Arc<ClassInfo>>,

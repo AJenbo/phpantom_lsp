@@ -238,9 +238,7 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
     // replace with the narrowed type.
     results.clear();
     for cls in narrowed {
-        if !results.iter().any(|c| c.name == cls.name) {
-            results.push(cls);
-        }
+        ClassInfo::push_unique(results, cls);
     }
     true
 }

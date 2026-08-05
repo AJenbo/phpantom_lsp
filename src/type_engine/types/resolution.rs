@@ -110,11 +110,7 @@ fn type_hint_to_classes_typed_depth(
                     class_loader,
                     depth,
                 );
-                for cls in resolved {
-                    if !results.iter().any(|existing| existing.name == cls.name) {
-                        results.push(cls);
-                    }
-                }
+                ClassInfo::extend_unique_arc(&mut results, resolved);
             }
             results
         }
@@ -130,11 +126,7 @@ fn type_hint_to_classes_typed_depth(
                     class_loader,
                     depth,
                 );
-                for cls in resolved {
-                    if !results.iter().any(|existing| existing.name == cls.name) {
-                        results.push(cls);
-                    }
-                }
+                ClassInfo::extend_unique_arc(&mut results, resolved);
             }
             results
         }

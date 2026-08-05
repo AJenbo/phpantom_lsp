@@ -12081,3 +12081,93 @@ async fn self_outside_macro_closure_stays_lexical() {
         diags
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Unions over classes sharing a short name
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A union whose members share a short name in different namespaces
+/// (`NsA\Thing|NsB\Thing`) must keep both receivers.  Deduplicating
+/// candidate classes by short name collapsed the pair, so members declared
+/// only on the second one were reported as missing.
+#[tokio::test]
+async fn union_of_same_short_name_classes_keeps_both_receivers() {
+    let backend = create_test_backend();
+    let text = concat!(
+        "<?php\n",
+        "namespace NsA {\n",
+        "    class Thing { public function onlyNsA(): string { return ''; } }\n",
+        "}\n",
+        "namespace NsB {\n",
+        "    class Thing { public function onlyNsB(): string { return ''; } }\n",
+        "}\n",
+        "namespace App {\n",
+        "    class Maker {\n",
+        "        /** @return \\NsA\\Thing|\\NsB\\Thing */\n",
+        "        public function make() { return new \\NsA\\Thing(); }\n",
+        "    }\n",
+        "    class Consumer {\n",
+        "        public function test(Maker $maker): void {\n",
+        "            $maker->make()->onlyNsA();\n",
+        "            $maker->make()->onlyNsB();\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let uri = "file:///test/short_name_union.php";
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "both halves of NsA\\Thing|NsB\\Thing should resolve, got: {:?}",
+        diags
+    );
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "forward walker should also keep both union receivers, got: {:?}",
+        diags
+    );
+}
+
+/// The dedup still has to bite: a member that exists on *neither* half of a
+/// same-short-name union is reported once, not once per receiver.
+#[tokio::test]
+async fn union_of_same_short_name_classes_still_flags_missing_members() {
+    let backend = create_test_backend();
+    let text = concat!(
+        "<?php\n",
+        "namespace NsA {\n",
+        "    class Thing { public function onlyNsA(): string { return ''; } }\n",
+        "}\n",
+        "namespace NsB {\n",
+        "    class Thing { public function onlyNsB(): string { return ''; } }\n",
+        "}\n",
+        "namespace App {\n",
+        "    class Maker {\n",
+        "        /** @return \\NsA\\Thing|\\NsB\\Thing */\n",
+        "        public function make() { return new \\NsA\\Thing(); }\n",
+        "    }\n",
+        "    class Consumer {\n",
+        "        public function test(Maker $maker): void {\n",
+        "            $maker->make()->nowhere();\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let diags =
+        unknown_member_diagnostics(&backend, "file:///test/short_name_union_miss.php", text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "a member missing from both halves should be flagged exactly once, got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].message.contains("nowhere"),
+        "expected the diagnostic to name 'nowhere', got: {:?}",
+        diags
+    );
+}

@@ -49,10 +49,7 @@ pub(crate) fn resolve_class_names_to_union(
             ctx.class_loader,
         );
         for arc_cls in resolved {
-            let cls = Arc::unwrap_or_clone(arc_cls);
-            if !union.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                union.push(cls);
-            }
+            ClassInfo::push_unique(&mut union, Arc::unwrap_or_clone(arc_cls));
         }
     }
     union

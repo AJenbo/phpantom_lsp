@@ -109,14 +109,17 @@ impl ResolvedType {
     }
 
     /// Push a `ResolvedType` into `results` only if no existing entry
-    /// shares the same class name (when both have class info) or the
+    /// shares the same class FQN (when both have class info) or the
     /// same type string (when comparing non-class types).
+    ///
+    /// Keying on the FQN rather than the short name keeps `NsA\Thing` and
+    /// `NsB\Thing` apart, so a union over both retains the members of each.
     pub(crate) fn push_unique(results: &mut Vec<ResolvedType>, rt: ResolvedType) {
         let dominated =
             results
                 .iter()
                 .any(|existing| match (&existing.class_info, &rt.class_info) {
-                    (Some(a), Some(b)) => a.name == b.name,
+                    (Some(a), Some(b)) => a.fqn() == b.fqn(),
                     (None, None) => existing.type_string == rt.type_string,
                     _ => false,
                 });
