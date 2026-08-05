@@ -1266,6 +1266,19 @@ async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
         entity_titles.contains(&"Doctrine repository: SpecialUserStore"),
         "expected configured repository lens, got {entity_titles:?}"
     );
+    let config_lens = entity_lenses
+        .iter()
+        .find(|lens| {
+            lens.command
+                .as_ref()
+                .is_some_and(|command| command.title == "Symfony/Doctrine config: 2 refs")
+        })
+        .unwrap();
+    let config_command = config_lens.command.as_ref().unwrap();
+    assert_eq!(config_command.command, "editor.action.showReferences");
+    let args = config_command.arguments.as_ref().unwrap();
+    let locations: Vec<Location> = serde_json::from_value(args[2].clone()).unwrap();
+    assert_eq!(locations.len(), 2);
 
     let repo_lenses = backend
         .handle_code_lens(&repo_uri.to_string(), repo_php)

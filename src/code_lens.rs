@@ -1159,11 +1159,15 @@ impl Backend {
         origin_position: Position,
         locations: Vec<Location>,
     ) -> Command {
-        let (uri, position) = locations
-            .first()
-            .map(|location| (location.uri.clone(), location.range.start))
-            .unwrap_or((origin_uri, origin_position));
-        self.build_code_lens_command(title, uri, position)
+        Command {
+            title,
+            command: "editor.action.showReferences".to_string(),
+            arguments: Some(vec![
+                serde_json::json!(origin_uri),
+                serde_json::json!(origin_position),
+                serde_json::json!(locations),
+            ]),
+        }
     }
 
     /// Build a `Prototype` by locating the method's position in the
