@@ -1371,17 +1371,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1961,17 +1950,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2523,29 +2501,6 @@ diagnostic layer.</p>
 - Psalm: <code>FileDiffer</code> and <code>FileStatementsDiffer</code> in
   <code>Psalm\Internal\Diff</code>
 - Psalm: <code>Analyzer::shiftFileOffsets()</code> for the offset-shifting logic</p>
-<hr />
-<h2 id="p46-mago-phpdoc-syntax-cannot-parse-method-static-name">P46. <code>mago-phpdoc-syntax</code> cannot parse <code>@method static (…) name()</code><a class="headerlink" href="#p46-mago-phpdoc-syntax-cannot-parse-method-static-name" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low (upstream)</strong></p>
-<p>The PHPDoc grammar reads <code>static</code> followed by <code>(</code> as a method literally
-named <code>static</code> whose parameter list follows, because
-<code>@method static(int $x)</code> is how such a method would be written and the
-two are indistinguishable once whitespace is discarded. A parenthesised
-return type after the <code>static</code> modifier therefore fails to parse and the
-whole tag is dropped:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * @method static (string|int)[] getArray()</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> * @method static (callable(): string) getCallable()</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x"> */</span>
-</code></pre></div>
-<p>Both forms appear in Psalm's own magic-method test suite. Two places
-work around it: <code>recover_static_method_tag</code> in
-<code>src/docblock/virtual_members.rs</code> re-parses the value without the
-modifier and reapplies <code>static</code> afterwards, and
-<code>recover_static_method_tags</code> in <code>src/symbol_map/docblock.rs</code> blanks the
-keyword out with spaces and re-parses the whole docblock, because it
-needs the tag's original byte offsets as well as its signature. Report
-it upstream; remove both workarounds once the grammar disambiguates on
-the whitespace before the <code>(</code>.</p>
 <hr />
 <h2 id="p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code><a class="headerlink" href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: High</strong></p>
