@@ -11,7 +11,7 @@ use crate::atom::{Atom, AtomMap, atom};
 
 use super::tag_kind::TagKind;
 
-use super::parser::{DocblockInfo, MethodTagInfo, parse_docblock_for_tags};
+use super::parser::{DocblockInfo, parse_docblock_for_tags};
 use super::tags::sanitise_and_parse_docblock_type;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
@@ -104,16 +104,8 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
         std::collections::HashSet::new();
 
     for tag in info.tags_by_kind(TagKind::Method) {
-        let recovered;
-        let method = match tag.value.as_method() {
-            Some(method) => method,
-            None => match recover_static_method_tag(&tag.description) {
-                Some(method) => {
-                    recovered = method;
-                    &recovered
-                }
-                None => continue,
-            },
+        let Some(method) = tag.value.as_method() else {
+            continue;
         };
         if method.name.is_empty() {
             continue;
@@ -241,28 +233,6 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────────────────
-
-/// Recover a `static` `@method` declaration the PHPDoc grammar rejected.
-///
-/// `mago-phpdoc-syntax` reads `@method static (…) name()` as a method
-/// literally named `static` whose parameter list is `(…)`, because
-/// `@method static(int $x)` is how a method actually called `static` would
-/// be written and the two are indistinguishable once whitespace is gone.
-/// The parenthesised return type then fails to parse as a parameter list
-/// and the whole tag is dropped.  Re-parsing without the modifier recovers
-/// the signature; the modifier is reapplied afterwards.
-fn recover_static_method_tag(value: &str) -> Option<MethodTagInfo> {
-    let rest = value
-        .trim_start()
-        .strip_prefix("static")
-        .and_then(|rest| rest.strip_prefix(char::is_whitespace))?
-        .trim_start();
-
-    let info = parse_docblock_for_tags(&format!("/** @method {rest} */"))?;
-    let mut method = info.tags.first()?.value.as_method()?.clone();
-    method.is_static = true;
-    Some(method)
-}
 
 /// Compute template bindings from a method's parameters.
 ///
@@ -397,9 +367,6 @@ mod tests {
 
     #[test]
     fn static_modifier_with_parenthesised_return_type() {
-        // The PHPDoc grammar cannot tell `@method static (…) foo()` from a
-        // method literally named `static`, so this form has to be recovered
-        // by re-parsing without the modifier.
         let method = single_method("@method static (string|int)[] getArray() with some text");
         assert_eq!(method.name.as_str(), "getArray");
         assert!(method.is_static);

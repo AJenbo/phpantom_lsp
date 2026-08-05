@@ -76,6 +76,9 @@ fn format_syntax_error(error: &SyntaxError) -> String {
         SyntaxError::UnexpectedEndOfFile(_, _) => {
             "Syntax error: unexpected end of file".to_string()
         }
+        SyntaxError::RecursionLimitExceeded(_, _) => {
+            "Syntax error: maximum nesting depth exceeded".to_string()
+        }
     }
 }
 

@@ -24,7 +24,7 @@ use mago_syntax::cst::*;
 
 use crate::docblock::{TagKind, tag_kind};
 
-use crate::docblock::parser::{type_text, value_span, with_docblock_cst};
+use crate::docblock::parser::{type_text, with_docblock_cst};
 use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 
@@ -181,18 +181,10 @@ pub(super) fn extract_docblock_symbols(
         found: &mut found,
     };
 
-    // Tags whose `static` modifier has to be blanked out before the grammar
-    // will read them, as `(element index, offset of the keyword)`.
-    let mut recoveries: Vec<(usize, usize)> = Vec::new();
-
     with_docblock_cst(docblock, docblock_span(docblock, base_offset), |document| {
-        for (index, element) in document.elements.iter().enumerate() {
+        for element in document.elements.iter() {
             match element {
-                Element::Tag(tag) => {
-                    if let Some(keyword) = emit_tag_symbols(tag, docblock, base_offset, &mut sink) {
-                        recoveries.push((index, keyword));
-                    }
-                }
+                Element::Tag(tag) => emit_tag_symbols(tag, docblock, base_offset, &mut sink),
                 // Free text ahead of the first tag, e.g. `Wraps {@see Foo}.`
                 Element::Text(text) => {
                     scan_text_for_inline_see(text, docblock, base_offset, sink.spans);
@@ -201,10 +193,6 @@ pub(super) fn extract_docblock_symbols(
             }
         }
     });
-
-    if !recoveries.is_empty() {
-        recover_static_method_tags(docblock, base_offset, &recoveries, &mut sink);
-    }
 
     found
 }
@@ -221,17 +209,10 @@ fn docblock_span(docblock: &str, base_offset: u32) -> Span {
 
 /// Emit the symbols one tag declares.
 ///
-/// Returns the docblock-relative offset of a `static` modifier that has to be
-/// blanked out before the tag can be read; see [`recover_static_method_tags`].
 /// Tags the grammar could not parse at all yield nothing: their type text is
 /// not a type, so guessing at a class name from it would only produce a
 /// reference that resolves to nothing.
-fn emit_tag_symbols(
-    tag: &Tag<'_>,
-    docblock: &str,
-    base_offset: u32,
-    sink: &mut DocblockSink<'_>,
-) -> Option<usize> {
+fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut DocblockSink<'_>) {
     match &tag.value {
         // ── Tags that lead with a type ──────────────────────────────
         TagValue::Param(value) => {
@@ -269,7 +250,7 @@ fn emit_tag_symbols(
         }
 
         // ── Tags that declare a member or a template parameter ──────
-        TagValue::Method(value) => emit_method_tag_symbols(value, value.is_static(), sink),
+        TagValue::Method(value) => emit_method_tag_symbols(value, sink),
         TagValue::Property(value)
         | TagValue::PropertyRead(value)
         | TagValue::PropertyWrite(value) => emit_property_tag_symbols(value, sink),
@@ -278,9 +259,6 @@ fn emit_tag_symbols(
         // ── Tags the grammar keeps as free text ─────────────────────
         TagValue::Generic(text) if tag_kind(tag) == TagKind::See => {
             emit_see_tag_symbol(&text.value, docblock, base_offset, sink.spans);
-        }
-        TagValue::Invalid(_) if tag_kind(tag) == TagKind::Method => {
-            return static_modifier_offset(tag, docblock, base_offset);
         }
         _ => {}
     }
@@ -291,78 +269,10 @@ fn emit_tag_symbols(
     if let Some(description) = tag_description(&tag.value) {
         scan_text_for_inline_see(&description, docblock, base_offset, sink.spans);
     }
-
-    None
-}
-
-/// The `static` modifier of a `@method` tag, and a blank of the same width.
-///
-/// Overwriting the keyword rather than removing it keeps every following byte
-/// at its original offset; see [`recover_static_method_tags`].
-const STATIC_MODIFIER: &str = "static";
-const BLANKED_MODIFIER: &str = "      ";
-const _: () = assert!(STATIC_MODIFIER.len() == BLANKED_MODIFIER.len());
-
-/// The docblock-relative offset of a `static` modifier leading a tag value.
-fn static_modifier_offset(tag: &Tag<'_>, docblock: &str, base_offset: u32) -> Option<usize> {
-    let value_start = value_span(tag, docblock, base_offset)
-        .start
-        .offset
-        .saturating_sub(base_offset) as usize;
-    let rest = docblock.get(value_start..)?.strip_prefix(STATIC_MODIFIER)?;
-
-    rest.starts_with(char::is_whitespace).then_some(value_start)
-}
-
-/// Re-emit the `@method` tags the PHPDoc grammar rejected over their `static`
-/// modifier.
-///
-/// `mago-phpdoc-syntax` cannot tell `@method static (…) name()` from a method
-/// literally called `static` whose parameter list follows, so a parenthesised
-/// return type after the modifier makes the whole tag unparseable.
-/// `docblock::virtual_members` recovers the signature by re-parsing the tag
-/// without the modifier; the symbol map needs the signature *and* its
-/// original offsets, so the keyword is blanked out instead of removed and the
-/// recovered CST still reports file-accurate spans.  Blanking cannot merge or
-/// split tags, so the element indices recorded during the first walk still
-/// identify the same tags.
-fn recover_static_method_tags(
-    docblock: &str,
-    base_offset: u32,
-    recoveries: &[(usize, usize)],
-    sink: &mut DocblockSink<'_>,
-) {
-    let mut patched = String::from(docblock);
-    for &(_, keyword) in recoveries {
-        patched.replace_range(keyword..keyword + STATIC_MODIFIER.len(), BLANKED_MODIFIER);
-    }
-
-    with_docblock_cst(&patched, docblock_span(&patched, base_offset), |document| {
-        for (index, element) in document.elements.iter().enumerate() {
-            if !recoveries.iter().any(|&(recovered, _)| recovered == index) {
-                continue;
-            }
-            let Element::Tag(tag) = element else { continue };
-            if let TagValue::Method(value) = &tag.value {
-                emit_method_tag_symbols(value, true, sink);
-                if let Some(description) = value.description {
-                    scan_text_for_inline_see(&description, docblock, base_offset, sink.spans);
-                }
-            }
-        }
-    });
 }
 
 /// Emit the return type, name and parameter types of a `@method` tag.
-///
-/// `is_static` is passed in rather than read off `value` so a tag recovered by
-/// [`recover_static_method_tags`], whose modifier has been blanked out, still
-/// declares a static member.
-fn emit_method_tag_symbols(
-    value: &MethodTagValue<'_>,
-    is_static: bool,
-    sink: &mut DocblockSink<'_>,
-) {
+fn emit_method_tag_symbols(value: &MethodTagValue<'_>, sink: &mut DocblockSink<'_>) {
     if let Some(return_type) = value.return_type {
         emit_type_symbols(return_type, sink);
     }
@@ -372,7 +282,7 @@ fn emit_method_tag_symbols(
         end: value.name.span.end.offset,
         kind: SymbolKind::MemberDeclaration {
             name: crate::atom::atom_bytes(value.name.value),
-            is_static,
+            is_static: value.is_static(),
         },
     });
 

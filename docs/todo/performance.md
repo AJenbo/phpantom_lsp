@@ -497,36 +497,6 @@ diagnostic layer.
 
 ---
 
-## P46. `mago-phpdoc-syntax` cannot parse `@method static (…) name()`
-
-**Impact: Low · Effort: Low (upstream)**
-
-The PHPDoc grammar reads `static` followed by `(` as a method literally
-named `static` whose parameter list follows, because
-`@method static(int $x)` is how such a method would be written and the
-two are indistinguishable once whitespace is discarded. A parenthesised
-return type after the `static` modifier therefore fails to parse and the
-whole tag is dropped:
-
-```php
-/**
- * @method static (string|int)[] getArray()
- * @method static (callable(): string) getCallable()
- */
-```
-
-Both forms appear in Psalm's own magic-method test suite. Two places
-work around it: `recover_static_method_tag` in
-`src/docblock/virtual_members.rs` re-parses the value without the
-modifier and reapplies `static` afterwards, and
-`recover_static_method_tags` in `src/symbol_map/docblock.rs` blanks the
-keyword out with spaces and re-parses the whole docblock, because it
-needs the tag's original byte offsets as well as its signature. Report
-it upstream; remove both workarounds once the grammar disambiguates on
-the whitespace before the `(`.
-
----
-
 ## P30. Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`
 
 **Impact: Medium-High · Effort: High**

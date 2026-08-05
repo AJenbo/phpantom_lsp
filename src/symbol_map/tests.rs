@@ -1159,9 +1159,7 @@ fn multiline_array_shape_return_resolves_nested_classes() {
 }
 
 #[test]
-fn static_method_tag_with_parenthesised_return_type_is_recovered() {
-    // The PHPDoc grammar cannot tell `@method static (…) foo()` from a method
-    // literally called `static`, so the tag only survives via recovery.
+fn static_method_tag_with_parenthesised_return_type() {
     let php = concat!(
         "<?php\n",
         "/**\n",
@@ -1179,12 +1177,11 @@ fn static_method_tag_with_parenthesised_return_type_is_recovered() {
             ..
         }) => {
             assert_eq!(name, "getArray");
-            assert!(is_static, "the `static` modifier must survive recovery");
+            assert!(is_static, "the `static` modifier must be recorded");
         }
         other => panic!("expected a static MemberDeclaration, got {other:?}"),
     }
 
-    // The tag the grammar *can* parse still works alongside a recovered one.
     assert_eq!(member_decl_at(&map, php, "getWrapped"), "getWrapped");
     assert_eq!(class_ref_at(&map, php, "Wrapped"), "Wrapped");
 }
