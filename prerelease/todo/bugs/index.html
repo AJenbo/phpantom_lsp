@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B10. Extract Function's by-reference-write safety check can never trigger
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b13-the-hover-scope-cache-is-populated-but-never-read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1405,17 +1394,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B10. Extract Function's by-reference-write safety check can never trigger
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b13-the-hover-scope-cache-is-populated-but-never-read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1544,36 +1522,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b10-extract-functions-by-reference-write-safety-check-can-never-trigger">B10. Extract Function's by-reference-write safety check can never trigger<a class="headerlink" href="#b10-extract-functions-by-reference-write-safety-check-can-never-trigger" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>Found while cleaning up comments in <code>scope_collector/</code>. <code>RangeClassification::reference_writes</code>
-(<code>src/scope_collector/scope_map.rs:172</code>, documented as "Variables that
-are written by reference (<code>&amp;$var</code>) inside the range") is declared,
-sorted at the end of <code>classify_range</code>, and consumed as a safety gate in
-Extract Function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1">// code_actions/extract_function/mod.rs:198</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">if</span><span class="w"> </span><span class="n">scope_map</span><span class="p">.</span><span class="n">uses_reference_params</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">classification</span><span class="p">.</span><span class="n">reference_writes</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">None</span><span class="p">;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">}</span>
-</code></pre></div>
-<p>but nothing in <code>classify_range</code> ever pushes into it — confirmed via
-<code>git log -S "reference_writes"</code> that no commit has ever added a
-<code>.push()</code> call since the field was introduced. Since it is always
-empty, this guard (meant to block extracting a range that writes to a
-by-reference variable, which would silently break the reference
-semantics once moved into a new function scope) can never fire.</p>
-<p>The collector already tracks the pieces needed to populate it
-correctly: <code>AccessKind</code> on each <code>VarAccess</code>, and the <code>ByRefResolver</code> /
-<code>ByRefCallKind</code> machinery in the same module that resolves which call
-arguments bind by reference. <code>classify_range</code> needs to identify
-accesses inside <code>[start, end)</code> that write through a <code>&amp;$var</code> binding
-(a reference parameter, a <code>foreach (... as &amp;$v)</code>, or an argument passed
-to a by-ref parameter per the resolver) and populate <code>reference_writes</code>
-with those variable names.</p>
-<p><strong>Where to look:</strong> <code>classify_range</code> in <code>src/scope_collector/scope_map.rs</code>
-— the <code>parameters</code>/<code>return_values</code>/<code>locals</code> classification loops already
-show the pattern for iterating <code>self.accesses</code> within the range; add an
-equivalent pass keyed on by-reference write accesses.</p>
 <h4 id="b13-the-hover-scope-cache-is-populated-but-never-read">B13. The hover scope cache is populated but never read<a class="headerlink" href="#b13-the-hover-scope-cache-is-populated-but-never-read" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>Found while cleaning up comments in
@@ -1675,7 +1623,7 @@ adding the field touches every <code>PropertyInfo</code> construction site.</p>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>new \Acme\Decimal\Decimal('0.00')</code> resolves to <code>Decimal&lt;bool&gt;</code>, and the
 value is then rejected against a plain <code>Decimal</code> parameter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal&lt;bool&gt;
 </code></pre></div>
 <p>The generic argument is nonsense: the class is constructed from a string
 literal and nothing in the call binds a <code>bool</code>. Because the reported type
@@ -1706,9 +1654,9 @@ backwards from the cursor over brackets, parentheses, braces, and string
 literals, but does not skip <code>//</code>, <code>#</code>, or <code>/* … */</code> comments. A stray
 bracket or quote in a comment between the call and the cursor unbalances
 the walk, and the completion drops out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">route(&#39;users.show&#39;, [   // TODO: check (parameters)</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    &#39;|&#39; =&gt; 1,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">]);</span>
 </code></pre></div>
 <p>It fails closed (no suggestions rather than wrong ones), which is why it
 is low impact. The obstacle is that a backwards scan cannot tell a <code>//</code>
@@ -1722,10 +1670,10 @@ preprocessor masks non-PHP text.</p>
 <code>if</code>, the forward walker merges the branches correctly (completion after
 the <code>if</code> offers members of every branch's type), but hover reports only
 the first branch's type:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function test(): void {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    if (rand(0, 1)) { $x = &#39;a&#39;; } else { $x = 42; }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    take($x); // hover on $x says &#39;a&#39;; it is &#39;a&#39;|42</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function test(): void {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    if (rand(0, 1)) { $x = &#39;a&#39;; } else { $x = 42; }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    take($x); // hover on $x says &#39;a&#39;; it is &#39;a&#39;|42</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>The same holds for objects: <code>$x = new Foo(); if (rand(0, 1)) { $x = new
 Bar(); }</code> hovers as <code>Foo</code> while completion on <code>$x-&gt;</code> correctly offers
@@ -1749,11 +1697,11 @@ same short name. Every call site reads it from
 <code>current_class.file_namespace</code>, but when the cursor is inside a plain
 function (or top-level code) there is no enclosing class and the callers
 fall back to <code>ClassInfo::default()</code>, whose <code>file_namespace</code> is <code>None</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">function test(): void {</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    Aborter::fail(); // resolves to \Aborter, not App\Aborter</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">function test(): void {</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    Aborter::fail(); // resolves to \Aborter, not App\Aborter</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>Inside a method of a class in the same file the resolution is correct,
 so the gap is specific to function and top-level scopes. The fix is to
@@ -1772,11 +1720,11 @@ branch scope unconditionally: unlike its brace-syntax counterpart
 <code>process_if_statement_body</code>, it never asks whether a branch terminates.
 A guard clause written in the alternative syntax therefore does not
 narrow, even with a plain <code>return</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">if (!$x instanceof Foo):</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    return;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">endif;</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">$x-&gt;fooMethod(); // $x is still Foo|Bar</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">if (!$x instanceof Foo):</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    return;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">endif;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">$x-&gt;fooMethod(); // $x is still Foo|Bar</span>
 </code></pre></div>
 <p>The brace form of the same guard narrows correctly. The exit check the
 brace path uses (<code>statement_unconditionally_exits</code>, which also
