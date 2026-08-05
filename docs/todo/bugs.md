@@ -7,53 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B13. The hover scope cache is populated but never read
-
-**Impact: Medium · Effort: Medium**
-
-Found while cleaning up comments in
-`type_engine/variable/forward_walk/diagnostic_cache.rs`. The hover
-scope cache banner there claims that after the first hover walks a
-method body once, "subsequent hovers on the same file content look up
-the pre-computed snapshots in O(log N) time via a `BTreeMap::range`
-search — no re-walk at all." The lookup path does not exist. The only
-accesses to `HoverScopeCache.methods` in the entire codebase are
-`contains_key` (`hover_scope_has_method`) and `insert`
-(`populate_hover_scope_cache_for_method`); no code ever reads the
-stored `ScopeSnapshotMap` values back.
-
-The populate site in `resolve_in_method_body`
-(`src/type_engine/variable/forward_walk/mod.rs`, the "Hover scope
-cache" block) also carries a comment claiming the population benefits
-"diagnostics member-access lookups via `lookup_diagnostic_scope`", but
-that function reads the thread-local `DIAGNOSTIC_SCOPE`, which the
-temporary guard in the same block clears immediately after the
-snapshots are harvested into the hover cache.
-
-Net effect: the cache makes hover strictly slower, not faster. The
-first hover that reaches a given method body performs two walks (the
-full-body population walk plus the standard walk that actually answers
-the request) instead of one, and the harvested snapshot map sits in
-thread-local storage as dead memory until the content hash changes.
-The only thing the cache prevents is repeating its own useless
-population walk. A lookup path was presumably lost in a refactor, or
-was never wired up after the LHS-assignment-hover problem described in
-the populate-site comment was discovered.
-
-**Where to look:** either wire up the read path (a
-`lookup_hover_scope(method_span_start, var_name, offset)` used by the
-member-access/hover consumers that can tolerate statement-start
-snapshots, keeping the standard walk only for the LHS-assignment case
-the comment describes), or delete the cache entirely
-(`activate_hover_scope_cache`, `is_hover_scope_cache_active`,
-`hover_scope_has_method`, `populate_hover_scope_cache_for_method`, the
-`HOVER_SCOPE_CACHE` thread-local, the activation call in
-`type_engine/variable/resolution.rs`, and the population block in
-`forward_walk/mod.rs`). Measure hover latency on a hover-heavy file
-(the banner's own motivating case: a test file with 80+ `assertType()`
-calls) before choosing — if the O(n²) problem the cache was built for
-is real, the read path is the right fix.
-
 #### B15. `IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard
 
 **Impact: Low · Effort: Medium**

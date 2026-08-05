@@ -207,84 +207,6 @@ pub(crate) fn resolve_in_method_body<'b>(
     is_static: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    // Collect iterators up front so they can be reused across the cache
-    // populate path and the standard walk path without ownership issues.
-    let params_vec: Vec<&'b FunctionLikeParameter<'b>> = parameters.collect();
-    let stmts_vec: Vec<&'b Statement<'b>> = body_statements.collect();
-
-    // ── Hover scope cache ────────────────────────────────────────────────
-    // The hover scope cache records snapshots at each statement's START
-    // offset (before the statement is processed).  This works well for
-    // member-access resolution within a statement (which needs the scope
-    // from before the statement), but returns the wrong type for variable
-    // hover on the LHS of an assignment: hovering `$x` in `$x = new Foo()`
-    // should show the post-assignment type (`Foo`), not the pre-assignment
-    // type.  Detecting all edge cases (nudged offsets, nested blocks,
-    // closures) is fragile, so variable resolution always uses the
-    // standard walk which processes statements up to the cursor and
-    // returns the correct post-assignment scope.
-    //
-    // The cache IS still populated here (if not yet present) so that
-    // other consumers (diagnostics member-access lookups via
-    // `lookup_diagnostic_scope`) benefit from it.
-    if !is_diagnostic_scope_active()
-        && is_hover_scope_cache_active()
-        && !hover_scope_has_method(method_span_start)
-    {
-        // Activate a temporary diagnostic scope so that walk_body_forward
-        // records snapshots at every statement boundary.
-        let _diag_guard = with_diagnostic_scope_cache();
-        // This is a dedicated scope-building walk (it harvests the temp
-        // cache below), so its snapshots must be recorded even when we
-        // were reached from a nested resolution that suspended recording.
-        let _resume_guard = resume_snapshot_recording();
-
-        // Build a full-walk context (cursor at u32::MAX = walk entire body).
-        let full_ctx = ForwardWalkCtx {
-            cursor_offset: u32::MAX,
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: ctx.enclosing_return_type.clone(),
-            top_level_scope: ctx.top_level_scope.clone(),
-        };
-
-        let mut scope = ScopeState::new();
-        if !is_static {
-            seed_this(&mut scope, ctx.current_class);
-        }
-        let method_name = method_ctx.map(|(n, _)| n);
-        let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
-
-        seed_params(
-            &mut scope,
-            params_vec.iter().copied(),
-            method_span_start,
-            method_name,
-            has_scope_attr,
-            &full_ctx,
-        );
-
-        record_scope_snapshot(method_span_start, &scope);
-
-        // Walk the full body to populate DIAGNOSTIC_SCOPE with snapshots.
-        walk_body_for_diagnostics(stmts_vec.iter().copied(), &mut scope, &full_ctx);
-
-        let snapshots = take_diagnostic_scope_map();
-
-        // The _diag_guard drop will clear DIAGNOSTIC_SCOPE; store
-        // snapshots in the hover cache before that happens (we already
-        // took ownership of the map above).
-        populate_hover_scope_cache_for_method(method_span_start, snapshots);
-        // Do NOT look up the variable from the freshly-populated cache.
-        // The standard walk below will produce the correct result.
-    }
-
-    // ── Standard walk (diagnostics path or hover cache not active) ───────
     let mut scope = ScopeState::new();
 
     if !is_static {
@@ -295,7 +217,7 @@ pub(crate) fn resolve_in_method_body<'b>(
     let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
     seed_params(
         &mut scope,
-        params_vec.iter().copied(),
+        parameters,
         method_span_start,
         method_name,
         has_scope_attr,
@@ -307,7 +229,7 @@ pub(crate) fn resolve_in_method_body<'b>(
     // not write into an active diagnostic scope cache.
     {
         let _suspend = suspend_snapshot_recording();
-        walk_body_forward(stmts_vec.iter().copied(), &mut scope, ctx);
+        walk_body_forward(body_statements, &mut scope, ctx);
     }
 
     // Return `Some(types)` when the variable exists in scope (even if

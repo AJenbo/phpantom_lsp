@@ -218,11 +218,6 @@ pub(crate) fn resolve_variable_php_type(
         }
     };
 
-    // Activate the hover scope cache when NOT inside a self-assignment RHS.
-    if !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed) {
-        super::forward_walk::activate_hover_scope_cache(content);
-    }
-
     let resolved = resolve_variable_types(
         &prefixed,
         effective_class,
