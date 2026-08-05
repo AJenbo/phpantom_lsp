@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785965782787,
+  "lastUpdate": 1785969196449,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -13939,6 +13939,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "095ebff0d5e8597b087677cb14143f4c7b83b8cb",
+          "message": "Calling a function or method that returns `never` is now recognized as\nan unconditional exit",
+          "timestamp": "2026-08-06T00:17:02+02:00",
+          "tree_id": "14f24a3d133cd8c0b608d7429351c27ee473705f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/095ebff0d5e8597b087677cb14143f4c7b83b8cb"
+        },
+        "date": 1785969193475,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.5,
             "unit": "MiB"
           }
         ]
