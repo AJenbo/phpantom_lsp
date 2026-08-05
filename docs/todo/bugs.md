@@ -244,32 +244,3 @@ multi-namespace case) rather than leaving it empty, so every consumer of
 **Reproduce:** in a namespaced file that also declares a global class of
 the same short name, reference the class unqualified from a plain
 function body.
-
-#### B24. Alternative `if:` / `endif;` syntax never narrows after a guard
-
-**Impact: Low-Medium · Effort: Low-Medium**
-
-`process_if_colon_body` in
-`src/type_engine/variable/forward_walk/control_flow.rs` merges every
-branch scope unconditionally: unlike its brace-syntax counterpart
-`process_if_statement_body`, it never asks whether a branch terminates.
-A guard clause written in the alternative syntax therefore does not
-narrow, even with a plain `return`:
-
-```php
-if (!$x instanceof Foo):
-    return;
-endif;
-
-$x->fooMethod(); // $x is still Foo|Bar
-```
-
-The brace form of the same guard narrows correctly. The exit check the
-brace path uses (`statement_unconditionally_exits`, which also
-recognises `never`-returning calls) already handles colon-delimited
-bodies, so the fix is to compute a per-branch `exits` flag in
-`process_if_colon_body` and drop terminating branches from the merge the
-way `process_if_statement_body` does.
-
-**Reproduce:** write an `instanceof` guard with `if (…): return; endif;`
-and complete on the guarded variable afterwards.

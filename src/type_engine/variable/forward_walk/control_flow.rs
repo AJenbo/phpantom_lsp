@@ -292,7 +292,7 @@ pub(crate) fn process_if_statement_body<'b>(
 pub(crate) fn process_if_colon_body<'b>(
     if_stmt: &'b If<'b>,
     body: &'b IfColonDelimitedBody<'b>,
-    _enclosing_stmt: &'b Statement<'b>,
+    enclosing_stmt: &'b Statement<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
@@ -357,11 +357,13 @@ pub(crate) fn process_if_colon_body<'b>(
 
     // Cursor is after the if — merge branches.
     let pre_if_scope = scope.clone();
+
     let mut then_scope = scope.clone();
     apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
     walk_body_forward(body.statements.iter(), &mut then_scope, ctx);
+    let then_exits = branch_exits_stmts(body.statements.iter(), &then_scope, ctx);
 
-    let mut all_scopes = vec![then_scope];
+    let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::new();
     for ei in body.else_if_clauses.iter() {
         let mut ei_scope = pre_if_scope.clone();
         // The elseif branch only runs when the if condition and every
@@ -384,9 +386,11 @@ pub(crate) fn process_if_colon_body<'b>(
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(ei.statements.iter(), &mut ei_scope, ctx);
-        all_scopes.push(ei_scope);
+        let exits = branch_exits_stmts(ei.statements.iter(), &ei_scope, ctx);
+        elseif_scopes.push((ei_scope, exits));
     }
-    if let Some(ref else_clause) = body.else_clause {
+
+    let (else_scope, else_exits) = if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
         // The else branch only runs when the if condition and every
         // elseif condition were false, so apply the inverse of all of
@@ -402,27 +406,87 @@ pub(crate) fn process_if_colon_body<'b>(
             record_scope_snapshot(first_stmt.span().start.offset, &else_scope);
         }
         walk_body_forward(else_clause.statements.iter(), &mut else_scope, ctx);
-        all_scopes.push(else_scope);
+        let exits = branch_exits_stmts(else_clause.statements.iter(), &else_scope, ctx);
+        (Some(else_scope), exits)
     } else {
-        // No else clause — the pre-if scope is the implicit "all
-        // conditions were false" path.  Apply the inverse of the if
-        // condition (and every elseif condition) so information from a
-        // failed condition is reflected in the merged scope.
-        let mut implicit_else_scope = pre_if_scope.clone();
-        apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
+        (None, false)
+    };
+
+    // Merge: collect all surviving (non-exiting) branch scopes, mirroring
+    // `process_if_statement_body`'s brace-delimited merge so a guard
+    // clause written with `if (): ... endif;` narrows the same way as
+    // `if () { ... }`.
+    let mut implicit_else_scope;
+    let mut surviving_scopes: Vec<&ScopeState> = Vec::new();
+
+    let then_exits_via_loop = body.statements.last().is_some_and(exits_via_loop_control);
+    if !then_exits || then_exits_via_loop {
+        surviving_scopes.push(&then_scope);
+    }
+    for (idx, (ei_scope, ei_exits)) in elseif_scopes.iter().enumerate() {
+        if !ei_exits
+            || body
+                .else_if_clauses
+                .iter()
+                .nth(idx)
+                .is_some_and(|ei| ei.statements.last().is_some_and(exits_via_loop_control))
+        {
+            surviving_scopes.push(ei_scope);
+        }
+    }
+    if let Some(ref es) = else_scope {
+        if !else_exits
+            || body
+                .else_clause
+                .as_ref()
+                .is_some_and(|ec| ec.statements.last().is_some_and(exits_via_loop_control))
+        {
+            surviving_scopes.push(es);
+        }
+    } else {
+        // No else clause — the pre-if scope is an implicit surviving path.
+        // Apply the inverse of every elseif condition unconditionally
+        // (the implicit path requires all of them to be false), but only
+        // apply the inverse of the `if` condition here when it is not
+        // about to be applied by the dedicated guard clause section
+        // below — applying it in both places would double-narrow.
+        implicit_else_scope = pre_if_scope.clone();
+        if !then_exits || !body.else_if_clauses.is_empty() {
+            apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
+        }
         for ei in body.else_if_clauses.iter() {
             apply_condition_narrowing_inverse(ei.condition, &mut implicit_else_scope, ctx);
         }
-        all_scopes.push(implicit_else_scope);
+        surviving_scopes.push(&implicit_else_scope);
     }
 
-    // Merge all surviving scopes.
-    if let Some(first) = all_scopes.first() {
-        let mut merged = first.clone();
-        for s in &all_scopes[1..] {
+    if surviving_scopes.is_empty() {
+        // All branches exit — theoretically unreachable code after.
+        // Keep the pre-if scope.
+        *scope = pre_if_scope;
+    } else if surviving_scopes.len() == 1 {
+        *scope = surviving_scopes[0].clone();
+    } else {
+        // Merge all surviving scopes.
+        let mut merged = surviving_scopes[0].clone();
+        for s in &surviving_scopes[1..] {
             merged.merge_branch(s);
         }
+        simplify_class_hierarchy_unions(&mut merged, ctx.class_loader);
         *scope = merged;
+    }
+
+    retain_synthetic_keys_common_to_all(scope, &surviving_scopes);
+
+    // Guard clause narrowing: when the if body unconditionally exits and
+    // there are no elseif/else branches, apply inverse narrowing.
+    if enclosing_stmt.span().end.offset < ctx.cursor_offset
+        && then_exits
+        && body.else_if_clauses.is_empty()
+        && body.else_clause.is_none()
+    {
+        apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
+        apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
     }
 }
 
@@ -444,6 +508,28 @@ fn branch_exits(stmt: &Statement<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'
             var_types: Some(&var_types),
         },
     )
+}
+
+/// Check whether a colon-delimited if/elseif/else branch terminates, so
+/// its assignments must not be merged into the post-if scope.  Mirrors
+/// `branch_exits` for a top-level statement list rather than a single
+/// (possibly block) statement: a branch exits if any statement in it
+/// exits, matching `if_body_unconditionally_exits`'s colon-delimited
+/// handling.
+fn branch_exits_stmts<'s>(
+    mut stmts: impl Iterator<Item = &'s Statement<'s>>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let var_types = |var_name: &str| scope.get(var_name).to_vec();
+    let exit_ctx = narrowing::ExitCtx {
+        current_class: ctx.current_class,
+        class_loader: ctx.class_loader,
+        function_loader: ctx.loaders.function_loader,
+        resolved_class_cache: ctx.resolved_class_cache,
+        var_types: Some(&var_types),
+    };
+    stmts.any(|s| narrowing::statement_unconditionally_exits(s, &exit_ctx))
 }
 
 /// Compute the assignment dependency depth for a loop body.

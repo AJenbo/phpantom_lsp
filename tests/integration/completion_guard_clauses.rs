@@ -2124,3 +2124,78 @@ async fn test_switch_default_throw_narrows_variable() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_guard_clause_colon_delimited_negated_instanceof_return_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///guard_neg_instanceof_colon.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Dog {\n",
+        "    public function bark(): void {}\n",
+        "}\n",
+        "class Cat {\n",
+        "    public function purr(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    /** @param Dog|Cat $pet */\n",
+        "    public function test($pet): void {\n",
+        "        if (!$pet instanceof Dog):\n",
+        "            return;\n",
+        "        endif;\n",
+        "        $pet->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's method 'bark' after colon-delimited guard clause, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's method 'purr' after colon-delimited guard clause, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
