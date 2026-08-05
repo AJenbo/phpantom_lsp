@@ -25,7 +25,6 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Workspace symbols               | ✅       | ✅           | ✅         | ✅          | ✅          |
 | Call hierarchy                  | ❌       | ❌           | ❌         | ❌          | ✅          |
 | Semantic tokens                 | ✅       | ❌           | ✅         | ❌          | ✅          |
-| Linked editing                  | ✅       | ❌           | ✅         | ❌          | ✅          |
 | Extras<sup>2</sup>              | ✅       | 💰           | 🚧         | 🚧          | ✅          |
 | **Diagnostics**                 |          |              |            |             |             |
 | PHPStan integration             | ✅       | ❌           | ❌         | 🚧          | 🚧          |

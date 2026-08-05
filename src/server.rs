@@ -192,9 +192,6 @@ impl LanguageServer for Backend {
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
-                linked_editing_range_provider: Some(LinkedEditingRangeServerCapabilities::Simple(
-                    true,
-                )),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
                         code_action_kinds: Some(vec![
@@ -1213,25 +1210,6 @@ impl LanguageServer for Backend {
         })
         .await
         .unwrap_or(Ok(None))
-    }
-
-    async fn linked_editing_range(
-        &self,
-        params: LinkedEditingRangeParams,
-    ) -> Result<Option<LinkedEditingRanges>> {
-        let uri = params
-            .text_document_position_params
-            .text_document
-            .uri
-            .to_string();
-        let position = params.text_document_position_params.position;
-
-        // Blade coordinate translation happens inside the handler, which has
-        // the variable name needed to verify the translated ranges still
-        // point at it in the template source.
-        self.handle_with_position("linked_editing_range", &uri, position, |content, pos| {
-            self.handle_linked_editing_range(&uri, content, pos)
-        })
     }
 
     async fn prepare_rename(

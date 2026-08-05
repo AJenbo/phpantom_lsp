@@ -8,8 +8,7 @@
 //! `TextEdit`s the editor applies verbatim, so a stale offset silently
 //! rewrites unrelated code.
 //!
-//! Linked editing already guards against this (see [`crate::linked_editing`]);
-//! the same two checks apply here:
+//! Two checks apply here:
 //!
 //! 1. **The symbol map must describe the text it is converted against.**
 //!    Cross-file edits are checked per file, against *that* file's
@@ -177,9 +176,8 @@ fn range_matches(content: &str, range: Range, expected: &Expected) -> bool {
         return false;
     };
 
-    // The range must start and end on a token boundary.  This is what
-    // catches the failure linked editing hit in practice: a shifted
-    // offset landing part-way into a longer identifier.
+    // The range must start and end on a token boundary, catching a
+    // shifted offset that lands part-way into a longer identifier.
     let before_ok = content
         .get(..start)
         .and_then(|s| s.chars().next_back())

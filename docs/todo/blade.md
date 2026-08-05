@@ -539,9 +539,9 @@ the inferred types into a signature docblock.
 Other Blade-aware editors ship a full structure view, folding builder,
 and formatter alongside their directive inspections.
 `document_symbols.rs`, `folding.rs`, and `formatting.rs` have no Blade
-awareness at all today, unlike `inlay_hints.rs`, `semantic_tokens.rs`,
-and `linked_editing.rs`, which all check `is_blade_file` and translate
-positions through `BladeSourceMap`. These items close that gap.
+awareness at all today, unlike `inlay_hints.rs` and `semantic_tokens.rs`,
+which both check `is_blade_file` and translate positions through
+`BladeSourceMap`. These items close that gap.
 
 ### BL13. Mismatched and unbalanced directive diagnostics
 
@@ -853,10 +853,10 @@ call missing a required variable gets a diagnostic.
 
 Implement directive-pair validation (BL13), then Blade-position
 translation for folding (BL14) and document symbols (BL15) — both
-follow the same `php_to_blade` pattern already used by inlay hints,
-semantic tokens, and linked editing. Formatting (BL16) starts with
-disabling the feature safely for `.blade.php` and defers the full
-indentation model.
+follow the same `php_to_blade` pattern already used by inlay hints
+and semantic tokens. Formatting (BL16) starts with disabling the
+feature safely for `.blade.php` and defers the full indentation
+model.
 
 **Deliverable:** `@foreach ... @endif` is flagged as a diagnostic.
 Folding and the outline view work correctly on `.blade.php` files.

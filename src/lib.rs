@@ -243,7 +243,6 @@ mod hover;
 mod indexing;
 pub(crate) mod inheritance;
 mod inlay_hints;
-mod linked_editing;
 mod mago;
 #[cfg(feature = "mem-audit")]
 mod mem_audit;

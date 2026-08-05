@@ -134,7 +134,6 @@ mod laravel_request_keys;
 mod laravel_route_controller;
 mod laravel_route_params;
 mod laravel_validated_shape;
-mod linked_editing;
 mod lsp_concurrency;
 mod parser;
 mod php_version;

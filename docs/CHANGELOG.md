@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Linked editing range toggle.** `.phpantom.toml` now supports `[linked_editing] variables = true | false` to control whether placing the cursor on a variable activates linked editing mode. Enabled by default; set to `false` to disable variable linked editing and rely on explicit rename instead. Contributed by @calebdw.
 - **Analyze verbosity flags.** `phpantom_lsp analyze` now supports PHPStan-style `--debug` and `-v`/`-vv`/`-vvv` flags. `--debug` prints each file as it is analyzed and disables the progress bar, so a hang or slowdown is immediately attributable to a specific file; warnings about unusually slow files also moved under this flag. `-v` adds per-file durations and a phase timing summary, `-vv` adds worker ids and parse-phase tracing, and `-vvv` adds memory usage.
 - **Config return type inference.** `config('database.default')`, `Config::get('app.name')`, and `$repository->get('mail.from')` now infer their return type from the project's `config/*.php` files. Scalar values resolve to their base type (`string`, `int`, `bool`), `env()` defaults resolve through their fallback argument, and nested arrays resolve to array shapes with typed keys. Framework default configs from `vendor/laravel/framework/config/` fill in any keys the project's own config file leaves unset, so a partially published `config/app.php` still resolves the framework defaults it does not override. Parsed config trees are cached and invalidated when config files change. Contributed by @calebdw.
 - **Semantic token modes.** `.phpantom.toml` now supports `[semantic_tokens] mode = "contextual" | "full" | "off"`. The default `contextual` mode emits only context-sensitive highlighting that complements editor syntax grammars, while `full` keeps the previous broad semantic-token stream and `off` disables semantic tokens. Contributed by @calebdw.
@@ -74,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Bundled Zed extension.** PHPantom's plain-PHP wiring has merged into Zed's official PHP extension, so a separate PHPantom extension is no longer needed. See [Editor Setup](editor-setup.md) for the updated Zed configuration.
+- **Linked editing.** Editors mirror keystrokes into a linked range on trust, and that turned ordinary manual edits into buffer corruption: rewriting `$this->someMethod($comment->createdByUser)` into an extracted variable while the cursor sat inside a linked range for `$comment` truncated the new line into `$author = $->createdByUser;`, mirroring a deletion the user never intended to repeat. Use `textDocument/rename` (explicit, cross-file, previewable, one undo step) or your editor's multi-cursor instead.
 
 ### Fixed
 

@@ -147,17 +147,6 @@
         }
       }
     },
-    "linked_editing": {
-      "type": "object",
-      "description": "Controls linked editing ranges. Linked editing lets the editor rename all occurrences of a symbol simultaneously as you type.",
-      "properties": {
-        "variables": {
-          "type": "boolean",
-          "description": "Enable linked editing for variables. When enabled, placing the cursor on a variable highlights every occurrence in its definition region and typing a new name updates them all at once. Set to false to disable this and rely on explicit rename instead.",
-          "default": true
-        }
-      }
-    },
     "formatting": {
       "type": "object",
       "description": "Controls the formatting strategy. PHPantom ships a built-in formatter (PER-CS 2.0 style). Projects with php-cs-fixer or PHP_CodeSniffer in composer.json require-dev automatically use those tools instead. Explicit configuration here always takes priority.",
