@@ -111,31 +111,3 @@ inside a string from the start of a comment without a forward pass, so
 the fix likely means scanning the enclosing statement forward once and
 masking comments before the backwards walk, the way the Blade
 preprocessor masks non-PHP text.
-
-#### B22. Hover lists a branch-merged union in reverse assignment order
-
-**Impact: Low · Effort: Low**
-
-When a variable is assigned before an `if` and reassigned inside it,
-hover shows every member of the merged union but puts the in-branch type
-first:
-
-```php
-$x = new Foo();
-if (rand(0, 1)) {
-    $x = new Bar();
-}
-echo $x; // hover renders `$x = Bar` then `$x = Foo`
-```
-
-An `if`/`else` where both branches assign renders in source order
-(`Foo` then `Bar`), so the ordering is inconsistent between the two
-shapes rather than merely unsorted. Readers scan the first code block as
-"the" type, so the pre-branch type should come first.
-
-**Where to look:** the branch-merge in
-`type_engine/variable/forward_walk/control_flow.rs` appends the surviving
-pre-branch types after the branch's own types; hover renders
-`ResolvedType::types_joined` in that order.
-
-**Reproduce:** hover a variable after a one-sided `if` that reassigns it.

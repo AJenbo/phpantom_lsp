@@ -473,7 +473,8 @@ function test(): void {
 
 /// A variable assigned before an `if` and reassigned inside it holds both
 /// the pre-branch type (the path that skips the `if`) and the in-branch
-/// type.  Hover must show both, not just whichever came first.
+/// type.  Hover must show both, in source order: the pre-branch type reads
+/// as the headline type, the same way an `if`/`else` renders its branches.
 #[test]
 fn hover_pre_branch_type_survives_one_sided_if() {
     let backend = create_test_backend();
@@ -511,6 +512,11 @@ function test(): void {
     assert!(
         text.contains("---"),
         "union hover should use a horizontal rule separator, got: {}",
+        text
+    );
+    assert!(
+        text.find("$x = Foo") < text.find("$x = Bar"),
+        "the pre-branch type must be listed before the in-branch type, got: {}",
         text
     );
 }

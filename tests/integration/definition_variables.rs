@@ -145,11 +145,11 @@ async fn test_goto_definition_ambiguous_variable_both_have_method() {
     match result.unwrap() {
         GotoDefinitionResponse::Scalar(location) => {
             assert_eq!(location.uri, uri);
-            // Forward walker returns Beta first: at the cursor position (after the if-block),
-            // the most recent assignment is `$obj = new Beta()` inside the if-body.
+            // The merged union lists the branches in source order, so the
+            // pre-`if` assignment `$obj = new Alpha()` is the first candidate.
             assert_eq!(
-                location.range.start.line, 6,
-                "greet() should resolve to Beta (line 6) as the forward walker's first candidate"
+                location.range.start.line, 2,
+                "greet() should resolve to Alpha (line 2) as the forward walker's first candidate"
             );
         }
         other => panic!("Expected Scalar location, got: {:?}", other),

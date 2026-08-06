@@ -237,7 +237,11 @@ pub(crate) fn process_if_statement_body<'b>(
         if !then_exits {
             apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
         }
-        surviving_scopes.push(&implicit_else_scope);
+        // The implicit else path precedes the then-body in source order, so
+        // it goes first: the merge below preserves this order in each
+        // variable's type list, and hover renders the first entry as the
+        // headline type.
+        surviving_scopes.insert(0, &implicit_else_scope);
     }
 
     if surviving_scopes.is_empty() {
@@ -457,7 +461,9 @@ pub(crate) fn process_if_colon_body<'b>(
         for ei in body.else_if_clauses.iter() {
             apply_condition_narrowing_inverse(ei.condition, &mut implicit_else_scope, ctx);
         }
-        surviving_scopes.push(&implicit_else_scope);
+        // Source order: the implicit else path comes before the then-body,
+        // matching `process_if_statement_body`.
+        surviving_scopes.insert(0, &implicit_else_scope);
     }
 
     if surviving_scopes.is_empty() {
