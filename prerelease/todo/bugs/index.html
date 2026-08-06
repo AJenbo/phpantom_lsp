@@ -828,28 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b13-the-hover-scope-cache-is-populated-but-never-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B13. The hover scope cache is populated but never read
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B15. <code>IN_CLOSURE_THIS_OVERRIDE</code> is a coarse boolean re-entry guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b18-override-completion-offers-final-parent-methods" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1383,28 +1361,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b13-the-hover-scope-cache-is-populated-but-never-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B13. The hover scope cache is populated but never read
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B15. <code>IN_CLOSURE_THIS_OVERRIDE</code> is a coarse boolean re-entry guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b18-override-completion-offers-final-parent-methods" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1500,66 +1456,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b13-the-hover-scope-cache-is-populated-but-never-read">B13. The hover scope cache is populated but never read<a class="headerlink" href="#b13-the-hover-scope-cache-is-populated-but-never-read" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Found while cleaning up comments in
-<code>type_engine/variable/forward_walk/diagnostic_cache.rs</code>. The hover
-scope cache banner there claims that after the first hover walks a
-method body once, "subsequent hovers on the same file content look up
-the pre-computed snapshots in O(log N) time via a <code>BTreeMap::range</code>
-search — no re-walk at all." The lookup path does not exist. The only
-accesses to <code>HoverScopeCache.methods</code> in the entire codebase are
-<code>contains_key</code> (<code>hover_scope_has_method</code>) and <code>insert</code>
-(<code>populate_hover_scope_cache_for_method</code>); no code ever reads the
-stored <code>ScopeSnapshotMap</code> values back.</p>
-<p>The populate site in <code>resolve_in_method_body</code>
-(<code>src/type_engine/variable/forward_walk/mod.rs</code>, the "Hover scope
-cache" block) also carries a comment claiming the population benefits
-"diagnostics member-access lookups via <code>lookup_diagnostic_scope</code>", but
-that function reads the thread-local <code>DIAGNOSTIC_SCOPE</code>, which the
-temporary guard in the same block clears immediately after the
-snapshots are harvested into the hover cache.</p>
-<p>Net effect: the cache makes hover strictly slower, not faster. The
-first hover that reaches a given method body performs two walks (the
-full-body population walk plus the standard walk that actually answers
-the request) instead of one, and the harvested snapshot map sits in
-thread-local storage as dead memory until the content hash changes.
-The only thing the cache prevents is repeating its own useless
-population walk. A lookup path was presumably lost in a refactor, or
-was never wired up after the LHS-assignment-hover problem described in
-the populate-site comment was discovered.</p>
-<p><strong>Where to look:</strong> either wire up the read path (a
-<code>lookup_hover_scope(method_span_start, var_name, offset)</code> used by the
-member-access/hover consumers that can tolerate statement-start
-snapshots, keeping the standard walk only for the LHS-assignment case
-the comment describes), or delete the cache entirely
-(<code>activate_hover_scope_cache</code>, <code>is_hover_scope_cache_active</code>,
-<code>hover_scope_has_method</code>, <code>populate_hover_scope_cache_for_method</code>, the
-<code>HOVER_SCOPE_CACHE</code> thread-local, the activation call in
-<code>type_engine/variable/resolution.rs</code>, and the population block in
-<code>forward_walk/mod.rs</code>). Measure hover latency on a hover-heavy file
-(the banner's own motivating case: a test file with 80+ <code>assertType()</code>
-calls) before choosing — if the O(n²) problem the cache was built for
-is real, the read path is the right fix.</p>
-<h4 id="b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard">B15. <code>IN_CLOSURE_THIS_OVERRIDE</code> is a coarse boolean re-entry guard<a class="headerlink" href="#b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
-<p>Found while cleaning up comments in
-<code>type_engine/variable/closure_resolution.rs</code>. The
-<code>IN_CLOSURE_THIS_OVERRIDE</code> thread-local guarding
-<code>find_closure_this_override</code> is a <code>Cell&lt;bool&gt;</code> — exactly the coarse
-boolean re-entry guard shape the project's performance anti-patterns
-warn about (item 5). It cannot distinguish re-entry on the <em>same</em>
-closure (the <code>$this</code>-receiver cycle it exists to break) from
-legitimate nested work on a <em>different</em> closure: with a closure inside
-a closure where both call sites declare <code>@param-closure-this</code>, the
-inner resolution short-circuits to <code>None</code> and silently falls back to
-<code>current_class</code>, so <code>$this</code> inside the inner closure resolves to the
-wrong type.</p>
-<p><strong>Where to look:</strong> <code>find_closure_this_override</code> in
-<code>src/type_engine/variable/closure_resolution.rs</code>. Key the guard by the
-entity being resolved (e.g. the closure's span offset or the call-site
-span) in a small visited set, as <code>RESOLVING</code> does for class FQNs, so
-only genuine same-entity cycles short-circuit.</p>
 <h4 id="b18-override-completion-offers-final-parent-methods">B18. Override completion offers <code>final</code> parent methods<a class="headerlink" href="#b18-override-completion-offers-final-parent-methods" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>collect_overridable_methods</code> in
