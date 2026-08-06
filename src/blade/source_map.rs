@@ -1,7 +1,7 @@
 use tower_lsp::lsp_types::Position;
 
 /// Source map from virtual PHP back to original Blade positions.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BladeSourceMap {
     /// Per-line column anchor points.
     ///
@@ -11,12 +11,25 @@ pub struct BladeSourceMap {
     /// PHP line.  Between two adjacent anchors the mapping is linear (1:1
     /// for PHP content, 0:N for boilerplate replacements).
     pub adjustments: Vec<Vec<(u32, u32)>>,
+    /// Number of prologue lines the preprocessor injected before the
+    /// first template line.  At least [`super::PROLOGUE_LINES`]; larger
+    /// when call-site-inferred `@var` declarations are injected.
+    pub prologue_lines: u32,
+}
+
+impl Default for BladeSourceMap {
+    fn default() -> Self {
+        Self {
+            adjustments: Vec::new(),
+            prologue_lines: super::PROLOGUE_LINES,
+        }
+    }
 }
 
 impl BladeSourceMap {
     pub fn blade_to_php(&self, pos: Position) -> Position {
         let line = pos.line as usize;
-        let virtual_line = line as u32 + super::PROLOGUE_LINES;
+        let virtual_line = line as u32 + self.prologue_lines;
 
         if line >= self.adjustments.len() {
             return Position {
@@ -54,13 +67,13 @@ impl BladeSourceMap {
     }
 
     pub fn php_to_blade(&self, pos: Position) -> Position {
-        if pos.line < super::PROLOGUE_LINES {
+        if pos.line < self.prologue_lines {
             return Position {
                 line: 0,
                 character: 0,
             };
         }
-        let line = (pos.line - super::PROLOGUE_LINES) as usize;
+        let line = (pos.line - self.prologue_lines) as usize;
 
         if line >= self.adjustments.len() {
             return Position {

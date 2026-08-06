@@ -1460,6 +1460,18 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             blade.add(v.capacity());
         }
     }
+    {
+        let m = backend.blade_injected_vars.read();
+        misc += map_buckets::<String, Vec<(String, String)>>(m.capacity());
+        for (k, vars) in m.iter() {
+            blade.add(k.capacity());
+            blade.add(vars.capacity() * size_of::<(String, String)>());
+            for (name, ty) in vars {
+                blade.add(name.capacity());
+                blade.add(ty.capacity());
+            }
+        }
+    }
     eprintln!(
         "── stub/autoload/uri-globals/negative caches {:.1} MB | laravel string keys {:.1} MB | blade virtual content: {} files {:.1} MB",
         mb(misc.bytes),

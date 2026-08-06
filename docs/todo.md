@@ -196,7 +196,6 @@ unlikely to move the needle for most users.
 | BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
 | BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#bl10-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
 | BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Low-Medium  |
-| BL12 | [Call-site variable inference](todo/blade.md#bl12-call-site-variable-inference-late-addition) (late addition, lowest-priority source)                                         | Low-Medium  | Medium-High |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |

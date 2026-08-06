@@ -18,11 +18,11 @@ For general architecture see `ARCHITECTURE.md`.
   against that contract (BL9), exactly as a function signature
   works. Inferring types *from* call sites inverts the contract and
   produces "true for one caller" types, so it is not the foundation —
-  but a best-effort call-site inference fallback for unannotated
-  projects is planned as a late addition (BL12), layered strictly
-  below every declared source. Projects running Bladestan (a PHPStan
-  extension for Blade template analysis) get the full contract model
-  in both the editor and CI from the same annotations.
+  the shipped call-site inference fallback for unannotated projects
+  is layered strictly below every declared source. Projects running
+  Bladestan (a PHPStan extension for Blade template analysis) get the
+  full contract model in both the editor and CI from the same
+  annotations.
 - **Discovery is just directory walks.** Scanning `resources/views/`
   and `app/View/Components/` (plus `app/Livewire/`) at init time is
   the full extent of external Blade file discovery. Paths are converted
@@ -518,20 +518,6 @@ get a diagnostic. Templates without a signature produce no call-site
 diagnostics. This gives the editor the same errors Bladestan reports
 in CI, live while typing, from one annotation.
 
-### BL12. Call-site variable inference (late addition)
-
-For projects using neither signatures nor Bladestan: infer a
-template's variable types from the `view()` call sites that
-reference it (literal array keys, `compact()`, `->with()` chains),
-as the **lowest-priority** source in the BL8 chain — any
-declared source shadows it entirely, and multiple call sites union
-per variable. This is deliberately last: it is the inverted-contract
-model and inherits its weaknesses (types are "true for the callers
-we found", dynamic view names contribute nothing). It exists so a
-completely unannotated project still gets useful completion inside
-`{{ $user-> }}`, and as a nudge path — hover can suggest promoting
-the inferred types into a signature docblock.
-
 ---
 
 ## Phase 6: Editor Tooling Parity
@@ -838,12 +824,13 @@ template variable typing.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file. Parent layout variables are available in child templates.
 
-### Step 9: Template contracts (BL8, BL9, BL10, BL11, BL12)
+### Step 9: Template contracts (BL8, BL9, BL10, BL11)
 
 Implement the signature resolution chain, then call-site validation
 on top of it. Section/stack intelligence and custom directive
 discovery are independent and can land in either order. Call-site
-inference (BL12) comes last, after every declared source works.
+inference (shipped) sits below every declared source; the BL8 chain
+slots in above it.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
 gets typed completion for its declared variables, and a `view()`

@@ -79,6 +79,21 @@ impl Backend {
         self.user_file_symbol_maps_matching(candidate_uris.as_ref())
     }
 
+    /// Like [`user_file_symbol_maps_for_reference_keys`], but never
+    /// blocks on (or triggers) workspace indexing — it snapshots
+    /// whatever is already parsed.  For callers on hot paths
+    /// (`update_ast`) where waiting on the index lock would stall
+    /// typing or deadlock a parse worker.  Before the reference index
+    /// is built the candidate filter is unavailable, so this falls
+    /// back to every parsed user file.
+    pub(crate) fn user_file_symbol_maps_for_reference_keys_nonblocking(
+        &self,
+        keys: &[ReferenceIndexKey],
+    ) -> Vec<(String, Arc<SymbolMap>)> {
+        let candidate_uris = self.reference_candidate_uris_for_keys(keys);
+        self.user_file_symbol_maps_matching(candidate_uris.as_ref())
+    }
+
     fn user_file_symbol_maps_matching(
         &self,
         candidate_uris: Option<&HashSet<Arc<str>>>,

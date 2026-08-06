@@ -48,23 +48,72 @@ enum CapturedDirective {
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
+    preprocess_with_vars(content, &[])
+}
+
+/// A type string that is safe to place inside a one-line `/** @var … */`
+/// docblock, or `mixed` when it is not.
+///
+/// Inferred types are rendered from expressions in caller files, so they
+/// can carry arbitrary text: a literal-string type keeps its source form,
+/// and PHP allows a real line break inside a quoted string. A line break
+/// would add a prologue line the source map has to account for, and a
+/// `*/` would close the docblock early and spill the rest into code.
+/// Neither is worth reproducing faithfully, so such a type degrades to
+/// `mixed` and the variable is still declared.
+fn docblock_safe_type(type_string: &str) -> &str {
+    let usable = !type_string.trim().is_empty()
+        && !type_string.contains(['\n', '\r'])
+        && !type_string.contains("*/");
+    if usable { type_string } else { "mixed" }
+}
+
+/// Like [`preprocess`], but seeds the template's scope with externally
+/// inferred variables (name without `$`, docblock type string).  Each
+/// variable is declared in the top-level prologue with a `@var` docblock
+/// and pulled into the wrapper function via `global`, the same mechanism
+/// that makes `$errors`/`$__env` visible to every consumer (forward
+/// walker, docblock backward scan, undefined-variable diagnostics).
+///
+/// Callers pass variables inferred from `view()` call sites; a template
+/// that declares its own `@var` for a name shadows the injected one
+/// because in-template annotations are nearer to every use site.
+pub fn preprocess_with_vars(
+    content: &str,
+    injected_vars: &[(String, String)],
+) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
 
-    // ── Prologue (5 lines) ──
+    // ── Prologue ──
     virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} }\n");
     virtual_php.push_str("/** @var \\Illuminate\\Support\\ViewErrorBag $errors */\n");
     virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
     virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
     virtual_php.push_str("$__env = new \\Illuminate\\View\\Factory();\n");
+    for (name, type_string) in injected_vars {
+        let type_string = docblock_safe_type(type_string);
+        virtual_php.push_str(&format!("/** @var {type_string} ${name} */\n"));
+        virtual_php.push_str(&format!("${name} = null;\n"));
+    }
     // Wrap the template body in a function so that diagnostic
     // collectors (which only analyse function/method bodies) treat
     // the Blade content as analysable code.  The closing brace is
-    // appended after the main loop.  `$errors`/`$__env` are assigned
-    // in the outer scope above, so pull them in with `global` —
-    // otherwise every use of them inside the wrapped function is a
-    // false-positive "undefined variable".
-    virtual_php.push_str("function __blade_template() { global $errors, $__env;\n");
+    // appended after the main loop.  `$errors`/`$__env` (and any
+    // injected variables) are assigned in the outer scope above, so
+    // pull them in with `global` — otherwise every use of them inside
+    // the wrapped function is a false-positive "undefined variable".
+    virtual_php.push_str("function __blade_template() { global $errors, $__env");
+    for (name, _) in injected_vars {
+        virtual_php.push_str(", $");
+        virtual_php.push_str(name);
+    }
+    virtual_php.push_str(";\n");
+    // Derive the prologue height from what was actually emitted rather
+    // than assuming a line count per injected variable.  Every Blade
+    // position is offset by this number, so a type string that carried
+    // an unexpected line break would shift the whole file.
+    source_map.prologue_lines = virtual_php.matches('\n').count() as u32;
 
     // `@use` imports cannot be emitted inline: the template body is wrapped
     // in `function __blade_template()`, and PHP `use` imports are only valid
@@ -915,6 +964,89 @@ mod tests {
         assert!(
             php.contains("function __blade_template() { global $errors, $__env;"),
             "$errors/$__env must be pulled into the wrapper function's scope: {}",
+            php
+        );
+    }
+
+    #[test]
+    fn test_preprocess_with_vars_injects_declarations() {
+        let content = "{{ $user->name }}";
+        let (php, map) = preprocess_with_vars(
+            content,
+            &[
+                ("results".to_string(), "array<int, string>".to_string()),
+                ("user".to_string(), "\\App\\Models\\User".to_string()),
+            ],
+        );
+        assert!(
+            php.contains("/** @var array<int, string> $results */"),
+            "injected @var declaration missing: {}",
+            php
+        );
+        assert!(
+            php.contains("/** @var \\App\\Models\\User $user */"),
+            "injected @var declaration missing: {}",
+            php
+        );
+        assert!(
+            php.contains("function __blade_template() { global $errors, $__env, $results, $user;"),
+            "injected variables must be pulled into the wrapper scope: {}",
+            php
+        );
+        // Each injected variable adds a @var line and an assignment line.
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 4);
+
+        // Round trip: blade (0,0) → php and back lands on the same line.
+        let php_pos = map.blade_to_php(tower_lsp::lsp_types::Position {
+            line: 0,
+            character: 3,
+        });
+        assert_eq!(php_pos.line, map.prologue_lines);
+        let back = map.php_to_blade(php_pos);
+        assert_eq!(back.line, 0);
+    }
+
+    #[test]
+    fn test_preprocess_without_vars_keeps_default_prologue() {
+        let (_, map) = preprocess("{{ $x }}");
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES);
+    }
+
+    /// A literal-string type keeps its source form, and PHP allows a real
+    /// line break inside a quoted string — so an inferred type can arrive
+    /// with a newline in it. It must not add a prologue line (that would
+    /// shift every position in the template) nor leave the `@var` docblock
+    /// straddling two lines.
+    #[test]
+    fn test_preprocess_with_vars_multiline_type_does_not_shift_positions() {
+        let (php, map) = preprocess_with_vars(
+            "{{ $body }}",
+            &[("body".to_string(), "'line1\nline2'".to_string())],
+        );
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 2);
+        assert!(
+            php.contains("/** @var mixed $body */"),
+            "a multi-line type must degrade to mixed: {}",
+            php
+        );
+        // The template body still starts exactly at the prologue height.
+        let php_lines: Vec<&str> = php.lines().collect();
+        assert!(
+            php_lines[map.prologue_lines as usize].contains("$body"),
+            "template line 0 must sit at prologue_lines: {}",
+            php
+        );
+    }
+
+    /// A `*/` inside an inferred type would close the docblock early and
+    /// spill the remainder into code.
+    #[test]
+    fn test_preprocess_with_vars_type_cannot_close_the_docblock() {
+        let (php, _) =
+            preprocess_with_vars("{{ $x }}", &[("x".to_string(), "'*/ evil()'".to_string())]);
+        assert!(
+            php.contains("/** @var mixed $x */") && !php.contains("evil()"),
+            "a type containing */ must degrade to mixed: {}",
             php
         );
     }

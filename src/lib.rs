@@ -730,6 +730,12 @@ pub struct Backend {
     /// URIs opened with `languageId == "blade"` that don't have a `.blade.php` extension.
     /// Allows editors to signal Blade files via languageId alone.
     pub(crate) blade_uris: Arc<RwLock<std::collections::HashSet<String>>>,
+    /// Per-template call-site-inferred variables injected into the virtual
+    /// PHP prologue on the last preprocess (name without `$`, docblock
+    /// type).  Lets re-inference passes skip templates whose inferred set
+    /// is unchanged.
+    pub(crate) blade_injected_vars:
+        Arc<RwLock<HashMap<String, crate::blade::call_site_inference::InjectedVars>>>,
     /// Whether the workspace directory has been fully scanned for PHP files.
     ///
     /// Set to `true` after the first Phase 2 walk in `ensure_workspace_indexed`.
@@ -934,6 +940,7 @@ impl Backend {
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1022,6 +1029,7 @@ impl Backend {
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1141,6 +1149,13 @@ impl Backend {
     /// inject user-defined functions or inspect the cache).
     pub fn global_functions(&self) -> &Arc<RwLock<CiMap<(String, FunctionInfo)>>> {
         &self.symbols.global_functions
+    }
+
+    /// The preprocessed virtual PHP for a Blade file (used by
+    /// integration tests to diagnose the virtual content the way the
+    /// live pipeline does).
+    pub fn blade_virtual_php(&self, uri: &str) -> Option<String> {
+        self.blade_virtual_content.read().get(uri).cloned()
     }
 
     /// Borrow the global defines mutex (used by integration tests to
@@ -1639,6 +1654,7 @@ impl Backend {
             blade_virtual_content: Arc::clone(&self.blade_virtual_content),
             blade_source_maps: Arc::clone(&self.blade_source_maps),
             blade_uris: Arc::clone(&self.blade_uris),
+            blade_injected_vars: Arc::clone(&self.blade_injected_vars),
             workspace_indexed: Arc::clone(&self.workspace_indexed),
             workspace_index_lock: Arc::clone(&self.workspace_index_lock),
             full_index_in_progress: Arc::clone(&self.full_index_in_progress),

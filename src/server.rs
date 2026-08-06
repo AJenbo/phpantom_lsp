@@ -608,6 +608,28 @@ impl LanguageServer for Backend {
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
+        // Opening a Blade template is the discrete point where its
+        // call-site variable inference runs (update_ast itself only
+        // reads the cached set).  On a blocking thread: inference
+        // resolves passed-expression types in caller files, which can
+        // lazily parse other files.
+        if self.is_blade_file(&uri) {
+            if self.sync_ast_updates {
+                if self.reinfer_and_reparse_blade(&uri, &text) {
+                    self.schedule_diagnostics(uri.clone());
+                }
+            } else {
+                let backend = self.clone_for_blocking();
+                let blade_uri = uri.clone();
+                let content = Arc::clone(&text);
+                tokio::task::spawn_blocking(move || {
+                    if backend.reinfer_and_reparse_blade(&blade_uri, &content) {
+                        backend.schedule_diagnostics(blade_uri);
+                    }
+                });
+            }
+        }
+
         // Baseline for the first save: without it, that save would have to
         // re-diagnose every open file to be safe.
         self.capture_declaration_baseline(&uri);
@@ -761,6 +783,7 @@ impl LanguageServer for Backend {
             self.blade_virtual_content.write().remove(&uri);
             self.blade_source_maps.write().remove(&uri);
             self.blade_uris.write().remove(&uri);
+            self.blade_injected_vars.write().remove(&uri);
         }
 
         self.clear_file_maps(&uri);
@@ -791,6 +814,19 @@ impl LanguageServer for Backend {
         // visible diagnostic refresh.
         self.schedule_diagnostics(uri.clone());
         self.schedule_diagnostics_for_open_files(&uri);
+
+        // If the saved file passes data to Blade templates, re-run
+        // call-site inference for those templates so a changed `view()`
+        // call is reflected without waiting for the template's next
+        // parse.  Runs on a blocking thread: inference resolves the
+        // passed expressions' types, which can parse other files.
+        {
+            let backend = self.clone_for_blocking();
+            let caller_uri = uri.clone();
+            tokio::task::spawn_blocking(move || {
+                backend.refresh_blade_inference_for_caller(&caller_uri);
+            });
+        }
 
         // External tools (PHPStan, PHPCS, Mago) are expensive and
         // serialized, so they are only triggered on save — not on

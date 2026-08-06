@@ -234,6 +234,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         &backend.resolved_class_cache,
         &class_loader,
     );
+
+    // Blade templates parsed in Phase 1 before their controllers saw no
+    // `view()` call sites.  With every user file parsed, re-run call-site
+    // inference and re-parse the templates whose inferred set changed, so
+    // Phase 2 diagnoses them with injected variables in scope.
+    backend.refresh_blade_call_site_inference();
     let populate_elapsed = populate_t0.elapsed();
 
     // ── Phase 2: Collect diagnostics (parallel) ─────────────────────

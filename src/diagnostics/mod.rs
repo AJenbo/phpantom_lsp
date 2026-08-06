@@ -1257,7 +1257,7 @@ impl Backend {
             let mut range =
                 crate::text_position::byte_range_to_lsp_range(virtual_php, start_byte, end_byte);
 
-            if range.start.line < crate::blade::PROLOGUE_LINES {
+            if range.start.line < map.prologue_lines {
                 // Diagnostic originates from the prologue (injected headers).
                 // We skip these to avoid false positives on line 1 of Blade.
                 return None;

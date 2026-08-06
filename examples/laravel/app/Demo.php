@@ -362,7 +362,10 @@ class Demo
         View::exists('emails.blog_published');
 
         // View under a custom path from config/view.php (resources/theme/views).
-        view('theme.dashboard');
+        // theme/dashboard.blade.php declares no @var signature, so the
+        // variables passed here are inferred inside the template from
+        // this call site ($theme completes as string, $author as BlogAuthor).
+        view('theme.dashboard', ['theme' => 'dark'])->with('author', new BlogAuthor());
 
         // Named Routes
         route('home');

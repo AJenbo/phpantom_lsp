@@ -1,6 +1,7 @@
 mod common;
 
 mod blade;
+mod blade_call_site_inference;
 pub mod blade_debug;
 pub mod blade_error;
 pub mod blade_regression;

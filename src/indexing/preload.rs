@@ -326,6 +326,12 @@ impl Backend {
             // `reference_candidate_uris_for_keys` and `find_implementors`.
             self.workspace_indexed
                 .store(true, std::sync::atomic::Ordering::Release);
+
+            // Blade templates parsed before their controllers saw no
+            // `view()` call sites; with the whole workspace indexed,
+            // re-run call-site inference and re-parse the templates
+            // whose inferred variable set changed.
+            self.refresh_blade_call_site_inference();
         }
         self.report_workspace_index_progress(progress, 100, "Workspace index ready");
         *self.workspace_index_status.lock() = None;
