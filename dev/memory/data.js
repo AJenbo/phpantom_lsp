@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785972746808,
+  "lastUpdate": 1785974643627,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14041,6 +14041,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "413fe1586b1a01376fbf48b0dd5f32a79e82c27e",
+          "message": "A guard clause written with the alternative `if: … endif;` syntax now\nnarrows",
+          "timestamp": "2026-08-06T01:47:37+02:00",
+          "tree_id": "5ace18ce4effd1c7dab870396ae5975c2883d836",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/413fe1586b1a01376fbf48b0dd5f32a79e82c27e"
+        },
+        "date": 1785974639868,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.8,
             "unit": "MiB"
           }
         ]
