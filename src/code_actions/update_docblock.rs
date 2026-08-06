@@ -593,10 +593,9 @@ fn check_needs_update(
         }
     } else {
         // No @param tags at all — only flag if a param needs enrichment.
-        let needs_enrichment = info
-            .sig_params
-            .iter()
-            .any(|sp| enrichment_plain(sp.type_hint.as_ref(), class_loader).is_some());
+        let needs_enrichment = info.sig_params.iter().any(|sp| {
+            enrichment_plain(sp.type_hint.as_ref(), class_loader, use_map, file_namespace).is_some()
+        });
         if needs_enrichment {
             return true;
         }
@@ -630,9 +629,12 @@ fn check_needs_update(
             if doc_param.type_parsed.has_type_structure() {
                 continue;
             }
-            if let Some(enriched) =
-                enrichment_plain_typed(sig_param.type_hint.as_ref(), class_loader)
-                && !enriched.equivalent(&doc_param.type_parsed)
+            if let Some(enriched) = enrichment_plain_typed(
+                sig_param.type_hint.as_ref(),
+                class_loader,
+                use_map,
+                file_namespace,
+            ) && !enriched.equivalent(&doc_param.type_parsed)
             {
                 return true;
             }
@@ -814,8 +816,13 @@ fn build_updated_docblock(
                         // Type is contradicted — try enrichment first, fall
                         // back to the raw native hint.
                         {
-                            enrichment_plain(sig.type_hint.as_ref(), class_loader)
-                                .unwrap_or(native_str)
+                            enrichment_plain(
+                                sig.type_hint.as_ref(),
+                                class_loader,
+                                use_map,
+                                file_namespace,
+                            )
+                            .unwrap_or(native_str)
                         }
                     } else if existing.type_parsed.has_type_structure() {
                         // Doc already has generics / callable / shape — keep it.
@@ -823,12 +830,20 @@ fn build_updated_docblock(
                     } else {
                         // Check if enrichment would upgrade the type (e.g.
                         // bare `Closure` → `(Closure(): mixed)`).
-                        if let Some(enriched) =
-                            enrichment_plain_typed(sig.type_hint.as_ref(), class_loader)
-                        {
+                        if let Some(enriched) = enrichment_plain_typed(
+                            sig.type_hint.as_ref(),
+                            class_loader,
+                            use_map,
+                            file_namespace,
+                        ) {
                             if !enriched.equivalent(&existing.type_parsed) {
-                                enrichment_plain(sig.type_hint.as_ref(), class_loader)
-                                    .unwrap_or_else(|| existing.type_str_raw.clone())
+                                enrichment_plain(
+                                    sig.type_hint.as_ref(),
+                                    class_loader,
+                                    use_map,
+                                    file_namespace,
+                                )
+                                .unwrap_or_else(|| existing.type_str_raw.clone())
                             } else {
                                 existing.type_str_raw.clone()
                             }
@@ -843,7 +858,13 @@ fn build_updated_docblock(
                 // The docblock already documents some params, so add this
                 // missing one — use enrichment or fall back to raw hint / mixed.
                 {
-                    enrichment_plain(sig.type_hint.as_ref(), class_loader).unwrap_or_else(|| {
+                    enrichment_plain(
+                        sig.type_hint.as_ref(),
+                        class_loader,
+                        use_map,
+                        file_namespace,
+                    )
+                    .unwrap_or_else(|| {
                         sig.type_hint
                             .as_ref()
                             .map(|t| t.to_string())
@@ -853,7 +874,12 @@ fn build_updated_docblock(
             } else {
                 // No @param tags at all — only add a tag when the native
                 // type needs enrichment, matching generate-docblock behaviour.
-                enrichment_plain(sig.type_hint.as_ref(), class_loader)?
+                enrichment_plain(
+                    sig.type_hint.as_ref(),
+                    class_loader,
+                    use_map,
+                    file_namespace,
+                )?
             };
 
             let description = existing.map(|e| e.description.clone()).unwrap_or_default();

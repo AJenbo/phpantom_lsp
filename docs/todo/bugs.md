@@ -36,26 +36,3 @@ cursor read as in-string; check the callers in
 `virtual_members/laravel/request_fields.rs`,
 `completion/eloquent_string.rs`, `completion/command_params.rs`, and
 `completion/laravel_route_params.rs` for how they cope with that.
-
-#### B25. Generated PHPDoc types are written as FQNs even when the file imports them
-
-**Impact: Low · Effort: Low**
-
-The inline `@var` completion (and the `@param`/`@return` enrichment that
-shares `enrichment_plain_typed` in
-`src/completion/phpdoc/generation/build.rs`) formats the inferred type
-from the resolved `PhpType`, which always carries the fully qualified
-name. A file that already has `use App\Collection;` still gets
-
-```php
-/** @var App\Collection<TKey, TValue> */
-```
-
-instead of the shorter `Collection<TKey, TValue>` the developer would
-write. The result is correct, just noisier than it needs to be, and it
-does not match the class-name completion path, which does consult the
-`use` map.
-
-`enrichment_plain_typed` takes only a class loader, so the fix is to
-thread the file's use map and namespace through to it and shorten each
-class-like name that resolves back to the same class.

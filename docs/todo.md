@@ -108,7 +108,6 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B22 | [`find_open_quote` is blind to comments on the cursor's own line](todo/bugs.md#b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line)                             | Low         | Low         |
-| B25 | [Generated PHPDoc types are written as FQNs even when the file imports them](todo/bugs.md#b25-generated-phpdoc-types-are-written-as-fqns-even-when-the-file-imports-them) | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

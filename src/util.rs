@@ -68,6 +68,36 @@ pub(crate) fn resolve_to_fqn(
     name.to_string()
 }
 
+/// Reverse of [`resolve_to_fqn`]: shorten a fully-qualified class name to
+/// the form the file would actually reference it by — the `use`-map
+/// alias when one imports it, or the bare name when it lives in the
+/// file's own namespace. A name that matches neither is returned
+/// unchanged (still fully qualified).
+pub(crate) fn shorten_from_fqn(
+    fqn: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> String {
+    let fqn = fqn.trim_start_matches('\\');
+
+    for (alias, imported) in use_map {
+        if imported.trim_start_matches('\\') == fqn {
+            return alias.clone();
+        }
+    }
+
+    if let Some(ns) = namespace {
+        let prefix = format!("{}\\", ns);
+        if let Some(rest) = fqn.strip_prefix(&prefix)
+            && !rest.contains('\\')
+        {
+            return rest.to_string();
+        }
+    }
+
+    fqn.to_string()
+}
+
 /// Resolve a class name to its FQN via the class loader.
 ///
 /// Returns the FQN from the loaded `ClassInfo` when the loader can find

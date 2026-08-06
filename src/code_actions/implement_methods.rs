@@ -606,7 +606,7 @@ fn shorten_type(
 ) -> String {
     let parsed = PhpType::parse(type_str);
     parsed
-        .resolve_names(&|name| shorten_single_type(name, use_map, file_namespace))
+        .resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace))
         .to_string()
 }
 
@@ -616,7 +616,7 @@ fn shorten_php_type_direct(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
-    ty.resolve_names(&|name| shorten_single_type(name, use_map, file_namespace))
+    ty.resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace))
         .to_string()
 }
 
@@ -626,25 +626,7 @@ pub(super) fn shorten_single_type(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
-    // Check the use map: if any imported short name maps to this FQN,
-    // use the short name.
-    for (short, fqn) in use_map {
-        if fqn.trim_start_matches('\\') == type_str {
-            return short.clone();
-        }
-    }
-
-    // If the type is in the same namespace, strip the namespace prefix.
-    if let Some(ns) = file_namespace {
-        let prefix = format!("{}\\", ns);
-        if let Some(rest) = type_str.strip_prefix(&prefix)
-            && !rest.contains('\\')
-        {
-            return rest.to_string();
-        }
-    }
-
-    type_str.to_string()
+    crate::util::shorten_from_fqn(type_str, use_map, file_namespace)
 }
 
 /// Detect the indentation level used inside a class body.

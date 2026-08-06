@@ -50,6 +50,8 @@ pub(crate) fn enrichment_snippet(
     type_hint: Option<&PhpType>,
     tab_stop: &mut u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
 ) -> Option<String> {
     let pt = match type_hint {
         None => {
@@ -100,7 +102,11 @@ pub(crate) fn enrichment_snippet(
                         *tab_stop += 1;
                         s
                     } else {
-                        member.to_string()
+                        member
+                            .resolve_names(&|n| {
+                                crate::util::shorten_from_fqn(n, use_map, file_namespace)
+                            })
+                            .to_string()
                     }
                 })
                 .collect();
@@ -124,12 +130,13 @@ pub(crate) fn enrichment_snippet(
         && let Some(cls) = class_loader(name)
         && !cls.template_params.is_empty()
     {
+        let short_name = crate::util::shorten_from_fqn(name, use_map, file_namespace);
         let mut parts = Vec::new();
         for tp in &cls.template_params {
             parts.push(format!("${{{}:{}}}", *tab_stop, tp));
             *tab_stop += 1;
         }
-        return Some(format!("{}<{}>", name, parts.join(", ")));
+        return Some(format!("{}<{}>", short_name, parts.join(", ")));
     }
 
     None
@@ -143,6 +150,21 @@ pub(crate) fn enrichment_snippet(
 /// plain-text callers that only need a display string should keep using
 /// [`enrichment_plain`].
 pub(crate) fn enrichment_plain_typed(
+    type_hint: Option<&PhpType>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+) -> Option<PhpType> {
+    let enriched = enrichment_plain_typed_fqn(type_hint, class_loader)?;
+    Some(
+        enriched
+            .resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace)),
+    )
+}
+
+/// Compute the enriched type with fully-qualified class names, before the
+/// file's `use`-map and namespace shorten them for display.
+fn enrichment_plain_typed_fqn(
     type_hint: Option<&PhpType>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
@@ -226,8 +248,10 @@ pub(crate) fn enrichment_plain_typed(
 pub(crate) fn enrichment_plain(
     type_hint: Option<&PhpType>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
 ) -> Option<String> {
-    let typed = enrichment_plain_typed(type_hint, class_loader)?;
+    let typed = enrichment_plain_typed(type_hint, class_loader, use_map, file_namespace)?;
 
     // Callable types need parentheses in PHPDoc notation, which
     // PhpType::Display does not add.
@@ -376,14 +400,20 @@ fn build_function_snippet(
     // Each entry is (snippet_type, display_len, escaped_name).
     let mut param_tags: Vec<(String, usize, String)> = Vec::new();
     for (type_hint, name) in &sym.params {
-        if let Some(enriched) = enrichment_snippet(type_hint.as_ref(), &mut tab_stop, class_loader)
-        {
+        if let Some(enriched) = enrichment_snippet(
+            type_hint.as_ref(),
+            &mut tab_stop,
+            class_loader,
+            use_map,
+            file_namespace,
+        ) {
             // Use the plain-text version to measure the rendered width for
             // alignment.  The snippet version contains `${N:...}` markers
             // that inflate its length.
-            let display_len = enrichment_plain(type_hint.as_ref(), class_loader)
-                .map(|p| p.len())
-                .unwrap_or(enriched.len());
+            let display_len =
+                enrichment_plain(type_hint.as_ref(), class_loader, use_map, file_namespace)
+                    .map(|p| p.len())
+                    .unwrap_or(enriched.len());
             // Escape `$` in PHP parameter names so the snippet parser
             // does not treat them as snippet variables.
             param_tags.push((enriched, display_len, name.replace('$', "\\$")));
@@ -418,9 +448,18 @@ fn build_function_snippet(
         // Fall back to signature-based enrichment when body inference
         // doesn't produce anything useful.
         if let Some(t) = inferred {
-            Some(t.to_string())
+            Some(
+                t.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
+                    .to_string(),
+            )
         } else {
-            enrichment_snippet(sym.return_type.as_ref(), &mut tab_stop, class_loader)
+            enrichment_snippet(
+                sym.return_type.as_ref(),
+                &mut tab_stop,
+                class_loader,
+                use_map,
+                file_namespace,
+            )
         }
     };
 
@@ -500,7 +539,9 @@ fn build_function_plain(
     // Collect @param tags that need enrichment.
     let mut param_tags: Vec<(String, String)> = Vec::new();
     for (type_hint, name) in &sym.params {
-        if let Some(enriched) = enrichment_plain(type_hint.as_ref(), class_loader) {
+        if let Some(enriched) =
+            enrichment_plain(type_hint.as_ref(), class_loader, use_map, file_namespace)
+        {
             param_tags.push((enriched, name.clone()));
         }
     }
@@ -534,8 +575,18 @@ fn build_function_plain(
         // Fall back to signature-based enrichment when body inference
         // doesn't produce anything useful.
         inferred
-            .map(|t| t.to_string())
-            .or_else(|| enrichment_plain(sym.return_type.as_ref(), class_loader))
+            .map(|t| {
+                t.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
+                    .to_string()
+            })
+            .or_else(|| {
+                enrichment_plain(
+                    sym.return_type.as_ref(),
+                    class_loader,
+                    use_map,
+                    file_namespace,
+                )
+            })
     };
 
     let has_throws = !uncaught.is_empty();

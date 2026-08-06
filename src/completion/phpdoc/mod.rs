@@ -651,13 +651,26 @@ pub fn build_phpdoc_completions(
                             // Plain label for display.
                             let label_type = smart
                                 .class_loader
-                                .and_then(|cl| generation::enrichment_plain(Some(th), cl))
-                                .unwrap_or_else(|| th.to_string());
+                                .and_then(|cl| {
+                                    generation::enrichment_plain(
+                                        Some(th),
+                                        cl,
+                                        use_map,
+                                        file_namespace,
+                                    )
+                                })
+                                .unwrap_or_else(|| shorten_php_type(th, use_map, file_namespace));
 
                             // Snippet insert text with tab stops on template params.
                             let mut tab_stop = 1u32;
                             let snippet_type = smart.class_loader.and_then(|cl| {
-                                generation::enrichment_snippet(Some(th), &mut tab_stop, cl)
+                                generation::enrichment_snippet(
+                                    Some(th),
+                                    &mut tab_stop,
+                                    cl,
+                                    use_map,
+                                    file_namespace,
+                                )
                             });
 
                             if let Some(snippet) = snippet_type {
@@ -711,13 +724,21 @@ pub fn build_phpdoc_completions(
                     // Plain label for display.
                     let label_type = smart
                         .class_loader
-                        .and_then(|cl| generation::enrichment_plain(Some(ret), cl))
-                        .unwrap_or_else(|| ret.to_string());
+                        .and_then(|cl| {
+                            generation::enrichment_plain(Some(ret), cl, use_map, file_namespace)
+                        })
+                        .unwrap_or_else(|| shorten_php_type(ret, use_map, file_namespace));
 
                     // Snippet insert text with tab stops on template params.
                     let mut tab_stop = 1u32;
                     let snippet_type = smart.class_loader.and_then(|cl| {
-                        generation::enrichment_snippet(Some(ret), &mut tab_stop, cl)
+                        generation::enrichment_snippet(
+                            Some(ret),
+                            &mut tab_stop,
+                            cl,
+                            use_map,
+                            file_namespace,
+                        )
                     });
 
                     let (insert, fmt) = if let Some(snippet) = snippet_type {
@@ -810,14 +831,22 @@ pub fn build_phpdoc_completions(
                 // Plain label for display.
                 let label_type = smart
                     .class_loader
-                    .and_then(|cl| generation::enrichment_plain(Some(th), cl))
-                    .unwrap_or_else(|| th.to_string());
+                    .and_then(|cl| {
+                        generation::enrichment_plain(Some(th), cl, use_map, file_namespace)
+                    })
+                    .unwrap_or_else(|| shorten_php_type(th, use_map, file_namespace));
 
                 // Snippet insert text with tab stops on template params.
                 let mut tab_stop = 1u32;
-                let snippet_type = smart
-                    .class_loader
-                    .and_then(|cl| generation::enrichment_snippet(Some(th), &mut tab_stop, cl));
+                let snippet_type = smart.class_loader.and_then(|cl| {
+                    generation::enrichment_snippet(
+                        Some(th),
+                        &mut tab_stop,
+                        cl,
+                        use_map,
+                        file_namespace,
+                    )
+                });
 
                 let (insert, fmt) = if let Some(snippet) = snippet_type {
                     (format!("var {}", snippet), Some(InsertTextFormat::SNIPPET))
@@ -849,16 +878,29 @@ pub fn build_phpdoc_completions(
                     // (snippet with tab stops on template parameters).
                     let label_type = smart
                         .class_loader
-                        .and_then(|cl| generation::enrichment_plain(Some(parsed_ty), cl))
-                        .unwrap_or_else(|| parsed_ty.to_string());
+                        .and_then(|cl| {
+                            generation::enrichment_plain(
+                                Some(parsed_ty),
+                                cl,
+                                use_map,
+                                file_namespace,
+                            )
+                        })
+                        .unwrap_or_else(|| shorten_php_type(parsed_ty, use_map, file_namespace));
 
                     let mut tab_stop = 1u32;
                     let snippet_type = smart
                         .class_loader
                         .and_then(|cl| {
-                            generation::enrichment_snippet(Some(parsed_ty), &mut tab_stop, cl)
+                            generation::enrichment_snippet(
+                                Some(parsed_ty),
+                                &mut tab_stop,
+                                cl,
+                                use_map,
+                                file_namespace,
+                            )
                         })
-                        .unwrap_or_else(|| format!("${{1:{}}}", parsed_ty));
+                        .unwrap_or_else(|| format!("${{1:{}}}", label_type));
 
                     items.push(CompletionItem {
                         label: format!("@var {}", label_type),
@@ -926,4 +968,17 @@ pub fn build_phpdoc_completions(
     }
 
     items
+}
+
+/// Shorten a resolved type's class-like names using the file's `use`-map
+/// and namespace, so a type that needs no enrichment still displays the
+/// way the file would reference it (e.g. `Collection` instead of
+/// `App\Collection` when the file has `use App\Collection;`).
+fn shorten_php_type(
+    ty: &PhpType,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+) -> String {
+    ty.resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace))
+        .to_string()
 }

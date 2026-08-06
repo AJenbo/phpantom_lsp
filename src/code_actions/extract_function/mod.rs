@@ -296,6 +296,8 @@ impl Backend {
             &raw_return_type_for_docblock,
             &member_indent,
             &class_loader,
+            &ctx.use_map,
+            &ctx.namespace,
         );
 
         // ── Build ExtractionInfo ────────────────────────────────────

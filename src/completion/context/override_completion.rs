@@ -824,23 +824,8 @@ fn shorten_type_display(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
-    ty.resolve_names(&|name| {
-        for (short, fqn) in use_map {
-            if fqn.trim_start_matches('\\') == name {
-                return short.clone();
-            }
-        }
-        if let Some(ns) = file_namespace {
-            let prefix = format!("{ns}\\");
-            if let Some(rest) = name.strip_prefix(&prefix)
-                && !rest.contains('\\')
-            {
-                return rest.to_string();
-            }
-        }
-        name.to_string()
-    })
-    .to_string()
+    ty.resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace))
+        .to_string()
 }
 
 /// Extract the partial method name and its LSP range at the cursor.

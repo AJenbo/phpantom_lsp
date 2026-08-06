@@ -2358,7 +2358,8 @@ async fn test_phpdoc_inline_var_immediate_assignment() {
 }
 
 /// Inline @var with an inferred class type should enrich it with
-/// template parameters from @template when a class loader is available.
+/// template parameters from @template when a class loader is available,
+/// and shorten the class name using the file's `use` import.
 #[tokio::test]
 async fn test_phpdoc_inline_var_enriched_with_templates() {
     let (backend, _dir) = create_psr4_workspace(
@@ -2391,13 +2392,13 @@ async fn test_phpdoc_inline_var_enriched_with_templates() {
     );
     let v = var_item.unwrap();
     assert_eq!(
-        v.label, "@var App\\Collection<TKey, TValue>",
-        "Inferred Collection type should be enriched with template params"
+        v.label, "@var Collection<TKey, TValue>",
+        "Inferred Collection type should be enriched with template params and shortened via the use import"
     );
     assert_eq!(
         v.insert_text.as_deref(),
-        Some("var App\\Collection<${1:TKey}, ${2:TValue}>"),
-        "Insert text should contain enriched type with tab stops on template params"
+        Some("var Collection<${1:TKey}, ${2:TValue}>"),
+        "Insert text should contain enriched type with tab stops on template params, shortened via the use import"
     );
     assert_eq!(
         v.insert_text_format,

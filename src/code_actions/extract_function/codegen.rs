@@ -53,8 +53,13 @@ pub(crate) fn build_docblock_for_extraction(
     raw_return_type: &PhpType,
     member_indent: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    use_map: &std::collections::HashMap<String, String>,
+    file_namespace: &Option<String>,
 ) -> String {
     let mut tags: Vec<String> = Vec::new();
+    let shorten = |ty: &PhpType| {
+        ty.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
+    };
 
     // Collect @param tags that need enrichment.
     for (name, type_hint, raw) in params {
@@ -64,11 +69,16 @@ pub(crate) fn build_docblock_for_extraction(
         }
         // Prefer the raw resolved type when it carries concrete generics.
         if raw.has_type_structure() {
-            tags.push(format!("@param {} {}", raw, name));
+            tags.push(format!("@param {} {}", shorten(raw), name));
             continue;
         }
         let type_for_enrichment = if has_native_hint { type_hint } else { raw };
-        if let Some(enriched) = enrichment_plain(Some(type_for_enrichment), class_loader) {
+        if let Some(enriched) = enrichment_plain(
+            Some(type_for_enrichment),
+            class_loader,
+            use_map,
+            file_namespace,
+        ) {
             tags.push(format!("@param {} {}", enriched, name));
         }
     }
@@ -76,14 +86,16 @@ pub(crate) fn build_docblock_for_extraction(
     // Collect @return tag if the return type needs enrichment.
     if !return_type_hint.is_empty() || !raw_return_type.is_empty() {
         if raw_return_type.has_type_structure() {
-            tags.push(format!("@return {}", raw_return_type));
+            tags.push(format!("@return {}", shorten(raw_return_type)));
         } else {
             let hint = if return_type_hint.is_empty() {
                 raw_return_type
             } else {
                 return_type_hint
             };
-            if let Some(enriched) = enrichment_plain(Some(hint), class_loader) {
+            if let Some(enriched) =
+                enrichment_plain(Some(hint), class_loader, use_map, file_namespace)
+            {
                 tags.push(format!("@return {}", enriched));
             }
         }

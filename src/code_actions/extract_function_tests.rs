@@ -2038,6 +2038,8 @@ fn docblock_not_generated_for_scalar_types() {
         &PhpType::parse("void"),
         "    ",
         &no_classes,
+        &std::collections::HashMap::new(),
+        &None,
     );
     assert!(
         result.is_empty(),
@@ -2058,6 +2060,8 @@ fn docblock_generated_for_array_param() {
         &PhpType::parse("void"),
         "    ",
         &no_classes,
+        &std::collections::HashMap::new(),
+        &None,
     );
     assert!(
         result.contains("@param"),
@@ -2081,6 +2085,8 @@ fn docblock_generated_for_callable_param() {
         &PhpType::parse("void"),
         "    ",
         &no_classes,
+        &std::collections::HashMap::new(),
+        &None,
     );
     assert!(
         result.contains("@param"),
@@ -2098,6 +2104,8 @@ fn docblock_not_generated_for_empty_types() {
         &PhpType::untyped(),
         "",
         &no_classes,
+        &std::collections::HashMap::new(),
+        &None,
     );
     assert!(
         result.is_empty(),
@@ -2125,6 +2133,8 @@ fn docblock_aligns_param_names() {
         &PhpType::parse("void"),
         "",
         &no_classes,
+        &std::collections::HashMap::new(),
+        &None,
     );
     // Both @param tags should be present.
     let param_lines: Vec<&str> = result.lines().filter(|l| l.contains("@param")).collect();
@@ -2200,6 +2210,8 @@ fn definition_includes_docblock_for_array_param() {
             &PhpType::parse("void"),
             "",
             &no_classes,
+            &std::collections::HashMap::new(),
+            &None,
         ),
     };
     let def = build_extracted_definition(&info);
@@ -2250,6 +2262,8 @@ fn definition_no_docblock_for_scalar_params() {
             &PhpType::parse("int"),
             "",
             &no_classes,
+            &std::collections::HashMap::new(),
+            &None,
         ),
     };
     let def = build_extracted_definition(&info);
