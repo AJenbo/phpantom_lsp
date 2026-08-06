@@ -61,6 +61,20 @@ pub(crate) fn is_type_compatible(
     // see the class-hierarchy section below for how the supertype-where-
     // subtype hatch was retired.
 
+    // A conditional that survived resolution (the call-site arguments that
+    // would decide it were not available) is a type expression, not a set
+    // of values — comparing a concrete type against it can only fail.
+    // Compare against the union of its branches instead, which is what the
+    // value satisfies however the condition resolves.
+    if arg_type.contains_conditional() || param_type.contains_conditional() {
+        return is_type_compatible(
+            &arg_type.conditionals_as_branch_unions(),
+            &param_type.conditionals_as_branch_unions(),
+            class_loader,
+            strict_types,
+        );
+    }
+
     // Skip if either type is unresolved/unknown.
     if arg_type.is_untyped() || param_type.is_untyped() {
         return true;

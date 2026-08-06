@@ -6862,3 +6862,83 @@ function test(): void {
         "OR short-circuit should narrow $x to int on RHS, got: {diags:?}"
     );
 }
+
+#[test]
+fn conditional_nested_in_generic_return_collapses_against_call_args() {
+    // `groupBy('key')` returns `static<($groupBy is array|string ? array-key
+    // : TGroupKey), …>`. Grouping by a string decides the condition, so the
+    // result's key type is `array-key` and a string key satisfies `get()`.
+    // Left unevaluated, the conditional binds to `TKey` and no argument can
+    // ever match it.
+    let php = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Coll
+{
+    /**
+     * @template TGroupKey of array-key
+     *
+     * @param  (callable(TValue, TKey): TGroupKey)|array|string  $groupBy
+     * @return static<
+     *  ($groupBy is (array|string)
+     *      ? array-key
+     *      : TGroupKey),
+     *  static<TKey, TValue>
+     * >
+     */
+    public function groupBy($groupBy) {}
+
+    /**
+     * @param  TKey  $key
+     * @return TValue|null
+     */
+    public function get($key) {}
+}
+
+function test(Coll $c): void
+{
+    $c->groupBy('key')->get('bucket');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "a conditional nested in the generic return must collapse against the call args, got: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn undecided_conditional_param_type_compares_as_branch_union() {
+    // The condition names a parameter of an earlier call, so it cannot be
+    // decided here. The value still satisfies one branch or the other, so
+    // compare against `int|string` — a string passes, an object does not.
+    let php = r#"<?php
+class Bucket {}
+
+class Holder
+{
+    /** @param ($unknown is int ? int : string) $key */
+    public function take($key): void {}
+}
+
+function test(Holder $h): void
+{
+    $h->take('bucket');
+    $h->take(new Bucket());
+}
+"#;
+    let diags = collect(php);
+    let messages = type_error_messages(&diags);
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the DateTime argument may be rejected, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("expects int|string"),
+        "the message must name the collapsed branch union, got: {messages:?}"
+    );
+}

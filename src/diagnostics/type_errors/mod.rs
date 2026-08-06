@@ -703,12 +703,15 @@ impl Backend {
                 // Always show full type names (FQN) so the developer
                 // can actually find and fix the types.  Short names
                 // strip the namespace which is the very information
-                // needed to resolve the mismatch.
+                // needed to resolve the mismatch.  Report the same
+                // branch-union collapse the compatibility check made, so
+                // an undecided conditional is named by the types it can
+                // actually be rather than as a type expression.
                 let message = format!(
                     "Argument {} ({}) expects {}, got {}",
                     arg_idx + 1,
                     param_name,
-                    effective_param_type,
+                    effective_param_type.conditionals_as_branch_unions(),
                     arg_type,
                 );
 

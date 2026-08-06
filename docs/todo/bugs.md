@@ -105,27 +105,3 @@ analyse pass leaves those maps unpopulated for the files it walks, or the
 composer package and builds the command, macro, morph-map, and provider
 resource indexes under an `is_laravel()` check, so start by confirming
 which of the two gates closes.
-#### B24. A conditional parameter type is compared without being evaluated
-
-**Impact: Medium · Effort: Medium**
-
-A parameter whose type comes from a conditional is compared against the
-argument as a raw, unevaluated conditional, so a value that satisfies
-*every* branch is still rejected:
-
-```
-Argument 1 ($key) expects $groupBy is array|string ? array-key : array-key, got 'bucket'
-```
-
-Both branches here are `array-key` and `'bucket'` is a string, so the
-call is valid no matter how the condition resolves. The compatibility
-check never collapses the conditional, so it compares a string against a
-type expression that no value can match.
-
-Collapsing a conditional whose branches are identical is the cheap first
-step; the general fix is to evaluate the condition against the call's
-bound arguments before comparing, and fall back to the union of the
-branches when it cannot be decided.
-
-**Reproduce:** `examples/demo.php`, the `$collection->groupBy('key')->get('bucket')`
-line in the generics section.

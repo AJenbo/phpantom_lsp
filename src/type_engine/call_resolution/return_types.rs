@@ -418,6 +418,8 @@ impl Backend {
                     let mut template_subs = class_level_subs;
                     template_subs.extend(method_subs);
 
+                    let var_resolver = build_var_resolver(ctx);
+
                     // Capture the return type hint from the first owner
                     // that has the method.  Apply template substitutions
                     // so that generic return types like `T` are resolved
@@ -436,6 +438,35 @@ impl Backend {
                                     ret.substitute(&template_subs)
                                 } else {
                                     ret.clone()
+                                };
+                                // Collapse any conditional nested inside the
+                                // return type (e.g. `Collection<($k is
+                                // array|string ? array-key : TGroupKey), …>`)
+                                // against this call's arguments.  The hint
+                                // becomes the receiver type of the next link
+                                // in the chain, so a conditional left raw here
+                                // ends up bound to a class-level template
+                                // parameter and is later compared against an
+                                // argument as an uninhabited type expression.
+                                let substituted = if substituted.contains_conditional() {
+                                    let arg_ty_resolver =
+                                        |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+                                    let tpl = TemplateContext {
+                                        defaults: Some(&template_subs),
+                                        params: &m.template_params,
+                                        arg_type_resolver: Some(&arg_ty_resolver),
+                                    };
+                                    crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
+                                        &substituted,
+                                        &m.parameters,
+                                        text_args,
+                                        Some(&var_resolver),
+                                        ctx.current_class.map(|c| c.name.as_str()),
+                                        ctx.class_loader,
+                                        &tpl,
+                                    )
+                                } else {
+                                    substituted
                                 };
                                 // Resolve self/static/parent keywords to
                                 // concrete class names so that downstream
@@ -471,7 +502,6 @@ impl Backend {
                             hint_captured = true;
                         }
                     }
-                    let var_resolver = build_var_resolver(ctx);
                     let mr_ctx = MethodReturnCtx {
                         all_classes: ctx.all_classes,
                         class_loader: ctx.class_loader,

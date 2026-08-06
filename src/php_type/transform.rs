@@ -552,6 +552,94 @@ impl PhpType {
         })
     }
 
+    /// Replace every [`TypeKind::Conditional`] in this type tree with the
+    /// union of its branches.
+    ///
+    /// A conditional whose condition has not been decided still describes a
+    /// value that satisfies one of its two branches, so `then|else` is the
+    /// tightest type that holds however the condition resolves — and, when
+    /// both branches are the same type, simply that type.  The raw
+    /// conditional is a type *expression*, not a set of values, so anything
+    /// that compares a concrete type against it (argument compatibility,
+    /// for instance) must collapse it first or nothing will ever match.
+    ///
+    /// Prefer evaluating the condition against the call's arguments when
+    /// they are available; this is the fallback for when they are not.
+    pub fn conditionals_as_branch_unions(&self) -> PhpType {
+        if !self.contains_conditional() {
+            return self.clone();
+        }
+        let recurse = |inner: &PhpType| inner.conditionals_as_branch_unions();
+        match self.kind() {
+            TypeKind::Conditional(c) => {
+                let mut members: Vec<PhpType> = Vec::new();
+                for branch in [&c.then_type, &c.else_type] {
+                    for member in recurse(branch).union_members() {
+                        if !members.contains(member) {
+                            members.push(member.clone());
+                        }
+                    }
+                }
+                match members.len() {
+                    1 => members.into_iter().next().expect("checked length"),
+                    _ => PhpType::union(members),
+                }
+            }
+            TypeKind::Nullable(inner) => PhpType::nullable(recurse(inner)),
+            TypeKind::Array(inner) => PhpType::array_of(recurse(inner)),
+            TypeKind::Union(members) => PhpType::union(members.iter().map(recurse).collect()),
+            TypeKind::Intersection(members) => {
+                PhpType::intersection(members.iter().map(recurse).collect())
+            }
+            TypeKind::Generic(g) => {
+                PhpType::generic_atom(g.name, g.args.iter().map(recurse).collect())
+            }
+            TypeKind::ArrayShape(entries) => PhpType::array_shape(
+                entries
+                    .iter()
+                    .map(|e| ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: recurse(&e.value_type),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            TypeKind::ObjectShape(entries) => PhpType::object_shape(
+                entries
+                    .iter()
+                    .map(|e| ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: recurse(&e.value_type),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            TypeKind::Callable(c) => PhpType::callable_type(CallableType {
+                kind: c.kind,
+                params: c
+                    .params
+                    .iter()
+                    .map(|p| CallableParam {
+                        type_hint: recurse(&p.type_hint),
+                        optional: p.optional,
+                        variadic: p.variadic,
+                    })
+                    .collect(),
+                return_type: c.return_type.as_ref().map(recurse),
+            }),
+            TypeKind::ClassString(inner) => PhpType::class_string(inner.as_ref().map(recurse)),
+            TypeKind::InterfaceString(inner) => {
+                PhpType::interface_string(inner.as_ref().map(recurse))
+            }
+            TypeKind::KeyOf(inner) => PhpType::key_of(recurse(inner)),
+            TypeKind::ValueOf(inner) => PhpType::value_of(recurse(inner)),
+            TypeKind::IndexAccess(base, index) => {
+                PhpType::index_access(recurse(base), recurse(index))
+            }
+            _ => self.clone(),
+        }
+    }
+
     /// Walk the type tree looking for a named type whose name satisfies
     /// `pred`.
     fn contains_name_matching(&self, pred: &dyn Fn(&str) -> bool) -> bool {
