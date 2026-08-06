@@ -17,6 +17,24 @@ use crate::php_type::{
 };
 use crate::types::ClassInfo;
 
+/// Returns `true` when the type names a class by an unqualified short name
+/// the project cannot load.  Covers both `Foo` and `Foo<Bar>`: a generic
+/// whose base name is unresolvable is just as unverifiable as a plain one.
+fn is_unloadable_short_name(
+    ty: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
+        TypeKind::Generic(g) => g.name.as_str(),
+        _ => return false,
+    };
+    !name.contains('\\')
+        && !crate::php_type::is_builtin_non_class_type(name)
+        && !is_array_like_name(name)
+        && class_loader(name).is_none()
+}
+
 /// Returns `true` when the type is a bare unparameterised `array`.
 fn is_bare_array(ty: &PhpType) -> bool {
     matches!(ty.kind(), TypeKind::Named(n) if n.eq_ignore_ascii_case("array"))
@@ -101,28 +119,20 @@ pub(crate) fn is_type_compatible(
         return true;
     }
 
-    // Skip when the param type is a Named type that can't be loaded as a
+    // Skip when the param type has a base name that can't be loaded as a
     // class and has no namespace separator — it's likely a @phpstan-type /
     // @psalm-type alias that we couldn't expand.  We can't verify
     // compatibility without the underlying type, so suppress to avoid
     // false positives.  Namespaced types (containing `\`) are real class
     // references that should still be checked.
-    if let TypeKind::Named(name) = param_type.kind()
-        && !name.contains('\\')
-        && !crate::php_type::is_builtin_non_class_type(name)
-        && class_loader(name).is_none()
-    {
+    if is_unloadable_short_name(param_type, class_loader) {
         return true;
     }
 
     // Same escape hatch for the argument type — an unexpanded
     // @phpstan-type / @psalm-type alias on the arg side would also
     // cause false positives (e.g. `Payload` passed to `?array`).
-    if let TypeKind::Named(name) = arg_type.kind()
-        && !name.contains('\\')
-        && !crate::php_type::is_builtin_non_class_type(name)
-        && class_loader(name).is_none()
-    {
+    if is_unloadable_short_name(arg_type, class_loader) {
         return true;
     }
 

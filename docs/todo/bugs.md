@@ -7,41 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B20. A class constructed from a string literal picks up a `bool` generic argument
-
-**Impact: Medium · Effort: Medium**
-
-`new \Acme\Decimal\Decimal('0.00')` resolves to `Decimal<bool>`, and the
-value is then rejected against a plain `Decimal` parameter:
-
-```
-Argument 1 ($amount) expects Acme\Decimal\Decimal, got Decimal<bool>
-```
-
-The generic argument is nonsense: the class is constructed from a string
-literal and nothing in the call binds a `bool`. Because the reported type
-is wrong, the diagnostic is a false positive, and it accounts for the
-argument mismatches the analyzer reports on large Laravel projects.
-
-Two contributing factors are worth separating when it is fixed:
-
-1. Whatever binds `bool` as the template argument of a class constructed
-   from a string literal. Start at `classify_template_binding` /
-   `remap_inherited_ctor_subs` in
-   `type_engine/variable/rhs_resolution/instantiation.rs`, and check what
-   the class's own `@template` bound resolves to when the constructor
-   argument is a literal.
-2. `is_type_compatible`'s unloadable-short-name escape hatch only
-   inspects `TypeKind::Named`, so a `Generic` whose base name cannot be
-   loaded (here `Decimal` written without its namespace) skips the hatch
-   and is compared anyway. Widening the hatch does not fix the wrong
-   type, but it stops a name the project cannot even load from producing
-   a mismatch.
-
-**Reproduce:** point `analyze` at a project that constructs a generic
-class from a string literal and passes it to a parameter typed with the
-bare class.
-
 #### B22. `find_open_quote` is blind to comments on the cursor's own line
 
 **Impact: Low · Effort: Low**
@@ -105,3 +70,26 @@ analyse pass leaves those maps unpopulated for the files it walks, or the
 composer package and builds the command, macro, morph-map, and provider
 resource indexes under an `is_laravel()` check, so start by confirming
 which of the two gates closes.
+
+#### B25. Generated PHPDoc types are written as FQNs even when the file imports them
+
+**Impact: Low · Effort: Low**
+
+The inline `@var` completion (and the `@param`/`@return` enrichment that
+shares `enrichment_plain_typed` in
+`src/completion/phpdoc/generation/build.rs`) formats the inferred type
+from the resolved `PhpType`, which always carries the fully qualified
+name. A file that already has `use App\Collection;` still gets
+
+```php
+/** @var App\Collection<TKey, TValue> */
+```
+
+instead of the shorter `Collection<TKey, TValue>` the developer would
+write. The result is correct, just noisier than it needs to be, and it
+does not match the class-name completion path, which does consult the
+`use` map.
+
+`enrichment_plain_typed` takes only a class loader, so the fix is to
+thread the file's use map and namespace through to it and shorten each
+class-like name that resolves back to the same class.

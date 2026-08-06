@@ -1126,7 +1126,7 @@ impl Backend {
                                 );
                             if let Some(ref mut hint_out) = return_type_hint_out {
                                 **hint_out =
-                                    Some(PhpType::generic_atom(substituted.name, type_args));
+                                    Some(PhpType::generic_atom(substituted.fqn(), type_args));
                             }
                             return vec![substituted];
                         }
@@ -1142,7 +1142,7 @@ impl Backend {
                     &type_args,
                 );
                 if let Some(ref mut hint_out) = return_type_hint_out {
-                    **hint_out = Some(PhpType::generic_atom(substituted.name, type_args));
+                    **hint_out = Some(PhpType::generic_atom(substituted.fqn(), type_args));
                 }
                 vec![substituted]
             }

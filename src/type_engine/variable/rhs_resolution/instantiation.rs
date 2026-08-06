@@ -214,7 +214,7 @@ pub(super) fn resolve_rhs_instantiation(
                         }
 
                         let generic_type =
-                            PhpType::generic_atom(substituted.name, type_args.clone());
+                            PhpType::generic_atom(substituted.fqn(), type_args.clone());
                         return vec![ResolvedType::from_both(generic_type, substituted)];
                     }
                 }
@@ -235,7 +235,7 @@ pub(super) fn resolve_rhs_instantiation(
                 ctx.resolved_class_cache,
                 &type_args,
             );
-            let generic_type = PhpType::generic_atom(substituted.name, type_args.clone());
+            let generic_type = PhpType::generic_atom(substituted.fqn(), type_args.clone());
             return vec![ResolvedType::from_both_arc(generic_type, substituted)];
         }
 

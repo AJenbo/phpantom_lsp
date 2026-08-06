@@ -2391,12 +2391,12 @@ async fn test_phpdoc_inline_var_enriched_with_templates() {
     );
     let v = var_item.unwrap();
     assert_eq!(
-        v.label, "@var Collection<TKey, TValue>",
+        v.label, "@var App\\Collection<TKey, TValue>",
         "Inferred Collection type should be enriched with template params"
     );
     assert_eq!(
         v.insert_text.as_deref(),
-        Some("var Collection<${1:TKey}, ${2:TValue}>"),
+        Some("var App\\Collection<${1:TKey}, ${2:TValue}>"),
         "Insert text should contain enriched type with tab stops on template params"
     );
     assert_eq!(

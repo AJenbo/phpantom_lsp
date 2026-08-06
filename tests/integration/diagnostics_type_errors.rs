@@ -6942,3 +6942,77 @@ function test(Holder $h): void
         "the message must name the collapsed branch union, got: {messages:?}"
     );
 }
+
+/// A generic class instantiated with no template-binding constructor
+/// argument resolves its template params to their declared bounds, and the
+/// resulting `Foo<bound>` type must carry the class's fully qualified name.
+/// A short base name is unloadable from the call site's namespace, so the
+/// value looked incompatible with a parameter typed by the same class.
+#[test]
+fn instantiated_generic_resolved_to_bounds_matches_plain_parameter() {
+    use crate::common::create_psr4_workspace;
+
+    const COMPOSER: &str =
+        r#"{"autoload": {"psr-4": {"App\\": "app/", "Acme\\Decimal\\": "dec/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            (
+                "dec/Decimal.php",
+                r#"<?php
+namespace Acme\Decimal;
+
+/**
+ * @template-covariant TNotZero of bool = bool
+ */
+final class Decimal {
+    public function __construct(int|self|string $value) {}
+}
+"#,
+            ),
+            (
+                "app/Helper.php",
+                r#"<?php
+namespace App;
+
+use Acme\Decimal\Decimal;
+
+class Helper {
+    public static function formatPrice(Decimal $amount): string { return ''; }
+}
+"#,
+            ),
+        ],
+    );
+    let uri = format!("file://{}/app/Run.php", dir.path().display());
+    let php = "<?php\n\\App\\Helper::formatPrice(new \\Acme\\Decimal\\Decimal('0.00'));\n";
+    backend.update_ast(&uri, php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, php, &mut out);
+    assert!(
+        !has_type_error(&out),
+        "expected no type error, got {:?}",
+        type_error_messages(&out)
+    );
+}
+
+/// An unexpanded `@phpstan-type` alias used with generic arguments
+/// (`Results<int>`) is as unverifiable as the bare alias name, so it must
+/// not produce a mismatch either.
+#[test]
+fn unloadable_short_generic_name_does_not_report_a_mismatch() {
+    let php = r#"<?php
+/**
+ * @param Results<int> $r
+ */
+function takesResults($r): void {}
+
+takesResults([1, 2]);
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "expected no type error, got {:?}",
+        type_error_messages(&diags)
+    );
+}
