@@ -112,7 +112,8 @@ struct TestMeta {
     feature: Feature,
     /// Labels that must appear in completion results (from `// expect:`).
     expect: Vec<String>,
-    /// Labels that must NOT appear in completion results (from `// expect_absent:`).
+    /// Labels that must NOT appear in completion results, or substrings that
+    /// must NOT appear in hover text (from `// expect_absent:`).
     expect_absent: Vec<String>,
     /// Hover assertions: `symbol => substring` (from `// expect_hover:`).
     expect_hover: Vec<(String, String)>,
@@ -539,6 +540,7 @@ async fn run_hover(fixture: &ParsedFixture) -> Result<(), String> {
                             "Hover on `{symbol}` expected to contain `{expected_substring}`, got:\n{hover_text}"
                         ));
                     }
+                    check_hover_absent(fixture, &hover_text)?;
                 }
                 None => {
                     return Err(format!("No hover result for symbol `{symbol}`"));
@@ -577,6 +579,7 @@ async fn run_hover(fixture: &ParsedFixture) -> Result<(), String> {
                     ));
                 }
             }
+            check_hover_absent(fixture, &hover_text)?;
         }
         None => {
             if !fixture.meta.expect.is_empty() {
@@ -585,6 +588,21 @@ async fn run_hover(fixture: &ParsedFixture) -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+/// Verify none of the fixture's `// expect_absent:` substrings appear in the
+/// hover text.  This is what lets a hover fixture assert that a type was
+/// *dropped* (e.g. a variable keeping its pre-branch type past a dead
+/// branch), not merely that the expected type is somewhere in the union.
+fn check_hover_absent(fixture: &ParsedFixture, hover_text: &str) -> Result<(), String> {
+    for absent in &fixture.meta.expect_absent {
+        if hover_text.contains(absent.as_str()) {
+            return Err(format!(
+                "Hover should NOT contain `{absent}`, got:\n{hover_text}"
+            ));
+        }
+    }
     Ok(())
 }
 

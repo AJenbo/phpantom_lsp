@@ -446,6 +446,75 @@ class Consumer {
     );
 }
 
+/// A branch-merged union of literal scalars keeps every member.  Scalars
+/// share a single code block (there is no class to give its own namespace
+/// line), so the whole union is printed inline.
+#[test]
+fn hover_branch_merged_scalar_union_keeps_every_member() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function take(mixed $v): void {}
+
+function test(): void {
+    if (rand(0, 1)) { $x = 'a'; } else { $x = 42; }
+    take($x);
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 10).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$x = 'a'|42"),
+        "a scalar union merged from two branches must keep both members, got: {}",
+        text
+    );
+}
+
+/// A variable assigned before an `if` and reassigned inside it holds both
+/// the pre-branch type (the path that skips the `if`) and the in-branch
+/// type.  Hover must show both, not just whichever came first.
+#[test]
+fn hover_pre_branch_type_survives_one_sided_if() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+function test(): void {
+    $x = new Foo();
+    if (rand(0, 1)) {
+        $x = new Bar();
+    }
+    echo $x;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 14, 10).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$x = Foo"),
+        "the pre-branch type must survive a one-sided if, got: {}",
+        text
+    );
+    assert!(
+        text.contains("$x = Bar"),
+        "the in-branch type must be merged in, got: {}",
+        text
+    );
+    assert!(
+        text.contains("---"),
+        "union hover should use a horizontal rule separator, got: {}",
+        text
+    );
+}
+
 #[test]
 fn hover_ambiguous_variable_inside_if_branch_shows_single_type() {
     let backend = create_test_backend();

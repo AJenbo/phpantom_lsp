@@ -31,7 +31,7 @@ $f-><>
 | `// test:` | yes | no | Human-readable test name. Shown in test output. |
 | `// feature:` | yes | no | One of `completion`, `hover`, `definition`, `signature_help`. |
 | `// expect:` | depends | yes | **Completion/hover:** a label prefix (completion) or substring (hover) that must appear. |
-| `// expect_absent:` | no | yes | **Completion:** a label prefix that must NOT appear. |
+| `// expect_absent:` | no | yes | **Completion:** a label prefix that must NOT appear. **Hover:** a substring that must NOT appear. |
 | `// expect_hover:` | no | yes | `symbol => substring` fires a hover on `symbol` and checks the response contains `substring`. |
 | `// expect_definition:` | depends | yes | `self:LINE` or `file:LINE` (1-based). |
 | `// expect_sig_label:` | no | no | **Signature help:** the exact expected signature label. |
@@ -105,6 +105,11 @@ Two modes:
 2. **Symbol hover:** use `// expect_hover: symbol => substring` lines. The
    runner finds `symbol` in the source, hovers over it, and checks the
    response.
+
+Both modes also honour `// expect_absent:`, which asserts a substring is
+missing from the hover text. Pair it with `// expect:` whenever the hover
+renders a union, since a bare `// expect: Foo` passes even when the hover
+also shows `Bar`.
 
 ### `definition`
 

@@ -1,10 +1,10 @@
-// test: never return type is treated as dead code — variable retains pre-branch type
-// feature: completion
+// test: never return type is treated as dead code — hover shows the pre-branch type
+// feature: hover
 // Adapted from phpactor type/never.test
-// `never_return()` terminates the branch, so `$obj = new Bar()` is dead
-// and $obj is still Foo after the if.
-// expect: fooMethod(
-// expect_absent: barMethod(
+// `never_return()` terminates the branch, so `$obj = new Bar()` is dead and
+// hover on $obj after the if shows Foo alone, with no Bar branch merged in.
+// expect: $obj = Foo
+// expect_absent: Bar
 ---
 <?php
 
@@ -29,5 +29,5 @@ function test(): void {
         never_return();
     }
 
-    $obj-><>
+    echo $o<>bj;
 }
