@@ -127,7 +127,10 @@ fn detect_context(content: &str, position: Position) -> Option<DetectedContext> 
     let (quote_pos, _) =
         crate::completion::source::helpers::find_open_quote(content, cursor_offset)?;
     let prefix = content[quote_pos + 1..cursor_offset].to_string();
-    let before_quote = content[..quote_pos].trim_end();
+    // The lexical context of the quote: `code_before` ends at the last byte of
+    // code before it, so a comment between the call and the key is skipped.
+    let code = crate::completion::source::code_context::code_context_at(content, quote_pos)?;
+    let before_quote = code.code_before;
 
     // ── Own argument / option: `->argument('|')` / `->option('|')` ─────────
     if let Some(before_paren) = before_quote.strip_suffix('(') {
@@ -160,9 +163,9 @@ fn detect_context(content: &str, position: Position) -> Option<DetectedContext> 
     // ── Array key inside a command call's parameter array ──────────────────
     // e.g. `Artisan::call('app:sync', [ '|' => ... ])`.  The character before
     // the quote is `[` (first key) or `,` (subsequent key).
-    let last = before_quote.chars().last()?;
-    if (last == '[' || last == ',')
-        && let Some(command_name) = command_name_for_array_key(content, quote_pos)
+    let last = code.last_code_byte()?;
+    if (last == b'[' || last == b',')
+        && let Some(command_name) = command_name_for_array_key(content, &code)
     {
         return Some(DetectedContext {
             context: ParamContext::CallArrayKey { command_name },
@@ -174,13 +177,16 @@ fn detect_context(content: &str, position: Position) -> Option<DetectedContext> 
     None
 }
 
-/// Given the position of an array-key opening quote, resolve the command name
-/// of the enclosing `Artisan::call('name', [...])`-style call.
+/// Given the lexical context of an array-key opening quote, resolve the
+/// command name of the enclosing `Artisan::call('name', [...])`-style call.
 ///
 /// Returns `None` when the enclosing call is not a recognised
 /// command-running call.
-fn command_name_for_array_key(content: &str, quote_pos: usize) -> Option<String> {
-    let call = crate::completion::source::helpers::enclosing_array_key_call(content, quote_pos)?;
+fn command_name_for_array_key(
+    content: &str,
+    code: &crate::completion::source::code_context::CodeContext<'_>,
+) -> Option<String> {
+    let call = crate::completion::source::helpers::enclosing_array_key_call(content, code)?;
     let before_callee = call.before_callee;
 
     let recognised = if let Some(receiver) = before_callee.strip_suffix("::") {

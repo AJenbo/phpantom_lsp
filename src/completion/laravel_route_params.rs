@@ -8,6 +8,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::completion::source::code_context::code_context_at;
 use crate::completion::source::helpers::{enclosing_array_key_call, find_open_quote};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::virtual_members::laravel::route_uri_parameters;
@@ -27,15 +28,15 @@ struct RouteParamContext {
 fn detect_context(content: &str, position: Position) -> Option<RouteParamContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
     let (quote_pos, _) = find_open_quote(content, cursor_offset)?;
-    let before_quote = content[..quote_pos].trim_end();
+    let code = code_context_at(content, quote_pos)?;
 
     // The character before the key is `[` for the first key and `,` for the
     // ones after it.
-    if !matches!(before_quote.chars().last(), Some('[') | Some(',')) {
+    if !matches!(code.last_code_byte(), Some(b'[') | Some(b',')) {
         return None;
     }
 
-    let call = enclosing_array_key_call(content, quote_pos)?;
+    let call = enclosing_array_key_call(content, &code)?;
     let receiver_is_call = call.before_callee.ends_with("::") || call.before_callee.ends_with("->");
     let names_a_route = match call.callee.as_str() {
         // `signedRoute()` / `temporarySignedRoute()` only exist on the `URL`

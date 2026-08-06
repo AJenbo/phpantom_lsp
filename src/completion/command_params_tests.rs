@@ -61,6 +61,29 @@ fn detects_this_call_array_key() {
     }
 }
 
+/// A comment between the call and the key may hold any punctuation; it must
+/// not be read as part of the expression.
+#[test]
+fn detects_call_array_key_below_a_comment() {
+    let content = "<?php\nArtisan::call('app:sync', [ /* which one? ( */ 'us']);\n";
+    let d = ctx_at(content, "'us").expect("should detect past the comment");
+    match d.context {
+        ParamContext::CallArrayKey { command_name } => assert_eq!(command_name, "app:sync"),
+        _ => panic!("expected CallArrayKey"),
+    }
+    assert_eq!(d.prefix, "us");
+}
+
+/// The same for the own-argument form, where the comment sits between the
+/// method's `(` and the name being typed.
+#[test]
+fn detects_own_argument_below_a_comment() {
+    let content = "<?php\n$this->argument(/* which? */ 'us');\n";
+    let d = ctx_at(content, "'us").expect("should detect past the comment");
+    assert!(matches!(d.context, ParamContext::OwnArgument));
+    assert_eq!(d.prefix, "us");
+}
+
 #[test]
 fn plain_array_not_command_call() {
     let content = "<?php\nfoo('x', ['us']);\n";

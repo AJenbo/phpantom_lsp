@@ -136,6 +136,17 @@ async fn subsequent_parameter_completes() {
     assert_eq!(labels, vec!["user".to_string(), "post".to_string()]);
 }
 
+/// A comment between the call and the key may hold brackets, parentheses, and
+/// apostrophes; none of them belong to the expression.
+#[tokio::test]
+async fn parameters_complete_below_a_comment() {
+    let source = consumer(
+        "route('users.posts.show', [   // TODO: check (parameters), don't\n            '',\n        ]);",
+    );
+    let labels = labels_after(&source, "            '").await;
+    assert_eq!(labels, vec!["user".to_string(), "post".to_string()]);
+}
+
 #[tokio::test]
 async fn group_prefixed_route_offers_its_parameter() {
     let source = consumer("to_route('admin.bakeries.cancel', ['']);");

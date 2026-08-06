@@ -56,6 +56,17 @@ fn detects_key_in_a_multiline_parameters_array() {
     assert_eq!(ctx.prefix, "us");
 }
 
+/// A comment between the call and the key may hold any punctuation; it must
+/// not be read as part of the expression.
+#[test]
+fn detects_a_key_below_a_comment_holding_brackets_and_quotes() {
+    let content =
+        "<?php\nroute('users.show', [   // TODO: check (parameters), don't\n    'us' => 1,\n]);\n";
+    let ctx = ctx_at(content, "    'us").expect("should detect past the comment");
+    assert_eq!(ctx.route_name, "users.show");
+    assert_eq!(ctx.prefix, "us");
+}
+
 #[test]
 fn ignores_the_route_name_argument_itself() {
     let content = "<?php\nroute('users.');\n";

@@ -42,25 +42,66 @@ Two contributing factors are worth separating when it is fixed:
 class from a string literal and passes it to a parameter typed with the
 bare class.
 
-#### B21. Completion's backward scan is blind to comments
+#### B22. `find_open_quote` is blind to comments on the cursor's own line
 
-**Impact: Low · Effort: Medium**
+**Impact: Low · Effort: Low**
 
-`scan_back_to_opener` in `src/completion/source/helpers.rs` walks
-backwards from the cursor over brackets, parentheses, braces, and string
-literals, but does not skip `//`, `#`, or `/* … */` comments. A stray
-bracket or quote in a comment between the call and the cursor unbalances
-the walk, and the completion drops out:
+`find_open_quote` in `src/completion/source/helpers.rs` finds the string
+literal the cursor sits in by scanning forward from the start of the
+cursor's line, tracking quotes but not comments. An apostrophe in a
+comment earlier on that line is read as an opening quote, which pairs up
+with the real opener and leaves the cursor looking like it is outside a
+string, so every completion gated on it drops out:
 
 ```php
-route('users.show', [   // TODO: check (parameters)
-    '|' => 1,
-]);
+Artisan::call('app:sync', [ /* don't ( */ '|']);
 ```
 
-It fails closed (no suggestions rather than wrong ones), which is why it
-is low impact. The obstacle is that a backwards scan cannot tell a `//`
-inside a string from the start of a comment without a forward pass, so
-the fix likely means scanning the enclosing statement forward once and
-masking comments before the backwards walk, the way the Blade
-preprocessor masks non-PHP text.
+It fails closed. The line-scoped anchor is also why a literal opened on
+an earlier line is never seen (`$request->input(\n    'na|`).
+
+**Where to look:** `code_context_at`
+(`src/completion/source/code_context.rs`) already runs the forward
+lexical scan that resolves this exactly — comments, heredocs, inline HTML
+and all. Having it report the literal it ends inside, instead of only
+`None`, would let `find_open_quote` be built on it and fix both gaps at
+once. Note that this widens the scan from the cursor's line to the whole
+file, so an unterminated literal *above* the cursor would then make the
+cursor read as in-string; check the callers in
+`virtual_members/laravel/request_fields.rs`,
+`completion/eloquent_string.rs`, `completion/command_params.rs`, and
+`completion/laravel_route_params.rs` for how they cope with that.
+
+#### B23. `analyze` reports no Laravel string-key errors at all
+
+**Impact: Medium · Effort: Low-Medium**
+
+The `analyze` CLI no longer emits any of the Laravel string-key
+diagnostics (`invalid_laravel_route`, `invalid_laravel_config`,
+`invalid_laravel_view`, `invalid_laravel_trans`,
+`invalid_laravel_command`, `invalid_laravel_morph_alias`). The CI
+checklist in `docs/CONTRIBUTING.md` relies on one of them:
+`examples/laravel/app/Demo.php:428` calls
+`Artisan::call('does:not-exist')` so that
+`phpantom_lsp analyze --project-root examples/laravel --no-colour` must
+report exactly `[ERROR] Found 1 error`. It reports `[OK] No errors`.
+
+**Reproduce:** run `composer install` in `examples/laravel`, then the
+analyze command above. Adding further bogus keys (a
+`config('totally.bogus.key')`, a second unknown command) to a copy of
+that project does not produce errors either, so the whole family is
+silent rather than one kind of key resolving too permissively. The LSP's
+own tests for these diagnostics pass, so the gap is in what the analyse
+pass feeds them.
+
+**Where to look:** `collect_invalid_laravel_string_key_diagnostics`
+(`src/diagnostics/mod.rs`) returns early when `symbol_maps` holds no
+entry for the file, and every kind additionally skips when its
+enumeration comes back empty (the deliberate escape hatch for
+non-Laravel projects that also define `__()` or `trans()`). Either the
+analyse pass leaves those maps unpopulated for the files it walks, or the
+`is_laravel` gate at `src/diagnostics/mod.rs:361` reads false there.
+`src/analyse/run.rs` does call `init_single_project` with the parsed
+composer package and builds the command, macro, morph-map, and provider
+resource indexes under an `is_laravel()` check, so start by confirming
+which of the two gates closes.

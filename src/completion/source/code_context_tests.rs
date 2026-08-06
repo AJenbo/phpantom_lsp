@@ -1,0 +1,113 @@
+use super::*;
+
+/// Scan up to the last occurrence of `needle`, as if the cursor sat there.
+fn at<'a>(content: &'a str, needle: &str) -> Option<CodeContext<'a>> {
+    let offset = content.rfind(needle).expect("needle not found");
+    code_context_at(content, offset)
+}
+
+/// The byte the offset `pick` names in `content`.
+fn byte_at(content: &str, pick: usize) -> u8 {
+    content.as_bytes()[pick]
+}
+
+#[test]
+fn open_brackets_name_the_enclosing_array_and_call() {
+    let src = "<?php\nroute('users.show', ['user' => 1]);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    let (bracket, paren) = ctx.nested_pair(b'[', b'(').expect("a `[` nested in a `(`");
+    assert_eq!(byte_at(src, bracket), b'[');
+    assert_eq!(byte_at(src, paren), b'(');
+    assert_eq!(ctx.last_code_byte(), Some(b'['));
+}
+
+#[test]
+fn a_line_comment_between_the_call_and_the_key_does_not_unbalance_the_scan() {
+    let src = "<?php\nroute('users.show', [   // TODO: check (parameters)\n    'user' => 1,\n]);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    assert!(ctx.nested_pair(b'[', b'(').is_some());
+    assert_eq!(ctx.last_code_byte(), Some(b'['));
+}
+
+#[test]
+fn block_and_hash_comments_are_skipped_too() {
+    for src in [
+        "<?php\nroute('r', [ /* don't ( */ 'user' => 1]);\n",
+        "<?php\nroute('r', [ # don't (\n    'user' => 1]);\n",
+    ] {
+        let ctx = at(src, "'user'").unwrap_or_else(|| panic!("the offset is in code: {src}"));
+        assert!(
+            ctx.nested_pair(b'[', b'(').is_some(),
+            "expected a `[` nested in a `(`: {src}"
+        );
+        assert_eq!(ctx.last_code_byte(), Some(b'['), "in {src}");
+    }
+}
+
+#[test]
+fn an_attribute_is_not_a_hash_comment() {
+    let src = "<?php\n#[Route('/x')]\nfunction f() { $a = ['k' => 1]; }\n";
+    let ctx = at(src, "'k'").expect("the offset is in code");
+    let (_, brace) = ctx
+        .nested_pair(b'[', b'{')
+        .expect("the array is nested in the function body");
+    assert_eq!(byte_at(src, brace), b'{');
+}
+
+#[test]
+fn a_heredoc_body_cannot_unbalance_the_scan() {
+    let src = "<?php\n$sql = <<<SQL\n  select ( from '\nSQL;\nroute('r', ['user' => 1]);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    assert!(ctx.nested_pair(b'[', b'(').is_some());
+}
+
+#[test]
+fn inline_html_before_the_open_tag_is_not_read_as_code() {
+    let src = "<p>Don't (do) that</p>\n<?php route('r', ['user' => 1]);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    assert!(ctx.nested_pair(b'[', b'(').is_some());
+}
+
+#[test]
+fn a_close_tag_inside_a_line_comment_ends_the_php_block() {
+    let src = "<?php echo 1; // done ?>\n<p>'x' (</p>\n";
+    assert!(at(src, "'x'").is_none(), "the offset sits in inline HTML");
+}
+
+#[test]
+fn an_offset_inside_a_comment_or_a_string_has_no_context() {
+    assert!(at("<?php\n// route('r', ['user']);\n", "'user'").is_none());
+    assert!(at("<?php\n$s = 'route(\\'r\\', [';\n", "[").is_none());
+}
+
+#[test]
+fn code_before_stops_at_the_last_byte_of_code() {
+    let src = "<?php\nroute('r', [ // note\n    'user'\n]);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    assert!(
+        ctx.code_before.ends_with('['),
+        "trailing comment and whitespace should be cut off, got {:?}",
+        ctx.code_before
+    );
+}
+
+#[test]
+fn a_key_of_a_nested_array_is_not_a_key_of_the_call() {
+    let src = "<?php\nroute('r', ['a' => ['user' => 1]]);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    assert!(ctx.nested_pair(b'[', b'(').is_none());
+}
+
+#[test]
+fn a_fragment_with_no_open_tag_is_read_as_code() {
+    let src = "route('users.show', ['user' => 1]);";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    assert!(ctx.nested_pair(b'[', b'(').is_some());
+}
+
+#[test]
+fn an_unmatched_closer_leaves_the_brackets_that_do_pair_up() {
+    let src = "<?php\n$x = [1, 2);\nroute('r', ['user' => 1]);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    assert!(ctx.nested_pair(b'[', b'(').is_some());
+}

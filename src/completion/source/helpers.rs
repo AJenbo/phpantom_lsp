@@ -22,6 +22,7 @@
 use crate::atom::atom;
 use std::sync::Arc;
 
+use crate::completion::source::code_context::CodeContext;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{BracketSegment, ClassInfo};
 
@@ -82,21 +83,20 @@ pub(crate) struct ArrayKeyCall<'a> {
     pub before_callee: &'a str,
 }
 
-/// Given the offset of the opening quote of an array key being typed, resolve
-/// the enclosing `foo('name', [ '|' => … ])` call.
+/// Resolve the enclosing `foo('name', [ '|' => … ])` call from the lexical
+/// context of the array key being typed.
 ///
-/// Scans backwards for the `[` that opens the array, then for the `(` that
-/// opens the call's argument list, and reads the callee and the call's first
-/// argument.  The array need not follow the name directly, so the parameters
-/// of `temporarySignedRoute('users.show', $expiration, ['|' => 1])` are found
-/// as well.  Returns `None` when the surrounding text is not that shape.
-pub(crate) fn enclosing_array_key_call(
-    content: &str,
-    quote_pos: usize,
-) -> Option<ArrayKeyCall<'_>> {
-    let bytes = content.as_bytes();
-    let bracket_open = scan_back_to_opener(bytes, quote_pos, b'[')?;
-    let paren_open = scan_back_to_opener(bytes, bracket_open, b'(')?;
+/// The key's array must be the innermost bracket left open at the cursor and
+/// must itself sit directly inside a call's argument list; the callee and the
+/// call's first argument are then read from the text before that `(`.  The
+/// array need not follow the name directly, so the parameters of
+/// `temporarySignedRoute('users.show', $expiration, ['|' => 1])` are found as
+/// well.  Returns `None` when the surrounding text is not that shape.
+pub(crate) fn enclosing_array_key_call<'a>(
+    content: &'a str,
+    code: &CodeContext<'_>,
+) -> Option<ArrayKeyCall<'a>> {
+    let (_, paren_open) = code.nested_pair(b'[', b'(')?;
 
     let name = first_string_argument(content, paren_open)?;
     let (callee, before_callee) = split_trailing_ident(content[..paren_open].trim_end());
@@ -109,58 +109,6 @@ pub(crate) fn enclosing_array_key_call(
         callee: callee.to_ascii_lowercase(),
         before_callee: before_callee.trim_end(),
     })
-}
-
-/// Walk backwards from `from` to the `opener` byte that opens the construct
-/// the cursor sits in, skipping over anything nested inside balanced
-/// brackets, parentheses, braces, or a string literal.
-///
-/// Returns `None` at the start of the file, at a statement boundary, and at
-/// the opener of a *different* construct — so the scan stays inside the
-/// expression the cursor is in instead of latching onto a bracket in an
-/// earlier statement.
-fn scan_back_to_opener(bytes: &[u8], from: usize, opener: u8) -> Option<usize> {
-    let (mut brackets, mut parens, mut braces) = (0i32, 0i32, 0i32);
-    let mut i = from;
-    while i > 0 {
-        i -= 1;
-        let byte = bytes[i];
-        let nested = brackets > 0 || parens > 0 || braces > 0;
-        if byte == opener && !nested {
-            return Some(i);
-        }
-        match byte {
-            b']' => brackets += 1,
-            b')' => parens += 1,
-            b'}' => braces += 1,
-            // An opener we are not looking for, with nothing of its own kind
-            // left to close: the scan has left the enclosing expression.
-            b'[' if brackets == 0 => return None,
-            b'(' if parens == 0 => return None,
-            b'{' if braces == 0 => return None,
-            b'[' => brackets -= 1,
-            b'(' => parens -= 1,
-            b'{' => braces -= 1,
-            b';' if !nested => return None,
-            b'\'' | b'"' if !is_escaped(bytes, i) => {
-                // A closing quote: jump to the literal's opening quote so its
-                // contents cannot unbalance the scan.
-                let mut j = i;
-                loop {
-                    if j == 0 {
-                        return None;
-                    }
-                    j -= 1;
-                    if bytes[j] == byte && !is_escaped(bytes, j) {
-                        break;
-                    }
-                }
-                i = j;
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Whether the byte at `index` is preceded by an odd number of backslashes.
@@ -1103,22 +1051,25 @@ mod tests {
         assert_eq!(find_open_quote(content, content.len()), None);
     }
 
+    /// Resolve the call around the empty array key in `content`.
+    fn array_key_call(content: &str) -> Option<ArrayKeyCall<'_>> {
+        let quote_pos = content.rfind("''").unwrap();
+        let code = crate::completion::source::code_context::code_context_at(content, quote_pos)?;
+        enclosing_array_key_call(content, &code)
+    }
+
     /// The name is read up to the literal's real closing quote, so an escaped
     /// quote inside it does not truncate the value.
     #[test]
     fn call_name_keeps_an_escaped_quote() {
-        let content = "route('it\\'s', ['' => 1]);";
-        let quote_pos = content.rfind("''").unwrap();
-        let call = enclosing_array_key_call(content, quote_pos).expect("a route() call");
+        let call = array_key_call("route('it\\'s', ['' => 1]);").expect("a route() call");
         assert_eq!(call.name, "it\\'s");
         assert_eq!(call.callee, "route");
     }
 
     #[test]
     fn call_name_reads_a_plain_first_argument() {
-        let content = "route('users.show', ['' => 1]);";
-        let quote_pos = content.rfind("''").unwrap();
-        let call = enclosing_array_key_call(content, quote_pos).expect("a route() call");
+        let call = array_key_call("route('users.show', ['' => 1]);").expect("a route() call");
         assert_eq!(call.name, "users.show");
     }
 

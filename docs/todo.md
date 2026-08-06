@@ -108,7 +108,8 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |
-| B21 | [Completion's backward scan is blind to comments](todo/bugs.md#b21-completions-backward-scan-is-blind-to-comments)                                                           | Low         | Medium      |
+| B23 | [`analyze` reports no Laravel string-key errors at all](todo/bugs.md#b23-analyze-reports-no-laravel-string-key-errors-at-all)                                                 | Medium      | Low-Medium  |
+| B22 | [`find_open_quote` is blind to comments on the cursor's own line](todo/bugs.md#b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line)                             | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
