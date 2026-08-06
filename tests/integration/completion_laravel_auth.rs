@@ -10,6 +10,7 @@ const COMPOSER_JSON: &str = r#"{
         "psr-4": {
             "App\\": "src/",
             "App\\Models\\": "src/Models/",
+            "Illuminate\\Auth\\": "vendor/illuminate/Auth/",
             "Illuminate\\Contracts\\Auth\\": "vendor/illuminate/Contracts/Auth/",
             "Illuminate\\Http\\": "vendor/illuminate/Http/",
             "Illuminate\\Foundation\\Http\\": "vendor/illuminate/Foundation/Http/",
@@ -65,13 +66,45 @@ class Admin implements Authenticatable {
 ";
 
 /// The `Auth` facade, whose `guard()` returns a `Guard` for the named
-/// guard (`Auth::guard('admin')`).
+/// guard (`Auth::guard('admin')`) and whose `user()` exists only as a
+/// `@method` tag, mirroring Laravel's real facade.
 const AUTH_FACADE_PHP: &str = "\
 <?php
 namespace Illuminate\\Support\\Facades;
 use Illuminate\\Contracts\\Auth\\Guard;
+/**
+ * @method static \\Illuminate\\Contracts\\Auth\\Authenticatable|null user()
+ */
 class Auth {
     public static function guard($name = null): Guard { return null; }
+}
+";
+
+/// The `Factory` contract returned by a no-argument `auth()` call. It
+/// declares no `user()` of its own; that arrives via the `AuthManager`
+/// mixin injected for the contract.
+const AUTH_FACTORY_PHP: &str = "\
+<?php
+namespace Illuminate\\Contracts\\Auth;
+interface Factory {
+    public function guard($name = null);
+    public function shouldUse($name);
+}
+";
+
+/// The concrete `AuthManager` bound to the `Factory` contract, whose
+/// `@mixin Guard` forwards `user()` and friends to the default guard.
+const AUTH_MANAGER_PHP: &str = "\
+<?php
+namespace Illuminate\\Auth;
+use Illuminate\\Contracts\\Auth\\Factory;
+/**
+ * @mixin \\Illuminate\\Contracts\\Auth\\Guard
+ */
+class AuthManager implements Factory {
+    public function guard($name = null) { return null; }
+    public function shouldUse($name) {}
+    public function __call($method, $parameters) { return null; }
 }
 ";
 
@@ -99,6 +132,11 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
             "vendor/illuminate/Support/Facades/Auth.php",
             AUTH_FACADE_PHP,
         ),
+        (
+            "vendor/illuminate/Contracts/Auth/Factory.php",
+            AUTH_FACTORY_PHP,
+        ),
+        ("vendor/illuminate/Auth/AuthManager.php", AUTH_MANAGER_PHP),
         ("src/Models/User.php", USER_PHP),
         ("src/Models/Admin.php", ADMIN_PHP),
     ]
@@ -126,6 +164,17 @@ const MULTI_GUARD_CONFIG: (&str, &str) = (
 const AUTH_HELPER_PHP: &str = "\
 <?php
 function auth($guard = null): \\Illuminate\\Contracts\\Auth\\Guard { return null; }
+";
+
+/// Laravel 12+'s `auth()` helper, whose no-argument call resolves to the
+/// `Factory` contract via the conditional return type.
+const AUTH_FACTORY_HELPER_PHP: &str = "\
+<?php
+/**
+ * @param string|null $guard
+ * @return ($guard is null ? \\Illuminate\\Contracts\\Auth\\Factory : \\Illuminate\\Contracts\\Auth\\Guard)
+ */
+function auth($guard = null): \\Illuminate\\Contracts\\Auth\\Factory|\\Illuminate\\Contracts\\Auth\\Guard { return null; }
 ";
 
 async fn complete_labels(
@@ -686,5 +735,69 @@ class C {
     assert_eq!(
         location.range.start.line, 5,
         "isSuperUser() is declared on line 5 of Admin.php"
+    );
+}
+
+/// A no-argument `auth()` call resolves to the `Factory` contract, which
+/// gains `user()` through the injected `AuthManager` mixin; the returned
+/// user is the default guard's model.
+#[tokio::test]
+async fn no_arg_auth_helper_resolves_default_model_via_factory() {
+    let mut files = base_files();
+    files.push(MULTI_GUARD_CONFIG);
+
+    let controller = "\
+<?php
+namespace App;
+class C {
+    public function show() {
+        auth()->user()->
+    }
+}
+";
+    let labels = complete_labels_with_opens(
+        &files,
+        &[("src/helpers.php", AUTH_FACTORY_HELPER_PHP)],
+        "src/C.php",
+        controller,
+        4,
+        24,
+    )
+    .await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("isActive")),
+        "expected default guard's User::isActive via auth()->user(), got: {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("isSuperUser")),
+        "did not expect the admin guard's Admin::isSuperUser, got: {labels:?}"
+    );
+}
+
+/// `Auth::user()` exists only as a `@method` tag on the facade; the tag's
+/// return type is refined to the default guard's model.
+#[tokio::test]
+async fn auth_facade_user_method_tag_resolves_default_model() {
+    let mut files = base_files();
+    files.push(MULTI_GUARD_CONFIG);
+
+    let controller = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Auth;
+class C {
+    public function show() {
+        Auth::user()->
+    }
+}
+";
+    let labels = complete_labels(&files, "src/C.php", controller, 5, 22).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("isActive")),
+        "expected default guard's User::isActive via Auth::user(), got: {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("isSuperUser")),
+        "did not expect the admin guard's Admin::isSuperUser, got: {labels:?}"
     );
 }

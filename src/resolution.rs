@@ -214,7 +214,7 @@ impl Backend {
         // Refine the auth entry points' `user()` return type to the configured
         // model.  Gated on the cheap stored short name so the hot loader path
         // is untouched for every other class.
-        if matches!(loaded.name.as_str(), "Guard" | "Request") {
+        if matches!(loaded.name.as_str(), "Guard" | "Request" | "Auth") {
             loaded = crate::virtual_members::laravel::patch_auth_user_class(self, loaded);
         }
         // Add any Laravel macros registered on this class.  Gated on a cheap

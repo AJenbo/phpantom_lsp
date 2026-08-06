@@ -166,6 +166,10 @@ const HIGHER_ORDER_MESSAGE_FQN: &str = "Mockery\\HigherOrderMessage";
 pub(crate) fn contract_concrete_mixin(fqn: &str) -> Option<&'static str> {
     match fqn {
         "Illuminate\\Contracts\\View\\View" => Some("Illuminate\\View\\View"),
+        // `auth()` with no argument returns the `Factory` contract, but the
+        // container binds `AuthManager`, whose `@mixin Guard` supplies
+        // `user()`, `check()`, `id()`, … via `__call` to the default guard.
+        "Illuminate\\Contracts\\Auth\\Factory" => Some("Illuminate\\Auth\\AuthManager"),
         _ => None,
     }
 }

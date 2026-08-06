@@ -48,6 +48,10 @@ pub(crate) const GUARD_FQN: &str = "Illuminate\\Contracts\\Auth\\Guard";
 /// FQN of the HTTP request whose `user()` resolves the default-guard model.
 pub(crate) const REQUEST_FQN: &str = "Illuminate\\Http\\Request";
 
+/// FQN of the `Auth` facade whose `@method user()` tag resolves the
+/// default-guard model.
+pub(crate) const AUTH_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Auth";
+
 /// Refine `Guard::user()` / `Request::user()` to return the configured auth
 /// user model for the **default** guard, preserving the method's nullability.
 ///
@@ -64,7 +68,7 @@ pub(crate) const REQUEST_FQN: &str = "Illuminate\\Http\\Request";
 /// no `user()` method to refine.
 pub(crate) fn patch_auth_user_class(backend: &Backend, loaded: Arc<ClassInfo>) -> Arc<ClassInfo> {
     let fqn = loaded.fqn();
-    if fqn.as_str() != GUARD_FQN && fqn.as_str() != REQUEST_FQN {
+    if fqn.as_str() != GUARD_FQN && fqn.as_str() != REQUEST_FQN && fqn.as_str() != AUTH_FACADE_FQN {
         return loaded;
     }
 
@@ -82,20 +86,42 @@ pub(crate) fn patch_auth_user_class(backend: &Backend, loaded: Arc<ClassInfo>) -
             continue;
         }
         let method = Arc::make_mut(method);
-        // `user()` is declared `?Authenticatable`; keep the result nullable.
-        let nullable = method
-            .return_type
-            .as_ref()
-            .is_none_or(|rt| rt.accepts_null());
-        method.return_type = Some(if nullable {
-            PhpType::nullable(model_type.clone())
-        } else {
-            model_type.clone()
-        });
+        refine_user_return_type(method, &model_type);
         changed = true;
     }
 
+    // The `Auth` facade declares `user()` as a `@method` tag, not a real
+    // method; rewrite the parsed tag so the phpdoc provider materializes
+    // the virtual method with the configured model.
+    if let Some(doc) = patched.doc_members.as_ref()
+        && doc.methods.iter().any(|m| m.name.as_str() == "user")
+    {
+        let mut doc = (**doc).clone();
+        for method in &mut doc.methods {
+            if method.name.as_str() != "user" {
+                continue;
+            }
+            refine_user_return_type(Arc::make_mut(method), &model_type);
+            changed = true;
+        }
+        patched.doc_members = Some(Arc::new(doc));
+    }
+
     if changed { Arc::new(patched) } else { loaded }
+}
+
+/// Replace a `user()` method's return type with the configured model,
+/// preserving the declared `?Authenticatable` nullability.
+fn refine_user_return_type(method: &mut crate::types::MethodInfo, model_type: &PhpType) {
+    let nullable = method
+        .return_type
+        .as_ref()
+        .is_none_or(|rt| rt.accepts_null());
+    method.return_type = Some(if nullable {
+        PhpType::nullable(model_type.clone())
+    } else {
+        model_type.clone()
+    });
 }
 
 /// Resolve (and memoize) the authenticated-user model type for a guard.

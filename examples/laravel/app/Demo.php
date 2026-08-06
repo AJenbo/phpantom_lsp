@@ -526,6 +526,12 @@ class Demo
         $request->user()->isPremium();    // → Customer method
         $request->user()->name;           // → Customer property
 
+        // The no-argument entry points reach the same default guard model:
+        // auth() returns the Factory contract (which forwards to the default
+        // guard) and Auth::user() is declared as a facade @method tag.
+        auth()->user()->isPremium();      // → Customer method
+        Auth::user()->isPremium();        // → Customer method
+
         // Passing a guard name selects that guard's configured model.
         // The `admin` guard's provider maps to App\Models\Administrator,
         // so the user resolves to Administrator, not Customer.
