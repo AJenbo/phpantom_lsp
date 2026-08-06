@@ -896,6 +896,7 @@ impl Backend {
                     let return_from_lang_level = lang_level_return.is_some();
                     let native_return_type = lang_level_return.or(raw_native_return_type);
                     let is_static = method.modifiers.iter().any(|m| m.is_static());
+                    let is_final = method.modifiers.iter().any(|m| m.is_final());
                     let visibility = extract_visibility(method.modifiers.iter());
 
                     // Parse the method's docblock once and reuse the
@@ -1296,6 +1297,7 @@ impl Backend {
                         template_bindings: method_template_bindings,
                         has_scope_attribute: has_scope_attr,
                         is_abstract: method.is_abstract(),
+                        is_final,
                         is_virtual: false,
                         is_macro: false,
                         is_inferred_return: false,

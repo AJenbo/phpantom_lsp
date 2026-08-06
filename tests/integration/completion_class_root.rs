@@ -917,3 +917,120 @@ async fn type_hint_completion_after_visibility_still_works() {
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
 }
+
+/// PHP rejects redeclaring a `final` inherited method outright, so it must
+/// not be offered as an override candidate on either entry point.  A
+/// `final` method reached through a trait the editing class uses directly
+/// is a different story: the class's own declaration simply wins, so it
+/// stays on offer.
+#[tokio::test]
+async fn final_parent_methods_are_not_offered_as_overrides() {
+    let text = concat!(
+        "<?php\n",
+        "trait Lockable {\n",
+        "    final public function onTrait(): void {}\n",
+        "}\n",
+        "class Base {\n",
+        "    final public function onLock(): void {}\n",
+        "    public function onOpen(): void {}\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    use Lockable;\n",
+        "    on\n",
+        "    public function on\n",
+        "}\n",
+    );
+
+    for (line, character, what) in [(10, 6, "class-body root"), (11, 22, "after `function`")] {
+        let items = completion_items(text, "file:///final_override.php", line, character).await;
+        let names = || {
+            items
+                .iter()
+                .filter_map(|i| i.filter_text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            !items
+                .iter()
+                .any(|i| i.filter_text.as_deref() == Some("onLock")),
+            "{what}: a final parent method cannot be overridden, got: {:?}",
+            names()
+        );
+        assert!(
+            items
+                .iter()
+                .any(|i| i.filter_text.as_deref() == Some("onOpen")),
+            "{what}: non-final parent methods must still be offered, got: {:?}",
+            names()
+        );
+        assert!(
+            items
+                .iter()
+                .any(|i| i.filter_text.as_deref() == Some("onTrait")),
+            "{what}: a directly-used trait's final method is redeclarable, got: {:?}",
+            names()
+        );
+    }
+}
+
+/// The same `final` trait method is *not* redeclarable once it arrives
+/// through a parent that used the trait: PHP reports "Cannot override
+/// final method Mid::onTrait()".
+#[tokio::test]
+async fn final_methods_from_a_parents_trait_are_not_offered() {
+    let text = concat!(
+        "<?php\n",
+        "trait Lockable {\n",
+        "    final public function onTrait(): void {}\n",
+        "    public function onPlain(): void {}\n",
+        "}\n",
+        "class Mid {\n",
+        "    use Lockable;\n",
+        "}\n",
+        "class Child extends Mid {\n",
+        "    on\n",
+        "}\n",
+    );
+    let items = completion_items(text, "file:///final_parent_trait.php", 9, 6).await;
+    let names = || {
+        items
+            .iter()
+            .filter_map(|i| i.filter_text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        !items
+            .iter()
+            .any(|i| i.filter_text.as_deref() == Some("onTrait")),
+        "a final method inherited via the parent's trait is not overridable, got: {:?}",
+        names()
+    );
+    assert!(
+        items
+            .iter()
+            .any(|i| i.filter_text.as_deref() == Some("onPlain")),
+        "non-final trait methods must still be offered, got: {:?}",
+        names()
+    );
+}
+
+/// Member-access completion is unaffected: a `final` method is perfectly
+/// callable, it just cannot be redeclared.
+#[tokio::test]
+async fn final_methods_still_appear_in_member_access_completion() {
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    final public function onLock(): void {}\n",
+        "}\n",
+        "class Child extends Base {}\n",
+        "$c = new Child();\n",
+        "$c->onL\n",
+    );
+    let items = completion_items(text, "file:///final_member_access.php", 6, 7).await;
+    assert!(
+        items.iter().any(|i| i.label.starts_with("onLock")),
+        "final methods are still callable, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}

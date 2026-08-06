@@ -521,6 +521,7 @@ mod tests {
             template_bindings: vec![],
             has_scope_attribute: false,
             is_abstract: false,
+            is_final: false,
             is_virtual: false,
             is_macro: false,
             is_inferred_return: false,

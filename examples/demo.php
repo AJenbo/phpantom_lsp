@@ -3253,6 +3253,11 @@ class ClassRootCompletionDemo extends OverridableWidget
     // Try: type `s` — `slug()` comes from the WidgetSlug trait, whose
     // PHPDoc is NOT inherited by an override, so the completion restates
     // `@param list<string> $parts` and `@return $this` above the method.
+    // `slugSeparator()` is offered too: it is `final` in the trait, but a
+    // class using the trait may still declare its own version.
+
+    // Try: type `onL` — nothing is offered.  `OverridableWidget::onLock()`
+    // is `final`, so PHP rejects an override of it outright.
 
 }
 
@@ -4464,6 +4469,8 @@ trait WidgetSlug
      * @return $this
      */
     public function slug(array $parts) { return $this; }
+
+    final public function slugSeparator(): string { return '-'; }
 }
 
 class OverridableWidget
@@ -4475,6 +4482,7 @@ class OverridableWidget
 
     public function onChange(callable $callback): static { return $this; }
     protected function onInitialize(): void {}
+    final public function onLock(): void {}
 
     /** @return $this */
     public function withLabel(string $label) { return $this; }

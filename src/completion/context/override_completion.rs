@@ -66,7 +66,7 @@ pub(crate) fn collect_overridable_methods(
         seen: &mut seen,
         visited: &mut visited,
         results: &mut results,
-        skip_override_attr: false,
+        from_own_trait: false,
     };
 
     collector.collect_from_parent_chain(&class.parent_class, 0);
@@ -82,7 +82,7 @@ pub(crate) fn collect_overridable_methods(
         collector.collect_from_interface(iface, 0);
     }
 
-    collector.skip_override_attr = true;
+    collector.from_own_trait = true;
     collector.collect_from_traits(&class.used_traits, 0);
 
     results
@@ -95,7 +95,11 @@ struct MethodCollector<'a> {
     seen: &'a mut HashSet<String>,
     visited: &'a mut HashSet<String>,
     results: &'a mut Vec<(MethodInfo, String, bool)>,
-    skip_override_attr: bool,
+    /// Whether the members currently being collected come from a trait the
+    /// editing class uses directly.  Such a method is redeclarable even when
+    /// `final` (the trait's copy loses to the class's own declaration), and
+    /// `#[\Override]` on it is a compile error.
+    from_own_trait: bool,
 }
 
 impl MethodCollector<'_> {
@@ -167,6 +171,11 @@ impl MethodCollector<'_> {
             if method.is_virtual {
                 continue;
             }
+            // A `final` method inherited through the parent chain cannot be
+            // redeclared at all; one reached via a directly-used trait can.
+            if method.is_final && !self.from_own_trait {
+                continue;
+            }
             if !self.partial.is_empty()
                 && !starts_with_ignore_ascii_case(&method.name, self.partial)
             {
@@ -176,11 +185,8 @@ impl MethodCollector<'_> {
             if self.own_names.contains(&lower) || !self.seen.insert(lower) {
                 continue;
             }
-            self.results.push((
-                (**method).clone(),
-                declaring.clone(),
-                self.skip_override_attr,
-            ));
+            self.results
+                .push(((**method).clone(), declaring.clone(), self.from_own_trait));
         }
     }
 }

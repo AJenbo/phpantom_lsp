@@ -197,6 +197,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             template_bindings,
             has_scope_attribute: false,
             is_abstract: false,
+            is_final: false,
             is_virtual: true,
             is_macro: false,
             is_inferred_return: false,

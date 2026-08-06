@@ -487,6 +487,13 @@ pub struct MethodInfo {
     /// implicitly abstract.  Used by the "Implement missing methods"
     /// code action to detect which inherited methods still need stubs.
     pub is_abstract: bool,
+    /// Whether this method is declared `final`.
+    ///
+    /// A `final` method cannot be redeclared by a subclass, so override
+    /// completion must not offer one as a candidate.  Note that `final` on
+    /// a *trait* method only binds subclasses of the class using the trait:
+    /// the using class itself may still declare its own version.
+    pub is_final: bool,
     /// Whether this method is a virtual (synthesized) member.
     ///
     /// Virtual methods come from `@method` docblock tags, `@mixin` classes,
@@ -558,6 +565,7 @@ impl MethodInfo {
             && self.template_bindings == other.template_bindings
             && self.has_scope_attribute == other.has_scope_attribute
             && self.is_abstract == other.is_abstract
+            && self.is_final == other.is_final
             && self.is_virtual == other.is_virtual
             && self.is_macro == other.is_macro
             && self.is_inferred_return == other.is_inferred_return
@@ -614,6 +622,7 @@ impl MethodInfo {
             template_bindings: Vec::new(),
             has_scope_attribute: false,
             is_abstract: false,
+            is_final: false,
             is_virtual: true,
             is_macro: false,
             is_inferred_return: false,
@@ -647,6 +656,7 @@ impl MethodInfo {
             template_bindings: Vec::new(),
             has_scope_attribute: false,
             is_abstract: false,
+            is_final: false,
             is_virtual: true,
             is_macro: false,
             is_inferred_return: false,
