@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::completion::eloquent_string::detect_string_call_context;
-use crate::completion::source::helpers::find_open_quote;
+use crate::completion::source::code_context::code_context_at;
 use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
 
@@ -101,14 +101,14 @@ pub(crate) fn detect_request_field_context(
     position: Position,
 ) -> Option<RequestFieldContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let (quote_pos, quote_char) = find_open_quote(content, cursor_offset)?;
+    let code = code_context_at(content, cursor_offset)?;
+    let (quote_pos, quote_char) = code.open_string?;
     let prefix = content.get(quote_pos + 1..cursor_offset)?.to_string();
 
     // ── Array access: `$request['|']` ───────────────────────────────
     // Checked before the call form because the backwards scan for a call's
     // opening paren would otherwise wander into unrelated code.
-    let before_quote = content.get(..quote_pos)?.trim_end();
-    if let Some(before_bracket) = before_quote.strip_suffix('[')
+    if let Some(before_bracket) = code.code_before.strip_suffix('[')
         && let Some(receiver) = trailing_variable(before_bracket)
     {
         return Some(RequestFieldContext {

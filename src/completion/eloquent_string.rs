@@ -135,13 +135,15 @@ pub(crate) fn detect_string_call_context(
     position: Position,
 ) -> Option<StringCallContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let (quote_pos, quote_char) =
-        crate::completion::source::helpers::find_open_quote(content, cursor_offset)?;
+    let code = crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
+    let (quote_pos, quote_char) = code.open_string?;
     let string_content_start = quote_pos + 1;
     let partial = content[string_content_start..cursor_offset].to_string();
 
-    let before_quote = &content[..quote_pos];
-    let trimmed = before_quote.trim_end();
+    // The code before the literal, with any comment between the call and the
+    // argument cut off, so `only([/* note */ '|'])` still reads as a key of the
+    // array.  It stays a prefix of `content`, so offsets into it carry over.
+    let trimmed = code.code_before;
     let last_char = trimmed.as_bytes().last().copied()?;
     if last_char != b'(' && last_char != b',' && last_char != b'[' {
         return None;

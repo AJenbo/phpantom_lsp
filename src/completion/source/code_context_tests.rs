@@ -75,9 +75,64 @@ fn a_close_tag_inside_a_line_comment_ends_the_php_block() {
 }
 
 #[test]
-fn an_offset_inside_a_comment_or_a_string_has_no_context() {
+fn an_offset_inside_a_comment_has_no_context() {
     assert!(at("<?php\n// route('r', ['user']);\n", "'user'").is_none());
-    assert!(at("<?php\n$s = 'route(\\'r\\', [';\n", "[").is_none());
+}
+
+/// Brackets and quotes inside a literal are text, so the context reported for
+/// an offset inside one is the context of the literal itself.
+#[test]
+fn an_offset_inside_a_string_reports_the_literal() {
+    let src = "<?php\n$s = 'route(\\'r\\', [';\n";
+    let ctx = at(src, "[").expect("the offset is inside the literal");
+    assert_eq!(ctx.open_string, Some((src.find('\'').unwrap(), '\'')));
+    assert!(ctx.open_brackets.is_empty());
+    assert!(ctx.code_before.ends_with('='), "got {:?}", ctx.code_before);
+}
+
+/// The key being typed is reported along with the brackets around it, so both
+/// come out of the one scan.
+#[test]
+fn an_array_key_being_typed_names_its_own_quote() {
+    let src = "<?php\nroute('users.show', ['us";
+    let ctx = at(src, "us").expect("the offset is inside the key");
+    assert_eq!(ctx.open_string, Some((src.rfind('\'').unwrap(), '\'')));
+    assert!(ctx.nested_pair(b'[', b'(').is_some());
+    assert_eq!(ctx.last_code_byte(), Some(b'['));
+}
+
+/// Quotes only pair up left to right, so the literal an offset is in is the one
+/// left open by the scan and not the nearest quote behind it.
+#[test]
+fn open_string_is_the_literal_the_offset_is_in() {
+    /// The literal the end of `content` sits in.
+    fn open_string(content: &str) -> Option<(usize, char)> {
+        code_context_at(content, content.len())?.open_string
+    }
+
+    // An apostrophe inside a double-quoted string is not its opener.
+    let src = "$request->input(\"it's ";
+    assert_eq!(open_string(src), Some((src.find('"').unwrap(), '"')));
+
+    // An escaped quote does not close the literal.
+    let src = "$request->input('it\\'s ";
+    assert_eq!(open_string(src), Some((src.find('\'').unwrap(), '\'')));
+
+    // A literal that already closed leaves the offset outside a string, on this
+    // line and on an earlier one.
+    assert_eq!(open_string("$a = 'x'; $request["), None);
+    assert_eq!(open_string("$a = 'x';\n$request["), None);
+
+    // An apostrophe in a comment earlier on the line is not an opener.
+    let src = "Artisan::call('app:sync', [ /* don't ( */ '";
+    assert_eq!(open_string(src), Some((src.len() - 1, '\'')));
+
+    // A literal opened on an earlier line is still found.
+    let src = "$request->input(\n    'na";
+    assert_eq!(open_string(src), Some((src.rfind('\'').unwrap(), '\'')));
+
+    // An offset in a comment is in no literal, apostrophe or not.
+    assert_eq!(open_string("// don't "), None);
 }
 
 #[test]

@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::source::code_context::code_context_at;
-use crate::completion::source::helpers::{enclosing_array_key_call, find_open_quote};
+use crate::completion::source::helpers::enclosing_array_key_call;
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::virtual_members::laravel::route_uri_parameters;
 
@@ -27,8 +27,8 @@ struct RouteParamContext {
 /// Detect the cursor inside a key of a route parameters array.
 fn detect_context(content: &str, position: Position) -> Option<RouteParamContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let (quote_pos, _) = find_open_quote(content, cursor_offset)?;
-    let code = code_context_at(content, quote_pos)?;
+    let code = code_context_at(content, cursor_offset)?;
+    let (quote_pos, _) = code.open_string?;
 
     // The character before the key is `[` for the first key and `,` for the
     // ones after it.

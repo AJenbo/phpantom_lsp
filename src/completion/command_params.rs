@@ -124,12 +124,12 @@ impl Backend {
 
 fn detect_context(content: &str, position: Position) -> Option<DetectedContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let (quote_pos, _) =
-        crate::completion::source::helpers::find_open_quote(content, cursor_offset)?;
+    // `code_before` ends at the last byte of code before the opening quote of
+    // the string being typed, so a comment between the call and the key is
+    // skipped.
+    let code = crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
+    let (quote_pos, _) = code.open_string?;
     let prefix = content[quote_pos + 1..cursor_offset].to_string();
-    // The lexical context of the quote: `code_before` ends at the last byte of
-    // code before it, so a comment between the call and the key is skipped.
-    let code = crate::completion::source::code_context::code_context_at(content, quote_pos)?;
     let before_quote = code.code_before;
 
     // ── Own argument / option: `->argument('|')` / `->option('|')` ─────────

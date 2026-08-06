@@ -89,6 +89,33 @@ fn full_value_stops_at_the_closing_quote() {
     assert_eq!(ctx.full_value(content), Some("address.city"));
 }
 
+/// A call broken over lines opens the field's literal on a line of its own.
+#[test]
+fn detects_a_call_argument_on_a_later_line() {
+    let content = "<?php\n$request->input(\n    'na');\n";
+    let ctx = detect_at(content, "'na").expect("should detect the wrapped input()");
+    assert_eq!(ctx.receiver, "$request");
+    assert_eq!(ctx.prefix, "na");
+}
+
+/// An apostrophe in a comment on the key's own line is not an opening quote.
+#[test]
+fn detects_a_key_past_an_apostrophe_in_a_comment() {
+    let content = "<?php\n$request->only([/* don't */ 'ag']);\n";
+    let ctx = detect_at(content, "'ag").expect("should detect only([…]) key");
+    assert_eq!(ctx.receiver, "$request");
+    assert_eq!(ctx.prefix, "ag");
+}
+
+/// A comment between the `[` and the key does not hide the array access either.
+#[test]
+fn detects_array_access_past_a_comment() {
+    let content = "<?php\n$title = $request[/* the key */ 'ti'];\n";
+    let ctx = detect_at(content, "'ti").expect("should detect array access");
+    assert_eq!(ctx.receiver, "$request");
+    assert_eq!(ctx.prefix, "ti");
+}
+
 #[test]
 fn full_value_is_none_for_an_unterminated_string() {
     let content = "<?php\n$request->input('na\n";

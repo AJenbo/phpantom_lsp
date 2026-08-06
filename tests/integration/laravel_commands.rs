@@ -278,6 +278,76 @@ class SyncCommand extends Command
     );
 }
 
+/// An apostrophe in a comment on the key's own line used to pair up with the
+/// real opening quote, leaving the cursor looking like it was outside the
+/// string and dropping the completion.
+#[tokio::test]
+async fn call_parameter_key_completes_past_an_apostrophe_in_a_comment() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('app:sync', [ /* don't ( */ '']);
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let position = position_after(consumer, "/* don't ( */ '");
+    let labels = complete_at(&backend, &uri, position).await;
+    assert!(labels.contains(&"user".to_string()), "got {labels:?}");
+    assert!(labels.contains(&"--queue".to_string()), "got {labels:?}");
+}
+
+/// The parameter array may be broken over lines, so the key's opening quote is
+/// not always on the same line as the call.
+#[tokio::test]
+async fn call_parameter_key_completes_on_a_later_line() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('app:sync', [
+            '' => 1,
+        ]);
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let position = position_after(consumer, "[\n            '");
+    let labels = complete_at(&backend, &uri, position).await;
+    assert!(labels.contains(&"user".to_string()), "got {labels:?}");
+}
+
 #[tokio::test]
 async fn unknown_own_argument_is_flagged() {
     let (backend, dir) = create_psr4_workspace(

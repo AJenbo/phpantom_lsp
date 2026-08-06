@@ -1,14 +1,16 @@
 //! Where an offset sits in PHP source, resolved by a single forward scan.
 //!
-//! Completion needs two things about the text leading up to a cursor: the
-//! last byte of real code before it (so the key in `route('name', [ // note
-//! (here)\n '|'` is still seen to follow a `[`), and the chain of brackets
-//! left open at it (so the `[` of an argument array and the `(` of the call
-//! it belongs to can be told apart from any other nesting).
+//! Completion needs three things about the text leading up to a cursor: the
+//! string literal the cursor is typing in, if any (so the key in
+//! `route('name', ['us|` is known to start after that quote), the last byte of
+//! real code before it (so that key is still seen to follow a `[` across
+//! `route('name', [ // note (here)\n '|'`), and the chain of brackets left
+//! open at it (so the `[` of an argument array and the `(` of the call it
+//! belongs to can be told apart from any other nesting).
 //!
-//! Both come out of one forward pass.  A backwards walk cannot answer
-//! either: read from the right, a `//`, a `#`, or a quote is ambiguous (it
-//! may open a comment, sit inside a string, or close one), so a stray
+//! All three come out of one forward pass.  A backwards walk cannot answer
+//! any of them: read from the right, a `//`, a `#`, or a quote is ambiguous
+//! (it may open a comment, sit inside a string, or close one), so a stray
 //! bracket or apostrophe inside a comment unbalances the walk.  Scanning
 //! forward the lexical state is unambiguous, and tracking the open brackets
 //! on the way gives the enclosing constructs directly.
@@ -24,6 +26,11 @@ pub(crate) struct CodeContext<'a> {
     /// The brackets still open at the offset, outermost first, each as
     /// `(offset, byte)` where the byte is `(`, `[`, or `{`.
     pub(crate) open_brackets: Vec<(usize, u8)>,
+    /// Set when the offset sits inside a `'…'` or `"…"` literal, holding the
+    /// offset and character of its opening quote.  The two fields above then
+    /// describe where that quote sits, since nothing inside a literal opens a
+    /// bracket or counts as code.
+    pub(crate) open_string: Option<(usize, char)>,
 }
 
 impl CodeContext<'_> {
@@ -59,8 +66,10 @@ enum State {
     /// Inline HTML, outside any `<?php` block.
     Html,
     Code,
-    SingleString,
-    DoubleString,
+    /// Inside a `'…'` literal opened at this offset.
+    SingleString(usize),
+    /// Inside a `"…"` literal opened at this offset.
+    DoubleString(usize),
     /// `// …` or `# …`.
     LineComment,
     /// `/* … */`, docblocks included.
@@ -70,10 +79,13 @@ enum State {
 
 /// Resolve the lexical position of `offset` in `content`.
 ///
-/// Returns `None` when `offset` is not in PHP code — inside a string
-/// literal, a comment, a heredoc body, or inline HTML — because the bracket
-/// nesting recorded for such a position says nothing about the expression
-/// the cursor is in.
+/// Returns `None` when `offset` is in a comment, a heredoc body, or inline
+/// HTML, because the bracket nesting recorded for such a position says nothing
+/// about the expression the cursor is in.  An offset inside a string literal
+/// *is* reported, with [`CodeContext::open_string`] naming the literal it sits
+/// in: that is where the cursor sits while a string argument or array key is
+/// being typed, and the brackets around the literal are the ones its call and
+/// argument array need.
 ///
 /// The scan starts in inline HTML when an opening tag appears before
 /// `offset`, and in code otherwise, so a bare fragment with no `<?php` (as
@@ -135,8 +147,8 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                 }
                 None => i = end,
             },
-            State::SingleString | State::DoubleString => {
-                let quote = if matches!(state, State::SingleString) {
+            State::SingleString(_) | State::DoubleString(_) => {
+                let quote = if matches!(state, State::SingleString(_)) {
                     b'\''
                 } else {
                     b'"'
@@ -210,12 +222,12 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         continue;
                     }
                     b'\'' => {
-                        state = State::SingleString;
+                        state = State::SingleString(i);
                         i += 1;
                         continue;
                     }
                     b'"' => {
-                        state = State::DoubleString;
+                        state = State::DoubleString(i);
                         i += 1;
                         continue;
                     }
@@ -251,12 +263,16 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
         }
     }
 
-    if !matches!(state, State::Code) {
-        return None;
-    }
+    let open_string = match state {
+        State::Code => None,
+        State::SingleString(quote) => Some((quote, '\'')),
+        State::DoubleString(quote) => Some((quote, '"')),
+        State::Html | State::LineComment | State::BlockComment | State::Heredoc => return None,
+    };
     Some(CodeContext {
         code_before: content.get(..code_end)?,
         open_brackets,
+        open_string,
     })
 }
 
