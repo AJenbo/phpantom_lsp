@@ -836,7 +836,10 @@ impl Backend {
                     let effective_class = match ctx.current_class {
                         Some(cc) => cc,
                         None => {
-                            dummy_class = ClassInfo::default();
+                            dummy_class = crate::class_lookup::class_context_placeholder(
+                                ctx.content,
+                                ctx.cursor_offset,
+                            );
                             &dummy_class
                         }
                     };

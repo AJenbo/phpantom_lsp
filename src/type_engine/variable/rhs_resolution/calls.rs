@@ -402,8 +402,15 @@ pub(crate) fn resolve_arg_variable_raw_type(
         return None;
     }
 
-    let default_class = crate::types::ClassInfo::default();
-    let current_class = rctx.current_class.unwrap_or(&default_class);
+    let default_class;
+    let current_class = match rctx.current_class {
+        Some(cc) => cc,
+        None => {
+            default_class =
+                crate::class_lookup::class_context_placeholder(rctx.content, rctx.cursor_offset);
+            &default_class
+        }
+    };
     let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
         var_name,
         current_class,

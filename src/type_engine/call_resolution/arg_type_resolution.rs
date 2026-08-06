@@ -149,8 +149,17 @@ impl Backend {
                 }
             }
             // Fall back to the unified variable resolution pipeline.
-            let default_class = ClassInfo::default();
-            let effective_class = current_class.unwrap_or(&default_class);
+            let default_class;
+            let effective_class = match current_class {
+                Some(cc) => cc,
+                None => {
+                    default_class = crate::class_lookup::class_context_placeholder(
+                        ctx.content,
+                        ctx.cursor_offset,
+                    );
+                    &default_class
+                }
+            };
             let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
                 arg_text,
                 effective_class,

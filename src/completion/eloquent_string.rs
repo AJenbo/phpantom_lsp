@@ -374,10 +374,16 @@ impl Backend {
             // Variable — resolve its type, then check both `Builder<Model>`
             // results (from query builder chains) and direct model instances.
             let cursor_offset = position_to_offset(content, position);
-            let default_class = ClassInfo::default();
+            let default_class;
             let current_class =
-                crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset)
-                    .unwrap_or(&default_class);
+                match crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset) {
+                    Some(cc) => cc,
+                    None => {
+                        default_class =
+                            crate::class_lookup::class_context_placeholder(content, cursor_offset);
+                        &default_class
+                    }
+                };
             let results = crate::type_engine::variable::resolution::resolve_variable_types(
                 subject,
                 current_class,

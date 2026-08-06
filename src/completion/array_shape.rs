@@ -38,7 +38,7 @@ use crate::docblock;
 use crate::php_type::PhpType;
 use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::Loaders;
-use crate::types::{ClassInfo, FileContext, ResolvedType};
+use crate::types::{FileContext, ResolvedType};
 
 /// Well-known keys for the `$_SERVER` superglobal.
 ///
@@ -528,7 +528,8 @@ impl Backend {
         let effective_class = match current_class {
             Some(cc) => cc,
             None => {
-                dummy_class = ClassInfo::default();
+                dummy_class =
+                    crate::class_lookup::class_context_placeholder(content, cursor_offset as u32);
                 &dummy_class
             }
         };

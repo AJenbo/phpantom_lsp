@@ -112,7 +112,6 @@ unlikely to move the needle for most users.
 | B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |
 | B21 | [Completion's backward scan is blind to comments](todo/bugs.md#b21-completions-backward-scan-is-blind-to-comments)                                                           | Low         | Medium      |
 | B22 | [Hover collapses a branch-merged union to its first member](todo/bugs.md#b22-hover-collapses-a-branch-merged-union-to-its-first-member)                                  | Medium      | Medium      |
-| B23 | [A top-level function body resolves source-level class names without a namespace](todo/bugs.md#b23-a-top-level-function-body-resolves-source-level-class-names-without-a-namespace) | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

@@ -827,7 +827,7 @@ pub(crate) fn build_diagnostic_scopes(
     BUILDING_SCOPES.with(|cell: &Cell<bool>| cell.set(true));
     let _building_guard = BuildingScopesGuard;
 
-    let default_class = ClassInfo::default();
+    let default_class = crate::class_lookup::placeholder_in_namespace(None);
     let diag_ctx = DiagnosticWalkCtx {
         content,
         local_classes,
@@ -879,8 +879,14 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
     for stmt in statements {
         match stmt {
             Statement::Namespace(ns) => {
-                // Recurse into namespace body with a fresh scope.
-                walk_top_level_statements(ns.statements().iter(), default_class, diag_ctx);
+                // Recurse into namespace body with a fresh scope.  The
+                // stand-in class carries the block's namespace so that
+                // source-level class references inside a plain function
+                // resolve against it, the way they do inside a method.
+                let ns_class = crate::class_lookup::placeholder_in_namespace(
+                    ns.name.as_ref().map(|ident| bytes_to_str(ident.value())),
+                );
+                walk_top_level_statements(ns.statements().iter(), &ns_class, diag_ctx);
             }
             Statement::Class(class) => {
                 let enclosing = find_enclosing_class_for_offset(

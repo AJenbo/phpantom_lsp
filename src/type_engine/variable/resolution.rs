@@ -213,7 +213,7 @@ pub(crate) fn resolve_variable_php_type(
     let effective_class = match current_class {
         Some(cc) => cc,
         None => {
-            dummy_class = ClassInfo::default();
+            dummy_class = crate::class_lookup::class_context_placeholder(content, cursor_offset);
             &dummy_class
         }
     };

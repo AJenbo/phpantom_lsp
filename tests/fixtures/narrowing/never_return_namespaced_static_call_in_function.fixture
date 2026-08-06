@@ -1,7 +1,9 @@
-// test: a same-namespace class shadows a global one in a never check
+// test: a same-namespace class shadows a global one from a plain function
 // feature: completion
 // `Aborter::fail()` means App\Aborter::fail(), which returns void, so the
-// branch does not terminate and both members stay available.
+// branch does not terminate and both members stay available.  The guard sits
+// in a plain function body, which has no enclosing class to read the
+// namespace from.
 // expect: fooMethod(
 // expect: barMethod(
 ---
@@ -16,10 +18,6 @@ namespace {
 }
 
 namespace App {
-    class Aborter {
-        public static function fail(): void {}
-    }
-
     class Foo {
         public function fooMethod(): void {}
     }
@@ -28,13 +26,15 @@ namespace App {
         public function barMethod(): void {}
     }
 
-    class Runner {
-        public function test(Foo|Bar $x): void {
-            if (!$x instanceof Foo) {
-                Aborter::fail();
-            }
+    class Aborter {
+        public static function fail(): void {}
+    }
 
-            $x-><>
+    function test(Foo|Bar $x): void {
+        if (!$x instanceof Foo) {
+            Aborter::fail();
         }
+
+        $x-><>
     }
 }

@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, ClassInfo, FileContext};
+use crate::types::{AccessKind, FileContext};
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -235,8 +235,15 @@ impl Backend {
                 current_class.map(|cc| Arc::new(cc.clone()))?
             } else {
                 // Other variable — try variable resolution.
-                let default_class = ClassInfo::default();
-                let current = current_class.unwrap_or(&default_class);
+                let default_class;
+                let current = match current_class {
+                    Some(cc) => cc,
+                    None => {
+                        default_class =
+                            crate::class_lookup::class_context_placeholder(content, cursor_offset);
+                        &default_class
+                    }
+                };
                 let results = crate::type_engine::variable::resolution::resolve_variable_types(
                     &ac_ctx.subject,
                     current,

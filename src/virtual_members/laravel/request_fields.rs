@@ -277,10 +277,17 @@ fn resolve_variable_class(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     backend: &Backend,
 ) -> Option<Arc<ClassInfo>> {
-    let fallback = ClassInfo::default();
+    let fallback;
+    let effective_class = match current_class {
+        Some(cc) => cc,
+        None => {
+            fallback = crate::class_lookup::class_context_placeholder(content, cursor_offset);
+            &fallback
+        }
+    };
     let types = crate::type_engine::variable::resolution::resolve_variable_types(
         variable,
-        current_class.unwrap_or(&fallback),
+        effective_class,
         &ctx.classes,
         content,
         cursor_offset,

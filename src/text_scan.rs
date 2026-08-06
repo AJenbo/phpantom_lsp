@@ -84,6 +84,72 @@ pub(crate) fn unquote_php_string(raw: &str) -> Option<&str> {
         .or_else(|| raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
 }
 
+/// Return the namespace in force at `offset`, or `None` for the global
+/// namespace.
+///
+/// A `namespace` declaration must be the first statement of its block, so
+/// the namespace in force at any point is the one declared by the last
+/// `namespace` statement starting before it.  That holds for both forms:
+/// `namespace App;` runs to the next declaration or the end of the file,
+/// and `namespace App { … }` is followed by the next block's declaration.
+///
+/// This scans the source text rather than the AST because the callers
+/// that need it (the stand-in class built when the cursor sits outside a
+/// class body) only ever have the file content and a byte offset.
+pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> {
+    const KEYWORD: &[u8] = b"namespace";
+
+    let bytes = content.as_bytes();
+    let mut end = offset.min(bytes.len());
+    while let Some(pos) = memchr::memmem::rfind(&bytes[..end], KEYWORD) {
+        end = pos;
+        if !is_namespace_statement(bytes, pos, KEYWORD.len()) {
+            continue;
+        }
+        return namespace_name_after(content, pos + KEYWORD.len());
+    }
+    None
+}
+
+/// Check that the `namespace` keyword at `pos` opens a declaration rather
+/// than being part of an identifier, the `namespace\Foo` operator, or text
+/// inside a comment or string literal.
+fn is_namespace_statement(bytes: &[u8], pos: usize, len: usize) -> bool {
+    // `namespace App;` and `namespace {` are the only two shapes; anything
+    // else (`namespaced`, `namespace\Foo`) is not a declaration.
+    match bytes.get(pos + len) {
+        Some(b) if b.is_ascii_whitespace() || *b == b'{' => {}
+        _ => return false,
+    }
+
+    // A declaration is a statement, so the text before it ends with a
+    // statement boundary or the opening tag.  A comment marker (`//`, `#`,
+    // `*`) or a quote before the keyword means the match is inside prose or
+    // a literal, which this check rejects.
+    let before = &bytes[..pos];
+    let Some(prev) = before.iter().rposition(|b| !b.is_ascii_whitespace()) else {
+        return true;
+    };
+    matches!(before[prev], b';' | b'{' | b'}' | b'>')
+        || (prev >= 4 && before[prev - 4..=prev].eq_ignore_ascii_case(b"<?php"))
+}
+
+/// Read the namespace name that follows the `namespace` keyword ending at
+/// `after_keyword`.  Returns `None` for `namespace { … }`, which declares
+/// the global namespace.
+fn namespace_name_after(content: &str, after_keyword: usize) -> Option<&str> {
+    let bytes = content.as_bytes();
+    let start = after_keyword
+        + bytes[after_keyword..]
+            .iter()
+            .position(|b| !b.is_ascii_whitespace())?;
+    let len = bytes[start..]
+        .iter()
+        .position(|b| !(b.is_ascii_alphanumeric() || *b == b'_' || *b == b'\\' || *b >= 0x80))
+        .unwrap_or(bytes.len() - start);
+    (len > 0).then(|| &content[start..start + len])
+}
+
 /// Find the first `;` in `s` that is not nested inside `()`, `[]`,
 /// `{}`, or string literals.
 ///
@@ -458,3 +524,7 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
     }
     None
 }
+
+#[cfg(test)]
+#[path = "text_scan_tests.rs"]
+mod tests;

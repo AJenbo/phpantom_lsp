@@ -561,7 +561,10 @@ fn resolve_target_classes_expr_inner(
                 let effective_class = match current_class {
                     Some(cc) => cc,
                     None => {
-                        dummy_class = ClassInfo::default();
+                        dummy_class = crate::class_lookup::class_context_placeholder(
+                            ctx.content,
+                            ctx.cursor_offset,
+                        );
                         &dummy_class
                     }
                 };
@@ -600,7 +603,10 @@ fn resolve_target_classes_expr_inner(
                 let effective_class = match current_class {
                     Some(cc) => cc,
                     None => {
-                        dummy_class = ClassInfo::default();
+                        dummy_class = crate::class_lookup::class_context_placeholder(
+                            ctx.content,
+                            ctx.cursor_offset,
+                        );
                         &dummy_class
                     }
                 };
@@ -729,7 +735,10 @@ fn resolve_target_classes_expr_inner(
                     let effective_class = match current_class {
                         Some(cc) => cc,
                         None => {
-                            dummy_class = ClassInfo::default();
+                            dummy_class = crate::class_lookup::class_context_placeholder(
+                                ctx.content,
+                                ctx.cursor_offset,
+                            );
                             &dummy_class
                         }
                     };
@@ -1236,7 +1245,8 @@ fn resolve_variable_fallback(
     let effective_class = match current_class {
         Some(cc) => cc,
         None => {
-            dummy_class = ClassInfo::default();
+            dummy_class =
+                crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
             &dummy_class
         }
     };

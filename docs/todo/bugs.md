@@ -143,34 +143,3 @@ completion instead.
 
 **Reproduce:** hover a variable after an `if`/`else` that assigns a
 different type in each branch.
-
-#### B23. A top-level function body resolves source-level class names without a namespace
-
-**Impact: Medium · Effort: Medium**
-
-Source-level class references (`new Foo`, `Foo::bar()`, `Foo::CONST`)
-are resolved with `resolve_source_class_name`, which needs the enclosing
-namespace so that a same-namespace class outranks a global class of the
-same short name. Every call site reads it from
-`current_class.file_namespace`, but when the cursor is inside a plain
-function (or top-level code) there is no enclosing class and the callers
-fall back to `ClassInfo::default()`, whose `file_namespace` is `None`:
-
-```php
-namespace App;
-
-function test(): void {
-    Aborter::fail(); // resolves to \Aborter, not App\Aborter
-}
-```
-
-Inside a method of a class in the same file the resolution is correct,
-so the gap is specific to function and top-level scopes. The fix is to
-give the synthesised placeholder class the namespace that contains the
-cursor (`Backend::namespace_at_offset` already computes it for the
-multi-namespace case) rather than leaving it empty, so every consumer of
-`current_class.file_namespace` gets the right answer.
-
-**Reproduce:** in a namespaced file that also declares a global class of
-the same short name, reference the class unqualified from a plain
-function body.

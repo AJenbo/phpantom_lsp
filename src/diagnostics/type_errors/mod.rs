@@ -31,7 +31,7 @@ use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
-use crate::types::{ClassInfo, ResolvedCallableTarget};
+use crate::types::ResolvedCallableTarget;
 
 use super::helpers::{
     find_innermost_enclosing_class, is_position_independent_call_expression, make_diagnostic,
@@ -287,7 +287,6 @@ impl Backend {
         let class_loader = self.class_loader(&file_ctx);
         let function_loader_cl = self.function_loader(&file_ctx);
         let constant_loader_cl = self.constant_loader();
-        let default_class = ClassInfo::default();
 
         // Walk the AST once, collect argument expressions, and resolve
         // their types — all inside the `with_parsed_program` closure so
@@ -310,8 +309,18 @@ impl Backend {
                 // Phase 2: resolve types for each collected expression.
                 let mut result: HashMap<u32, ResolvedCallArgs> = HashMap::new();
                 for (args_start, exprs) in &expr_map {
-                    let enclosing = find_innermost_enclosing_class(&file_ctx.classes, *args_start);
-                    let current_class_info = enclosing.unwrap_or(&default_class);
+                    let placeholder;
+                    let current_class_info =
+                        match find_innermost_enclosing_class(&file_ctx.classes, *args_start) {
+                            Some(cc) => cc,
+                            None => {
+                                placeholder = crate::class_lookup::class_context_placeholder(
+                                    content,
+                                    *args_start,
+                                );
+                                &placeholder
+                            }
+                        };
 
                     let config_resolver = |key: &str| self.resolve_config_type(key);
                     let loaders = Loaders {

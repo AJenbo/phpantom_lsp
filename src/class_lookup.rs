@@ -41,6 +41,36 @@ pub(crate) fn find_class_at_offset(classes: &[Arc<ClassInfo>], offset: u32) -> O
         .map(|(c, _)| c)
 }
 
+/// Build the stand-in [`ClassInfo`] used when the cursor is not inside a
+/// class body — a plain function, a closure at file scope, or top-level
+/// code.  It has no name, so the checks that ask "are we in a class?"
+/// (`current_class.name.is_empty()`) still answer no.
+///
+/// What it does carry is the namespace enclosing the cursor.  Source-level
+/// class references resolve through
+/// [`resolve_source_class_name`](crate::util::resolve_source_class_name),
+/// which reads that namespace from `current_class.file_namespace` so a
+/// same-namespace class outranks a global one of the same short name.  A
+/// bare `ClassInfo::default()` reports no namespace, which would resolve
+/// `Foo::bar()` inside `namespace App` to the global `\Foo` even when
+/// `App\Foo` exists.
+pub(crate) fn class_context_placeholder(content: &str, cursor_offset: u32) -> ClassInfo {
+    placeholder_in_namespace(crate::text_scan::namespace_at_offset(
+        content,
+        cursor_offset as usize,
+    ))
+}
+
+/// [`class_context_placeholder`] for callers that already know the
+/// enclosing namespace (e.g. a walker recursing into a `namespace { … }`
+/// block) and need not scan for it.
+pub(crate) fn placeholder_in_namespace(namespace: Option<&str>) -> ClassInfo {
+    ClassInfo {
+        file_namespace: namespace.map(crate::atom::atom),
+        ..ClassInfo::default()
+    }
+}
+
 /// Find a class in a slice by name, preferring namespace-aware matching
 /// when the name is fully qualified.
 ///

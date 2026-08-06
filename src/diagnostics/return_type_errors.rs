@@ -171,7 +171,6 @@ impl Backend {
         let class_loader = self.class_loader(&file_ctx);
         let function_loader_cl = self.function_loader(&file_ctx);
         let constant_loader_cl = self.constant_loader();
-        let default_class = ClassInfo::default();
 
         // Walk the AST, find return statements in method/function
         // bodies, resolve their types, and pair them with the declared
@@ -188,7 +187,6 @@ impl Backend {
                         &class_loader,
                         &function_loader_cl,
                         &constant_loader_cl,
-                        &default_class,
                         self,
                         &mut resolved_returns,
                     );
@@ -349,7 +347,6 @@ fn process_top_level_statement(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str) -> Option<Option<String>>,
-    default_class: &ClassInfo,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
 ) {
@@ -363,7 +360,6 @@ fn process_top_level_statement(
                     class_loader,
                     function_loader,
                     constant_loader,
-                    default_class,
                     backend,
                     out,
                 );
@@ -378,7 +374,6 @@ fn process_top_level_statement(
                     class_loader,
                     function_loader,
                     constant_loader,
-                    default_class,
                     backend,
                     out,
                 );
@@ -393,7 +388,6 @@ fn process_top_level_statement(
                     class_loader,
                     function_loader,
                     constant_loader,
-                    default_class,
                     backend,
                     out,
                 );
@@ -408,7 +402,6 @@ fn process_top_level_statement(
                     class_loader,
                     function_loader,
                     constant_loader,
-                    default_class,
                     backend,
                     out,
                 );
@@ -423,7 +416,6 @@ fn process_top_level_statement(
                     class_loader,
                     function_loader,
                     constant_loader,
-                    default_class,
                     backend,
                     out,
                 );
@@ -475,8 +467,16 @@ fn process_top_level_statement(
                 return;
             }
 
-            let enclosing = find_innermost_enclosing_class(&file_ctx.classes, func_offset);
-            let current_class = enclosing.unwrap_or(default_class);
+            let placeholder;
+            let current_class = match find_innermost_enclosing_class(&file_ctx.classes, func_offset)
+            {
+                Some(cc) => cc,
+                None => {
+                    placeholder =
+                        crate::class_lookup::class_context_placeholder(content, func_offset);
+                    &placeholder
+                }
+            };
 
             let config_resolver = |key: &str| backend.resolve_config_type(key);
             let loaders = Loaders {
@@ -512,7 +512,6 @@ fn process_top_level_statement(
                         class_loader,
                         function_loader,
                         constant_loader,
-                        default_class,
                         backend,
                         out,
                     );
@@ -526,7 +525,6 @@ fn process_top_level_statement(
                             class_loader,
                             function_loader,
                             constant_loader,
-                            default_class,
                             backend,
                             out,
                         );
@@ -547,7 +545,6 @@ fn process_class_member(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str) -> Option<Option<String>>,
-    _default_class: &ClassInfo,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
 ) {
