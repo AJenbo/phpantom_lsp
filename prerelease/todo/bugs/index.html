@@ -828,28 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b18-override-completion-offers-final-parent-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B18. Override completion offers <code>final</code> parent methods
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b19-override-completion-drops-readonly-from-a-redeclared-property" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B19. Override completion drops <code>readonly</code> from a redeclared property
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -865,17 +843,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B21. Completion's backward scan is blind to comments
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b22-hover-collapses-a-branch-merged-union-to-its-first-member" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B22. Hover collapses a branch-merged union to its first member
       </span>
     </span>
   </a>
@@ -1350,28 +1317,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b18-override-completion-offers-final-parent-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B18. Override completion offers <code>final</code> parent methods
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b19-override-completion-drops-readonly-from-a-redeclared-property" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B19. Override completion drops <code>readonly</code> from a redeclared property
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1387,17 +1332,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B21. Completion's backward scan is blind to comments
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b22-hover-collapses-a-branch-merged-union-to-its-first-member" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B22. Hover collapses a branch-merged union to its first member
       </span>
     </span>
   </a>
@@ -1434,43 +1368,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b18-override-completion-offers-final-parent-methods">B18. Override completion offers <code>final</code> parent methods<a class="headerlink" href="#b18-override-completion-offers-final-parent-methods" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p><code>collect_overridable_methods</code> in
-<code>completion/context/override_completion.rs</code> filters private, magic, and
-virtual methods, but nothing filters <code>final</code>. A <code>final public function
-onLock()</code> on a parent is therefore offered as an override candidate, and
-accepting the completion inserts a declaration PHP rejects outright
-("Cannot override final method Base::onLock()").</p>
-<p>Both override entry points are affected: the <code>function get|</code> path and
-the class-body-root path, where it is more visible because the inserted
-snippet is a complete declaration rather than just a name.</p>
-<p><strong>Where to look:</strong> <code>MethodInfo</code> has no <code>is_final</code> field — <code>is_final</code>
-exists only on <code>ClassInfo</code>. The fix is to record the method modifier
-during parsing (<code>method.modifiers</code> is already read for <code>is_abstract</code> and
-<code>is_static</code> at <code>parser/classes.rs:1298</code>) and skip final methods in
-<code>MethodCollector::push_from_class</code>. Adding the field touches every
-<code>MethodInfo</code> construction site (~30 in <code>src/</code>, plus test fixtures), so
-it is a mechanical but wide change; keep it a task of its own.</p>
-<p>Note that a <code>final</code> parent method should still be offered by <em>member
-access</em> completion (<code>$obj-&gt;onL|</code>) — only override candidates need the
-filter.</p>
-<h4 id="b19-override-completion-drops-readonly-from-a-redeclared-property">B19. Override completion drops <code>readonly</code> from a redeclared property<a class="headerlink" href="#b19-override-completion-drops-readonly-from-a-redeclared-property" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>At the class-body root, a parent's <code>public readonly string $onName</code> is
-offered with the inserted declaration <code>public string $onName;</code>. PHP
-rejects that: "Cannot redeclare readonly property A::$x as non-readonly
-B::$x". Redeclaring it <em>as</em> readonly is legal (verified on PHP 8.5), so
-the fix is to carry the modifier through, not to filter the property
-out.</p>
-<p><strong>Where to look:</strong> <code>PropertyInfo</code> has no <code>is_readonly</code> field. The
-modifier is currently recovered by a local re-parse in
-<code>code_actions/generate_getter_setter.rs</code> (<code>has_readonly</code>), which shows
-where to read it from during parsing. Once <code>PropertyInfo</code> carries it,
-<code>build_property_override_completions</code> should emit <code>readonly</code> after the
-visibility keyword whenever <code>include_declaration</code> is set. Same blast
-radius caveat as <a href="#b18-override-completion-offers-final-parent-methods">B18</a>:
-adding the field touches every <code>PropertyInfo</code> construction site.</p>
 <h4 id="b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument">B20. A class constructed from a string literal picks up a <code>bool</code> generic argument<a class="headerlink" href="#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>new \Acme\Decimal\Decimal('0.00')</code> resolves to <code>Decimal&lt;bool&gt;</code>, and the
@@ -1516,30 +1413,6 @@ inside a string from the start of a comment without a forward pass, so
 the fix likely means scanning the enclosing statement forward once and
 masking comments before the backwards walk, the way the Blade
 preprocessor masks non-PHP text.</p>
-<h4 id="b22-hover-collapses-a-branch-merged-union-to-its-first-member">B22. Hover collapses a branch-merged union to its first member<a class="headerlink" href="#b22-hover-collapses-a-branch-merged-union-to-its-first-member" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>When a variable is assigned different types in different branches of an
-<code>if</code>, the forward walker merges the branches correctly (completion after
-the <code>if</code> offers members of every branch's type), but hover reports only
-the first branch's type:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function test(): void {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    if (rand(0, 1)) { $x = &#39;a&#39;; } else { $x = 42; }</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    take($x); // hover on $x says &#39;a&#39;; it is &#39;a&#39;|42</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>The same holds for objects: <code>$x = new Foo(); if (rand(0, 1)) { $x = new
-Bar(); }</code> hovers as <code>Foo</code> while completion on <code>$x-&gt;</code> correctly offers
-both <code>Foo</code> and <code>Bar</code> members. Hover is not incapable of showing several
-types (a <code>Foo|Bar</code> parameter renders as two sections), so the union
-survives the walk and is dropped somewhere between the merged scope and
-the hover renderer.</p>
-<p>Found while writing fixtures for <code>never</code>-returning calls: the whole
-class of "variable keeps its pre-branch type" assertions cannot be
-expressed as a hover fixture until this is fixed, which is why
-<code>tests/fixtures/type/never_return_type.fixture</code> asserts through
-completion instead.</p>
-<p><strong>Reproduce:</strong> hover a variable after an <code>if</code>/<code>else</code> that assigns a
-different type in each branch.</p>
 
 
 
