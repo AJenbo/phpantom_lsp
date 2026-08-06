@@ -42,7 +42,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
-use crate::php_type::{LiteralValue, PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
@@ -745,6 +745,17 @@ fn resolve_rhs_expression_inner<'b>(
                 || PhpType::union(vec![PhpType::int(), PhpType::float()]),
             ))]
         }
+        // Type casts (`(int) $x`), `!`, and `~`.  The result depends on the
+        // operator, not on how the expression is reached, so a cast in a
+        // ternary branch resolves the same as one assigned directly.
+        Expression::UnaryPrefix(unary) => {
+            match unary_prefix_result_type(&unary.operator, || {
+                resolve_rhs_expression(unary.operand, ctx)
+            }) {
+                Some(ty) => vec![ResolvedType::from_type_string(ty)],
+                None => vec![],
+            }
+        }
         Expression::Match(match_expr) => {
             // Two subject shapes carry narrowing information: `match (true)`
             // with `instanceof` conditions, and `match ($x::class)` with
@@ -884,6 +895,106 @@ fn resolve_rhs_expression_inner<'b>(
         // expressions not handled above should use the raw-type
         // inference pipeline.
         _ => vec![],
+    }
+}
+
+/// The type a unary prefix expression produces, for the operators whose
+/// result is determined by the operator plus (for `(object)` and `~`) the
+/// operand type.
+///
+/// `resolve_operand` is only called for those two operators, so callers
+/// that reach this on a plain cast pay nothing for it.
+///
+/// Returns `None` for operators the caller must resolve itself: `-`/`+`
+/// need the full expression resolver to keep signed numeric literals
+/// exact, and `@`/`&`/`++`/`--` take the type of their operand.
+pub(crate) fn unary_prefix_result_type(
+    operator: &unary::UnaryPrefixOperator<'_>,
+    resolve_operand: impl FnOnce() -> Vec<ResolvedType>,
+) -> Option<PhpType> {
+    use unary::UnaryPrefixOperator;
+
+    Some(match operator {
+        UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => PhpType::int(),
+        UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
+            PhpType::string()
+        }
+        UnaryPrefixOperator::FloatCast(..)
+        | UnaryPrefixOperator::DoubleCast(..)
+        | UnaryPrefixOperator::RealCast(..) => PhpType::float(),
+        UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => PhpType::bool(),
+        UnaryPrefixOperator::ArrayCast(..) => PhpType::array(),
+        UnaryPrefixOperator::UnsetCast(..) => PhpType::named(atom("null")),
+        UnaryPrefixOperator::Not(_) => PhpType::bool(),
+        UnaryPrefixOperator::ObjectCast(..) => object_cast_type(resolve_operand()),
+        // `~` yields a string for string operands and an int otherwise.
+        UnaryPrefixOperator::BitwiseNot(_) => {
+            let operand = resolve_operand();
+            let is_string = !operand.is_empty()
+                && operand
+                    .iter()
+                    .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
+            if is_string {
+                PhpType::string()
+            } else {
+                PhpType::int()
+            }
+        }
+        _ => return None,
+    })
+}
+
+/// The object shape `(object) $expr` produces: an array shape casts
+/// key-for-key, a scalar becomes `object{scalar: T}`, and anything else
+/// (including an unresolved operand) falls back to `stdClass`.
+///
+/// The cast does not preserve literal precision, so shape values widen.
+fn object_cast_type(operand: Vec<ResolvedType>) -> PhpType {
+    let inner =
+        (!operand.is_empty()).then(|| ResolvedType::types_joined(&operand).widen_scalar_literals());
+    match inner.as_ref().map(PhpType::kind) {
+        Some(TypeKind::ArrayShape(entries)) => PhpType::object_shape(
+            entries
+                .iter()
+                .map(|e| ShapeEntry {
+                    key: e.key.clone(),
+                    value_type: e.value_type.widen_scalar_literals(),
+                    optional: e.optional,
+                })
+                .collect(),
+        ),
+        Some(_) if inner.as_ref().is_some_and(is_object_cast_scalar_type) => {
+            PhpType::object_shape(vec![ShapeEntry {
+                key: Some("scalar".to_string()),
+                value_type: inner.as_ref().unwrap().clone(),
+                optional: false,
+            }])
+        }
+        _ => PhpType::named(atom("stdClass")),
+    }
+}
+
+/// Whether `(object) $expr` on this type produces an `object{scalar: T}`
+/// wrapper rather than a plain `stdClass`.
+fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(name) => matches!(
+            keyword_lowercase(name).as_str(),
+            "int"
+                | "integer"
+                | "string"
+                | "float"
+                | "double"
+                | "real"
+                | "bool"
+                | "boolean"
+                | "true"
+                | "false"
+        ),
+        TypeKind::Union(members) => {
+            !members.is_empty() && members.iter().all(is_object_cast_scalar_type)
+        }
+        _ => false,
     }
 }
 

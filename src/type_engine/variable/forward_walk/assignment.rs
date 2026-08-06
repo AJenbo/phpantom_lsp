@@ -6,7 +6,7 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
+use crate::php_type::{LiteralValue, PhpType, TypeKind, keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
@@ -1640,84 +1640,16 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     // common patterns where the result type depends only on the
     // expression kind, not on the operand types.
 
-    // Type casts: (int)$x → int, (string)$x → string, etc.
-    if let Expression::UnaryPrefix(prefix) = rhs {
-        use mago_syntax::cst::unary::UnaryPrefixOperator;
-        let cast_type = match &prefix.operator {
-            UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => {
-                Some(PhpType::int())
-            }
-            UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
-                Some(PhpType::string())
-            }
-            UnaryPrefixOperator::FloatCast(..)
-            | UnaryPrefixOperator::DoubleCast(..)
-            | UnaryPrefixOperator::RealCast(..) => Some(PhpType::float()),
-            UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => {
-                Some(PhpType::bool())
-            }
-            UnaryPrefixOperator::ArrayCast(..) => Some(PhpType::array()),
-            UnaryPrefixOperator::ObjectCast(..) => {
-                // Resolve the operand type to produce an object shape:
-                // - scalar → object{scalar: <type>}
-                // - array shape → object{key: type, ...}
-                // - otherwise → stdClass
-                let operand_types = resolve_rhs_with_scope(prefix.operand, scope, ctx);
-                let inner = (!operand_types.is_empty())
-                    .then(|| ResolvedType::types_joined(&operand_types).widen_scalar_literals());
-                let obj_type = match inner.as_ref().map(PhpType::kind) {
-                    Some(TypeKind::ArrayShape(entries)) => {
-                        // Widen literal types to their base types:
-                        // PHP (object) cast doesn't preserve literal precision.
-                        let widened = entries
-                            .iter()
-                            .map(|e| ShapeEntry {
-                                key: e.key.clone(),
-                                value_type: e.value_type.widen_scalar_literals(),
-                                optional: e.optional,
-                            })
-                            .collect();
-                        PhpType::object_shape(widened)
-                    }
-                    Some(_) if inner.as_ref().is_some_and(is_object_cast_scalar_type) => {
-                        PhpType::object_shape(vec![ShapeEntry {
-                            key: Some("scalar".to_string()),
-                            value_type: inner.as_ref().unwrap().clone(),
-                            optional: false,
-                        }])
-                    }
-                    _ => PhpType::named(atom("stdClass")),
-                };
-                Some(obj_type)
-            }
-            UnaryPrefixOperator::UnsetCast(..) => Some(PhpType::named(atom("null"))),
-            // The unified resolver preserves signed numeric literals and
-            // falls back to `int|float` for non-literal operands.
-            UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => None,
-            UnaryPrefixOperator::BitwiseNot(_) => None, // handled below
-            UnaryPrefixOperator::Not(_) => Some(PhpType::bool()),
-            _ => None,
-        };
-        if let Some(ty) = cast_type {
-            return vec![ResolvedType::from_type_string(ty)];
-        }
-    }
-
-    // Bitwise NOT (~): returns string when operand is string, int otherwise.
-    if let Expression::UnaryPrefix(prefix) = rhs {
-        use mago_syntax::cst::unary::UnaryPrefixOperator;
-        if matches!(prefix.operator, UnaryPrefixOperator::BitwiseNot(_)) {
-            let operand_types = resolve_rhs_with_scope(prefix.operand, scope, ctx);
-            let is_string = !operand_types.is_empty()
-                && operand_types
-                    .iter()
-                    .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
-            return vec![ResolvedType::from_type_string(if is_string {
-                PhpType::string()
-            } else {
-                PhpType::int()
-            })];
-        }
+    // Type casts (`(int) $x`), `!`, and `~`.  `-`/`+` are left to the
+    // unified resolver below, which preserves signed numeric literals and
+    // falls back to `int|float` for non-literal operands.
+    if let Expression::UnaryPrefix(prefix) = rhs
+        && let Some(ty) =
+            super::super::rhs_resolution::unary_prefix_result_type(&prefix.operator, || {
+                resolve_rhs_with_scope(prefix.operand, scope, ctx)
+            })
+    {
+        return vec![ResolvedType::from_type_string(ty)];
     }
 
     // For all other expressions, delegate to the existing RHS resolver
@@ -2549,28 +2481,6 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 )))],
             );
         }
-    }
-}
-
-fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
-    match ty.kind() {
-        TypeKind::Named(name) => matches!(
-            keyword_lowercase(name).as_str(),
-            "int"
-                | "integer"
-                | "string"
-                | "float"
-                | "double"
-                | "real"
-                | "bool"
-                | "boolean"
-                | "true"
-                | "false"
-        ),
-        TypeKind::Union(members) => {
-            !members.is_empty() && members.iter().all(is_object_cast_scalar_type)
-        }
-        _ => false,
     }
 }
 

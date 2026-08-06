@@ -6840,3 +6840,25 @@ class Visitor {
         "an arm narrowed to StaticCall cannot feed a FuncCall param, got: {diags:?}"
     );
 }
+
+#[test]
+fn no_diagnostic_or_short_circuit_narrows_null_for_rhs_call() {
+    // Issue #325: `$x === null || !take_not_null($x)` — the RHS only
+    // executes when `$x` is NOT null, so `$x` is `int` there.
+    let php = r#"<?php
+function take_not_null(int $x): void {}
+
+function test(): void {
+    $x = isset($_POST['x']) ? (int) $_POST['x'] : null;
+
+    if ($x === null || !take_not_null($x)) {
+        return;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "OR short-circuit should narrow $x to int on RHS, got: {diags:?}"
+    );
+}

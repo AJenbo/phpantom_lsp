@@ -118,6 +118,19 @@ class Foo extends Bar
 		assertType('array', $nullToArray);
 	}
 
+	public function castInConditionalBranch(bool $cond, string $str): void
+	{
+		assertType('int|null', $cond ? (int) $str : null);
+		assertType('string|null', $cond ? (string) $str : null);
+		assertType('float|null', $cond ? (float) $str : null);
+		assertType('bool|null', $cond ? (bool) $str : null);
+		assertType('array|null', $cond ? (array) $str : null);
+		assertType('object{scalar: string}|null', $cond ? (object) $str : null);
+		assertType('object{a: int}|null', $cond ? (object) ['a' => 1] : null);
+		assertType('bool|null', $cond ? !$str : null);
+		assertType('string|null', $cond ? ~$str : null);
+	}
+
 	public function castArrayLiteral(): void
 	{
 		$arrFromInt = (array) 1;

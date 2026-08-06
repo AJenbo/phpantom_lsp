@@ -1826,10 +1826,10 @@ class ShapeMethodDemo
     public function getToolKit(): array { return ['pen' => new Pen(), 'pencil' => new Pencil(), 'active' => true]; }
 
     /** @return object{name: string, age: int, active: bool} */
-    public function getProfile(): object { return (object) []; }
+    public function getProfile(): object { return (object) ['name' => 'Ada', 'age' => 36, 'active' => true]; }
 
     /** @return object{tool: Pen, meta: object{page: int, total: int}} */
-    public function getResult(): object { return (object) []; }
+    public function getResult(): object { return (object) ['tool' => new Pen(), 'meta' => (object) ['page' => 1, 'total' => 3]]; }
 
     /** @param array{host: string, port: int, tool: Pen} $config */
     public function fromParam(array $config): void

@@ -109,6 +109,7 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |
 | B23 | [`analyze` reports no Laravel string-key errors at all](todo/bugs.md#b23-analyze-reports-no-laravel-string-key-errors-at-all)                                                 | Medium      | Low-Medium  |
+| B24 | [A conditional parameter type is compared without being evaluated](todo/bugs.md#b24-a-conditional-parameter-type-is-compared-without-being-evaluated)                        | Medium      | Medium      |
 | B22 | [`find_open_quote` is blind to comments on the cursor's own line](todo/bugs.md#b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line)                             | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
