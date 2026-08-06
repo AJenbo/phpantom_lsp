@@ -1034,3 +1034,80 @@ async fn final_methods_still_appear_in_member_access_completion() {
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
 }
+
+/// Redeclaring an inherited `readonly` property as non-readonly is a fatal
+/// error ("Cannot redeclare readonly property"), so the generated
+/// declaration has to keep the modifier.  Redeclaring it *as* readonly is
+/// legal, so the property stays on offer.
+#[tokio::test]
+async fn class_root_keeps_readonly_on_a_redeclared_property() {
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public readonly string $onName;\n",
+        "    protected readonly int $onCount;\n",
+        "    public string $onPlain = 'x';\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    \n",
+        "}\n",
+    );
+    let items = completion_items(text, "file:///readonly_override.php", 7, 4).await;
+
+    let name = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("onName"))
+        .expect("parent readonly property $onName should be offered");
+    assert_eq!(
+        insert_text_of(name),
+        "public readonly string $onName;",
+        "a readonly property must be redeclared as readonly"
+    );
+
+    let count = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("onCount"))
+        .expect("parent readonly property $onCount should be offered");
+    assert_eq!(insert_text_of(count), "protected readonly int $onCount;");
+
+    let plain = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("onPlain"))
+        .expect("parent property $onPlain should be offered");
+    assert_eq!(
+        insert_text_of(plain),
+        "public string $onPlain = 'x';",
+        "a non-readonly property must not gain the modifier"
+    );
+}
+
+/// A promoted constructor parameter is a real property, so its `readonly`
+/// modifier has to survive the same round trip.
+#[tokio::test]
+async fn class_root_keeps_readonly_on_a_promoted_property() {
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function __construct(\n",
+        "        public readonly string $onLabel,\n",
+        "        protected int $onSize,\n",
+        "    ) {}\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    \n",
+        "}\n",
+    );
+    let items = completion_items(text, "file:///readonly_promoted.php", 8, 4).await;
+
+    let label = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("onLabel"))
+        .expect("promoted readonly property $onLabel should be offered");
+    assert_eq!(insert_text_of(label), "public readonly string $onLabel;");
+
+    let size = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("onSize"))
+        .expect("promoted property $onSize should be offered");
+    assert_eq!(insert_text_of(size), "protected int $onSize;");
+}

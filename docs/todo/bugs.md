@@ -7,26 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B19. Override completion drops `readonly` from a redeclared property
-
-**Impact: Medium · Effort: Medium**
-
-At the class-body root, a parent's `public readonly string $onName` is
-offered with the inserted declaration `public string $onName;`. PHP
-rejects that: "Cannot redeclare readonly property A::$x as non-readonly
-B::$x". Redeclaring it *as* readonly is legal (verified on PHP 8.5), so
-the fix is to carry the modifier through, not to filter the property
-out.
-
-**Where to look:** `PropertyInfo` has no `is_readonly` field. The
-modifier is currently recovered by a local re-parse in
-`code_actions/generate_getter_setter.rs` (`has_readonly`), which shows
-where to read it from during parsing. Once `PropertyInfo` carries it,
-`build_property_override_completions` should emit `readonly ` after the
-visibility keyword whenever `include_declaration` is set. Same blast
-radius caveat as `MethodInfo::is_final`: adding the field touches every
-`PropertyInfo` construction site.
-
 #### B20. A class constructed from a string literal picks up a `bool` generic argument
 
 **Impact: Medium · Effort: Medium**

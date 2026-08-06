@@ -148,6 +148,7 @@ fn type_hint_to_classes_typed_depth(
                             deprecation_message: None,
                             deprecated_replacement: None,
                             see_refs: Vec::new(),
+                            is_readonly: false,
                             is_virtual: true,
                             source: None,
                         })

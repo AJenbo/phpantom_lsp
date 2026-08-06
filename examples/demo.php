@@ -3259,6 +3259,10 @@ class ClassRootCompletionDemo extends OverridableWidget
     // Try: type `onL` — nothing is offered.  `OverridableWidget::onLock()`
     // is `final`, so PHP rejects an override of it outright.
 
+    // Try: type `onN` — `$onName` is `readonly` in the parent, and the
+    // inserted declaration keeps the modifier: `public readonly string
+    // $onName;`.  Redeclaring it without `readonly` is a fatal error.
+
 }
 
 
@@ -4479,6 +4483,7 @@ class OverridableWidget
 
     public ?string $oneTimeToken = null;
     protected int $override = 0;
+    public readonly string $onName;
 
     public function onChange(callable $callback): static { return $this; }
     protected function onInitialize(): void {}

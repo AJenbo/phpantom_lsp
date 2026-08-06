@@ -702,6 +702,14 @@ pub struct PropertyInfo {
     pub description: Option<String>,
     /// Whether the property is static.
     pub is_static: bool,
+    /// Whether the property carries an explicit `readonly` modifier.
+    ///
+    /// A subclass may redeclare an inherited readonly property, but only as
+    /// readonly, so override completion has to carry the modifier through.
+    /// Properties that are only *implicitly* readonly (every property of a
+    /// `readonly class`) have this `false`: a subclass of a readonly class is
+    /// itself readonly, and repeating the keyword there is a compile error.
+    pub is_readonly: bool,
     /// Visibility of the property (public, protected, or private).
     pub visibility: Visibility,
     /// Deprecation message from the `@deprecated` PHPDoc tag.
@@ -825,6 +833,7 @@ impl PropertyInfo {
             && self.type_hint == other.type_hint
             && self.visibility == other.visibility
             && self.is_static == other.is_static
+            && self.is_readonly == other.is_readonly
             && self.description == other.description
             && self.deprecation_message == other.deprecation_message
             && self.deprecated_replacement == other.deprecated_replacement
@@ -871,6 +880,7 @@ impl PropertyInfo {
             native_type_hint: None,
             description: None,
             is_static: false,
+            is_readonly: false,
             visibility: Visibility::Public,
             deprecation_message: None,
             deprecated_replacement: None,

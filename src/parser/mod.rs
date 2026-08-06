@@ -1180,6 +1180,7 @@ pub(crate) fn extract_property_info(
     use mago_syntax::cst::class_like::property::PropertyItem;
 
     let is_static = property.modifiers().iter().any(|m| m.is_static());
+    let is_readonly = property.modifiers().iter().any(|m| m.is_readonly());
     let visibility = extract_visibility(property.modifiers().iter());
 
     let native_hint = property.hint().map(|h| extract_hint_type(h));
@@ -1210,6 +1211,7 @@ pub(crate) fn extract_property_info(
             native_type_hint: native_hint.clone(),
             description: None,
             is_static,
+            is_readonly,
             visibility,
             deprecation_message: None,
             deprecated_replacement: None,

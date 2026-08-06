@@ -665,6 +665,9 @@ pub(crate) fn build_property_override_completions(
         };
         if opts.include_declaration {
             let static_kw = if prop.is_static { "static " } else { "" };
+            // Redeclaring a readonly property as non-readonly is a fatal
+            // error, so the modifier has to come along with the declaration.
+            let readonly_kw = if prop.is_readonly { "readonly " } else { "" };
             let type_prefix = prop
                 .native_type_hint
                 .as_ref()
@@ -673,7 +676,7 @@ pub(crate) fn build_property_override_completions(
                 .map(|t| format!("{t} "))
                 .unwrap_or_default();
             insert = format!(
-                "{} {static_kw}{type_prefix}${insert};",
+                "{} {readonly_kw}{static_kw}{type_prefix}${insert};",
                 visibility_keyword(prop.visibility)
             );
         }

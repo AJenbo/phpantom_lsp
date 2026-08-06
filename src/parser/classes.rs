@@ -1087,6 +1087,7 @@ impl Backend {
                                 let saved_native_hint =
                                     param.hint.as_ref().map(|h| extract_hint_type(h));
                                 let prop_visibility = extract_visibility(param.modifiers.iter());
+                                let prop_readonly = param.modifiers.iter().any(|m| m.is_readonly());
 
                                 // Check for a docblock type override.
                                 //
@@ -1143,6 +1144,7 @@ impl Backend {
                                     type_hint,
                                     description: None,
                                     is_static: false,
+                                    is_readonly: prop_readonly,
                                     visibility: prop_visibility,
                                     deprecation_message: None,
                                     deprecated_replacement: None,

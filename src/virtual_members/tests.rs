@@ -736,6 +736,7 @@ fn merge_docblock_tag_does_not_override_real_property() {
     // Real declared properties always beat docblock tags.
     let mut class = make_class("Foo");
     class.properties.push(Arc::new(PropertyInfo {
+        is_readonly: false,
         is_virtual: false,
         ..PropertyInfo::virtual_property("name", Some("string"))
     }));

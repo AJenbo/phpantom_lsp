@@ -152,6 +152,7 @@ fn doc_property(
         native_type_hint: None,
         description: None,
         is_static: false,
+        is_readonly: false,
         visibility: Visibility::Public,
         deprecation_message: None,
         deprecated_replacement: None,
