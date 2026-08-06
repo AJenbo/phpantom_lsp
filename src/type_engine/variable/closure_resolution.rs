@@ -11,7 +11,7 @@
 ///   closure/arrow-function parameter types from the enclosing callable
 ///   signature (e.g. `$users->map(fn($u) => …)` infers `$u` from the
 ///   `map` method's parameter type).
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
@@ -26,16 +26,61 @@ use crate::virtual_members::laravel::{
 };
 
 thread_local! {
-    /// Re-entrancy guard for [`find_closure_this_override`].
+    /// Positions currently being resolved by
+    /// [`find_closure_this_override`], as `(source address, cursor
+    /// offset)` pairs.
     ///
     /// The override check re-parses the program and resolves the
     /// receiver of the enclosing call expression.  If the receiver
     /// is `$this`, that triggers `resolve_target_classes_expr` →
-    /// `SubjectExpr::This` → `find_closure_this_override` again,
-    /// creating an infinite cycle.  Returning `None` on re-entry
-    /// breaks the cycle and leaves the receiver on the normal
-    /// `current_class` fallback.
-    static IN_CLOSURE_THIS_OVERRIDE: Cell<bool> = const { Cell::new(false) };
+    /// `SubjectExpr::This` → `find_closure_this_override` again.
+    ///
+    /// Re-entry on a *different* position is legitimate work that must
+    /// proceed: for a closure nested inside another closure, resolving
+    /// the inner call's `$this` receiver re-enters at a position inside
+    /// the outer closure body, which is exactly where the outer
+    /// `@param-closure-this` applies.  Only re-entry on the *same*
+    /// position is a cycle; returning `None` there breaks it and leaves
+    /// the receiver on the normal `current_class` fallback.
+    static CLOSURE_THIS_IN_PROGRESS: RefCell<Vec<(usize, u32)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// RAII entry in [`CLOSURE_THIS_IN_PROGRESS`].
+struct ClosureThisGuard {
+    key: (usize, u32),
+}
+
+impl ClosureThisGuard {
+    /// Register the position `ctx` resolves, or return `None` when that
+    /// same position is already on the stack (a cycle).
+    ///
+    /// The source address is part of the key so that the same offset in
+    /// a different file is not mistaken for re-entry.  Both `&str`s are
+    /// alive for the whole nested call tree, so their addresses cannot
+    /// alias.
+    fn enter(ctx: &ResolutionCtx<'_>) -> Option<Self> {
+        let key = (ctx.content.as_ptr() as usize, ctx.cursor_offset);
+        CLOSURE_THIS_IN_PROGRESS.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if stack.contains(&key) {
+                return None;
+            }
+            stack.push(key);
+            Some(Self { key })
+        })
+    }
+}
+
+impl Drop for ClosureThisGuard {
+    fn drop(&mut self) {
+        CLOSURE_THIS_IN_PROGRESS.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if let Some(pos) = stack.iter().rposition(|k| *k == self.key) {
+                stack.remove(pos);
+            }
+        });
+    }
 }
 
 use crate::parser::with_parsed_program;
@@ -54,23 +99,16 @@ use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType
 /// `@param-closure-this` PHPDoc tag declares what `$this` should
 /// resolve to.
 pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
-    let already_inside = IN_CLOSURE_THIS_OVERRIDE.with(|f| f.get());
-    if already_inside {
-        return None;
-    }
-    IN_CLOSURE_THIS_OVERRIDE.with(|f| f.set(true));
+    let _guard = ClosureThisGuard::enter(ctx)?;
 
-    let result = with_parsed_program(ctx.content, "find_closure_this_override", |program, _| {
+    with_parsed_program(ctx.content, "find_closure_this_override", |program, _| {
         for stmt in program.statements.iter() {
             if let Some(result) = walk_stmt_for_closure_this(stmt, ctx) {
                 return Some(result);
             }
         }
         None
-    });
-
-    IN_CLOSURE_THIS_OVERRIDE.with(|f| f.set(false));
-    result
+    })
 }
 
 /// Recursively walk a statement looking for a closure argument that
@@ -296,9 +334,15 @@ fn walk_expr_for_closure_this(expr: &Expression<'_>, ctx: &ResolutionCtx<'_>) ->
         Expression::Clone(c) => walk_expr_for_closure_this(c.object, ctx),
         Expression::Pipe(p) => walk_expr_for_closure_this(p.input, ctx)
             .or_else(|| walk_expr_for_closure_this(p.callable, ctx)),
-        // Closures/arrow-functions that are NOT inside a call argument
-        // are handled by the caller; we don't descend into their bodies
-        // here because there is no call context to check.
+        // A closure/arrow-function met here is not itself a call
+        // argument (assigned to a variable, stored in an array, etc.),
+        // so it does not rebind `$this`.  Still descend into its body
+        // looking for a nested call whose closure argument contains the
+        // cursor; that nested call may sit under a `@param-closure-this`
+        // parameter.
+        Expression::Closure(_) | Expression::ArrowFunction(_) => {
+            walk_closure_body_for_closure_this(expr, ctx)
+        }
         _ => None,
     }
 }
@@ -431,6 +475,9 @@ fn is_closure_like(expr: &Expression<'_>) -> bool {
 /// Walk call arguments.  For each closure/arrow-function argument whose
 /// body contains the cursor, call `lookup_fn(arg_idx)` to check whether
 /// the target parameter has `closure_this_type`.
+///
+/// A call nested inside that body is checked first: the innermost
+/// `@param-closure-this` is the one that binds `$this` at the cursor.
 fn walk_args_for_closure_this<F>(
     arguments: &TokenSeparatedSequence<'_, Argument<'_>>,
     ctx: &ResolutionCtx<'_>,
@@ -461,10 +508,38 @@ where
         };
 
         if cursor_inside_body {
+            if let Some(nested) = walk_closure_body_for_closure_this(arg_expr, ctx) {
+                return Some(nested);
+            }
             return lookup_fn(arg_idx);
         }
     }
     None
+}
+
+/// Walk the body of a closure/arrow-function argument, looking for a
+/// nested call whose own closure argument contains the cursor.
+///
+/// Only closures passed *as call arguments* rebind `$this`; a closure
+/// merely defined inside the body inherits `$this` from its enclosing
+/// scope, which is why the walk descends through calls rather than
+/// through every closure it meets.
+fn walk_closure_body_for_closure_this(
+    arg_expr: &Expression<'_>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<ClassInfo> {
+    match arg_expr {
+        Expression::Closure(closure) => {
+            for stmt in closure.body.statements.iter() {
+                if let Some(r) = walk_stmt_for_closure_this(stmt, ctx) {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        Expression::ArrowFunction(arrow) => walk_expr_for_closure_this(arrow.expression, ctx),
+        _ => None,
+    }
 }
 
 /// Look up `closure_this_type` on a standalone function's parameter at

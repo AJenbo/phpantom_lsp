@@ -7,29 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B15. `IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard
-
-**Impact: Low · Effort: Medium**
-
-Found while cleaning up comments in
-`type_engine/variable/closure_resolution.rs`. The
-`IN_CLOSURE_THIS_OVERRIDE` thread-local guarding
-`find_closure_this_override` is a `Cell<bool>` — exactly the coarse
-boolean re-entry guard shape the project's performance anti-patterns
-warn about (item 5). It cannot distinguish re-entry on the *same*
-closure (the `$this`-receiver cycle it exists to break) from
-legitimate nested work on a *different* closure: with a closure inside
-a closure where both call sites declare `@param-closure-this`, the
-inner resolution short-circuits to `None` and silently falls back to
-`current_class`, so `$this` inside the inner closure resolves to the
-wrong type.
-
-**Where to look:** `find_closure_this_override` in
-`src/type_engine/variable/closure_resolution.rs`. Key the guard by the
-entity being resolved (e.g. the closure's span offset or the call-site
-span) in a small visited set, as `RESOLVING` does for class FQNs, so
-only genuine same-entity cycles short-circuit.
-
 #### B18. Override completion offers `final` parent methods
 
 **Impact: Medium · Effort: Medium**

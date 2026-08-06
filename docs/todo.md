@@ -107,7 +107,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B15 | [`IN_CLOSURE_THIS_OVERRIDE` is a coarse boolean re-entry guard](todo/bugs.md#b15-in_closure_this_override-is-a-coarse-boolean-re-entry-guard)                               | Low         | Medium      |
 | B18 | [Override completion offers `final` parent methods](todo/bugs.md#b18-override-completion-offers-final-parent-methods)                                                        | Medium      | Medium      |
 | B19 | [Override completion drops `readonly` from a redeclared property](todo/bugs.md#b19-override-completion-drops-readonly-from-a-redeclared-property)                            | Medium      | Medium      |
 | B20 | [A class constructed from a string literal picks up a `bool` generic argument](todo/bugs.md#b20-a-class-constructed-from-a-string-literal-picks-up-a-bool-generic-argument)   | Medium      | Medium      |

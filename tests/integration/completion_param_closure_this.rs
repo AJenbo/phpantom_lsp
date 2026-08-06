@@ -613,6 +613,154 @@ async fn test_param_closure_this_method_chain() {
     );
 }
 
+// ─── @param-closure-this in nested closures ─────────────────────────────────
+
+/// A closure inside a closure, where both call sites declare
+/// `@param-closure-this`: the innermost annotation wins.  The inner call's
+/// own receiver (`$this`) is itself resolved through the outer override.
+#[tokio::test]
+async fn test_param_closure_this_nested_closures() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_nested.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Inner {\n",
+        "    public function innerOnly(): void {}\n",
+        "}\n",
+        "class Outer {\n",
+        "    /**\n",
+        "     * @param-closure-this Inner $callback\n",
+        "     */\n",
+        "    public function withInner(\\Closure $callback): void {}\n",
+        "    public function outerOnly(): void {}\n",
+        "}\n",
+        "class Host {\n",
+        "    /**\n",
+        "     * @param-closure-this Outer $callback\n",
+        "     */\n",
+        "    public function withOuter(\\Closure $callback): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function boot(): void {\n",
+        "        $host = new Host();\n",
+        "        $host->withOuter(function () {\n",
+        "            $this->withInner(function () {\n",
+        "                $this->\n",
+        "            });\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 22: `                $this->` — cursor after `->`
+    let items = complete_at(&backend, &uri, src, 22, 23).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"innerOnly"),
+        "Expected 'innerOnly' from the inner @param-closure-this Inner, got: {:?}",
+        names,
+    );
+    assert!(
+        !names.contains(&"outerOnly"),
+        "Inner closure should not see Outer's members, got: {:?}",
+        names,
+    );
+}
+
+/// The outer closure body still resolves `$this` to the outer override
+/// when the cursor sits outside the nested closure.
+#[tokio::test]
+async fn test_param_closure_this_outer_body_of_nested_closures() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_nested_outer.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Inner {\n",
+        "    public function innerOnly(): void {}\n",
+        "}\n",
+        "class Outer {\n",
+        "    /**\n",
+        "     * @param-closure-this Inner $callback\n",
+        "     */\n",
+        "    public function withInner(\\Closure $callback): void {}\n",
+        "    public function outerOnly(): void {}\n",
+        "}\n",
+        "class Host {\n",
+        "    /**\n",
+        "     * @param-closure-this Outer $callback\n",
+        "     */\n",
+        "    public function withOuter(\\Closure $callback): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function boot(): void {\n",
+        "        $host = new Host();\n",
+        "        $host->withOuter(function () {\n",
+        "            $this->withInner(function () {});\n",
+        "            $this->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 22: `            $this->` — cursor after `->`
+    let items = complete_at(&backend, &uri, src, 22, 19).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"outerOnly"),
+        "Expected 'outerOnly' from the outer @param-closure-this Outer, got: {:?}",
+        names,
+    );
+    assert!(
+        !names.contains(&"innerOnly"),
+        "Outer closure body should not see Inner's members, got: {:?}",
+        names,
+    );
+}
+
+/// The enclosing `@param-closure-this` call site is still found when the
+/// closure containing it is not itself a call argument (here, assigned
+/// to a variable rather than passed directly to `withOuter`).
+#[tokio::test]
+async fn test_param_closure_this_outer_closure_assigned_to_variable() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_assigned_var.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Inner {\n",
+        "    public function innerOnly(): void {}\n",
+        "}\n",
+        "class Outer {\n",
+        "    /**\n",
+        "     * @param-closure-this Inner $callback\n",
+        "     */\n",
+        "    public function withInner(\\Closure $callback): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function boot(Outer $outer): void {\n",
+        "        $fn = function () use ($outer) {\n",
+        "            $outer->withInner(function () {\n",
+        "                $this->\n",
+        "            });\n",
+        "        };\n",
+        "        $fn();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 14: `                $this->` — cursor after `->`
+    let items = complete_at(&backend, &uri, src, 14, 23).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"innerOnly"),
+        "Expected 'innerOnly' from @param-closure-this Inner even though the outer \
+         closure is assigned to a variable rather than passed as a call argument, got: {:?}",
+        names,
+    );
+}
+
 // ─── Docblock parsing unit tests ────────────────────────────────────────────
 
 #[test]

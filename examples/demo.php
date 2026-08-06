@@ -3654,6 +3654,16 @@ class ParamClosureThisDemo
             $this->middleware('auth')->prefix('/v2');
         });
 
+        // Nested closures: the innermost @param-closure-this wins. Note
+        // that resolving the inner call's own $this receiver goes through
+        // the outer override first (it is a Route, which is what declares
+        // resource()).
+        $router->group(function () {
+            $this->resource('posts', function () {
+                $this->only('index');     // resolves Resource::only()
+            });
+        });
+
         // @param-closure-this with $this as the type (declares the
         // closure's $this is the method's declaring class).
         $router->extend('redis', function () {
@@ -5186,11 +5196,26 @@ class ScaffoldingPipeline
     public function through(array $pipes): static { return $this; }
 }
 
-// ScaffoldingClosureThisRoute / ScaffoldingClosureThisRouter — used by ParamClosureThisDemo
+// ScaffoldingClosureThisRoute / ScaffoldingClosureThisRouter — used by
+// ParamClosureThisDemo. Each method that declares @param-closure-this also
+// binds the callback with Closure::call() so the runtime matches the tag.
 class ScaffoldingClosureThisRoute
 {
     public function middleware(string $m): self { return $this; }
     public function prefix(string $p): self { return $this; }
+
+    /**
+     * @param-closure-this ScaffoldingClosureThisResource $callback
+     */
+    public function resource(string $name, \Closure $callback): void
+    {
+        $callback->call(new ScaffoldingClosureThisResource());
+    }
+}
+
+class ScaffoldingClosureThisResource
+{
+    public function only(string $action): self { return $this; }
 }
 
 class ScaffoldingClosureThisRouter
@@ -5200,7 +5225,10 @@ class ScaffoldingClosureThisRouter
     /**
      * @param-closure-this ScaffoldingClosureThisRoute $callback
      */
-    public function group(\Closure $callback): void {}
+    public function group(\Closure $callback): void
+    {
+        $callback->call(new ScaffoldingClosureThisRoute());
+    }
 
     /**
      * @param string $driver
@@ -5208,7 +5236,11 @@ class ScaffoldingClosureThisRouter
      * @param-closure-this $this $callback
      * @return $this
      */
-    public function extend(string $driver, \Closure $callback): self { return $this; }
+    public function extend(string $driver, \Closure $callback): self
+    {
+        $callback->call($this);
+        return $this;
+    }
 }
 
 // ScaffoldingMacroTarget — a minimal Macroable-style class used by
@@ -7526,6 +7558,16 @@ function runDemoAssertions(): void
     assert(is_string($ctRouter->getDefaultDriver()), 'Router::getDefaultDriver() must return string');
     $ctExt = $ctRouter->extend('redis', function () {});
     assert($ctExt instanceof ScaffoldingClosureThisRouter, 'Router::extend() must return self');
+
+    // Nested @param-closure-this: the innermost binding is the one in
+    // effect, and the inner call's receiver is the outer binding.
+    $ctInner = null;
+    $ctRouter->group(function () use (&$ctInner) {
+        $this->resource('posts', function () use (&$ctInner) {
+            $ctInner = $this->only('index');
+        });
+    });
+    assert($ctInner instanceof ScaffoldingClosureThisResource, 'nested @param-closure-this must bind $this to the innermost declared type');
 
     // Macro-style scope binding: self::/static:: inside a registered
     // closure refer to the macro target class at runtime.
