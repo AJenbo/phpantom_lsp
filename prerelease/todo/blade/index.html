@@ -1289,17 +1289,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#bl12-call-site-variable-inference-late-addition" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL12. Call-site variable inference (late addition)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1541,10 +1530,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl8-bl9-bl10-bl11-bl12" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl8-bl9-bl10-bl11" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL8, BL9, BL10, BL11, BL12)
+        Step 9: Template contracts (BL8, BL9, BL10, BL11)
       </span>
     </span>
   </a>
@@ -2600,17 +2589,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#bl12-call-site-variable-inference-late-addition" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL12. Call-site variable inference (late addition)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2852,10 +2830,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl8-bl9-bl10-bl11-bl12" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl8-bl9-bl10-bl11" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL8, BL9, BL10, BL11, BL12)
+        Step 9: Template contracts (BL8, BL9, BL10, BL11)
       </span>
     </span>
   </a>
@@ -2968,11 +2946,11 @@ For general architecture see <code>ARCHITECTURE.md</code>.</p>
   against that contract (BL9), exactly as a function signature
   works. Inferring types <em>from</em> call sites inverts the contract and
   produces "true for one caller" types, so it is not the foundation —
-  but a best-effort call-site inference fallback for unannotated
-  projects is planned as a late addition (BL12), layered strictly
-  below every declared source. Projects running Bladestan (a PHPStan
-  extension for Blade template analysis) get the full contract model
-  in both the editor and CI from the same annotations.</li>
+  the shipped call-site inference fallback for unannotated projects
+  is layered strictly below every declared source. Projects running
+  Bladestan (a PHPStan extension for Blade template analysis) get the
+  full contract model in both the editor and CI from the same
+  annotations.</li>
 <li><strong>Discovery is just directory walks.</strong> Scanning <code>resources/views/</code>
   and <code>app/View/Components/</code> (plus <code>app/Livewire/</code>) at init time is
   the full extent of external Blade file discovery. Paths are converted
@@ -3367,18 +3345,6 @@ missing required variables, unknown extras, and type mismatches each
 get a diagnostic. Templates without a signature produce no call-site
 diagnostics. This gives the editor the same errors Bladestan reports
 in CI, live while typing, from one annotation.</p>
-<h3 id="bl12-call-site-variable-inference-late-addition">BL12. Call-site variable inference (late addition)<a class="headerlink" href="#bl12-call-site-variable-inference-late-addition" title="Permanent link">&para;</a></h3>
-<p>For projects using neither signatures nor Bladestan: infer a
-template's variable types from the <code>view()</code> call sites that
-reference it (literal array keys, <code>compact()</code>, <code>-&gt;with()</code> chains),
-as the <strong>lowest-priority</strong> source in the BL8 chain — any
-declared source shadows it entirely, and multiple call sites union
-per variable. This is deliberately last: it is the inverted-contract
-model and inherits its weaknesses (types are "true for the callers
-we found", dynamic view names contribute nothing). It exists so a
-completely unannotated project still gets useful completion inside
-<code>{{ $user-&gt; }}</code>, and as a nudge path — hover can suggest promoting
-the inferred types into a signature docblock.</p>
 <hr />
 <h2 id="phase-6-editor-tooling-parity">Phase 6: Editor Tooling Parity<a class="headerlink" href="#phase-6-editor-tooling-parity" title="Permanent link">&para;</a></h2>
 <p>Other Blade-aware editors ship a full structure view, folding builder,
@@ -3644,11 +3610,12 @@ Implement <code>@extends</code> signature merging. Implement component class to
 template variable typing.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file. Parent layout variables are available in child templates.</p>
-<h3 id="step-9-template-contracts-bl8-bl9-bl10-bl11-bl12">Step 9: Template contracts (BL8, BL9, BL10, BL11, BL12)<a class="headerlink" href="#step-9-template-contracts-bl8-bl9-bl10-bl11-bl12" title="Permanent link">&para;</a></h3>
+<h3 id="step-9-template-contracts-bl8-bl9-bl10-bl11">Step 9: Template contracts (BL8, BL9, BL10, BL11)<a class="headerlink" href="#step-9-template-contracts-bl8-bl9-bl10-bl11" title="Permanent link">&para;</a></h3>
 <p>Implement the signature resolution chain, then call-site validation
 on top of it. Section/stack intelligence and custom directive
 discovery are independent and can land in either order. Call-site
-inference (BL12) comes last, after every declared source works.</p>
+inference (shipped) sits below every declared source; the BL8 chain
+slots in above it.</p>
 <p><strong>Deliverable:</strong> A template with a <code>@bladestan-signature</code> docblock
 gets typed completion for its declared variables, and a <code>view()</code>
 call missing a required variable gets a diagnostic.</p>
