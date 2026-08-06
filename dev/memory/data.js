@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786021195348,
+  "lastUpdate": 1786046976355,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14211,6 +14211,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "028efbeaa946a1c3fadc8486f9911eb5f58be583",
+          "message": "A conditional buried in a generic return type is decided at the call\nsite",
+          "timestamp": "2026-08-06T20:10:35+02:00",
+          "tree_id": "2897334af0da8b79364e8d33c909a3c70b4cb46e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/028efbeaa946a1c3fadc8486f9911eb5f58be583"
+        },
+        "date": 1786046972564,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 68.5,
             "unit": "MiB"
           }
         ]
