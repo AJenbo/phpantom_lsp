@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785974643627,
+  "lastUpdate": 1785974658657,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14075,6 +14075,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f070dc23512a8bc36bc02ef6dc88ba6fb6356f46",
+          "message": "Hover no longer builds a scope snapshot nothing reads",
+          "timestamp": "2026-08-06T01:48:03+02:00",
+          "tree_id": "9870d3b4d57be5f04d11a0538e0967a84a6651f8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f070dc23512a8bc36bc02ef6dc88ba6fb6356f46"
+        },
+        "date": 1785974655048,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.9,
             "unit": "MiB"
           }
         ]
