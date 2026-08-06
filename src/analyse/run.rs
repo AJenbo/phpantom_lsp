@@ -361,7 +361,6 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         #[cfg(debug_assertions)]
                         {
                             const FILE_TIMEOUT: Duration = Duration::from_secs(60);
-                            type CollectFn = dyn Fn(&Backend, &str, &str, &mut Vec<Diagnostic>);
                             let file_start = Instant::now();
                             let deadline = file_start + FILE_TIMEOUT;
                             let mut timings = Vec::new();
@@ -376,64 +375,26 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 (t0.elapsed(), "fast")
                             });
 
-                            // Slow collectors, each run separately so it
-                            // can be timed independently and check the
-                            // deadline between collectors.  Keeping them as
-                            // named entries also makes it easy to disable an
-                            // individual collector when narrowing down which
-                            // one is responsible for a hang on a given file.
-                            let collectors: &[(&str, &CollectFn)] = &[
-                                (
-                                    "unknown_class",
-                                    &|b: &Backend, u: &str, c: &str, o: &mut Vec<Diagnostic>| {
-                                        b.collect_unknown_class_diagnostics(u, c, o)
-                                    },
-                                ),
-                                ("class_case_mismatch", &|b, u, c, o| {
-                                    b.collect_class_case_mismatch_diagnostics(u, c, o)
+                            // Slow collectors, timed one by one with the
+                            // deadline checked between them, so a hang on a
+                            // given file can be attributed to a single
+                            // collector.  The list of collectors lives in
+                            // `collect_slow_diagnostics` so this path always
+                            // runs exactly what the LSP runs.
+                            backend.collect_slow_diagnostics_observed(
+                                uri,
+                                content,
+                                &mut raw,
+                                Some(&mut |name, elapsed| {
+                                    timings.push((elapsed, name));
+                                    if Instant::now() >= deadline {
+                                        timed_out = true;
+                                        false
+                                    } else {
+                                        true
+                                    }
                                 }),
-                                ("unknown_member", &|b, u, c, o| {
-                                    b.collect_unknown_member_diagnostics(u, c, o)
-                                }),
-                                ("unknown_function", &|b, u, c, o| {
-                                    b.collect_unknown_function_diagnostics(u, c, o)
-                                }),
-                                ("argument_count_mismatch", &|b, u, c, o| {
-                                    b.collect_argument_count_diagnostics(u, c, o)
-                                }),
-                                ("type_mismatch_argument", &|b, u, c, o| {
-                                    b.collect_argument_type_diagnostics(u, c, o)
-                                }),
-                                ("type_mismatch_return", &|b, u, c, o| {
-                                    b.collect_return_type_diagnostics(u, c, o)
-                                }),
-                                ("type_mismatch_property", &|b, u, c, o| {
-                                    b.collect_property_type_diagnostics(u, c, o)
-                                }),
-                                ("missing_implementation", &|b, u, c, o| {
-                                    b.collect_implementation_error_diagnostics(u, c, o)
-                                }),
-                                ("deprecated_usage", &|b, u, c, o| {
-                                    b.collect_deprecated_diagnostics(u, c, o)
-                                }),
-                                ("unknown_variable", &|b, u, c, o| {
-                                    b.collect_undefined_variable_diagnostics(u, c, o)
-                                }),
-                                ("invalid_class_kind", &|b, u, c, o| {
-                                    b.collect_invalid_class_kind_diagnostics(u, c, o)
-                                }),
-                            ];
-
-                            for (name, collect_fn) in collectors {
-                                if Instant::now() >= deadline {
-                                    timed_out = true;
-                                    break;
-                                }
-                                let t0 = Instant::now();
-                                collect_fn(backend, uri, content, &mut raw);
-                                let elapsed = t0.elapsed();
-                                timings.push((elapsed, name));
-                            }
+                            );
 
                             let file_elapsed = file_start.elapsed();
                             // The leading newline escapes the `\r`-rewritten

@@ -107,7 +107,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B23 | [`analyze` reports no Laravel string-key errors at all](todo/bugs.md#b23-analyze-reports-no-laravel-string-key-errors-at-all)                                                 | Medium      | Low-Medium  |
 | B22 | [`find_open_quote` is blind to comments on the cursor's own line](todo/bugs.md#b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line)                             | Low         | Low         |
 | B25 | [Generated PHPDoc types are written as FQNs even when the file imports them](todo/bugs.md#b25-generated-phpdoc-types-are-written-as-fqns-even-when-the-file-imports-them) | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |

@@ -237,6 +237,13 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 
+/// Callback invoked after each Phase 2 collector in
+/// [`Backend::collect_slow_diagnostics_observed`]: receives the
+/// collector's name and how long it ran, and returns `false` to skip the
+/// remaining collectors.
+pub(crate) type SlowDiagnosticObserver<'a> =
+    &'a mut dyn FnMut(&'static str, std::time::Duration) -> bool;
+
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 impl Backend {
@@ -277,6 +284,25 @@ impl Backend {
         uri_str: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
+    ) {
+        self.collect_slow_diagnostics_observed(uri_str, content, out, None);
+    }
+
+    /// [`Self::collect_slow_diagnostics`], with an optional per-collector
+    /// observer.
+    ///
+    /// The observer receives each collector's name and how long it ran,
+    /// and returns `false` to skip the remaining collectors.  The
+    /// `analyse` CLI uses it to attribute a slow or hanging file to a
+    /// single collector and to abandon a file that blows its deadline.
+    /// Having it share this collector list is what keeps the CLI from
+    /// silently missing a diagnostic kind the LSP reports.
+    pub(crate) fn collect_slow_diagnostics_observed(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+        mut observe: Option<SlowDiagnosticObserver<'_>>,
     ) {
         // Activate the chain resolution cache so that all slow
         // diagnostic collectors share cached intermediate chain
@@ -337,31 +363,96 @@ impl Backend {
             );
         }
 
-        if let Some(ctx) = &file_ctx {
-            self.collect_unknown_class_diagnostics_with_context(ctx, uri_str, content, out);
+        // Run one collector, reporting its name and duration to the
+        // observer and returning early when the observer asks to stop.
+        macro_rules! step {
+            ($name:literal, $call:expr) => {
+                match observe.as_mut() {
+                    Some(obs) => {
+                        let t0 = std::time::Instant::now();
+                        $call;
+                        if !obs($name, t0.elapsed()) {
+                            return;
+                        }
+                    }
+                    None => $call,
+                }
+            };
         }
-        self.collect_class_case_mismatch_diagnostics(uri_str, content, out);
+
         if let Some(ctx) = &file_ctx {
-            self.collect_unknown_member_diagnostics_with_context(ctx, uri_str, content, out);
-            self.collect_unknown_function_diagnostics_with_context(ctx, uri_str, content, out);
+            step!(
+                "unknown_class",
+                self.collect_unknown_class_diagnostics_with_context(ctx, uri_str, content, out)
+            );
         }
-        // unresolved_member_access diagnostics are emitted inside
-        // collect_unknown_member_diagnostics (in the Untyped arm) to
-        // avoid a second full walk with duplicate type resolution.
-        self.collect_argument_count_diagnostics(uri_str, content, out);
-        self.collect_type_mismatch_diagnostics(uri_str, content, out);
+        step!(
+            "class_case_mismatch",
+            self.collect_class_case_mismatch_diagnostics(uri_str, content, out)
+        );
         if let Some(ctx) = &file_ctx {
-            self.collect_implementation_error_diagnostics_with_context(ctx, uri_str, content, out);
-            self.collect_deprecated_diagnostics_with_context(ctx, uri_str, content, out);
+            // unresolved_member_access diagnostics are emitted inside
+            // collect_unknown_member_diagnostics (in the Untyped arm) to
+            // avoid a second full walk with duplicate type resolution.
+            step!(
+                "unknown_member",
+                self.collect_unknown_member_diagnostics_with_context(ctx, uri_str, content, out)
+            );
+            step!(
+                "unknown_function",
+                self.collect_unknown_function_diagnostics_with_context(ctx, uri_str, content, out)
+            );
         }
-        self.collect_undefined_variable_diagnostics(uri_str, content, out);
+        step!(
+            "argument_count_mismatch",
+            self.collect_argument_count_diagnostics(uri_str, content, out)
+        );
+        step!(
+            "type_mismatch_argument",
+            self.collect_argument_type_diagnostics(uri_str, content, out)
+        );
+        step!(
+            "type_mismatch_return",
+            self.collect_return_type_diagnostics(uri_str, content, out)
+        );
+        step!(
+            "type_mismatch_property",
+            self.collect_property_type_diagnostics(uri_str, content, out)
+        );
         if let Some(ctx) = &file_ctx {
-            self.collect_invalid_class_kind_diagnostics_with_context(ctx, uri_str, content, out);
+            step!(
+                "missing_implementation",
+                self.collect_implementation_error_diagnostics_with_context(
+                    ctx, uri_str, content, out
+                )
+            );
+            step!(
+                "deprecated_usage",
+                self.collect_deprecated_diagnostics_with_context(ctx, uri_str, content, out)
+            );
+        }
+        step!(
+            "unknown_variable",
+            self.collect_undefined_variable_diagnostics(uri_str, content, out)
+        );
+        if let Some(ctx) = &file_ctx {
+            step!(
+                "invalid_class_kind",
+                self.collect_invalid_class_kind_diagnostics_with_context(
+                    ctx, uri_str, content, out
+                )
+            );
         }
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         if is_laravel {
-            self.collect_invalid_laravel_string_key_diagnostics(uri_str, content, out);
-            self.collect_invalid_command_param_diagnostics(uri_str, content, out);
+            step!(
+                "invalid_laravel_string_key",
+                self.collect_invalid_laravel_string_key_diagnostics(uri_str, content, out)
+            );
+            step!(
+                "invalid_command_parameter",
+                self.collect_invalid_command_param_diagnostics(uri_str, content, out)
+            );
         }
     }
 
@@ -601,23 +692,6 @@ impl Backend {
                 ));
             }
         }
-    }
-
-    /// Collect all type mismatch diagnostics: argument types, return
-    /// types, and property assignment types.
-    ///
-    /// This is a convenience entry point that groups the three
-    /// `type_mismatch_*` collectors.  The individual methods remain
-    /// available for selective use (e.g. in `analyse.rs`).
-    pub fn collect_type_mismatch_diagnostics(
-        &self,
-        uri_str: &str,
-        content: &str,
-        out: &mut Vec<Diagnostic>,
-    ) {
-        self.collect_argument_type_diagnostics(uri_str, content, out);
-        self.collect_return_type_diagnostics(uri_str, content, out);
-        self.collect_property_type_diagnostics(uri_str, content, out);
     }
 }
 
@@ -1452,5 +1526,61 @@ mod tests {
 
         // Clean up.
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: the `analyse` CLI times each Phase 2 collector
+    /// individually via the observer, and must see the whole collector
+    /// list.  It used to carry its own copy of the list, which omitted
+    /// the Laravel checks, so `analyze` reported no `invalid_laravel_*`
+    /// errors on a Laravel project while the LSP reported them.
+    #[test]
+    fn observed_slow_diagnostics_report_every_collector() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+
+        let uri = "file:///app/Http/observed.php";
+        let php = "<?php\nclass Observed { public function run(): void { config('app.name'); } }\n";
+        backend.update_ast(uri, php);
+
+        let mut names: Vec<&'static str> = Vec::new();
+        let mut out = Vec::new();
+        backend.collect_slow_diagnostics_observed(
+            uri,
+            php,
+            &mut out,
+            Some(&mut |name, _elapsed| {
+                names.push(name);
+                true
+            }),
+        );
+
+        for expected in [
+            "unknown_class",
+            "unknown_member",
+            "argument_count_mismatch",
+            "invalid_class_kind",
+            "invalid_laravel_string_key",
+            "invalid_command_parameter",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "observer never saw the {expected} collector, only {names:?}"
+            );
+        }
+
+        // Returning `false` stops the pass — this is how the CLI abandons
+        // a file that blows its per-file deadline.
+        let mut stopped: Vec<&'static str> = Vec::new();
+        let mut out = Vec::new();
+        backend.collect_slow_diagnostics_observed(
+            uri,
+            php,
+            &mut out,
+            Some(&mut |name, _elapsed| {
+                stopped.push(name);
+                false
+            }),
+        );
+        assert_eq!(stopped.len(), 1, "observer must be able to stop the pass");
     }
 }

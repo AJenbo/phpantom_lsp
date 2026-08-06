@@ -37,40 +37,6 @@ cursor read as in-string; check the callers in
 `completion/eloquent_string.rs`, `completion/command_params.rs`, and
 `completion/laravel_route_params.rs` for how they cope with that.
 
-#### B23. `analyze` reports no Laravel string-key errors at all
-
-**Impact: Medium · Effort: Low-Medium**
-
-The `analyze` CLI no longer emits any of the Laravel string-key
-diagnostics (`invalid_laravel_route`, `invalid_laravel_config`,
-`invalid_laravel_view`, `invalid_laravel_trans`,
-`invalid_laravel_command`, `invalid_laravel_morph_alias`). The CI
-checklist in `docs/CONTRIBUTING.md` relies on one of them:
-`examples/laravel/app/Demo.php:428` calls
-`Artisan::call('does:not-exist')` so that
-`phpantom_lsp analyze --project-root examples/laravel --no-colour` must
-report exactly `[ERROR] Found 1 error`. It reports `[OK] No errors`.
-
-**Reproduce:** run `composer install` in `examples/laravel`, then the
-analyze command above. Adding further bogus keys (a
-`config('totally.bogus.key')`, a second unknown command) to a copy of
-that project does not produce errors either, so the whole family is
-silent rather than one kind of key resolving too permissively. The LSP's
-own tests for these diagnostics pass, so the gap is in what the analyse
-pass feeds them.
-
-**Where to look:** `collect_invalid_laravel_string_key_diagnostics`
-(`src/diagnostics/mod.rs`) returns early when `symbol_maps` holds no
-entry for the file, and every kind additionally skips when its
-enumeration comes back empty (the deliberate escape hatch for
-non-Laravel projects that also define `__()` or `trans()`). Either the
-analyse pass leaves those maps unpopulated for the files it walks, or the
-`is_laravel` gate at `src/diagnostics/mod.rs:361` reads false there.
-`src/analyse/run.rs` does call `init_single_project` with the parsed
-composer package and builds the command, macro, morph-map, and provider
-resource indexes under an `is_laravel()` check, so start by confirming
-which of the two gates closes.
-
 #### B25. Generated PHPDoc types are written as FQNs even when the file imports them
 
 **Impact: Low · Effort: Low**
