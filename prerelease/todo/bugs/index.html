@@ -959,17 +959,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b53-this-mockfooclass-loses-the-intersection-with-foo" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B53. <code>$this-&gt;mock(Foo::class)</code> loses the intersection with <code>Foo</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1569,17 +1558,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b53-this-mockfooclass-loses-the-intersection-with-foo" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B53. <code>$this-&gt;mock(Foo::class)</code> loses the intersection with <code>Foo</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1765,20 +1743,6 @@ the variable as undefined:</p>
 existence question from
 <a href="../type-inference/#t29-definite-vs-possible-variable-existence-tracking">T29</a>,
 narrowed to the one shape that shows up constantly in templates.</p>
-<h4 id="b53-this-mockfooclass-loses-the-intersection-with-foo">B53. <code>$this-&gt;mock(Foo::class)</code> loses the intersection with <code>Foo</code><a class="headerlink" href="#b53-this-mockfooclass-loses-the-intersection-with-foo" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p>Laravel declares <code>InteractsWithContainer::mock()</code> as returning
-<code>MockInterface</code>; the useful type is <code>Foo&amp;MockInterface</code>, which is what
-callers annotate:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">private function mockHelloRetailClient(): Client&amp;MockInterface</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">{</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">    $mock = $this-&gt;mock(Client::class);</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">    // Return type Mockery\MockInterface is incompatible with declared</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">    // return type Client&amp;MockInterface</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">    return $mock;</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>Same treatment for <code>partialMock()</code>, <code>spy()</code> and <code>instance()</code>.</p>
 
 
 
