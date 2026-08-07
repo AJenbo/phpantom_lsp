@@ -8,7 +8,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::source::code_context::code_context_at;
+use crate::completion::source::code_context::CodeContext;
 use crate::completion::source::helpers::enclosing_array_key_call;
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::virtual_members::laravel::route_uri_parameters;
@@ -25,9 +25,11 @@ struct RouteParamContext {
 }
 
 /// Detect the cursor inside a key of a route parameters array.
-fn detect_context(content: &str, position: Position) -> Option<RouteParamContext> {
-    let cursor_offset = position_to_offset(content, position) as usize;
-    let code = code_context_at(content, cursor_offset)?;
+fn detect_context(
+    content: &str,
+    cursor_offset: usize,
+    code: &CodeContext<'_>,
+) -> Option<RouteParamContext> {
     let (quote_pos, _) = code.open_string?;
 
     // The character before the key is `[` for the first key and `,` for the
@@ -36,7 +38,7 @@ fn detect_context(content: &str, position: Position) -> Option<RouteParamContext
         return None;
     }
 
-    let call = enclosing_array_key_call(content, &code)?;
+    let call = enclosing_array_key_call(content, code)?;
     let receiver_is_call = call.before_callee.ends_with("::") || call.before_callee.ends_with("->");
     let names_a_route = match call.callee.as_str() {
         // `signedRoute()` / `temporarySignedRoute()` only exist on the `URL`
@@ -70,8 +72,10 @@ impl Backend {
         &self,
         content: &str,
         position: Position,
+        code: &CodeContext<'_>,
     ) -> Option<CompletionResponse> {
-        let ctx = detect_context(content, position)?;
+        let cursor_offset = position_to_offset(content, position) as usize;
+        let ctx = detect_context(content, cursor_offset, code)?;
 
         let routes = self.cached_routes();
         let route = routes.iter().find(|route| route.name == ctx.route_name)?;

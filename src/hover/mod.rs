@@ -671,7 +671,10 @@ impl Backend {
     ) -> Option<Hover> {
         use crate::completion::eloquent_string::detect_string_call_context;
 
-        let sc = detect_string_call_context(content, position)?;
+        let cursor_offset = crate::text_position::position_to_offset(content, position) as usize;
+        let code =
+            crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
+        let sc = detect_string_call_context(content, cursor_offset, &code)?;
 
         // For hover we need the FULL string content, not just the
         // partial typed before the cursor.  Scan forward from the

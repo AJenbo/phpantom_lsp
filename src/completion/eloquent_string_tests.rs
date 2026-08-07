@@ -1,6 +1,21 @@
 use super::*;
 use tower_lsp::lsp_types::Position;
 
+/// Resolve the lexical position the completion handler would pass in, then
+/// detect the Eloquent string context there.
+fn eloquent_ctx_at(content: &str, pos: Position) -> Option<EloquentStringContext> {
+    let offset = crate::text_position::position_to_offset(content, pos) as usize;
+    let code = crate::completion::source::code_context::code_context_at(content, offset)?;
+    detect_eloquent_string_context(content, offset, &code)
+}
+
+/// The same for the generic string-in-a-call context underneath it.
+fn call_ctx_at(content: &str, pos: Position) -> Option<StringCallContext> {
+    let offset = crate::text_position::position_to_offset(content, pos) as usize;
+    let code = crate::completion::source::code_context::code_context_at(content, offset)?;
+    detect_string_call_context(content, offset, &code)
+}
+
 #[test]
 fn test_detect_relation_method_with() {
     let content = "<?php\nUser::with('";
@@ -8,7 +23,7 @@ fn test_detect_relation_method_with() {
         line: 1,
         character: 12,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.partial, "");
     assert_eq!(ctx.subject, "User");
@@ -22,7 +37,7 @@ fn test_detect_relation_method_with_partial() {
         line: 1,
         character: 15,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.partial, "pos");
     assert_eq!(ctx.subject, "User");
@@ -35,7 +50,7 @@ fn test_detect_relation_dot_notation() {
         line: 1,
         character: 21,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.partial, "posts.com");
 }
@@ -47,7 +62,7 @@ fn test_detect_column_method_where() {
         line: 1,
         character: 13,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Column);
     assert_eq!(ctx.partial, "");
     assert_eq!(ctx.subject, "User");
@@ -60,7 +75,7 @@ fn test_detect_instance_call() {
         line: 1,
         character: 13,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.partial, "");
     assert_eq!(ctx.subject, "$user");
@@ -74,7 +89,7 @@ fn test_detect_in_array_second_element() {
         line: 1,
         character: 22,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.partial, "");
 }
@@ -86,7 +101,7 @@ fn test_no_detection_outside_string() {
         line: 1,
         character: 12,
     };
-    assert!(detect_eloquent_string_context(content, pos).is_none());
+    assert!(eloquent_ctx_at(content, pos).is_none());
 }
 
 #[test]
@@ -96,7 +111,7 @@ fn test_no_detection_unknown_method() {
         line: 1,
         character: 11,
     };
-    assert!(detect_eloquent_string_context(content, pos).is_none());
+    assert!(eloquent_ctx_at(content, pos).is_none());
 }
 
 #[test]
@@ -106,7 +121,7 @@ fn test_detect_nullsafe_operator() {
         line: 1,
         character: 14,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.subject, "$user");
     assert!(!ctx.is_static);
@@ -119,7 +134,7 @@ fn test_detect_orderby_column() {
         line: 1,
         character: 19,
     };
-    let ctx = detect_eloquent_string_context(content, pos).unwrap();
+    let ctx = eloquent_ctx_at(content, pos).unwrap();
     assert_eq!(ctx.kind, EloquentStringKind::Column);
     assert_eq!(ctx.partial, "na");
 }
@@ -139,7 +154,7 @@ fn with_call_of_length(args: usize) -> (String, Position) {
 fn test_a_long_argument_list_still_finds_the_call() {
     for args in [100, 1000] {
         let (content, pos) = with_call_of_length(args);
-        let ctx = detect_eloquent_string_context(&content, pos)
+        let ctx = eloquent_ctx_at(&content, pos)
             .unwrap_or_else(|| panic!("a with() call with {args} preceding arguments"));
         assert_eq!(ctx.kind, EloquentStringKind::Relation);
         assert_eq!(ctx.subject, "User");
@@ -159,8 +174,7 @@ fn at_end(content: &str) -> Position {
 #[test]
 fn test_a_paren_in_a_comment_does_not_hide_the_call() {
     let content = "<?php\nUser::with('a' /* ) */, '";
-    let ctx =
-        detect_eloquent_string_context(content, at_end(content)).expect("the comment is not code");
+    let ctx = eloquent_ctx_at(content, at_end(content)).expect("the comment is not code");
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.subject, "User");
 }
@@ -170,7 +184,7 @@ fn test_a_paren_in_a_comment_does_not_hide_the_call() {
 #[test]
 fn test_a_comma_in_a_comment_is_not_an_argument_separator() {
     let content = "<?php\n$q->where('a' /* , */, '";
-    let ctx = detect_string_call_context(content, at_end(content)).expect("a where() call");
+    let ctx = call_ctx_at(content, at_end(content)).expect("a where() call");
     assert_eq!(ctx.method_name, "where");
     assert_eq!(ctx.arg_index, 1);
 }
@@ -179,8 +193,8 @@ fn test_a_comma_in_a_comment_is_not_an_argument_separator() {
 #[test]
 fn test_a_comment_before_the_argument_list_is_skipped() {
     let content = "<?php\n$q->orderBy /* asc */ ('";
-    let ctx = detect_eloquent_string_context(content, at_end(content))
-        .expect("the comment is not part of the callee");
+    let ctx =
+        eloquent_ctx_at(content, at_end(content)).expect("the comment is not part of the callee");
     assert_eq!(ctx.kind, EloquentStringKind::Column);
     assert_eq!(ctx.subject, "$q");
 }
@@ -191,8 +205,8 @@ fn test_a_comment_before_the_argument_list_is_skipped() {
 #[test]
 fn test_a_comment_before_the_arrow_does_not_hide_the_receiver() {
     let content = "<?php\n$q /* the query */ ->where('";
-    let ctx = detect_eloquent_string_context(content, at_end(content))
-        .expect("the comment does not hide the receiver");
+    let ctx =
+        eloquent_ctx_at(content, at_end(content)).expect("the comment does not hide the receiver");
     assert_eq!(ctx.kind, EloquentStringKind::Column);
     assert_eq!(ctx.subject, "$q");
     assert!(!ctx.is_static);
@@ -201,8 +215,8 @@ fn test_a_comment_before_the_arrow_does_not_hide_the_receiver() {
 #[test]
 fn test_a_comment_before_the_double_colon_does_not_hide_the_receiver() {
     let content = "<?php\nUser /* the model */ ::with('";
-    let ctx = detect_eloquent_string_context(content, at_end(content))
-        .expect("the comment does not hide the receiver");
+    let ctx =
+        eloquent_ctx_at(content, at_end(content)).expect("the comment does not hide the receiver");
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.subject, "User");
     assert!(ctx.is_static);
@@ -213,7 +227,7 @@ fn test_a_comment_before_the_double_colon_does_not_hide_the_receiver() {
 #[test]
 fn test_an_unrelated_call_after_a_receiver_chain_has_no_subject() {
     let content = "<?php\nif ($a->foo and bar('";
-    let ctx = detect_string_call_context(content, at_end(content)).expect("a bar() call");
+    let ctx = call_ctx_at(content, at_end(content)).expect("a bar() call");
     assert_eq!(ctx.method_name, "bar");
     assert!(ctx.subject.is_none());
     assert!(!ctx.is_static);
@@ -225,7 +239,7 @@ fn test_an_unrelated_call_after_a_receiver_chain_has_no_subject() {
 #[test]
 fn test_a_bare_call_after_a_receiver_argument_has_no_subject() {
     let content = "<?php\nfoo($a->bar, baz('";
-    let ctx = detect_string_call_context(content, at_end(content)).expect("a baz() call");
+    let ctx = call_ctx_at(content, at_end(content)).expect("a baz() call");
     assert_eq!(ctx.method_name, "baz");
     assert!(ctx.subject.is_none());
 }
@@ -235,6 +249,6 @@ fn test_a_bare_call_after_a_receiver_argument_has_no_subject() {
 #[test]
 fn test_an_element_of_an_argument_array_keeps_the_array_index() {
     let content = "<?php\n$q->where('a', ['b', '";
-    let ctx = detect_string_call_context(content, at_end(content)).expect("a where() call");
+    let ctx = call_ctx_at(content, at_end(content)).expect("a where() call");
     assert_eq!(ctx.arg_index, 1);
 }

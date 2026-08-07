@@ -3,8 +3,14 @@ use super::*;
 /// Place the cursor immediately after `needle` and detect the context there.
 fn detect_at(content: &str, needle: &str) -> Option<RequestFieldContext> {
     let offset = content.find(needle).unwrap() + needle.len();
-    let position = crate::text_position::offset_to_position(content, offset);
-    detect_request_field_context(content, position)
+    detect_at_offset(content, offset)
+}
+
+/// Detect the context at a byte offset, resolving the lexical position the
+/// completion handler would otherwise pass in.
+fn detect_at_offset(content: &str, offset: usize) -> Option<RequestFieldContext> {
+    let code = crate::completion::source::code_context::code_context_at(content, offset)?;
+    detect_request_field_context(content, offset, &code)
 }
 
 #[test]
@@ -83,8 +89,7 @@ fn rejects_static_calls() {
 fn full_value_stops_at_the_closing_quote() {
     let content = "<?php\n$request->input('address.city');\n";
     let offset = content.find("address").unwrap() + 3;
-    let position = crate::text_position::offset_to_position(content, offset);
-    let ctx = detect_request_field_context(content, position).unwrap();
+    let ctx = detect_at_offset(content, offset).unwrap();
     assert_eq!(ctx.prefix, "add");
     assert_eq!(ctx.full_value(content), Some("address.city"));
 }

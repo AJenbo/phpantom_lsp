@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::completion::eloquent_string::detect_string_call_context;
-use crate::completion::source::code_context::code_context_at;
+use crate::completion::source::code_context::{CodeContext, code_context_at};
 use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
 
@@ -98,10 +98,9 @@ impl RequestFieldContext {
 /// Detect a cursor inside a request input-field string.
 pub(crate) fn detect_request_field_context(
     content: &str,
-    position: Position,
+    cursor_offset: usize,
+    code: &CodeContext<'_>,
 ) -> Option<RequestFieldContext> {
-    let cursor_offset = position_to_offset(content, position) as usize;
-    let code = code_context_at(content, cursor_offset)?;
     let (quote_pos, quote_char) = code.open_string?;
     let prefix = content.get(quote_pos + 1..cursor_offset)?.to_string();
 
@@ -120,7 +119,7 @@ pub(crate) fn detect_request_field_context(
     }
 
     // ── Method argument: `$request->input('|')` ─────────────────────
-    let call = detect_string_call_context(content, position)?;
+    let call = detect_string_call_context(content, cursor_offset, code)?;
     if call.is_static {
         return None;
     }
@@ -193,11 +192,12 @@ pub(crate) fn request_fields_at_position(
     content: &str,
     position: Position,
     ctx: &FileContext,
+    code: &CodeContext<'_>,
 ) -> Option<(RequestFieldContext, ResolvedRules, Vec<RuleField>)> {
-    let field_ctx = detect_request_field_context(content, position)?;
+    let cursor_offset = position_to_offset(content, position);
+    let field_ctx = detect_request_field_context(content, cursor_offset as usize, code)?;
 
     let class_loader = backend.class_loader(ctx);
-    let cursor_offset = position_to_offset(content, position);
     let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
 
     let loaded: Option<Arc<ClassInfo>>;
@@ -299,8 +299,10 @@ pub(crate) fn resolve_request_field_definition(
     position: Position,
 ) -> Option<Location> {
     let ctx = backend.file_context(uri);
+    let cursor_offset = position_to_offset(content, position) as usize;
+    let code = code_context_at(content, cursor_offset)?;
     let (field_ctx, rules, fields) =
-        request_fields_at_position(backend, uri, content, position, &ctx)?;
+        request_fields_at_position(backend, uri, content, position, &ctx, &code)?;
     let value = field_ctx.full_value(content)?;
 
     // An exact rule key wins over the root segment it also contributes, so

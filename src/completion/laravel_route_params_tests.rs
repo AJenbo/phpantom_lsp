@@ -3,8 +3,8 @@ use super::*;
 fn ctx_at(content: &str, needle: &str) -> Option<RouteParamContext> {
     // Place the cursor right after `needle` (which ends inside a quote).
     let idx = content.find(needle).expect("needle not found") + needle.len();
-    let position = crate::text_position::offset_to_position(content, idx);
-    detect_context(content, position)
+    let code = crate::completion::source::code_context::code_context_at(content, idx)?;
+    detect_context(content, idx, &code)
 }
 
 #[test]
@@ -109,7 +109,9 @@ fn backend_with_routes(routes: &str) -> crate::Backend {
 fn labels_at(backend: &crate::Backend, content: &str, needle: &str) -> Vec<String> {
     let idx = content.find(needle).expect("needle not found") + needle.len();
     let position = crate::text_position::offset_to_position(content, idx);
-    match backend.try_route_param_completion(content, position) {
+    let code = crate::completion::source::code_context::code_context_at(content, idx)
+        .expect("the cursor is in a string literal");
+    match backend.try_route_param_completion(content, position, &code) {
         Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
         Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
         None => Vec::new(),

@@ -3,8 +3,8 @@ use super::*;
 fn ctx_at(content: &str, needle: &str) -> Option<DetectedContext> {
     // Place the cursor right after `needle` (which should end inside a quote).
     let idx = content.find(needle).expect("needle not found") + needle.len();
-    let position = crate::text_position::offset_to_position(content, idx);
-    detect_context(content, position)
+    let code = crate::completion::source::code_context::code_context_at(content, idx)?;
+    detect_context(content, idx, &code)
 }
 
 #[test]
@@ -107,7 +107,8 @@ class SyncCommand extends Command
 ";
     let idx = content.find("argument('").unwrap() + "argument('".len();
     let position = crate::text_position::offset_to_position(content, idx);
-    let response = backend.try_command_param_completion(content, position);
+    let code = crate::completion::source::code_context::code_context_at(content, idx).unwrap();
+    let response = backend.try_command_param_completion(content, position, &code);
     let labels = collect_labels(response);
     assert!(labels.contains(&"user".to_string()), "got {labels:?}");
     assert!(labels.contains(&"team".to_string()), "got {labels:?}");
@@ -132,7 +133,8 @@ class SyncCommand extends Command
 ";
     let idx = content.find("option('").unwrap() + "option('".len();
     let position = crate::text_position::offset_to_position(content, idx);
-    let response = backend.try_command_param_completion(content, position);
+    let code = crate::completion::source::code_context::code_context_at(content, idx).unwrap();
+    let response = backend.try_command_param_completion(content, position, &code);
     let labels = collect_labels(response);
     assert!(labels.contains(&"queue".to_string()), "got {labels:?}");
     assert!(labels.contains(&"conn".to_string()), "got {labels:?}");

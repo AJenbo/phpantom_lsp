@@ -16,6 +16,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::completion::source::code_context::CodeContext;
 use crate::text_position::position_to_offset;
 
 /// What kind of command-parameter completion the cursor sits in.
@@ -44,9 +45,10 @@ impl Backend {
         &self,
         content: &str,
         position: Position,
+        code: &CodeContext<'_>,
     ) -> Option<CompletionResponse> {
-        let detected = detect_context(content, position)?;
         let cursor_offset = position_to_offset(content, position) as usize;
+        let detected = detect_context(content, cursor_offset, code)?;
 
         let labels: Vec<String> = match &detected.context {
             ParamContext::OwnArgument => {
@@ -122,12 +124,13 @@ impl Backend {
     }
 }
 
-fn detect_context(content: &str, position: Position) -> Option<DetectedContext> {
-    let cursor_offset = position_to_offset(content, position) as usize;
-    // `code_before` ends at the last byte of code before the opening quote of
-    // the string being typed, so a comment between the call and the key is
-    // skipped.
-    let code = crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
+// `code_before` ends at the last byte of code before the opening quote of the
+// string being typed, so a comment between the call and the key is skipped.
+fn detect_context(
+    content: &str,
+    cursor_offset: usize,
+    code: &CodeContext<'_>,
+) -> Option<DetectedContext> {
     let (quote_pos, _) = code.open_string?;
     let prefix = content[quote_pos + 1..cursor_offset].to_string();
     let before_quote = code.code_before;
@@ -165,7 +168,7 @@ fn detect_context(content: &str, position: Position) -> Option<DetectedContext> 
     // the quote is `[` (first key) or `,` (subsequent key).
     let last = code.last_code_byte()?;
     if (last == b'[' || last == b',')
-        && let Some(command_name) = command_name_for_array_key(content, &code)
+        && let Some(command_name) = command_name_for_array_key(content, code)
     {
         return Some(DetectedContext {
             context: ParamContext::CallArrayKey { command_name },
@@ -182,10 +185,7 @@ fn detect_context(content: &str, position: Position) -> Option<DetectedContext> 
 ///
 /// Returns `None` when the enclosing call is not a recognised
 /// command-running call.
-fn command_name_for_array_key(
-    content: &str,
-    code: &crate::completion::source::code_context::CodeContext<'_>,
-) -> Option<String> {
+fn command_name_for_array_key(content: &str, code: &CodeContext<'_>) -> Option<String> {
     let call = crate::completion::source::helpers::enclosing_array_key_call(content, code)?;
     let before_callee = call.before_callee;
 

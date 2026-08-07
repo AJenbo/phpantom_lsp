@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::source::code_context::Operator;
+use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
@@ -130,12 +130,16 @@ pub(crate) struct StringCallContext {
 /// Returns `Some(StringCallContext)` when the cursor is inside a
 /// string literal that is an argument to a function or method call.
 /// Works for both `$obj->method('|')` and standalone `func('|')`.
+///
+/// `code` is the cursor's lexical position, which the caller resolves once
+/// and shares with the other string-argument strategies: the forward scan
+/// behind it is a pass over the file, so running it per strategy would cost
+/// as many passes as there are strategies on every keystroke.
 pub(crate) fn detect_string_call_context(
     content: &str,
-    position: Position,
+    cursor_offset: usize,
+    code: &CodeContext<'_>,
 ) -> Option<StringCallContext> {
-    let cursor_offset = position_to_offset(content, position) as usize;
-    let code = crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
     let (quote_pos, quote_char) = code.open_string?;
     let string_content_start = quote_pos + 1;
     let partial = content[string_content_start..cursor_offset].to_string();
@@ -202,9 +206,10 @@ pub(crate) struct EloquentStringContext {
 /// recognized Eloquent method.
 pub(crate) fn detect_eloquent_string_context(
     content: &str,
-    position: Position,
+    cursor_offset: usize,
+    code: &CodeContext<'_>,
 ) -> Option<EloquentStringContext> {
-    let ctx = detect_string_call_context(content, position)?;
+    let ctx = detect_string_call_context(content, cursor_offset, code)?;
 
     let subject = ctx.subject?;
 
@@ -282,8 +287,10 @@ impl Backend {
         content: &str,
         position: Position,
         ctx: &FileContext,
+        code: &CodeContext<'_>,
     ) -> Option<CompletionResponse> {
-        let es_ctx = detect_eloquent_string_context(content, position)?;
+        let cursor_offset = position_to_offset(content, position) as usize;
+        let es_ctx = detect_eloquent_string_context(content, cursor_offset, code)?;
 
         // Resolve the model class.
         let class_loader = self.class_loader(ctx);
@@ -521,8 +528,10 @@ impl Backend {
         content: &str,
         position: Position,
         ctx: &FileContext,
+        code: &CodeContext<'_>,
     ) -> Option<CompletionResponse> {
-        let sc = detect_string_call_context(content, position)?;
+        let cursor_offset = position_to_offset(content, position) as usize;
+        let sc = detect_string_call_context(content, cursor_offset, code)?;
 
         let call_expr = match &sc.subject {
             Some(subj) if sc.is_static => format!("{}::{}", subj, sc.method_name),

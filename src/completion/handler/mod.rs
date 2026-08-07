@@ -173,7 +173,12 @@ impl Backend {
             let cursor_offset = crate::text_position::position_to_offset(&content, position);
             let ctx = self.file_context_at(&uri, cursor_offset);
 
-            if (crate::completion::comment_position::is_inside_non_doc_comment(&content, position)
+            // Scanning for a comment costs a pass over the file, so the answer
+            // is taken once and reused by the check below it.
+            let in_non_doc_comment =
+                crate::completion::comment_position::is_inside_non_doc_comment(&content, position);
+
+            if (in_non_doc_comment
                 || crate::completion::comment_position::is_inside_docblock(&content, position))
                 && let Some(prefix) =
                     crate::phpstan_ignore::phpstan_ignore_code_prefix(&content, position)
@@ -182,7 +187,7 @@ impl Backend {
             }
 
             // ── Suppress completion inside non-doc comments ─────────
-            if crate::completion::comment_position::is_inside_non_doc_comment(&content, position) {
+            if in_non_doc_comment {
                 return Ok(None);
             }
 
@@ -278,6 +283,17 @@ impl Backend {
             let string_ctx =
                 crate::completion::comment_position::classify_string_context(&content, position);
             use crate::completion::comment_position::StringContext;
+
+            // ── Cursor's lexical position ───────────────────────────
+            // Resolving it is a forward pass over the file, and every
+            // string-argument strategy below needs the same answer (the
+            // literal being typed in, and the brackets around it), so the
+            // scan runs once here and is shared rather than repeated per
+            // strategy on every keystroke.
+            let code_ctx = crate::completion::source::code_context::code_context_at(
+                &content,
+                cursor_offset as usize,
+            );
             // ── Array shape key completion ───────────────────────────
             // Runs before `InStringLiteral` suppression because in
             // normal code `$arr['` puts the scanner inside a
@@ -317,7 +333,8 @@ impl Backend {
                     string_ctx,
                     StringContext::InStringLiteral | StringContext::NotInString
                 )
-                && let Some(response) = self.try_route_param_completion(&content, position)
+                && let Some(code) = code_ctx.as_ref()
+                && let Some(response) = self.try_route_param_completion(&content, position, code)
             {
                 return Ok(Some(response));
             }
@@ -331,7 +348,8 @@ impl Backend {
                     string_ctx,
                     StringContext::InStringLiteral | StringContext::NotInString
                 )
-                && let Some(response) = self.try_command_param_completion(&content, position)
+                && let Some(code) = code_ctx.as_ref()
+                && let Some(response) = self.try_command_param_completion(&content, position, code)
             {
                 return Ok(Some(response));
             }
@@ -343,8 +361,9 @@ impl Backend {
             if matches!(
                 string_ctx,
                 StringContext::InStringLiteral | StringContext::NotInString
-            ) && let Some(response) =
-                self.try_eloquent_string_completion(&content, position, &ctx)
+            ) && let Some(code) = code_ctx.as_ref()
+                && let Some(response) =
+                    self.try_eloquent_string_completion(&content, position, &ctx, code)
             {
                 return Ok(Some(response));
             }
@@ -356,8 +375,9 @@ impl Backend {
             if matches!(
                 string_ctx,
                 StringContext::InStringLiteral | StringContext::NotInString
-            ) && let Some(response) =
-                self.try_model_property_completion(&content, position, &ctx)
+            ) && let Some(code) = code_ctx.as_ref()
+                && let Some(response) =
+                    self.try_model_property_completion(&content, position, &ctx, code)
             {
                 return Ok(Some(response));
             }
@@ -373,8 +393,9 @@ impl Backend {
                     string_ctx,
                     StringContext::InStringLiteral | StringContext::NotInString
                 )
+                && let Some(code) = code_ctx.as_ref()
                 && let Some(response) =
-                    self.try_request_input_key_completion(&uri, &content, position, &ctx)
+                    self.try_request_input_key_completion(&uri, &content, position, &ctx, code)
             {
                 return Ok(Some(response));
             }

@@ -13,6 +13,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::completion::source::code_context::CodeContext;
 use crate::types::FileContext;
 use crate::virtual_members::laravel::request_fields_at_position;
 
@@ -28,8 +29,10 @@ impl Backend {
         content: &str,
         position: Position,
         ctx: &FileContext,
+        code: &CodeContext<'_>,
     ) -> Option<CompletionResponse> {
-        let (field_ctx, _, fields) = request_fields_at_position(self, uri, content, position, ctx)?;
+        let (field_ctx, _, fields) =
+            request_fields_at_position(self, uri, content, position, ctx, code)?;
 
         // Replace the whole typed prefix so dotted names survive the editor's
         // word-based filtering.

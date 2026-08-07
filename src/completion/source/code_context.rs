@@ -18,6 +18,11 @@
 //! bracket or apostrophe inside a comment unbalances the walk.  Scanning
 //! forward the lexical state is unambiguous, and tracking the open brackets
 //! on the way gives the enclosing constructs directly.
+//!
+//! Starting from the top of the file is what makes that unambiguous, so the
+//! pass costs the file: a caller resolves it **once** per request and shares
+//! the result with every strategy that needs it (see
+//! `Backend::handle_completion`), rather than each one scanning for itself.
 
 use memchr::{memchr, memchr2, memmem};
 
@@ -436,16 +441,30 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                             }
                             last_closed_call = None;
                         }
+                        // Only the first byte of the run carries meaning, so
+                        // step over the rest in one go rather than re-entering
+                        // the dispatch for every character of every name.
+                        while i < end && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                            i += 1;
+                        }
+                        code_end = i;
+                        continue;
                     }
                     _ if !byte.is_ascii_whitespace() => {
                         current_op = None;
                         last_closed_call = None;
                     }
-                    _ => {}
+                    _ => {
+                        // Whitespace neither ends the code seen so far nor
+                        // invalidates a pending operator, so a run of it can be
+                        // skipped whole.
+                        while i < end && bytes[i].is_ascii_whitespace() {
+                            i += 1;
+                        }
+                        continue;
+                    }
                 }
-                if !byte.is_ascii_whitespace() {
-                    code_end = i + 1;
-                }
+                code_end = i + 1;
                 i += 1;
             }
         }
