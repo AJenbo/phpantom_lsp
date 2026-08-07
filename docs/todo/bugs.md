@@ -156,19 +156,3 @@ array_map(
 3 diagnostics in one sample project. Related to
 [T25](type-inference.md#t25-call-site-template-argument-inference-for-callable-parameters),
 which covers the template side of the same call-site inference.
-
-#### B51. An `instanceof` result stored in a variable does not narrow
-
-**Impact: Medium · Effort: Medium**
-
-Narrowing works on a direct `instanceof` condition but is lost when the
-result is assigned first:
-
-```php
-$isHtml = $raw instanceof HtmlString;
-
-return $isHtml ? $raw->toHtml() : 'x';   // type of '$raw' could not be resolved
-```
-
-The boolean carries the assertion, so a truthy check on it should apply
-the same narrowing as the original expression.

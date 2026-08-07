@@ -301,6 +301,23 @@ class TypeNarrowingDemo
         if (!$guard instanceof Rock || !$guard->crush()) {
             // guard clause body
         }
+
+        // A boolean holding the result of an instanceof check carries the
+        // check with it: testing the boolean narrows the original subject.
+        $stored = pickRockOrBanana();
+        $isRock = $stored instanceof Rock;
+        if ($isRock) {
+            $stored->crush();                     // narrowed to Rock via $isRock
+        }
+        echo $isRock ? $stored->crush() : $stored->peel();   // both branches narrowed
+
+        // The negated form works as a guard clause too.
+        $held = pickRockOrBanana();
+        $isBanana = $held instanceof Banana;
+        if (!$isBanana) {
+            return;
+        }
+        $held->peel();                            // narrowed to Banana after the guard
     }
 }
 

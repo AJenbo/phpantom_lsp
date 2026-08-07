@@ -582,6 +582,7 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
 
     for var_name in captured {
         scope.invalidate_dependent_keys(&var_name);
+        scope.invalidate_assertions(&var_name);
         let types = closure_scope.get(&var_name).to_vec();
         if !types.is_empty() {
             scope.set(&var_name, types);
@@ -1250,6 +1251,7 @@ pub(crate) fn process_assignment_expr<'b>(
                     return;
                 }
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                scope.invalidate_assertions(&key);
                 if !rhs_types.is_empty() {
                     scope.set(&key, rhs_types);
                 }
@@ -1282,11 +1284,15 @@ pub(crate) fn process_assignment_expr<'b>(
         // after resolving the RHS, so `$x = $x->foo` still reads the old
         // key while resolving.
         scope.invalidate_dependent_keys(&lhs_name);
+        scope.invalidate_assertions(&lhs_name);
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
         } else if !scope.contains(&lhs_name) {
             scope.set_empty(&lhs_name);
         }
+        // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
+        // for the check, so testing it later narrows `$raw`.
+        record_assertion_variable(&lhs_name, assignment.rhs, scope);
     }
 }
 
