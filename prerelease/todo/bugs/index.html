@@ -849,17 +849,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b49-static-call-through-a-string-typed-variable-is-reported-as-scalar-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B49. Static call through a string-typed variable is reported as scalar access
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1349,17 +1338,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b49-static-call-through-a-string-typed-variable-is-reported-as-scalar-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B49. Static call through a string-typed variable is reported as scalar access
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1417,16 +1395,6 @@ original <code>int</code> key from the Eloquent collection, so every subsequent
 </code></pre></div>
 <p>3 diagnostics across two sample projects (one of them through a Blade
 view that receives the collection).</p>
-<h4 id="b49-static-call-through-a-string-typed-variable-is-reported-as-scalar-access">B49. Static call through a string-typed variable is reported as scalar access<a class="headerlink" href="#b49-static-call-through-a-string-typed-variable-is-reported-as-scalar-access" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p><code>$string::method()</code> is valid PHP — the string is the class name — but it
-is reported as a member access on a scalar:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$job-&gt;class_name::dispatch();</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">// Cannot access method &#39;dispatch&#39; on type &#39;string&#39;</span>
-</code></pre></div>
-<p>A <code>class-string&lt;T&gt;</code> subject should resolve to <code>T</code>; a plain <code>string</code>
-subject is unresolvable, which is a "cannot verify" at most, never a
-scalar-access error.</p>
 
 
 
