@@ -109,6 +109,7 @@ mod commands;
 mod completion_cache;
 mod config_keys;
 pub(crate) mod config_values;
+mod const_eval;
 pub(crate) mod database_schema;
 mod env_vars;
 mod factory;

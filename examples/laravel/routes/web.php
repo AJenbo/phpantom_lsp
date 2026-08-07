@@ -25,3 +25,19 @@ Route::prefix('bakeries')
 // name, singularizing each segment to build the {parameters}.  This nested
 // name yields bakeries/{bakery}/ovens and bakeries/{bakery}/ovens/{oven}.
 Route::resource('bakeries.ovens', BakeryController::class)->only(['index', 'show']);
+
+// One route per entry of a literal array, each named by interpolation.  The
+// array, the loop variables and the names they build are all statically
+// known, so route('campaigns.black-friday.perfume') resolves here just as a
+// written-out ->name() would.
+$campaigns = ['black-friday' => ['perfume', 'skincare'], 'valentines' => ['gifts']];
+
+foreach ($campaigns as $campaign => $sections) {
+    Route::get("/{$campaign}", [BakeryController::class, 'index'])
+        ->name("campaigns.{$campaign}.landing");
+
+    foreach ($sections as $section) {
+        Route::get("/{$campaign}/{$section}", [BakeryController::class, 'index'])
+            ->name("campaigns.{$campaign}.{$section}");
+    }
+}

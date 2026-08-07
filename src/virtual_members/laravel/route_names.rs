@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::{Location, Url};
 use crate::Backend;
 use crate::text_position::offset_to_position;
 
+use super::const_eval::{Scope, bind_assignment, const_string, for_each_iteration};
 use super::helpers::{
     chain_as_prefix, extract_string_literal, first_string_arg, singularize_english_word,
 };
@@ -593,7 +594,9 @@ fn open_included_file<'a>(
 /// loops, and a service provider registers them from a method body.
 /// Closures are deliberately not descended into here — a closure registers
 /// routes only as a `->group()` body, and that path applies the group's name
-/// and URI prefixes before walking it.
+/// and URI prefixes before walking it.  A `foreach` is likewise absent: its
+/// body is walked once per element with the loop variables bound, which the
+/// callers do themselves.
 fn for_each_nested_statement(stmt: &Statement<'_>, f: &mut dyn FnMut(&Statement<'_>)) {
     let mut visit = |statements: &[Statement<'_>]| statements.iter().for_each(&mut *f);
 
@@ -612,7 +615,6 @@ fn for_each_nested_statement(stmt: &Statement<'_>, f: &mut dyn FnMut(&Statement<
         Statement::While(w) => visit(w.body.statements()),
         Statement::DoWhile(dw) => f(dw.statement),
         Statement::For(fs) => visit(fs.body.statements()),
-        Statement::Foreach(fe) => visit(fe.body.statements()),
         Statement::Try(t) => {
             visit(t.block.statements.as_slice());
             for catch in t.catch_clauses.iter() {
@@ -751,9 +753,10 @@ fn scan_route_file(
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut results = Vec::new();
+    let mut scope = Scope::default();
 
     for stmt in program.statements.iter() {
-        results.extend(scan_stmt(stmt, content, "", target, uri, paths));
+        results.extend(scan_stmt(stmt, content, "", target, uri, paths, &mut scope));
     }
     results
 }
@@ -765,19 +768,47 @@ fn scan_stmt(
     target: &str,
     uri: &Url,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
 ) -> Vec<Location> {
     let mut results = match stmt {
-        Statement::Expression(e) => scan_expr(e.expression, content, prefix, target, uri, paths),
+        Statement::Expression(e) => {
+            scan_expr(e.expression, content, prefix, target, uri, paths, scope)
+        }
         Statement::Return(r) => r
             .value
-            .map(|v| scan_expr(v, content, prefix, target, uri, paths))
+            .map(|v| scan_expr(v, content, prefix, target, uri, paths, scope))
             .unwrap_or_default(),
+        // A loop over a literal array registers one route per element, so the
+        // body is walked once per element with the loop variables bound to it.
+        Statement::Foreach(fe) => {
+            let mut results = Vec::new();
+            for_each_iteration(fe, content, scope, &mut |scope| {
+                for nested in fe.body.statements() {
+                    results.extend(scan_stmt(
+                        nested, content, prefix, target, uri, paths, scope,
+                    ));
+                }
+            });
+            return results;
+        }
         _ => Vec::new(),
     };
     for_each_nested_statement(stmt, &mut |nested| {
-        results.extend(scan_stmt(nested, content, prefix, target, uri, paths));
+        results.extend(scan_stmt(
+            nested, content, prefix, target, uri, paths, scope,
+        ));
     });
     results
+}
+
+/// Where go-to-definition lands for a route-name argument: between the quotes
+/// of a plain literal, and at the start of anything else — an interpolated or
+/// concatenated name has no single literal to point at.
+fn name_offset(expr: &Expression<'_>, content: &str) -> usize {
+    match extract_string_literal(expr, content) {
+        Some((_, start, _)) => start,
+        None => expr.span().start.offset as usize,
+    }
 }
 
 /// Walk a call-chain expression while tracking the accumulated group name prefix.
@@ -794,6 +825,7 @@ fn scan_expr(
     target: &str,
     uri: &Url,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
 ) -> Vec<Location> {
     // A chain that registers a resource declares every one of its route names
     // at the resource-name literal, so that is where the target resolves to.
@@ -812,7 +844,7 @@ fn scan_expr(
         }
         // The target may still be declared by a `->group()` sharing the chain.
         return match registration.preceding {
-            Some(preceding) => scan_expr(preceding, content, prefix, target, uri, paths),
+            Some(preceding) => scan_expr(preceding, content, prefix, target, uri, paths, scope),
             None => Vec::new(),
         };
     }
@@ -822,7 +854,7 @@ fn scan_expr(
         Expression::Call(Call::Method(mc)) => {
             let mut results = Vec::new();
             let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
-                return scan_expr(mc.object, content, prefix, target, uri, paths);
+                return scan_expr(mc.object, content, prefix, target, uri, paths, scope);
             };
             let method = ident.value.to_ascii_lowercase();
 
@@ -837,28 +869,28 @@ fn scan_expr(
                         target,
                         uri,
                         paths,
+                        scope,
                     ));
                 }
             } else if method == b"name" {
-                if let Some(first_arg) = mc.argument_list.arguments.iter().next()
-                    && let Some((name_val, start, _)) =
-                        extract_string_literal(first_arg.value(), content)
+                if let Some(name_expr) = mc.argument_list.arguments.iter().next().map(|a| a.value())
+                    && let Some(name_val) = const_string(name_expr, content, scope)
+                    && format!("{prefix}{name_val}") == target
                 {
-                    let full = format!("{prefix}{name_val}");
-                    if full == target {
-                        results.push(crate::definition::point_location(
-                            uri.clone(),
-                            offset_to_position(content, start),
-                        ));
-                    }
+                    results.push(crate::definition::point_location(
+                        uri.clone(),
+                        offset_to_position(content, name_offset(name_expr, content)),
+                    ));
                 }
-                results.extend(scan_expr(mc.object, content, prefix, target, uri, paths));
+                results.extend(scan_expr(
+                    mc.object, content, prefix, target, uri, paths, scope,
+                ));
             } else {
                 match scan_macro(ident.value, Some(mc.object), content, prefix, target, paths) {
                     Some(found) => results.extend(found),
-                    None => {
-                        results.extend(scan_expr(mc.object, content, prefix, target, uri, paths))
-                    }
+                    None => results.extend(scan_expr(
+                        mc.object, content, prefix, target, uri, paths, scope,
+                    )),
                 }
             }
             results
@@ -886,6 +918,7 @@ fn scan_expr(
                         target,
                         uri,
                         paths,
+                        scope,
                     ));
                 }
                 results
@@ -894,10 +927,17 @@ fn scan_expr(
             }
         }
 
+        // The data a route file loops over is usually built in a variable
+        // first, and a registration is occasionally assigned to one too.
+        Expression::Assignment(assignment) => {
+            bind_assignment(assignment, content, scope);
+            scan_expr(assignment.rhs, content, prefix, target, uri, paths, scope)
+        }
+
         // A route file pulled in by `require`/`include` registers its routes
         // under whichever group encloses the include.
         Expression::Construct(construct) => match include_target(construct) {
-            Some(file) => scan_included_file(file, content, prefix, target, uri, paths),
+            Some(file) => scan_included_file(file, content, prefix, target, uri, paths, scope),
             None => Vec::new(),
         },
 
@@ -917,19 +957,20 @@ fn scan_group_body(
     target: &str,
     uri: &Url,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
 ) -> Vec<Location> {
     match expr {
         Expression::Closure(closure) => {
             let mut results = Vec::new();
             for stmt in closure.body.statements.iter() {
-                results.extend(scan_stmt(stmt, content, prefix, target, uri, paths));
+                results.extend(scan_stmt(stmt, content, prefix, target, uri, paths, scope));
             }
             results
         }
         Expression::ArrowFunction(af) => {
-            scan_expr(af.expression, content, prefix, target, uri, paths)
+            scan_expr(af.expression, content, prefix, target, uri, paths, scope)
         }
-        _ => scan_included_file(expr, content, prefix, target, uri, paths),
+        _ => scan_included_file(expr, content, prefix, target, uri, paths, scope),
     }
 }
 
@@ -943,6 +984,7 @@ fn scan_included_file(
     target: &str,
     uri: &Url,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
 ) -> Vec<Location> {
     let Some(included) = open_included_file(file, content, paths) else {
         return Vec::new();
@@ -966,6 +1008,7 @@ fn scan_included_file(
             target,
             &sub_uri,
             sub_paths,
+            scope,
         ));
     }
     results
@@ -999,6 +1042,9 @@ fn scan_macro(
     let file_id = FileId::new(b"macro.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, open.content.as_bytes());
     let mut results = Vec::new();
+    // A macro closure is registered without a `use (...)` clause, so it has
+    // no access to the caller's local variables; its body gets its own scope.
+    let mut scope = Scope::default();
     match macro_body_at(Node::Program(program), open.offset) {
         Some(MacroBody::Closure(closure)) => {
             for stmt in closure.body.statements.iter() {
@@ -1009,6 +1055,7 @@ fn scan_macro(
                     target,
                     &open.uri,
                     sub_paths,
+                    &mut scope,
                 ));
             }
         }
@@ -1019,6 +1066,7 @@ fn scan_macro(
             target,
             &open.uri,
             sub_paths,
+            &mut scope,
         )),
         None => {}
     }
@@ -1071,11 +1119,11 @@ const URI_FIRST_ARG_METHODS: &[&[u8]] = &[
 /// `Route::middleware('auth')->get('/users/{user}', …)->name('users.show')`
 /// records `/users/{user}`.  `Route::match(['get', 'post'], '/uri', …)` keeps
 /// its URI in the second argument.
-fn chain_uri<'c>(expr: &Expression<'_>, content: &'c str) -> Option<&'c str> {
+fn chain_uri(expr: &Expression<'_>, content: &str, scope: &Scope) -> Option<String> {
     let (method, args) = match expr {
         Expression::Call(Call::Method(mc)) => match &mc.method {
             ClassLikeMemberSelector::Identifier(ident) => (ident.value, &mc.argument_list),
-            _ => return chain_uri(mc.object, content),
+            _ => return chain_uri(mc.object, content, scope),
         },
         Expression::Call(Call::StaticMethod(sc)) => match &sc.method {
             ClassLikeMemberSelector::Identifier(ident) => (ident.value, &sc.argument_list),
@@ -1093,12 +1141,12 @@ fn chain_uri<'c>(expr: &Expression<'_>, content: &'c str) -> Option<&'c str> {
         None
     };
     if let Some(arg) = uri_arg {
-        return extract_string_literal(arg.value(), content).map(|(uri, _, _)| uri);
+        return const_string(arg.value(), content, scope);
     }
 
     // Not a registration link — keep descending the chain.
     match expr {
-        Expression::Call(Call::Method(mc)) => chain_uri(mc.object, content),
+        Expression::Call(Call::Method(mc)) => chain_uri(mc.object, content, scope),
         _ => None,
     }
 }
@@ -1243,8 +1291,16 @@ fn collect_all_names_from_file(
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+    let mut scope = Scope::default();
     for stmt in program.statements.iter() {
-        collect_names_from_stmt(stmt, content, GroupPrefix::default(), paths, out);
+        collect_names_from_stmt(
+            stmt,
+            content,
+            GroupPrefix::default(),
+            paths,
+            &mut scope,
+            out,
+        );
     }
 }
 
@@ -1253,21 +1309,32 @@ fn collect_names_from_stmt(
     content: &str,
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
     out: &mut Vec<RouteEntry>,
 ) {
     match stmt {
         Statement::Expression(e) => {
-            collect_names_from_expr(e.expression, content, group, paths, out);
+            collect_names_from_expr(e.expression, content, group, paths, scope, out);
         }
         Statement::Return(r) => {
             if let Some(v) = r.value {
-                collect_names_from_expr(v, content, group, paths, out);
+                collect_names_from_expr(v, content, group, paths, scope, out);
             }
+        }
+        // A loop over a literal array registers one route per element, so the
+        // body is walked once per element with the loop variables bound to it.
+        Statement::Foreach(fe) => {
+            for_each_iteration(fe, content, scope, &mut |scope| {
+                for nested in fe.body.statements() {
+                    collect_names_from_stmt(nested, content, group, paths, scope, out);
+                }
+            });
+            return;
         }
         _ => {}
     }
     for_each_nested_statement(stmt, &mut |nested| {
-        collect_names_from_stmt(nested, content, group, paths, out);
+        collect_names_from_stmt(nested, content, group, paths, scope, out);
     });
 }
 
@@ -1276,6 +1343,7 @@ fn collect_names_from_expr(
     content: &str,
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
     out: &mut Vec<RouteEntry>,
 ) {
     // A chain that registers a resource generates its whole route set here;
@@ -1285,7 +1353,7 @@ fn collect_names_from_expr(
         // A `->group()` sharing the chain registers routes of its own, which
         // the resource shortcut must not swallow.
         if let Some(preceding) = registration.preceding {
-            collect_names_from_expr(preceding, content, group, paths, out);
+            collect_names_from_expr(preceding, content, group, paths, scope, out);
         }
         return;
     }
@@ -1293,7 +1361,7 @@ fn collect_names_from_expr(
     match expr {
         Expression::Call(Call::Method(mc)) => {
             let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
-                collect_names_from_expr(mc.object, content, group, paths, out);
+                collect_names_from_expr(mc.object, content, group, paths, scope, out);
                 return;
             };
             let method = ident.value.to_ascii_lowercase();
@@ -1308,12 +1376,11 @@ fn collect_names_from_expr(
                     uri: &uri_prefix,
                 };
                 for arg in mc.argument_list.arguments.iter() {
-                    collect_names_from_group_body(arg.value(), content, inner, paths, out);
+                    collect_names_from_group_body(arg.value(), content, inner, paths, scope, out);
                 }
             } else if method == b"name" {
                 if let Some(first_arg) = mc.argument_list.arguments.iter().next()
-                    && let Some((name_val, _, _)) =
-                        extract_string_literal(first_arg.value(), content)
+                    && let Some(name_val) = const_string(first_arg.value(), content, scope)
                 {
                     let full = format!("{}{name_val}", group.name);
                     // Only collect leaf names (non-prefix names that don't end with '.').
@@ -1325,11 +1392,14 @@ fn collect_names_from_expr(
                             join_uri_segments(group.uri, &chain_uri_prefix(mc.object, content));
                         out.push(RouteEntry {
                             name: full,
-                            uri: route_uri(&uri_prefix, chain_uri(mc.object, content)),
+                            uri: route_uri(
+                                &uri_prefix,
+                                chain_uri(mc.object, content, scope).as_deref(),
+                            ),
                         });
                     }
                 }
-                collect_names_from_expr(mc.object, content, group, paths, out);
+                collect_names_from_expr(mc.object, content, group, paths, scope, out);
             } else if !collect_names_from_macro(
                 ident.value,
                 Some(mc.object),
@@ -1338,7 +1408,7 @@ fn collect_names_from_expr(
                 paths,
                 out,
             ) {
-                collect_names_from_expr(mc.object, content, group, paths, out);
+                collect_names_from_expr(mc.object, content, group, paths, scope, out);
             }
         }
         Expression::Call(Call::StaticMethod(sc)) => {
@@ -1361,17 +1431,23 @@ fn collect_names_from_expr(
                     uri: &uri_prefix,
                 };
                 for arg in sc.argument_list.arguments.iter() {
-                    collect_names_from_group_body(arg.value(), content, inner, paths, out);
+                    collect_names_from_group_body(arg.value(), content, inner, paths, scope, out);
                 }
             } else {
                 collect_names_from_macro(ident.value, None, content, group, paths, out);
             }
         }
+        // The data a route file loops over is usually built in a variable
+        // first, and a registration is occasionally assigned to one too.
+        Expression::Assignment(assignment) => {
+            bind_assignment(assignment, content, scope);
+            collect_names_from_expr(assignment.rhs, content, group, paths, scope, out);
+        }
         // A route file pulled in by `require`/`include` registers its routes
         // under whichever group encloses the include.
         Expression::Construct(construct) => {
             if let Some(file) = include_target(construct) {
-                collect_names_from_included_file(file, content, group, paths, out);
+                collect_names_from_included_file(file, content, group, paths, scope, out);
             }
         }
         _ => {}
@@ -1419,14 +1495,24 @@ fn collect_names_from_macro(
     let arena = LocalArena::new();
     let file_id = FileId::new(b"macro.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, open.content.as_bytes());
+    // A macro closure is registered without a `use (...)` clause, so it has
+    // no access to the caller's local variables; its body gets its own scope.
+    let mut scope = Scope::default();
     match macro_body_at(Node::Program(program), open.offset) {
         Some(MacroBody::Closure(closure)) => {
             for stmt in closure.body.statements.iter() {
-                collect_names_from_stmt(stmt, &open.content, inner, sub_paths, out);
+                collect_names_from_stmt(stmt, &open.content, inner, sub_paths, &mut scope, out);
             }
         }
         Some(MacroBody::Arrow(arrow)) => {
-            collect_names_from_expr(arrow.expression, &open.content, inner, sub_paths, out);
+            collect_names_from_expr(
+                arrow.expression,
+                &open.content,
+                inner,
+                sub_paths,
+                &mut scope,
+                out,
+            );
         }
         None => {}
     }
@@ -1525,20 +1611,21 @@ fn collect_names_from_group_body(
     content: &str,
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
     out: &mut Vec<RouteEntry>,
 ) {
     match expr {
         Expression::Closure(closure) => {
             for stmt in closure.body.statements.iter() {
-                collect_names_from_stmt(stmt, content, group, paths, out);
+                collect_names_from_stmt(stmt, content, group, paths, scope, out);
             }
         }
         Expression::ArrowFunction(af) => {
-            collect_names_from_expr(af.expression, content, group, paths, out);
+            collect_names_from_expr(af.expression, content, group, paths, scope, out);
         }
         // `Route::group([], __DIR__ . '/sub.php')` names a file rather than a
         // callback.
-        _ => collect_names_from_included_file(expr, content, group, paths, out),
+        _ => collect_names_from_included_file(expr, content, group, paths, scope, out),
     }
 }
 
@@ -1552,6 +1639,7 @@ fn collect_names_from_included_file(
     content: &str,
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
+    scope: &mut Scope,
     out: &mut Vec<RouteEntry>,
 ) {
     let Some(included) = open_included_file(file, content, paths) else {
@@ -1567,7 +1655,7 @@ fn collect_names_from_included_file(
     let program =
         mago_syntax::parser::parse_file_content(&arena, file_id, included.content.as_bytes());
     for stmt in program.statements.iter() {
-        collect_names_from_stmt(stmt, &included.content, group, sub_paths, out);
+        collect_names_from_stmt(stmt, &included.content, group, sub_paths, scope, out);
     }
 }
 

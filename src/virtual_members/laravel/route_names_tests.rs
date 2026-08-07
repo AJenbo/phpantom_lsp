@@ -491,6 +491,117 @@ fn registrations_inside_a_foreach_body_are_collected() {
     assert_eq!(names, vec!["about".to_string()]);
 }
 
+/// A route file that registers one route per entry of a literal array names
+/// each of them by interpolation.  The loop variables are statically known,
+/// so the names are too, and nested loops compose.
+#[test]
+fn names_interpolated_from_a_literal_foreach_are_collected() {
+    let content = "<?php
+$events = ['black-friday' => ['perfume-her', 'k-beauty'], 'valentines' => ['perfume']];
+
+foreach ($events as $event => $subcategories) {
+    Route::get(\"/{$event}\", [EventsController::class, 'landing'])
+        ->name(\"events.{$event}.landing\");
+
+    foreach ($subcategories as $subcategory) {
+        Route::get(\"/{$event}/{$subcategory}\", [EventsController::class, 'sub'])
+            ->name(\"events.{$event}.{$subcategory}\");
+    }
+}
+";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(
+        names,
+        vec![
+            "events.black-friday.landing",
+            "events.black-friday.perfume-her",
+            "events.black-friday.k-beauty",
+            "events.valentines.landing",
+            "events.valentines.perfume",
+        ]
+    );
+    assert_eq!(
+        uri_of(content, "events.black-friday.k-beauty"),
+        "black-friday/k-beauty"
+    );
+}
+
+/// The loop value is a `list`, so the key the name is built from is the
+/// element's index.
+#[test]
+fn names_interpolated_from_a_list_use_the_element_index() {
+    let content = "<?php\nforeach (['first', 'second'] as $index => $step) {\n    Route::get('/step', 'run')->name('wizard.' . $index . '.' . $step);\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["wizard.0.first", "wizard.1.second"]);
+}
+
+/// Route data is often a list of rows rather than a flat array, so a name
+/// built from one of a row's fields has to be read out of the row.
+#[test]
+fn names_read_a_field_of_the_looped_row() {
+    let content = "<?php\nforeach ([['slug' => 'faq'], ['slug' => 'terms']] as $page) {\n    Route::get(\"/{$page['slug']}\", 'show')->name(\"pages.{$page['slug']}\");\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["pages.faq", "pages.terms"]);
+    assert_eq!(uri_of(content, "pages.terms"), "terms");
+}
+
+/// A value the evaluator cannot fold contributes no name, while the entries
+/// around it still do.  A partial name would be worse than none: it would
+/// report a route that does not exist and hide one that does.
+#[test]
+fn an_unevaluable_element_contributes_no_name() {
+    let content = "<?php\nforeach (['gifts', slug('/xmas/gift-sets')] as $section) {\n    Route::get(\"/{$section}\", 'show')->name(\"shop.{$section}\");\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["shop.gifts"]);
+}
+
+/// A loop over something that is not a literal array still walks its body
+/// once, and the interpolated name stays unknown rather than being guessed.
+#[test]
+fn a_non_literal_loop_subject_yields_no_interpolated_name() {
+    let content = "<?php\nforeach (config('shop.sections') as $section) {\n    Route::get(\"/{$section}\", 'show')->name(\"shop.{$section}\");\n    Route::get('/all', 'all')->name('shop.all');\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["shop.all"]);
+}
+
+/// The loop variable goes out of scope with the loop, so a later
+/// registration cannot pick up the last element it held.
+#[test]
+fn a_loop_variable_does_not_leak_past_its_loop() {
+    let content = "<?php\nforeach (['a', 'b'] as $section) {\n    Route::get(\"/{$section}\", 'show')->name(\"shop.{$section}\");\n}\nRoute::get('/rest', 'rest')->name(\"shop.{$section}\");\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["shop.a", "shop.b"]);
+}
+
+/// A registration kept in a variable so later lines can extend it still
+/// declares its route.
+#[test]
+fn a_registration_assigned_to_a_variable_is_collected() {
+    let content = "<?php\n$dashboard = Route::get('/dashboard', 'index')->name('dashboard');\n";
+    assert_eq!(uri_of(content, "dashboard"), "dashboard");
+}
+
+/// Go-to-definition on a route named in a loop lands on the `->name()`
+/// argument that produced it.  An interpolated name has no single literal to
+/// point inside, so the whole argument is the target.
+#[test]
+fn definition_resolves_a_name_built_in_a_loop() {
+    let content = "<?php\nforeach (['faq', 'terms'] as $page) {\n    Route::get(\"/{$page}\", 'show')->name(\"pages.{$page}\");\n}\n";
+    let uri = Url::parse("file:///app/routes/web.php").unwrap();
+
+    let macros = MacroScope::default();
+    let found = scan_route_file(content, "pages.terms", &uri, None, None, None, &macros);
+    let line = content.lines().nth(2).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].range.start.line, 2);
+    assert_eq!(
+        found[0].range.start.character,
+        line.find("\"pages.").unwrap() as u32
+    );
+
+    assert!(scan_route_file(content, "pages.missing", &uri, None, None, None, &macros).is_empty());
+}
+
 #[test]
 fn registrations_inside_a_try_block_are_collected() {
     let content = "<?php\ntry {\n    Route::get('/health', 'health')->name('health');\n} catch (Throwable $e) {\n    Route::get('/down', 'down')->name('down');\n}\n";

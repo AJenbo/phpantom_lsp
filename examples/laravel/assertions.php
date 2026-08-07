@@ -747,6 +747,43 @@ check(
         && ($macroUris['admin.password.update'] ?? null) === 'admin/password/reset'
 );
 
+// ─── Route names built in a loop ────────────────────────────────────────────
+
+// routes/web.php registers one route per entry of a literal array and names
+// each of them by interpolation.  The LSP unrolls that loop statically, so the
+// names and URIs it records have to be the ones the router really ends up
+// with, including the order and the trimmed leading slash.
+$loopRouter = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+$campaigns = ['black-friday' => ['perfume', 'skincare'], 'valentines' => ['gifts']];
+foreach ($campaigns as $campaign => $sections) {
+    $loopRouter->get("/{$campaign}", [$controller, 'index'])
+        ->name("campaigns.{$campaign}.landing");
+
+    foreach ($sections as $section) {
+        $loopRouter->get("/{$campaign}/{$section}", [$controller, 'index'])
+            ->name("campaigns.{$campaign}.{$section}");
+    }
+}
+
+$loopUris = [];
+foreach ($loopRouter->getRoutes() as $route) {
+    $loopUris[$route->getName()] = $route->uri();
+}
+check(
+    'a loop over a literal array names one route per entry',
+    array_keys($loopUris) === [
+        'campaigns.black-friday.landing',
+        'campaigns.black-friday.perfume',
+        'campaigns.black-friday.skincare',
+        'campaigns.valentines.landing',
+        'campaigns.valentines.gifts',
+    ]
+);
+check(
+    'an interpolated URI keeps the loop variables it was built from',
+    ($loopUris['campaigns.black-friday.skincare'] ?? null) === 'black-friday/skincare'
+);
+
 // ─── Higher-order collection proxies ────────────────────────────────────────
 
 // Every proxy the LSP knows how to type must actually be proxyable, and

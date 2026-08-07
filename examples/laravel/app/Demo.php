@@ -392,6 +392,12 @@ class Demo
         // of bakeries.ovens singularized into bakeries/{bakery}/ovens/{oven}.
         route('bakeries.ovens.show', ['bakery' => 1, 'oven' => 2]);
 
+        // routes/web.php registers these from a nested foreach over a literal
+        // array and names each one by interpolation.  The loop is unrolled
+        // statically, so they resolve like any written-out name.
+        route('campaigns.black-friday.landing');
+        route('campaigns.valentines.gifts');
+
         // Translation Keys
         __('messages.welcome');
         trans('auth.failed');
