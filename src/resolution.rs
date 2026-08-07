@@ -1309,6 +1309,36 @@ impl Backend {
         }
     }
 
+    /// Return a Laravel macro `$this` resolver closure bound to a class
+    /// loader.
+    ///
+    /// Given the class expression a `::macro(...)` call is registered
+    /// against (e.g. `Route`), resolves the concrete class `$this` is
+    /// bound to inside the macro's closure body: loads the written
+    /// target, then maps a facade to its concrete class via
+    /// [`facade_macro_concrete`](Self::facade_macro_concrete). Every
+    /// [`ResolutionCtx`](crate::type_engine::resolver::ResolutionCtx)
+    /// construction site should populate `laravel_macro_this_resolver`
+    /// with this so that `$this` inside a macro closure resolves
+    /// consistently across completion, hover, go-to-definition, and
+    /// diagnostics.
+    pub(crate) fn laravel_macro_this_resolver<'a, F>(
+        &'a self,
+        class_loader: &'a F,
+    ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a
+    where
+        F: Fn(&str) -> Option<Arc<ClassInfo>> + ?Sized,
+    {
+        move |target: &str| {
+            let facade = class_loader(target)?;
+            let target_fqn = facade.fqn().to_string();
+            let concrete = self
+                .facade_macro_concrete(&target_fqn)
+                .unwrap_or(target_fqn);
+            self.find_or_load_class(&concrete)
+        }
+    }
+
     /// Return a function-loader closure bound to a [`FileContext`].
     ///
     /// This is the convenience wrapper for the common case where the
@@ -1379,6 +1409,7 @@ impl Backend {
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
         let rctx = ResolutionCtx {
             current_class,
             all_classes: &ctx.classes,
@@ -1386,7 +1417,7 @@ impl Backend {
             cursor_offset,
             class_loader: &class_loader,
             backend: Some(self),
-            laravel_macro_this_resolver: None,
+            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader),
             scope_var_resolver: None,

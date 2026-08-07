@@ -51,6 +51,11 @@ abstract class Facade
             'View' => View::class,
         ]);
     }
+
+    public static function __callStatic($method, $args)
+    {
+        return static::resolveFacadeInstance()->$method(...$args);
+    }
 }
 "#;
 
@@ -330,5 +335,52 @@ class ViewServiceProvider
     assert!(
         !names.contains(&"boot"),
         "facade macro callback $this should not resolve to the provider, got: {names:?}"
+    );
+}
+
+/// `$this` inside a facade-registered macro closure resolves to the
+/// facade's concrete class for diagnostics too, not just completion.  Every
+/// call to a real method on the concrete class must go unflagged, and the
+/// diagnostic pass must not report it as a member of the enclosing service
+/// provider either.
+#[tokio::test]
+async fn facade_macro_closure_this_not_flagged_by_unknown_member_diagnostics() {
+    let provider = "\
+<?php
+namespace App\\Providers;
+use Illuminate\\Support\\Facades\\View;
+class ViewServiceProvider
+{
+    public function boot(): void
+    {
+        View::macro('withLayout', function (): string {
+            return $this->make();
+        });
+    }
+}
+";
+    let mut files = base_files();
+    files.push(("src/Providers/ViewServiceProvider.php", provider));
+    let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let uri = "file:///src/Providers/ViewServiceProvider.php";
+    open(&backend, uri, provider).await;
+
+    backend.update_ast(uri, provider);
+    let mut diagnostics = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, provider, &mut diagnostics);
+
+    let members: Vec<&str> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+        })
+        .map(|d| d.message.as_str())
+        .collect();
+
+    assert!(
+        members.is_empty(),
+        "$this->make() inside the macro closure should resolve to the concrete factory, got: {members:?}"
     );
 }

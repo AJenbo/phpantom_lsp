@@ -73,6 +73,7 @@ impl Backend {
         let class_loader = self.class_loader_with(local_classes, file_use_map, file_namespace);
         let function_loader =
             self.function_loader_with(file_resolved_names.as_deref(), file_use_map, file_namespace);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
         let cache = &self.resolved_class_cache;
 
         // ── Walk every symbol span ──────────────────────────────────────
@@ -169,7 +170,7 @@ impl Backend {
                                     cursor_offset: span.start,
                                     class_loader: &class_loader,
                                     backend: Some(self),
-                                    laravel_macro_this_resolver: None,
+                                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
                                     resolved_class_cache: Some(cache),
                                     function_loader: Some(&function_loader),
                                     scope_var_resolver: None,

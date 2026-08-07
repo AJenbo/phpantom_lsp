@@ -107,7 +107,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B30 | [`$this` inside a macro closure resolves to the enclosing class](todo/bugs.md#b30-this-inside-a-macro-closure-resolves-to-the-enclosing-class)                                | Medium      | Low-Medium  |
 | B31 | [Route names built with a string function are reported as unknown](todo/bugs.md#b31-route-names-built-with-a-string-function-are-reported-as-unknown)                        | Low         | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |

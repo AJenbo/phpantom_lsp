@@ -2551,6 +2551,7 @@ impl Backend {
         let file_ctx = self.file_context(uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
         for reg in regs.iter_mut() {
             if reg.method.return_type.is_some() || reg.method.native_return_type.is_some() {
                 continue;
@@ -2578,7 +2579,7 @@ impl Backend {
                 cursor_offset: reg.name_offset,
                 class_loader: &class_loader,
                 backend: Some(self),
-                laravel_macro_this_resolver: None,
+                laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
                 resolved_class_cache: Some(&self.resolved_class_cache),
                 function_loader: Some(&function_loader),
                 scope_var_resolver: None,
@@ -2622,6 +2623,7 @@ impl Backend {
         let file_ctx = self.file_context(def_uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
         let rctx = crate::type_engine::resolver::ResolutionCtx {
             current_class: Some(target_class.as_ref()),
             all_classes: &file_ctx.classes,
@@ -2629,7 +2631,7 @@ impl Backend {
             cursor_offset: reg.name_offset,
             class_loader: &class_loader,
             backend: Some(self),
-            laravel_macro_this_resolver: None,
+            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader),
             scope_var_resolver: None,

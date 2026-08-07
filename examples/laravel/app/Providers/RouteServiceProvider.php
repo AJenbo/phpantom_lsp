@@ -17,21 +17,25 @@ class RouteServiceProvider extends ServiceProvider
             ->group(base_path('app/Modules/Reviews/routes.php'));
 
         // A router macro registers routes of its own.  `laravel/ui` ships
-        // `Route::auth()` this way.  PHPantom walks the macro body wherever
-        // the macro is called, so `route('login')` resolves and Ctrl+Click on
-        // it jumps to the `->name('login')` below.
+        // `Route::auth()` this way, binding the closure to the router
+        // instance so `$this` inside it is the router, not this provider.
+        // PHPantom walks the macro body wherever the macro is called, so
+        // `route('login')` resolves and Ctrl+Click on it jumps to the
+        // `->name('login')` below; `$this->get(...)` resolves and completes
+        // as a `Router` method rather than being flagged as unknown on
+        // `RouteServiceProvider`.
         Route::macro('bakeryAuth', function (): void {
-            Route::get('login', fn () => view('welcome'))->name('login');
-            Route::post('logout', fn () => view('welcome'))->name('logout');
+            $this->get('login', fn () => view('welcome'))->name('login');
+            $this->post('logout', fn () => view('welcome'))->name('logout');
 
             // A macro body may call another macro; both sets of names belong
             // to whichever route file called the outer one.
-            Route::bakeryPasswordReset();
+            $this->bakeryPasswordReset();
         });
 
         Route::macro('bakeryPasswordReset', function (): void {
-            Route::get('password/reset', fn () => view('welcome'))->name('password.request');
-            Route::post('password/reset', fn () => view('welcome'))->name('password.update');
+            $this->get('password/reset', fn () => view('welcome'))->name('password.request');
+            $this->post('password/reset', fn () => view('welcome'))->name('password.update');
         });
     }
 }

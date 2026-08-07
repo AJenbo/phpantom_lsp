@@ -46,6 +46,7 @@ impl Backend {
         let current_class = find_class_at_offset(&ctx.classes, offset);
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
         let resolved_types: Vec<PhpType> = match &symbol.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -93,7 +94,7 @@ impl Backend {
                     cursor_offset: offset,
                     class_loader: &class_loader,
                     backend: Some(self),
-                    laravel_macro_this_resolver: None,
+                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
                     resolved_class_cache: Some(&self.resolved_class_cache),
                     function_loader: Some(
                         &function_loader as &dyn Fn(&str, u32) -> Option<FunctionInfo>,

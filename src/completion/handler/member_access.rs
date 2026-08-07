@@ -52,14 +52,7 @@ impl Backend {
 
         let class_loader = self.class_loader(ctx);
         let function_loader = self.function_loader(ctx);
-        let laravel_macro_this_resolver = |target: &str| {
-            let facade = class_loader(target)?;
-            let target_fqn = facade.fqn().to_string();
-            let concrete = self
-                .facade_macro_concrete(&target_fqn)
-                .unwrap_or(target_fqn);
-            self.find_or_load_class(&concrete)
-        };
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
         // `static::` in a final class is equivalent to `self::` but
         // suggests the class can be subclassed — which it can't.

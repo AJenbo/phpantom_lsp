@@ -120,6 +120,7 @@ impl Backend {
 
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
         // 3. Resolve the subject to all candidate classes.
         //    When a variable is assigned different types in conditional
@@ -131,7 +132,7 @@ impl Backend {
             cursor_offset,
             class_loader: &class_loader,
             backend: Some(self),
-            laravel_macro_this_resolver: None,
+            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader),
             scope_var_resolver: None,
