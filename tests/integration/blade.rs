@@ -453,6 +453,32 @@ mod tests {
         );
     }
 
+    /// `@props` declares its keys as local variables (typed from their
+    /// default), so a component that only reads its own declared props
+    /// never reports them as undefined — regression test for the
+    /// multi-line array form used throughout real components.
+    #[tokio::test]
+    async fn test_props_directive_declares_its_variables() {
+        let body = "@props([\n    'caption' => '',\n])\n<span>{{ $caption }}</span>\n";
+        let (backend, _dir, uri) =
+            component_workspace("resources/views/components/box.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let undefined = undefined_variables(&backend, &uri).await;
+        assert!(
+            undefined.is_empty(),
+            "@props should declare $caption: {:?}",
+            undefined
+        );
+
+        let hover = hover_text(&backend, &uri, 3, 9).await;
+        assert!(
+            hover.contains("$caption = ''"),
+            "$caption should resolve to its '' default, got: {}",
+            hover
+        );
+    }
+
     /// The implicit variables are a component's, not every template's.
     #[tokio::test]
     async fn test_plain_view_still_flags_slot_as_undefined() {

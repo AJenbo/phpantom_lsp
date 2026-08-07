@@ -7,25 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B38. `@props` and anonymous-component attributes are reported as undefined
-
-**Impact: Medium · Effort: Low-Medium**
-
-An anonymous Blade component receives every attribute the caller passes
-as a local variable, and `@props` declares those variables explicitly.
-Neither is recognised:
-
-```blade
-@props([
-    'caption' => '',
-])
-<span>{{ $caption }}</span>   {{-- Undefined variable '$caption' --}}
-```
-
-`@props` is the easy half and should be read directly. Attributes with
-no `@props` declaration need the caller's `<x-… :foo="$bar" />` tag, which
-depends on component tag parsing.
-
 #### B39. Multi-line PHP expressions in Blade component attributes are truncated
 
 **Impact: Medium-High · Effort: Medium**

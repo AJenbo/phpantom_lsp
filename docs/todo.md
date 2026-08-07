@@ -114,7 +114,6 @@ unlikely to move the needle for most users.
 | B49 | [Static call through a string-typed variable is reported as scalar access](todo/bugs.md#b49-static-call-through-a-string-typed-variable-is-reported-as-scalar-access)        | Medium      | Low         |
 | B47 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b47-deprecation-diagnostics-ignore-the-projects-target-php-version)                           | Medium      | Low-Medium  |
 | B52 | [`isset()` in a short-circuit condition does not mark the variable defined](todo/bugs.md#b52-isset-in-a-short-circuit-condition-does-not-mark-the-variable-defined)          | Medium      | Low-Medium  |
-| B38 | [`@props` and anonymous-component attributes are reported as undefined](todo/bugs.md#b38-props-and-anonymous-component-attributes-are-reported-as-undefined)                 | Medium      | Low-Medium  |
 | B48 | [`Collection::keyBy()` does not rebind the key template](todo/bugs.md#b48-collectionkeyby-does-not-rebind-the-key-template)                                                  | Medium      | Medium      |
 | B50 | [Closure parameter types are not narrowed from the call site](todo/bugs.md#b50-closure-parameter-types-are-not-narrowed-from-the-call-site)                                  | Medium      | Medium      |
 | B51 | [An `instanceof` result stored in a variable does not narrow](todo/bugs.md#b51-an-instanceof-result-stored-in-a-variable-does-not-narrow)                                    | Medium      | Medium      |

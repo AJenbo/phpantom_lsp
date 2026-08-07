@@ -1,4 +1,8 @@
+use mago_span::HasSpan;
+use mago_syntax::cst::*;
+
 use super::TemplateKind;
+use super::call_site_inference::string_literal_contents;
 use super::directives::{match_directive, translate_directive};
 use super::source_map::BladeSourceMap;
 
@@ -39,13 +43,16 @@ enum Mode {
 }
 
 /// Which directive is having its argument list captured by
-/// [`Mode::CaptureArgs`]. The two have different real-PHP translations:
+/// [`Mode::CaptureArgs`]. Each has a different real-PHP translation:
 /// `@use` becomes a top-level `use` import (hoisted out of the wrapper
-/// function), `@inject` becomes an inline `$var = app(service);` assignment.
+/// function), `@inject` becomes an inline `$var = app(service);`
+/// assignment, and `@props` becomes one `$name = default;` assignment per
+/// declared prop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CapturedDirective {
     Use,
     Inject,
+    Props,
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
@@ -172,6 +179,14 @@ pub fn preprocess_with_vars(
     // attributes, which are only valid at attribute position inside a tag.
     let mut in_html_tag = false;
     let mut html_attr_string: Option<char> = None;
+    // Text captured by `Mode::CaptureArgs` from lines before the current
+    // one. A captured argument list (e.g. a multi-line `@props([...])`
+    // array) can span several lines, but the per-line `buffer` below is
+    // reset every iteration of the outer loop, so each line's contribution
+    // is appended here (instead of being flushed into `processed`) until
+    // the closing paren is reached and the whole span is transformed as
+    // one unit.
+    let mut capture_buffer = String::new();
 
     for line in content.lines() {
         let mut processed = String::new();
@@ -396,7 +411,6 @@ pub fn preprocess_with_vars(
                                 | "prepend"
                                 | "component"
                                 | "slot"
-                                | "props"
                                 | "aware"
                                 | "fragment"
                                 | "hasSection"
@@ -462,19 +476,19 @@ pub fn preprocess_with_vars(
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::Html; // These don't take args and return to HTML mode immediately
-                        } else if matches!(directive, "use" | "inject") {
-                            // `@use(...)` / `@inject(...)` need their string
-                            // argument(s) parsed into a real PHP construct, so
-                            // the argument list is captured (not emitted
-                            // verbatim) and transformed when it closes. Emit
-                            // nothing inline until then.
+                        } else if matches!(directive, "use" | "inject" | "props") {
+                            // `@use(...)` / `@inject(...)` / `@props(...)` need
+                            // their argument(s) parsed into a real PHP
+                            // construct, so the argument list is captured (not
+                            // emitted verbatim) and transformed when it
+                            // closes. Emit nothing inline until then.
                             let after_dir: String = rest_str[directive.len()..].chars().collect();
                             if after_dir.trim_start().starts_with('(') {
                                 replacement = "".to_string();
-                                next_mode = Mode::CaptureArgs(if directive == "use" {
-                                    CapturedDirective::Use
-                                } else {
-                                    CapturedDirective::Inject
+                                next_mode = Mode::CaptureArgs(match directive {
+                                    "use" => CapturedDirective::Use,
+                                    "inject" => CapturedDirective::Inject,
+                                    _ => CapturedDirective::Props,
                                 });
                                 paren_depth = 0;
                             } else {
@@ -618,9 +632,15 @@ pub fn preprocess_with_vars(
                     if paren_depth <= 0 {
                         char_idx += 1;
                         current_utf16_col += 1;
-                        // `buffer` holds the argument text from the opening
-                        // `(` up to (but not including) this closing `)`.
-                        let raw = std::mem::take(&mut buffer);
+                        // `capture_buffer` holds any prior lines of this
+                        // argument list; `buffer` holds the current line's
+                        // text from the opening `(` (or line start) up to
+                        // (but not including) this closing `)`. Together
+                        // they are the argument text from the opening `(`
+                        // to the closing `)`.
+                        let mut raw = std::mem::take(&mut capture_buffer);
+                        raw.push_str(&buffer);
+                        buffer.clear();
                         let emitted = match kind {
                             CapturedDirective::Use => {
                                 if let Some(stmt) = build_use_statement(&raw) {
@@ -630,6 +650,7 @@ pub fn preprocess_with_vars(
                                 String::new()
                             }
                             CapturedDirective::Inject => build_inject_statement(&raw),
+                            CapturedDirective::Props => build_props_statement(&raw),
                         };
 
                         let start_suffix = utf16_count(&processed) as u32;
@@ -736,13 +757,23 @@ pub fn preprocess_with_vars(
             in_string = None;
         }
 
-        flush_buffer(
-            &mut processed,
-            &mut buffer,
-            mode,
-            current_utf16_col,
-            &mut adjustments,
-        );
+        if let Mode::CaptureArgs(_) = mode {
+            // The argument list is still open at end of line: defer this
+            // line's text instead of flushing it into `processed`, which
+            // would leak a raw fragment into the virtual PHP before the
+            // closing paren transforms the whole span as one unit.
+            capture_buffer.push_str(&buffer);
+            capture_buffer.push('\n');
+            buffer.clear();
+        } else {
+            flush_buffer(
+                &mut processed,
+                &mut buffer,
+                mode,
+                current_utf16_col,
+                &mut adjustments,
+            );
+        }
 
         virtual_php.push_str(&processed);
         virtual_php.push('\n');
@@ -915,6 +946,94 @@ fn build_inject_statement(raw: &str) -> String {
     }
 
     format!(" ${variable} = app({service}); ")
+}
+
+/// Translate the captured argument text of a `@props(...)` directive into
+/// one `$name = default;` assignment per declared prop, so the forward
+/// walker sees each variable as defined (typed from its default value)
+/// without any dependency on the caller's `<x-… />` tag. `raw` is
+/// everything from the opening `(` up to (not including) the closing `)`;
+/// the argument list may span multiple lines.
+///
+/// Falls back to an inert `blade_directive(...)` call, matching how the
+/// other directives discard their arguments, when the argument is not a
+/// plain array literal (e.g. a variable holding a dynamically built props
+/// array) or no entry has a plain string key/value.
+fn build_props_statement(raw: &str) -> String {
+    // `raw` starts with the directive's own opening `(`, which has no
+    // matching `)` in this text; the array literal itself starts right
+    // after it.
+    let inner = match raw.find('(') {
+        Some(idx) => &raw[idx + 1..],
+        None => raw,
+    };
+
+    const PARSE_PREFIX: &str = "<?php ";
+    let synthetic = format!("{PARSE_PREFIX}{inner};");
+
+    let assignments = crate::parser::with_parsed_program(
+        &synthetic,
+        "blade_props_directive",
+        |program, _content| {
+            // `program.statements` includes the leading `<?php` opening tag
+            // as its own statement, so the array literal is the first
+            // *expression* statement, not necessarily `.first()`.
+            let Some(Statement::Expression(expr_stmt)) = program
+                .statements
+                .iter()
+                .find(|stmt| matches!(stmt, Statement::Expression(_)))
+            else {
+                return String::new();
+            };
+            let elements = match expr_stmt.expression {
+                Expression::Array(array) => &array.elements,
+                Expression::LegacyArray(array) => &array.elements,
+                _ => return String::new(),
+            };
+
+            let mut out = String::new();
+            for element in elements.iter() {
+                let (name, default_text) = match element {
+                    ArrayElement::KeyValue(kv) => {
+                        let Expression::Literal(Literal::String(s)) = kv.key else {
+                            continue;
+                        };
+                        let Some(name) = string_literal_contents(s) else {
+                            continue;
+                        };
+                        let span = kv.value.span();
+                        let start = (span.start.offset as usize).saturating_sub(PARSE_PREFIX.len());
+                        let end = (span.end.offset as usize).saturating_sub(PARSE_PREFIX.len());
+                        let Some(default_text) = inner.get(start..end) else {
+                            continue;
+                        };
+                        (name, default_text.to_string())
+                    }
+                    ArrayElement::Value(v) => {
+                        // A shorthand prop with no default (`@props(['visible'])`)
+                        // is only defined when the caller passes it; declare it
+                        // as `null` so it is at least never "undefined".
+                        let Expression::Literal(Literal::String(s)) = v.value else {
+                            continue;
+                        };
+                        let Some(name) = string_literal_contents(s) else {
+                            continue;
+                        };
+                        (name, "null".to_string())
+                    }
+                    _ => continue,
+                };
+                out.push_str(&format!(" ${name} = {default_text}; "));
+            }
+            out
+        },
+    );
+
+    if assignments.trim().is_empty() {
+        format!(" blade_directive({inner}); ")
+    } else {
+        assignments
+    }
 }
 
 /// If `rem` (starting at a `:`) opens a `:name="` or `:name='` bound
@@ -2006,6 +2125,67 @@ mod tests {
         assert!(
             php.contains("$repo = app(App\\Repo::class);"),
             "@inject should preserve a ::class service expression: {}",
+            php
+        );
+    }
+
+    /// `@props` declares each key as a local variable assigned its default
+    /// value, so the forward walker sees it as defined and typed without
+    /// waiting on the caller's `<x-… />` attributes.
+    #[test]
+    fn test_preprocess_props_directive_declares_variables() {
+        let content = "@props(['caption' => '', 'count' => 0])\n{{ $caption }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$caption = '';"),
+            "@props should declare $caption with its default: {}",
+            php
+        );
+        assert!(
+            php.contains("$count = 0;"),
+            "@props should declare $count with its default: {}",
+            php
+        );
+    }
+
+    /// The array literal in `@props(...)` commonly spans multiple lines;
+    /// the whole argument list must be captured across lines, not just the
+    /// closing line, or every prop declared before the last line is lost.
+    #[test]
+    fn test_preprocess_props_directive_spans_multiple_lines() {
+        let content = "@props([\n    'caption' => '',\n])\n{{ $caption }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$caption = '';"),
+            "a multi-line @props array must still declare its keys: {}",
+            php
+        );
+    }
+
+    /// A prop with no default (`@props(['visible'])`) is declared `null`
+    /// rather than left undefined, matching Blade allowing the shorthand
+    /// form for a prop the caller may or may not pass.
+    #[test]
+    fn test_preprocess_props_directive_shorthand_without_default() {
+        let content = "@props(['visible'])\n{{ $visible }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("$visible = null;"),
+            "a defaultless prop should still be declared: {}",
+            php
+        );
+    }
+
+    /// A dynamic props argument (not a plain array literal) cannot be read
+    /// directly; it must fall back to the inert directive call rather than
+    /// producing invalid PHP.
+    #[test]
+    fn test_preprocess_props_directive_dynamic_argument_falls_back() {
+        let content = "@props($dynamicProps)\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($dynamicProps);"),
+            "a non-literal @props argument should fall back to the inert call: {}",
             php
         );
     }
