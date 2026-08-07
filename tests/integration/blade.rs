@@ -67,6 +67,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_inline_php_directive_assignment_updates_scope() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_text = "<?php class Logger { public function info() {} }";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let blade_uri = Url::parse("file:///inline.blade.php").unwrap();
+        let blade_text = "@php($logger = new Logger())\n{{ $logger->info() }}";
+
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: blade_uri.clone(),
+                    language_id: "blade".to_string(),
+                    version: 1,
+                    text: blade_text.to_string(),
+                },
+            })
+            .await;
+
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: blade_uri.clone(),
+                },
+                position: Position {
+                    line: 1,
+                    character: 13, // $logger->in|fo()
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let result = backend.goto_definition(params).await.unwrap();
+
+        assert!(
+            result.is_some(),
+            "Inline @php(...) assignment should update the template scope"
+        );
+        match result.unwrap() {
+            GotoDefinitionResponse::Scalar(location) => {
+                assert_eq!(location.uri, php_uri);
+                assert_eq!(location.range.start.line, 0);
+            }
+            _ => panic!("Expected scalar location"),
+        }
+    }
+
+    /// A standalone `@var` block immediately above an inline `@php(…)`
+    /// must not swallow the assignment that follows it.
+    #[tokio::test]
+    async fn test_inline_php_directive_assignment_after_var_block() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_text = "<?php class Logger { public function info() {} \
+                        public function self_(): Logger { return $this; } }";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let blade_uri = Url::parse("file:///inline_var.blade.php").unwrap();
+        let blade_text = "@php\n/** @var \\Logger $base */\n@endphp\n\
+                          @php($logger = $base->self_())\n{{ $logger->info() }}";
+
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: blade_uri.clone(),
+                    language_id: "blade".to_string(),
+                    version: 1,
+                    text: blade_text.to_string(),
+                },
+            })
+            .await;
+
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: blade_uri.clone(),
+                },
+                position: Position {
+                    line: 4,
+                    character: 13, // $logger->in|fo()
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let result = backend.goto_definition(params).await.unwrap();
+
+        assert!(
+            result.is_some(),
+            "Inline @php(...) assignment below a @var block should still update the scope"
+        );
+    }
+
+    #[tokio::test]
     async fn test_blade_if_endif_parsing() {
         let backend = create_test_backend();
 

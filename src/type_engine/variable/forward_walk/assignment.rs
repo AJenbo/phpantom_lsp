@@ -112,10 +112,16 @@ pub(crate) fn process_expression_statement<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let expr = expr_stmt.expression;
+    // `($a = expr);` is a parenthesized expression statement, written by
+    // hand or produced by the Blade preprocessor for `@php($a = expr)`.
+    // The statement offset stays on the outer expression so a preceding
+    // `@var` docblock is still found, but everything that inspects the
+    // expression's shape works on the inner one.
+    let outer = expr_stmt.expression;
+    let expr = unwrap_parens(outer);
 
     // Try inline `/** @var Type $x */` override first.
-    match try_process_inline_var_override(expr, stmt_offset(expr), scope, ctx) {
+    match try_process_inline_var_override(expr, stmt_offset(outer), scope, ctx) {
         VarOverrideResult::NamedVar => {
             // Re-record the scope snapshot at this expression's offset
             // so that variable lookups within the same statement (e.g.
@@ -124,7 +130,7 @@ pub(crate) fn process_expression_statement<'b>(
             // The snapshot recorded by `walk_body_for_diagnostics` at
             // the statement start was taken *before* the `@var`
             // override was applied.
-            record_scope_snapshot(stmt_offset(expr), scope);
+            record_scope_snapshot(stmt_offset(outer), scope);
             return;
         }
         VarOverrideResult::NoVar => {
@@ -1163,7 +1169,9 @@ pub(crate) fn process_assignment_expr<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    if let Expression::Assignment(assignment) = expr {
+    // `($a = expr);` is a parenthesized assignment statement — written by
+    // hand, or produced by the Blade preprocessor for `@php($a = expr)`.
+    if let Expression::Assignment(assignment) = unwrap_parens(expr) {
         if !assignment.operator.is_assign() {
             // Compound assignment: $x op= expr.
             // The type depends on the operator.

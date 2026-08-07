@@ -24,6 +24,13 @@
         <p>Email: {{ $user->email }}</p>
     @endif
 
+    {{-- The inline @php(…) directive assigns just like the block form:
+         $featured is a \App\Models\BlogPost from here on --}}
+    @php($featured = $posts->published()->byNewest()->first())
+    @if($featured)
+        <p>Featured: {{ $featured->getTitle() }}</p>
+    @endif
+
     {{-- @error injects an implicit $message variable --}}
     @error('email')
         <div class="alert">{{ $message }}</div>

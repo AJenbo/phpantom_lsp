@@ -7,22 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B40. Assignments in the inline `@php(…)` directive are not recorded
-
-**Impact: Medium · Effort: Low**
-
-The block form updates scope correctly; the inline form does not:
-
-```blade
-@php($a = $order->orderProducts->whereIn('product_id', [1]))
-{{ $a->isNotEmpty() }}   {{-- type of '$a' could not be resolved --}}
-
-@php
-    $b = $order->orderProducts->whereIn('product_id', [1]);
-@endphp
-{{ $b->isNotEmpty() }}   {{-- resolves --}}
-```
-
 #### B41. Translation-key diagnostics fire when the app replaces the translation loader
 
 **Impact: Medium-High · Effort: Low-Medium**
