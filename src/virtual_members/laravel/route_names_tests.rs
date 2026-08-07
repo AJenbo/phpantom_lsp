@@ -699,6 +699,107 @@ fn registrations_inside_a_provider_method_are_collected() {
     assert_eq!(names, vec!["admin.dashboard".to_string()]);
 }
 
+// ─── Included route files ────────────────────────────────────────────────────
+
+/// Collect the routes of a route file that lives on disk, which is what the
+/// files it pulls in have to be read relative to.
+fn routes_of_file(path: &Path, workspace_root: &Path) -> Vec<RouteEntry> {
+    let content = std::fs::read_to_string(path).unwrap();
+    let mut out = Vec::new();
+    collect_all_names_from_file(
+        &content,
+        Some(path),
+        Some(workspace_root),
+        &MacroScope::default(),
+        &mut out,
+    );
+    out
+}
+
+/// Write `files` (relative paths) into a fresh workspace and return it.
+fn workspace_with(files: &[(&str, &str)]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for (relative, content) in files {
+        let path = dir.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, content).unwrap();
+    }
+    dir
+}
+
+/// A route file that keeps the sub-file's path in a variable pulls it in just
+/// as one that writes the concatenation inline does.
+#[test]
+fn a_group_target_held_in_a_variable_is_followed() {
+    let dir = workspace_with(&[
+        (
+            "routes/web.php",
+            "<?php\n$api = __DIR__.'/api.php';\nRoute::group(['prefix' => 'v1'], $api);\n",
+        ),
+        (
+            "routes/api.php",
+            "<?php\nRoute::get('/ping', 'ping')->name('ping');\n",
+        ),
+    ]);
+
+    let collected = routes_of_file(&dir.path().join("routes/web.php"), dir.path());
+    assert_eq!(collected.len(), 1, "{collected:?}");
+    assert_eq!(collected[0].name, "ping");
+    assert_eq!(collected[0].uri, "v1/ping");
+}
+
+/// Go-to-definition follows the same indirection through a `require`, and
+/// lands in the file that was pulled in.
+#[test]
+fn definition_follows_a_require_target_held_in_a_variable() {
+    let dir = workspace_with(&[
+        (
+            "routes/web.php",
+            "<?php\n$admin = __DIR__.'/admin.php';\nrequire $admin;\n",
+        ),
+        (
+            "routes/admin.php",
+            "<?php\nRoute::get('/users', 'index')->name('users.index');\n",
+        ),
+    ]);
+    let web = dir.path().join("routes/web.php");
+    let content = std::fs::read_to_string(&web).unwrap();
+
+    let found = scan_route_file(
+        &content,
+        "users.index",
+        &Url::from_file_path(&web).unwrap(),
+        Some(&web),
+        web.parent(),
+        Some(dir.path()),
+        &MacroScope::default(),
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].uri,
+        Url::from_file_path(dir.path().join("routes/admin.php").canonicalize().unwrap()).unwrap()
+    );
+}
+
+/// A function body has variables of its own, so an assignment written there
+/// must not be read as the value a file-scope include target holds.
+#[test]
+fn a_variable_assigned_inside_a_function_is_not_read_at_file_scope() {
+    let dir = workspace_with(&[
+        (
+            "routes/web.php",
+            "<?php\nfunction boot() {\n    $api = __DIR__.'/api.php';\n}\nRoute::group([], $api);\n",
+        ),
+        (
+            "routes/api.php",
+            "<?php\nRoute::get('/ping', 'ping')->name('ping');\n",
+        ),
+    ]);
+
+    let collected = routes_of_file(&dir.path().join("routes/web.php"), dir.path());
+    assert!(collected.is_empty(), "{collected:?}");
+}
+
 // ─── Router macros ───────────────────────────────────────────────────────────
 
 const ADMIN_PANEL_MACRO: &str = "\

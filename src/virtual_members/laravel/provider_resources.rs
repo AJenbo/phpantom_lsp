@@ -84,7 +84,7 @@ pub(crate) fn extract_provider_resources(
                 content,
                 file_dir,
                 workspace_root,
-                Some(program),
+                program,
             )
         {
             grouped_route_files.push(path);
@@ -98,14 +98,10 @@ pub(crate) fn extract_provider_resources(
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
         if method_lower == b"mergeconfigfrom" && args.len() >= 2 {
-            if let Some(path) = resolve_path_arg(
-                args[0].value(),
-                content,
-                file_dir,
-                workspace_root,
-                Some(program),
-            ) && let Some((ns, _, _)) =
-                super::helpers::extract_string_literal(args[1].value(), content)
+            if let Some(path) =
+                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+                && let Some((ns, _, _)) =
+                    super::helpers::extract_string_literal(args[1].value(), content)
             {
                 resources.config_files.push(ProviderResource {
                     path,
@@ -113,14 +109,10 @@ pub(crate) fn extract_provider_resources(
                 });
             }
         } else if method_lower == b"loadviewsfrom" && args.len() >= 2 {
-            if let Some(path) = resolve_path_arg(
-                args[0].value(),
-                content,
-                file_dir,
-                workspace_root,
-                Some(program),
-            ) && let Some((ns, _, _)) =
-                super::helpers::extract_string_literal(args[1].value(), content)
+            if let Some(path) =
+                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+                && let Some((ns, _, _)) =
+                    super::helpers::extract_string_literal(args[1].value(), content)
             {
                 resources.view_dirs.push(ProviderResource {
                     path,
@@ -128,14 +120,10 @@ pub(crate) fn extract_provider_resources(
                 });
             }
         } else if method_lower == b"loadtranslationsfrom" && args.len() >= 2 {
-            if let Some(path) = resolve_path_arg(
-                args[0].value(),
-                content,
-                file_dir,
-                workspace_root,
-                Some(program),
-            ) && let Some((ns, _, _)) =
-                super::helpers::extract_string_literal(args[1].value(), content)
+            if let Some(path) =
+                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+                && let Some((ns, _, _)) =
+                    super::helpers::extract_string_literal(args[1].value(), content)
             {
                 resources.trans_dirs.push(ProviderResource {
                     path,
@@ -143,13 +131,9 @@ pub(crate) fn extract_provider_resources(
                 });
             }
         } else if method_lower == b"loadjsontranslationsfrom" && !args.is_empty() {
-            if let Some(path) = resolve_path_arg(
-                args[0].value(),
-                content,
-                file_dir,
-                workspace_root,
-                Some(program),
-            ) {
+            if let Some(path) =
+                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+            {
                 resources.trans_dirs.push(ProviderResource {
                     path,
                     namespace: String::new(),
@@ -157,13 +141,8 @@ pub(crate) fn extract_provider_resources(
             }
         } else if method_lower == b"loadroutesfrom"
             && !args.is_empty()
-            && let Some(path) = resolve_path_arg(
-                args[0].value(),
-                content,
-                file_dir,
-                workspace_root,
-                Some(program),
-            )
+            && let Some(path) =
+                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
         {
             resources.route_files.push(path);
         }
@@ -192,18 +171,16 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
 /// Covers the forms Laravel projects use to locate route, config, view, and
 /// translation files: `__DIR__ . '/…'`, `base_path('…')`, a bare literal
 /// (absolute, or relative to the referring file), and a local variable
-/// assigned one of those forms earlier in the same method (Livewire's
+/// assigned one of those forms earlier in the same scope (Livewire's
 /// service provider writes `$config = __DIR__.'/../config/x.php';` before
-/// passing `$config` to `mergeConfigFrom`).  `program` is only needed for
-/// that last form, so callers that cannot easily thread it through (e.g. a
-/// route-file `require` reached mid-traversal) may pass `None` and simply
-/// lose local-variable resolution.
+/// passing `$config` to `mergeConfigFrom`).  `program` is the parse of
+/// `content`, which that last form is resolved against.
 pub(crate) fn resolve_path_arg(
     expr: &Expression<'_>,
     content: &str,
     file_dir: &Path,
     workspace_root: &Path,
-    program: Option<&Program<'_>>,
+    program: &Program<'_>,
 ) -> Option<PathBuf> {
     if let Some(rel) = super::helpers::extract_dir_concat_path(expr, content) {
         let resolved = file_dir.join(rel.trim_start_matches('/'));
@@ -236,26 +213,26 @@ pub(crate) fn resolve_path_arg(
     }
 
     if let Expression::Variable(Variable::Direct(dv)) = expr {
-        let program = program?;
         let assigned = last_assignment_before(program, dv.start_offset(), dv.name)?;
-        return resolve_path_arg(assigned, content, file_dir, workspace_root, Some(program));
+        return resolve_path_arg(assigned, content, file_dir, workspace_root, program);
     }
 
     None
 }
 
 /// The RHS of the last `$name = <expr>;` assignment before `offset` in the
-/// enclosing method or function body: PHP's own resolution rule for a
-/// variable read, the most recent write to it in the same function scope.
+/// scope enclosing it: PHP's own resolution rule for a variable read, the
+/// most recent write to it in the same scope.
+///
+/// A service provider assigns inside a method; a route file assigns at the
+/// top level of the script, where the enclosing scope is the file itself.
 fn last_assignment_before<'ast, 'arena>(
     program: &'ast Program<'arena>,
     offset: u32,
     name: &[u8],
 ) -> Option<&'ast Expression<'arena>> {
-    let body = super::helpers::enclosing_body(Node::Program(program), offset)?;
-
-    let mut best: Option<(u32, &Expression<'_>)> = None;
-    super::helpers::walk_before_cursor(body, offset, &mut |node| {
+    let mut best: Option<(u32, &'ast Expression<'arena>)> = None;
+    let mut record = |node: Node<'ast, 'arena>| {
         let Node::Assignment(assignment) = node else {
             return;
         };
@@ -272,7 +249,16 @@ fn last_assignment_before<'ast, 'arena>(
         if super::helpers::beats_best(&best, end, offset) {
             best = Some((end, assignment.rhs));
         }
-    });
+    };
+
+    match super::helpers::enclosing_body(Node::Program(program), offset) {
+        Some(body) => super::helpers::walk_before_cursor(body, offset, &mut record),
+        None => super::helpers::walk_file_scope_before_cursor(
+            Node::Program(program),
+            offset,
+            &mut record,
+        ),
+    }
     best.map(|(_, rhs)| rhs)
 }
 

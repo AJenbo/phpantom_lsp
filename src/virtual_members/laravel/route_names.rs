@@ -366,13 +366,18 @@ fn nested_resource_uri(segments: &[&str], overrides: &[(String, String)]) -> Str
 /// `dir` anchors `__DIR__`-relative paths and `root` anchors `base_path()`
 /// ones.  `open` is the cycle breaker: route files legitimately pull each
 /// other in, and following a `require` back into a file already on the
-/// include stack would not terminate.
+/// include stack would not terminate.  `program` is the parse of the source
+/// being scanned, which is what lets an include target written as a local
+/// variable be followed back to the path it was assigned; every hop that
+/// switches source (an included file, a macro body) replaces it along with
+/// `dir`.
 #[derive(Clone, Copy)]
 struct ScanPaths<'a> {
     dir: Option<&'a Path>,
     root: Option<&'a Path>,
     open: &'a RefCell<HashSet<PathBuf>>,
     macros: &'a MacroScope,
+    program: &'a Program<'a>,
 }
 
 impl<'a> ScanPaths<'a> {
@@ -381,12 +386,14 @@ impl<'a> ScanPaths<'a> {
         root: Option<&'a Path>,
         open: &'a RefCell<HashSet<PathBuf>>,
         macros: &'a MacroScope,
+        program: &'a Program<'a>,
     ) -> Self {
         Self {
             dir,
             root,
             open,
             macros,
+            program,
         }
     }
 }
@@ -571,7 +578,13 @@ fn open_included_file<'a>(
     paths: ScanPaths<'a>,
 ) -> Option<IncludedFile<'a>> {
     let dir = paths.dir?;
-    let path = resolve_path_arg(target, content, dir, paths.root.unwrap_or(dir), None)?;
+    let path = resolve_path_arg(
+        target,
+        content,
+        dir,
+        paths.root.unwrap_or(dir),
+        paths.program,
+    )?;
     let path = path.canonicalize().unwrap_or(path);
     if !paths.open.borrow_mut().insert(path.clone()) {
         return None;
@@ -747,11 +760,11 @@ fn scan_route_file(
         open.borrow_mut()
             .insert(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     }
-    let paths = ScanPaths::new(file_dir, workspace_root, &open, macros);
-
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+    let paths = ScanPaths::new(file_dir, workspace_root, &open, macros, program);
+
     let mut results = Vec::new();
     let mut scope = Scope::default();
 
@@ -996,15 +1009,17 @@ fn scan_included_file(
         return Vec::new();
     };
     let sub_uri = Url::from_file_path(&included.path).unwrap_or_else(|_| uri.clone());
-    let sub_paths = ScanPaths {
-        dir: included.path.parent(),
-        ..paths
-    };
 
     let arena = LocalArena::new();
     let file_id = FileId::new(b"included.php");
     let program =
         mago_syntax::parser::parse_file_content(&arena, file_id, included.content.as_bytes());
+    let sub_paths = ScanPaths {
+        dir: included.path.parent(),
+        program,
+        ..paths
+    };
+
     let mut results = Vec::new();
     for stmt in program.statements.iter() {
         results.extend(scan_stmt(
@@ -1039,14 +1054,15 @@ fn scan_macro(
         Some(chain) => format!("{prefix}{}", chain_name_prefix(chain, content)),
         None => prefix.to_string(),
     };
-    let sub_paths = ScanPaths {
-        dir: open.path.parent(),
-        ..paths
-    };
-
     let arena = LocalArena::new();
     let file_id = FileId::new(b"macro.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, open.content.as_bytes());
+    let sub_paths = ScanPaths {
+        dir: open.path.parent(),
+        program,
+        ..paths
+    };
+
     let mut results = Vec::new();
     // A macro closure is registered without a `use (...)` clause, so it has
     // no access to the caller's local variables; its body gets its own scope.
@@ -1312,16 +1328,17 @@ fn collect_all_names_from_file(
         open.borrow_mut()
             .insert(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     }
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let paths = ScanPaths::new(
         file_path.and_then(Path::parent),
         workspace_root,
         &open,
         macros,
+        program,
     );
 
-    let arena = LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut scope = Scope::default();
     for stmt in program.statements.iter() {
         collect_names_from_stmt(
@@ -1539,14 +1556,15 @@ fn collect_names_from_macro(
         name: &name_prefix,
         uri: &uri_prefix,
     };
-    let sub_paths = ScanPaths {
-        dir: open.path.parent(),
-        ..paths
-    };
-
     let arena = LocalArena::new();
     let file_id = FileId::new(b"macro.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, open.content.as_bytes());
+    let sub_paths = ScanPaths {
+        dir: open.path.parent(),
+        program,
+        ..paths
+    };
+
     // A macro closure is registered without a `use (...)` clause, so it has
     // no access to the caller's local variables; its body gets its own scope.
     let mut scope = Scope::default();
@@ -1698,15 +1716,16 @@ fn collect_names_from_included_file(
     let Some(included) = open_included_file(file, content, paths) else {
         return;
     };
-    let sub_paths = ScanPaths {
-        dir: included.path.parent(),
-        ..paths
-    };
-
     let arena = LocalArena::new();
     let file_id = FileId::new(b"included.php");
     let program =
         mago_syntax::parser::parse_file_content(&arena, file_id, included.content.as_bytes());
+    let sub_paths = ScanPaths {
+        dir: included.path.parent(),
+        program,
+        ..paths
+    };
+
     for stmt in program.statements.iter() {
         collect_names_from_stmt(stmt, &included.content, group, sub_paths, scope, out);
     }

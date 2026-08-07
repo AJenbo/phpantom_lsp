@@ -1016,6 +1016,39 @@ pub(in crate::virtual_members::laravel) fn walk_before_cursor<'ast, 'arena>(
     });
 }
 
+/// Hand every node of `node`'s subtree that starts before `cursor` to
+/// `visit`, stopping at anything that has variables of its own.
+///
+/// The file-scope counterpart to [`walk_before_cursor`], for an offset no
+/// function-like body encloses: a route file registers its routes at the top
+/// level of the script, so a `$path = …` written inside a function or closure
+/// further up the file says nothing about the value in force there.
+pub(in crate::virtual_members::laravel) fn walk_file_scope_before_cursor<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    cursor: u32,
+    visit: &mut impl FnMut(Node<'ast, 'arena>),
+) {
+    visit(node);
+    node.visit_children(|child| {
+        if child.span().start.offset < cursor && !opens_variable_scope(child) {
+            walk_file_scope_before_cursor(child, cursor, visit);
+        }
+    });
+}
+
+/// Whether a node's body runs with a fresh set of local variables rather than
+/// the ones its surroundings hold.
+fn opens_variable_scope(node: Node<'_, '_>) -> bool {
+    matches!(
+        node,
+        Node::Function(_)
+            | Node::Closure(_)
+            | Node::ArrowFunction(_)
+            | Node::Method(_)
+            | Node::PropertyHook(_)
+    )
+}
+
 /// Whether a construct ending at `end` is a better candidate than the one
 /// already in `best`: it has to finish before the cursor, and later beats
 /// earlier so the nearest preceding construct wins.

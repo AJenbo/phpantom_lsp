@@ -375,6 +375,10 @@ class Demo
         // with the route file under app/Modules instead of the routes/ dir.
         route('reviews.update');
 
+        // Route declared in routes/api/v1.php, which routes/web.php pulls in
+        // by a path it keeps in a variable rather than by a closure.
+        route('api.v1.users.index');
+
         // Routes a router macro registers.  routes/web.php only calls
         // Route::bakeryAuth(); the names come from the macro body in
         // RouteServiceProvider, including the ones a nested macro adds.

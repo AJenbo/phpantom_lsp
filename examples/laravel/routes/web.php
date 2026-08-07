@@ -26,6 +26,14 @@ Route::prefix('bakeries')
 // name yields bakeries/{bakery}/ovens and bakeries/{bakery}/ovens/{oven}.
 Route::resource('bakeries.ovens', BakeryController::class)->only(['index', 'show']);
 
+// A route file pulled in by path rather than by closure.  The path is held in
+// a variable, which PHPantom follows back to the assignment, so the routes
+// api/v1.php declares are found and inherit this group's URI prefix
+// (api.v1.users.index is registered at api/v1/users).
+$apiRoutes = __DIR__ . '/api/v1.php';
+
+Route::group(['prefix' => 'api'], $apiRoutes);
+
 // One route per entry of a literal array, each named by interpolation.  The
 // array, the loop variables and the names they build are all statically
 // known, so route('campaigns.black-friday.perfume') resolves here just as a

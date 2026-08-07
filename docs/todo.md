@@ -120,7 +120,6 @@ unlikely to move the needle for most users.
 | B51 | [An `instanceof` result stored in a variable does not narrow](todo/bugs.md#b51-an-instanceof-result-stored-in-a-variable-does-not-narrow)                                    | Medium      | Medium      |
 | B53 | [`$this->mock(Foo::class)` loses the intersection with `Foo`](todo/bugs.md#b53-this-mockfooclass-loses-the-intersection-with-foo)                                             | Low-Medium  | Low         |
 | B44 | [String container bindings do not resolve](todo/bugs.md#b44-string-container-bindings-do-not-resolve)                                                                        | Low-Medium  | Medium      |
-| B33 | [Included route file paths behind a local variable are not resolved](todo/bugs.md#b33-included-route-file-paths-behind-a-local-variable-are-not-resolved)                    | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
