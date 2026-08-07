@@ -7,22 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B44. String container bindings do not resolve
-
-**Impact: Low-Medium · Effort: Medium**
-
-`app()->make('sentry')` resolves to nothing, because nothing indexes the
-string keys that service providers bind:
-
-```php
-// Sentry\Laravel\ServiceProvider
-$this->app->singleton('sentry', fn () => new HubAdapter());
-```
-
-Provider scanning already walks `register()` for config and route
-resources, so the `bind()` / `singleton()` / `instance()` calls with a
-string abstract and a resolvable concrete are within reach.
-
 #### B47. Deprecation diagnostics ignore the project's target PHP version
 
 **Impact: Medium · Effort: Low-Medium**

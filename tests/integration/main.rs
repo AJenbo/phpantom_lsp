@@ -129,6 +129,7 @@ mod inlay_hints;
 mod laravel_app_facade_container;
 mod laravel_commands;
 mod laravel_config_keys;
+mod laravel_container_bindings;
 mod laravel_contract_concrete;
 mod laravel_custom_builder;
 mod laravel_date_factory;

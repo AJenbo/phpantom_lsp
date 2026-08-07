@@ -110,7 +110,6 @@ unlikely to move the needle for most users.
 | B49 | [Static call through a string-typed variable is reported as scalar access](todo/bugs.md#b49-static-call-through-a-string-typed-variable-is-reported-as-scalar-access)        | Medium      | Low         |
 | B47 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b47-deprecation-diagnostics-ignore-the-projects-target-php-version)                           | Medium      | Low-Medium  |
 | B48 | [`Collection::keyBy()` does not rebind the key template](todo/bugs.md#b48-collectionkeyby-does-not-rebind-the-key-template)                                                  | Medium      | Medium      |
-| B44 | [String container bindings do not resolve](todo/bugs.md#b44-string-container-bindings-do-not-resolve)                                                                        | Low-Medium  | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

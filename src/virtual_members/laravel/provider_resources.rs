@@ -1,10 +1,15 @@
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
+use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
+
+use crate::atom::bytes_to_str;
+use crate::names::OwnedResolvedNames;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderResource {
@@ -18,6 +23,12 @@ pub(crate) struct ProviderResources {
     pub view_dirs: Vec<ProviderResource>,
     pub trans_dirs: Vec<ProviderResource>,
     pub route_files: Vec<PathBuf>,
+    /// Container binding key → concrete class FQN, for the bindings a
+    /// provider makes under a *string* abstract
+    /// (`$this->app->singleton('sentry', fn () => new HubAdapter())`).  A
+    /// binding keyed by `Contract::class` needs no table: the written name
+    /// already resolves.
+    pub bindings: HashMap<String, String>,
     /// A provider rebound `translator` or `translation.loader` to something
     /// other than Laravel's own file-based pair, so the strings come from a
     /// source we cannot enumerate (a database table, say) and the set of
@@ -31,6 +42,7 @@ impl ProviderResources {
         self.view_dirs.extend(other.view_dirs);
         self.trans_dirs.extend(other.trans_dirs);
         self.route_files.extend(other.route_files);
+        self.bindings.extend(other.bindings);
         self.custom_translation_loader |= other.custom_translation_loader;
     }
 }
@@ -73,6 +85,10 @@ pub(crate) fn extract_provider_resources(
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+    // Container bindings name their concrete by short name (`new HubAdapter()`
+    // under a `use` statement), so the file's resolved-name table is needed to
+    // turn that into the FQN the class index is keyed by.
+    let resolved = OwnedResolvedNames::from_resolved(&NameResolver::new(&arena).resolve(program));
 
     super::helpers::walk_program_expressions(program, &mut |expr| {
         // Any direct use of the `Route` facade means routes are registered
@@ -126,15 +142,27 @@ pub(crate) fn extract_provider_resources(
             && let Some(key_arg) = mc.argument_list.arguments.iter().next()
             && let Some((key, _, _)) =
                 super::helpers::extract_string_literal(key_arg.value(), content)
-            && TRANSLATION_BINDINGS.contains(&key)
         {
             let factory = mc.argument_list.arguments.iter().nth(1).map(|a| a.value());
-            // `extend` decorates whatever is already bound, so even a
-            // file-based wrapper adds lines from somewhere else.
-            if method_lower != b"extend" && builds_file_translator(factory) {
+
+            if TRANSLATION_BINDINGS.contains(&key) {
+                // `extend` decorates whatever is already bound, so even a
+                // file-based wrapper adds lines from somewhere else.
+                if method_lower != b"extend" && builds_file_translator(factory) {
+                    return ControlFlow::Continue(());
+                }
+                resources.custom_translation_loader = true;
                 return ControlFlow::Continue(());
             }
-            resources.custom_translation_loader = true;
+
+            // `extend` wraps whatever the key already holds; which class comes
+            // out depends on the binding it decorates, so only the calls that
+            // *replace* the value tell us the concrete type.
+            if method_lower != b"extend"
+                && let Some(concrete) = binding_concrete(factory, &resolved)
+            {
+                resources.bindings.insert(key.to_string(), concrete);
+            }
             return ControlFlow::Continue(());
         }
 
@@ -236,6 +264,59 @@ fn is_app_container_expr(expr: &Expression<'_>) -> bool {
         }
         _ => false,
     }
+}
+
+/// The concrete class a container binding puts behind its key.
+///
+/// Covers the shapes a service provider writes: the class itself
+/// (`bind('foo', Foo::class)`), a ready-made instance
+/// (`instance('foo', new Foo())`), and the usual factory
+/// (`singleton('foo', fn () => new Foo())` or its closure equivalent, whose
+/// first `return` decides the type).  A factory that hands back anything else
+/// (a container lookup, a variable, a conditional) yields `None`: guessing
+/// there would bind the key to a class the application never resolves.
+fn binding_concrete(
+    expr: Option<&Expression<'_>>,
+    resolved: &OwnedResolvedNames,
+) -> Option<String> {
+    match expr? {
+        Expression::Instantiation(inst) => match inst.class {
+            Expression::Identifier(id) => resolved_class_fqn(id, resolved),
+            _ => None,
+        },
+        Expression::Access(Access::ClassConstant(cca))
+            if matches!(
+                &cca.constant,
+                ClassLikeConstantSelector::Identifier(constant)
+                    if constant.value.eq_ignore_ascii_case(b"class")
+            ) =>
+        {
+            match cca.class {
+                Expression::Identifier(id) => resolved_class_fqn(id, resolved),
+                _ => None,
+            }
+        }
+        Expression::ArrowFunction(arrow) => binding_concrete(Some(arrow.expression), resolved),
+        Expression::Closure(closure) => {
+            closure.body.statements.iter().find_map(|stmt| match stmt {
+                Statement::Return(ret) => binding_concrete(ret.value, resolved),
+                _ => None,
+            })
+        }
+        Expression::Parenthesized(inner) => binding_concrete(Some(inner.expression), resolved),
+        _ => None,
+    }
+}
+
+/// The FQN a class-name identifier resolves to, through the file's namespace
+/// and `use` statements, falling back to the written name when the resolver
+/// did not track the offset.
+fn resolved_class_fqn(ident: &Identifier<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
+    if let Some(fqn) = resolved.get(ident.span().start.offset) {
+        return Some(fqn.trim_start_matches('\\').to_string());
+    }
+    let raw = bytes_to_str(ident.value()).trim_start_matches('\\');
+    (!raw.is_empty()).then(|| raw.to_string())
 }
 
 /// Whether a translation binding's factory builds Laravel's own file-based

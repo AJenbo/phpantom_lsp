@@ -171,9 +171,17 @@ impl Backend {
 /// installed. Returns empty tables for a non-Laravel project (the framework
 /// classes are absent from the class index).
 fn build_laravel_aliases(backend: &Backend) -> LaravelAliases {
-    let container = read_source_by_fqn(backend, APPLICATION_FQN)
+    let mut container = read_source_by_fqn(backend, APPLICATION_FQN)
         .and_then(|src| parse_container_aliases(&src, APPLICATION_FQN))
         .unwrap_or_default();
+
+    // Overlay the string keys the project's own service providers bind
+    // (`$this->app->singleton('sentry', fn () => new HubAdapter())`).  These
+    // are registered after the core aliases at runtime, so a provider that
+    // rebinds a core key wins here too.
+    for (key, fqn) in backend.laravel_provider_resources.read().bindings.iter() {
+        container.insert(key.clone(), fqn.clone());
+    }
 
     // Facade aliases: the framework defaults, then the project's config
     // overlay (which may add to or override individual entries).
