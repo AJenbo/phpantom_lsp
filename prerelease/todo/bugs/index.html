@@ -883,10 +883,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b50-closure-parameter-types-are-not-narrowed-from-the-call-site" class="md-nav__link">
+  <a href="#b51-array-function-return-types-are-lost-when-the-call-is-not-assigned-to-a-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B50. Closure parameter types are not narrowed from the call site
+        B51. Array-function return types are lost when the call is not assigned to a variable
       </span>
     </span>
   </a>
@@ -1416,10 +1416,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b50-closure-parameter-types-are-not-narrowed-from-the-call-site" class="md-nav__link">
+  <a href="#b51-array-function-return-types-are-lost-when-the-call-is-not-assigned-to-a-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B50. Closure parameter types are not narrowed from the call site
+        B51. Array-function return types are lost when the call is not assigned to a variable
       </span>
     </span>
   </a>
@@ -1515,23 +1515,33 @@ is reported as a member access on a scalar:</p>
 <p>A <code>class-string&lt;T&gt;</code> subject should resolve to <code>T</code>; a plain <code>string</code>
 subject is unresolvable, which is a "cannot verify" at most, never a
 scalar-access error.</p>
-<h4 id="b50-closure-parameter-types-are-not-narrowed-from-the-call-site">B50. Closure parameter types are not narrowed from the call site<a class="headerlink" href="#b50-closure-parameter-types-are-not-narrowed-from-the-call-site" title="Permanent link">&para;</a></h4>
+<h4 id="b51-array-function-return-types-are-lost-when-the-call-is-not-assigned-to-a-variable">B51. Array-function return types are lost when the call is not assigned to a variable<a class="headerlink" href="#b51-array-function-return-types-are-lost-when-the-call-is-not-assigned-to-a-variable" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>When a closure is passed to <code>array_map()</code> (and friends) over an array
-with a known element type, that element type should refine a wider
-declared parameter type. PHPStan does this at level max; PHPantom keeps
-the declared <code>array</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @return iterable&lt;array{DiscountType, ?CartLabel}&gt; */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">private static function yieldCases(): iterable { /* … */ }</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">array_map(</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    static fn (array $case): string =&gt; $case[0]-&gt;name,   // type of &#39;$case[0]&#39; could not be resolved</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    iterator_to_array(self::yieldCases()),</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">);</span>
+<p>The element-type rules for the array-producing standard library
+functions (<code>iterator_to_array</code>, <code>array_map</code>, <code>array_filter</code>, …) live in
+the AST-driven pipeline, so they only fire when the call is the RHS of
+an assignment. Used inline as a subject or as another call's argument,
+the same call goes through the text-driven path in
+<code>call_resolution/return_types.rs</code> and falls back to the bare declared
+return type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @var iterable&lt;array{DiscountType, ?CartLabel}&gt; $it */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$rows = iterator_to_array($it);</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$rows[0][0]-&gt;name;                  // resolves</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">iterator_to_array($it)[0][0]-&gt;name; // type of &#39;…&#39; could not be resolved</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">array_map(</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">    static fn ($case) =&gt; $case[0]-&gt;name,   // $case is `mixed`</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">    iterator_to_array($it),</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">);</span>
 </code></pre></div>
-<p>3 diagnostics in one sample project. Related to
-<a href="../type-inference/#t25-call-site-template-argument-inference-for-callable-parameters">T25</a>,
-which covers the template side of the same call-site inference.</p>
+<p>Two things are missing on the text path: the array-function rules
+themselves, and the plumbing that reports a resolved conditional or
+template-substituted return type through <code>return_type_hint_out</code> (today
+only the raw declared return type is written there, so callers that need
+the type string rather than a <code>ClassInfo</code> never see the refinement).
+Related to
+<a href="../type-inference/#t25-call-site-template-argument-inference-for-callable-parameters">T25</a>.</p>
 
 
 
