@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B28. A comment before the arrow hides a request field's receiver via the <code>safe()</code> hop
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B28. A comment before the arrow hides a request field's receiver via the <code>safe()</code> hop
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,29 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop">B28. A comment before the arrow hides a request field's receiver via the <code>safe()</code> hop<a class="headerlink" href="#b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low</strong></p>
-<p><code>detect_request_field_context</code> (<code>src/virtual_members/laravel/request_fields.rs</code>)
-recovers the receiver of <code>$request-&gt;input('|')</code> (and the <code>-&gt;safe()-&gt;only(['|'])</code>
-hop-through) with its own backwards text walk — <code>strip_trailing_ident</code>,
-<code>strip_arrow</code>, <code>strip_safe_call</code>, <code>trailing_variable</code> — over
-<code>content[..call.code_before_call]</code>, independently of
-<code>detect_string_call_context</code>'s own receiver extraction (fixed for the same
-class of bug by using <code>OpenBracket::callee_operator</code> from the forward scan,
-see the <code>A comment no longer hides a string-argument call's receiver</code>
-changelog entry). A comment between the receiver and <code>-&gt;</code> still ends this
-walk early:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$request /* the request */ -&gt;input(&#39;|&#39;);  // no completion</span>
-</code></pre></div>
-<p><strong>Where to look:</strong> <code>strip_arrow</code> needs the same fix <code>detect_string_call_context</code>
-got — a code-before boundary from the scan rather than a raw trailing-comment
-trim. <code>call.callee_operator</code> already gives the boundary for the <em>last</em> <code>-&gt;</code>
-before the callee; the <code>safe()</code> hop needs a second one further back (the
-<code>-&gt;</code> before <code>safe</code>), which is not currently exposed since <code>OpenBracket</code> only
-records the operator immediately before its own callee. Extending the scan
-to expose that (e.g. a small chain of recent operators, not just the last
-one) would let both <code>strip_arrow</code> and <code>strip_safe_call</code> read comment-free
-boundaries instead of walking raw text.</p>
+<p>No outstanding items.</p>
 
 
 
