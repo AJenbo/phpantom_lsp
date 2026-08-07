@@ -11,7 +11,9 @@ use crate::class_lookup::find_class_by_name;
 use crate::class_lookup::{is_self_or_static, resolve_class_keyword};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
-use crate::type_engine::variable::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
+use crate::type_engine::variable::array_func_rules::{
+    array_func_element_type, array_func_raw_type,
+};
 use crate::types::ClassLikeKind;
 use crate::types::*;
 
@@ -22,6 +24,7 @@ use crate::type_engine::conditional_resolution::{
 };
 use crate::type_engine::resolver::ResolutionCtx;
 
+use super::arg_type_resolution::TextArrayFuncArgs;
 use super::target_cache::try_infer_body_return_type;
 
 /// Bundled parameters for [`Backend::resolve_method_return_types_with_args`].
@@ -723,30 +726,56 @@ impl Backend {
                     return vec![cls];
                 }
 
-                let is_array_element_func = ARRAY_ELEMENT_FUNCS
-                    .iter()
-                    .any(|f| f.eq_ignore_ascii_case(func_name));
-                let is_array_preserving_func = ARRAY_PRESERVING_FUNCS
-                    .iter()
-                    .any(|f| f.eq_ignore_ascii_case(func_name));
+                // ── Array-producing / element-extracting functions ───
+                // The stubs declare these as returning a bare `array` or
+                // `mixed`, so the element-type rules in
+                // `variable::array_func_rules` supply the real type.
+                // The same rules run on the AST path when the call is an
+                // assignment right-hand side; here they cover every
+                // inline use (`array_map(…)[0]`, `f(array_filter(…))`).
+                if !text_args.is_empty() {
+                    let owner_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
+                    let fn_args = TextArrayFuncArgs::new(text_args, ctx);
 
-                if (is_array_element_func || is_array_preserving_func)
-                    && !text_args.is_empty()
-                    && let Some(first_arg) = Self::extract_first_arg_text(text_args)
-                {
-                    let arg_raw_type = Self::resolve_inline_arg_raw_type(&first_arg, ctx);
-
-                    if let Some(ref raw) = arg_raw_type
-                        && let Some(element_type) = raw.extract_value_type(true)
-                    {
-                        let owner_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
+                    // Element-extracting functions (`array_pop`, `current`,
+                    // …): the call's type *is* the element type.
+                    if let Some(element_type) = array_func_element_type(func_name, &fn_args) {
                         let classes: Vec<Arc<ClassInfo>> =
                             crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                element_type,
+                                &element_type,
                                 owner_name,
                                 ctx.all_classes,
                                 ctx.class_loader,
                             );
+                        if let Some(ref mut hint_out) = return_type_hint_out {
+                            **hint_out = Some(element_type);
+                        }
+                        if !classes.is_empty() {
+                            return classes;
+                        }
+                    }
+
+                    // Array-producing functions (`array_filter`,
+                    // `array_map`, `iterator_to_array`, …): the container
+                    // type is what a caller indexing into the call
+                    // (`array_map(…)[0]`) needs, so it travels as the
+                    // hint.  The classes stay the element's, since an
+                    // array has none of its own.
+                    if let Some(raw_type) = array_func_raw_type(func_name, &fn_args) {
+                        let classes: Vec<Arc<ClassInfo>> = raw_type
+                            .extract_value_type(true)
+                            .map(|element_type| {
+                                crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                                    element_type,
+                                    owner_name,
+                                    ctx.all_classes,
+                                    ctx.class_loader,
+                                )
+                            })
+                            .unwrap_or_default();
+                        if let Some(ref mut hint_out) = return_type_hint_out {
+                            **hint_out = Some(raw_type);
+                        }
                         if !classes.is_empty() {
                             return classes;
                         }
@@ -772,14 +801,23 @@ impl Backend {
                         } else {
                             resolve_conditional_without_args(cond, &func_info.parameters)
                         };
-                        if let Some(ref parsed_ty) = resolved_type {
+                        if let Some(parsed_ty) = resolved_type {
                             let classes: Vec<Arc<ClassInfo>> =
                                 crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                    parsed_ty,
+                                    &parsed_ty,
                                     "",
                                     ctx.all_classes,
                                     ctx.class_loader,
                                 );
+                            // The collapsed conditional is the call's real
+                            // type; report it even when it names no class
+                            // (`list<string>`, an array shape), or callers
+                            // that need the type string rather than a
+                            // `ClassInfo` fall back to the declared
+                            // `array`/`mixed` below.
+                            if let Some(ref mut hint_out) = return_type_hint_out {
+                                **hint_out = Some(parsed_ty);
+                            }
                             if !classes.is_empty() {
                                 return classes;
                             }
@@ -818,6 +856,15 @@ impl Backend {
                                     ctx.all_classes,
                                     ctx.class_loader,
                                 );
+                            // Report the substituted type, not the raw
+                            // `@return T[]` the fallback below would
+                            // write: an unbound template param is
+                            // useless to a caller reading the hint.
+                            if substituted != *ret
+                                && let Some(ref mut hint_out) = return_type_hint_out
+                            {
+                                **hint_out = Some(substituted);
+                            }
                             if !classes.is_empty() {
                                 return classes;
                             }

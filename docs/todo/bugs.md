@@ -95,36 +95,3 @@ $job->class_name::dispatch();
 A `class-string<T>` subject should resolve to `T`; a plain `string`
 subject is unresolvable, which is a "cannot verify" at most, never a
 scalar-access error.
-
-#### B51. Array-function return types are lost when the call is not assigned to a variable
-
-**Impact: Medium · Effort: Medium**
-
-The element-type rules for the array-producing standard library
-functions (`iterator_to_array`, `array_map`, `array_filter`, …) live in
-the AST-driven pipeline, so they only fire when the call is the RHS of
-an assignment. Used inline as a subject or as another call's argument,
-the same call goes through the text-driven path in
-`call_resolution/return_types.rs` and falls back to the bare declared
-return type:
-
-```php
-/** @var iterable<array{DiscountType, ?CartLabel}> $it */
-$rows = iterator_to_array($it);
-$rows[0][0]->name;                  // resolves
-
-iterator_to_array($it)[0][0]->name; // type of '…' could not be resolved
-
-array_map(
-    static fn ($case) => $case[0]->name,   // $case is `mixed`
-    iterator_to_array($it),
-);
-```
-
-Two things are missing on the text path: the array-function rules
-themselves, and the plumbing that reports a resolved conditional or
-template-substituted return type through `return_type_hint_out` (today
-only the raw declared return type is written there, so callers that need
-the type string rather than a `ClassInfo` never see the refinement).
-Related to
-[T25](type-inference.md#t25-call-site-template-argument-inference-for-callable-parameters).

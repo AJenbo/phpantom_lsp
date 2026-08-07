@@ -1683,6 +1683,11 @@ class IteratorToArrayDemo
 
         $items = iterator_to_array($iter);
         $items[0]->write();                       // resolves Pen from iterator value type
+
+        // The element type survives without the intermediate variable,
+        // and through a nested array function call.
+        iterator_to_array($iter)[0]->write();     // Pen straight off the call
+        array_values(iterator_to_array($iter))[0]->write();
     }
 }
 
@@ -2128,6 +2133,10 @@ class ArrayFuncDemo
 
         $mapped = array_map(fn($pen) => $pen, $src->members);
         $mapped[0]->write();              // Pen from array_map fallback
+
+        // The same rules apply without an intermediate variable.
+        array_filter($src->members)[0]->write();
+        array_map(fn($pen): Pen => $pen, $src->members)[0]->write();
 
         // Untyped callback parameter inferred from a method-call array
         // argument: `$pen` resolves to Pen from roster()'s list<Pen>.
@@ -7354,6 +7363,18 @@ function runDemoAssertions(): void
 
     $product = array_product([2, 3, 4]);
     assert(is_int($product) || is_float($product), 'array_product must return int or float');
+
+    // Inline, without an intermediate variable — the same element type.
+    $penArray3 = [new Pen('x'), new Pen('y')];
+    assert(array_values($penArray3)[0] instanceof Pen, 'array_values must preserve Pen inline');
+    assert(array_map(fn(Pen $p): Pen => $p, $penArray3)[0] instanceof Pen,
+        'array_map must preserve Pen inline');
+
+    $penIterator = new \ArrayIterator([new Pen('i'), new Pen('j')]);
+    assert(iterator_to_array($penIterator)[0] instanceof Pen,
+        'iterator_to_array must preserve Pen inline');
+    assert(array_values(iterator_to_array($penIterator))[0] instanceof Pen,
+        'a nested array function call must preserve Pen');
 
     // ── Match expression types ──────────────────────────────────────────
     $matchResult = match (0) {

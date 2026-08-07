@@ -769,8 +769,26 @@ impl Backend {
             .or_else(|| {
                 let body =
                     crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
-                Self::resolve_closure_body_type(arg_text, body, ctx)
+                Self::resolve_closure_body_type(arg_text, body, None, ctx)
             })
+    }
+
+    /// Infer a closure/arrow-function argument's return type from its
+    /// body, with its first parameter seeded to `param_type`.
+    ///
+    /// The call site sometimes knows what the callback's first
+    /// parameter receives even though the callback leaves it untyped:
+    /// `array_map($cb, $users)` hands `$cb` a `User`.  Unlike
+    /// [`infer_closure_return_type`](Self::infer_closure_return_type)
+    /// this skips the `: ReturnType` annotation, which the caller has
+    /// already consulted.
+    pub(crate) fn infer_closure_return_type_from_body(
+        arg_text: &str,
+        param_type: &PhpType,
+        ctx: &ResolutionCtx<'_>,
+    ) -> Option<PhpType> {
+        let body = crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
+        Self::resolve_closure_body_type(arg_text, body, Some(param_type), ctx)
     }
 
     /// Resolve an unannotated closure's body expression to a type,
@@ -785,16 +803,27 @@ impl Backend {
     /// declared type hints and delegates everything else to the
     /// resolution the body would otherwise get (the outer scope
     /// resolver when present, assignment scanning otherwise).
+    ///
+    /// `first_param_seed` supplies the type of the first parameter when
+    /// the closure declares none and the call site knows what it
+    /// receives (see
+    /// [`infer_closure_return_type_from_body`](Self::infer_closure_return_type_from_body)).
     fn resolve_closure_body_type(
         closure_text: &str,
         body: &str,
+        first_param_seed: Option<&PhpType>,
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         let typed_params: Vec<(String, PhpType)> =
             crate::completion::source::helpers::extract_closure_params_from_text(closure_text)
                 .unwrap_or_default()
                 .into_iter()
-                .filter_map(|(name, ty)| ty.map(|t| (name, t)))
+                .enumerate()
+                .filter_map(|(index, (name, ty))| match ty {
+                    Some(t) => Some((name, t)),
+                    None if index == 0 => first_param_seed.map(|t| (name, t.clone())),
+                    None => None,
+                })
                 .collect();
         if typed_params.is_empty() {
             return Self::resolve_arg_text_to_type(body, ctx);
