@@ -828,32 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line" class="md-nav__link">
+  <a href="#b26-detect_string_call_context-still-walks-backwards-past-comments" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B22. <code>find_open_quote</code> is blind to comments on the cursor's own line
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b23-analyze-reports-no-laravel-string-key-errors-at-all" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B23. <code>analyze</code> reports no Laravel string-key errors at all
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b25-generated-phpdoc-types-are-written-as-fqns-even-when-the-file-imports-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B25. Generated PHPDoc types are written as FQNs even when the file imports them
+        B26. <code>detect_string_call_context</code> still walks backwards past comments
       </span>
     </span>
   </a>
@@ -1328,32 +1306,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line" class="md-nav__link">
+  <a href="#b26-detect_string_call_context-still-walks-backwards-past-comments" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B22. <code>find_open_quote</code> is blind to comments on the cursor's own line
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b23-analyze-reports-no-laravel-string-key-errors-at-all" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B23. <code>analyze</code> reports no Laravel string-key errors at all
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b25-generated-phpdoc-types-are-written-as-fqns-even-when-the-file-imports-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B25. Generated PHPDoc types are written as FQNs even when the file imports them
+        B26. <code>detect_string_call_context</code> still walks backwards past comments
       </span>
     </span>
   </a>
@@ -1390,74 +1346,31 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line">B22. <code>find_open_quote</code> is blind to comments on the cursor's own line<a class="headerlink" href="#b22-find_open_quote-is-blind-to-comments-on-the-cursors-own-line" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low</strong></p>
-<p><code>find_open_quote</code> in <code>src/completion/source/helpers.rs</code> finds the string
-literal the cursor sits in by scanning forward from the start of the
-cursor's line, tracking quotes but not comments. An apostrophe in a
-comment earlier on that line is read as an opening quote, which pairs up
-with the real opener and leaves the cursor looking like it is outside a
-string, so every completion gated on it drops out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">Artisan::call(&#39;app:sync&#39;, [ /* don&#39;t ( */ &#39;|&#39;]);</span>
+<h4 id="b26-detect_string_call_context-still-walks-backwards-past-comments">B26. <code>detect_string_call_context</code> still walks backwards past comments<a class="headerlink" href="#b26-detect_string_call_context-still-walks-backwards-past-comments" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><code>detect_string_call_context</code>
+(<code>src/completion/eloquent_string.rs</code>) now takes the literal the cursor is
+in and the code before it from the forward lexical scan, but it still
+recovers the <em>call</em> around that literal with backwards text scans that
+read comments as code. <code>find_matching_open_paren</code> balances brackets
+right-to-left, so a bracket in a comment unbalances it and the completion
+drops out; <code>count_top_level_commas</code> counts commas between the <code>(</code> and the
+literal without skipping comments, so it reports the wrong argument index
+and the completion offered is the one for another parameter:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">foo(&#39;a&#39; /* ) */, &#39;b|&#39;);   // no completion at all</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$q-&gt;where(&#39;a&#39; /* , */, &#39;b|&#39;);  // read as argument 2, not argument 1</span>
 </code></pre></div>
-<p>It fails closed. The line-scoped anchor is also why a literal opened on
-an earlier line is never seen (<code>$request-&gt;input(\n    'na|</code>).</p>
-<p><strong>Where to look:</strong> <code>code_context_at</code>
-(<code>src/completion/source/code_context.rs</code>) already runs the forward
-lexical scan that resolves this exactly — comments, heredocs, inline HTML
-and all. Having it report the literal it ends inside, instead of only
-<code>None</code>, would let <code>find_open_quote</code> be built on it and fix both gaps at
-once. Note that this widens the scan from the cursor's line to the whole
-file, so an unterminated literal <em>above</em> the cursor would then make the
-cursor read as in-string; check the callers in
-<code>virtual_members/laravel/request_fields.rs</code>,
-<code>completion/eloquent_string.rs</code>, <code>completion/command_params.rs</code>, and
-<code>completion/laravel_route_params.rs</code> for how they cope with that.</p>
-<h4 id="b23-analyze-reports-no-laravel-string-key-errors-at-all">B23. <code>analyze</code> reports no Laravel string-key errors at all<a class="headerlink" href="#b23-analyze-reports-no-laravel-string-key-errors-at-all" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>The <code>analyze</code> CLI no longer emits any of the Laravel string-key
-diagnostics (<code>invalid_laravel_route</code>, <code>invalid_laravel_config</code>,
-<code>invalid_laravel_view</code>, <code>invalid_laravel_trans</code>,
-<code>invalid_laravel_command</code>, <code>invalid_laravel_morph_alias</code>). The CI
-checklist in <code>docs/CONTRIBUTING.md</code> relies on one of them:
-<code>examples/laravel/app/Demo.php:428</code> calls
-<code>Artisan::call('does:not-exist')</code> so that
-<code>phpantom_lsp analyze --project-root examples/laravel --no-colour</code> must
-report exactly <code>[ERROR] Found 1 error</code>. It reports <code>[OK] No errors</code>.</p>
-<p><strong>Reproduce:</strong> run <code>composer install</code> in <code>examples/laravel</code>, then the
-analyze command above. Adding further bogus keys (a
-<code>config('totally.bogus.key')</code>, a second unknown command) to a copy of
-that project does not produce errors either, so the whole family is
-silent rather than one kind of key resolving too permissively. The LSP's
-own tests for these diagnostics pass, so the gap is in what the analyse
-pass feeds them.</p>
-<p><strong>Where to look:</strong> <code>collect_invalid_laravel_string_key_diagnostics</code>
-(<code>src/diagnostics/mod.rs</code>) returns early when <code>symbol_maps</code> holds no
-entry for the file, and every kind additionally skips when its
-enumeration comes back empty (the deliberate escape hatch for
-non-Laravel projects that also define <code>__()</code> or <code>trans()</code>). Either the
-analyse pass leaves those maps unpopulated for the files it walks, or the
-<code>is_laravel</code> gate at <code>src/diagnostics/mod.rs:361</code> reads false there.
-<code>src/analyse/run.rs</code> does call <code>init_single_project</code> with the parsed
-composer package and builds the command, macro, morph-map, and provider
-resource indexes under an <code>is_laravel()</code> check, so start by confirming
-which of the two gates closes.</p>
-<h4 id="b25-generated-phpdoc-types-are-written-as-fqns-even-when-the-file-imports-them">B25. Generated PHPDoc types are written as FQNs even when the file imports them<a class="headerlink" href="#b25-generated-phpdoc-types-are-written-as-fqns-even-when-the-file-imports-them" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low</strong></p>
-<p>The inline <code>@var</code> completion (and the <code>@param</code>/<code>@return</code> enrichment that
-shares <code>enrichment_plain_typed</code> in
-<code>src/completion/phpdoc/generation/build.rs</code>) formats the inferred type
-from the resolved <code>PhpType</code>, which always carries the fully qualified
-name. A file that already has <code>use App\Collection;</code> still gets</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var App\Collection&lt;TKey, TValue&gt; */</span>
-</code></pre></div>
-<p>instead of the shorter <code>Collection&lt;TKey, TValue&gt;</code> the developer would
-write. The result is correct, just noisier than it needs to be, and it
-does not match the class-name completion path, which does consult the
-<code>use</code> map.</p>
-<p><code>enrichment_plain_typed</code> takes only a class loader, so the fix is to
-thread the file's use map and namespace through to it and shorten each
-class-like name that resolves back to the same class.</p>
+<p>Both fail on the same input the forward scan already handles.</p>
+<p><strong>Where to look:</strong> <code>code_context_at</code> returns <code>open_brackets</code>, whose
+innermost <code>(</code> <em>is</em> the call's opening paren, from the same scan that
+already produces <code>code_before</code> here. Taking <code>paren_pos</code> from it removes
+<code>find_matching_open_paren</code> (and its <code>MAX_OPEN_PAREN_SCAN</code> bound)
+entirely. The argument index wants the same treatment: count the commas
+that the forward scan sees at the call's own bracket depth rather than
+re-lexing the span afterwards. <code>extract_identifier_backwards</code> and
+<code>extract_subject_backwards</code> read the callee and receiver before that
+paren and are comment-blind in the same way (<code>foo /* x */ ('|')</code>), though
+that shape is rarer.</p>
 
 
 
