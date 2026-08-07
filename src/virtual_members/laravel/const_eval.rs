@@ -13,11 +13,14 @@
 //! ```
 //!
 //! Everything here folds only what PHP would fold to the same value without
-//! running any code.  Anything else — a function call, an unbound variable,
-//! an object — is [`ConstValue::Unknown`], which yields no name at all
-//! rather than a partial one.
+//! running any code.  A call to one of a fixed list of pure string functions
+//! (`trim`, `str_replace`, `preg_replace`, …) folds when every argument is
+//! already known; anything else — an unbound variable, an object, a call
+//! outside the list — is [`ConstValue::Unknown`], which yields no name at
+//! all rather than a partial one.
 
 use mago_syntax::cst::*;
+use regex::Regex;
 
 use crate::atom::bytes_to_str;
 
@@ -171,8 +174,379 @@ fn const_value(expr: &Expression<'_>, content: &str, scope: &Scope) -> ConstValu
                 .map(|(_, value)| value)
                 .unwrap_or(ConstValue::Unknown)
         }
+        Expression::Call(Call::Function(call)) => const_function_call(call, content, scope),
         _ => ConstValue::Unknown,
     }
+}
+
+/// Fold a call to a fixed list of pure string functions whose result is
+/// fully determined by constant arguments, e.g. `preg_replace('#^/xmas/#',
+/// '', $slug)` normalizing a loop variable before it is used in a route
+/// name.
+///
+/// Only folds when every argument is a plain positional argument and every
+/// value it resolves to is already known; a named or spread argument, or an
+/// unknown value, leaves the whole call [`ConstValue::Unknown`] rather than
+/// risk folding the wrong position or inventing a partial result.
+fn const_function_call(call: &FunctionCall<'_>, content: &str, scope: &Scope) -> ConstValue {
+    let Expression::Identifier(identifier) = call.function else {
+        return ConstValue::Unknown;
+    };
+    let name = bytes_to_str(identifier.value())
+        .trim_start_matches('\\')
+        .to_ascii_lowercase();
+
+    if call
+        .argument_list
+        .arguments
+        .iter()
+        .any(|argument| !argument.is_positional() || argument.is_unpacked())
+    {
+        return ConstValue::Unknown;
+    }
+
+    let args: Vec<ConstValue> = call
+        .argument_list
+        .arguments
+        .iter()
+        .map(|argument| const_value(argument.value(), content, scope))
+        .collect();
+
+    match name.as_str() {
+        "trim" => fold_trim(&args, |text, chars| {
+            text.trim_matches(|c| chars.contains(&c)).to_string()
+        }),
+        "ltrim" => fold_trim(&args, |text, chars| {
+            text.trim_start_matches(|c| chars.contains(&c)).to_string()
+        }),
+        "rtrim" => fold_trim(&args, |text, chars| {
+            text.trim_end_matches(|c| chars.contains(&c)).to_string()
+        }),
+        "strtolower" => fold_case(&args, |c| c.to_ascii_lowercase()),
+        "strtoupper" => fold_case(&args, |c| c.to_ascii_uppercase()),
+        "ucfirst" => fold_ucfirst(&args),
+        "str_replace" => fold_str_replace(&args),
+        "preg_replace" => fold_preg_replace(&args),
+        "implode" => fold_implode(&args),
+        "sprintf" => fold_sprintf(&args),
+        _ => ConstValue::Unknown,
+    }
+}
+
+/// The characters `trim`/`ltrim`/`rtrim` strip without an explicit charlist:
+/// space, tab, newline, carriage return, NUL, and vertical tab.
+const DEFAULT_TRIM_CHARS: [char; 6] = [' ', '\t', '\n', '\r', '\0', '\u{0B}'];
+
+fn fold_trim(args: &[ConstValue], trim: impl Fn(&str, &[char]) -> String) -> ConstValue {
+    let (subject, charlist) = match args {
+        [subject] => (subject, None),
+        [subject, charlist] => (subject, Some(charlist)),
+        _ => return ConstValue::Unknown,
+    };
+    let Some(subject) = subject.scalar() else {
+        return ConstValue::Unknown;
+    };
+    let chars: Vec<char> = match charlist {
+        None => DEFAULT_TRIM_CHARS.to_vec(),
+        Some(charlist) => {
+            let Some(charlist) = charlist.scalar() else {
+                return ConstValue::Unknown;
+            };
+            // `"a..z"` is a character range, not a two-character set; folding
+            // it as a literal set would strip the wrong characters.
+            if charlist.contains("..") {
+                return ConstValue::Unknown;
+            }
+            charlist.chars().collect()
+        }
+    };
+    ConstValue::Scalar(trim(subject, &chars))
+}
+
+/// Fold `strtolower`/`strtoupper`, which PHP defines as ASCII-only: bytes
+/// outside `A-Z`/`a-z` (including multibyte UTF-8 sequences) pass through
+/// unchanged.
+fn fold_case(args: &[ConstValue], map: impl Fn(char) -> char) -> ConstValue {
+    let [subject] = args else {
+        return ConstValue::Unknown;
+    };
+    let Some(text) = subject.scalar() else {
+        return ConstValue::Unknown;
+    };
+    ConstValue::Scalar(
+        text.chars()
+            .map(|c| if c.is_ascii() { map(c) } else { c })
+            .collect(),
+    )
+}
+
+fn fold_ucfirst(args: &[ConstValue]) -> ConstValue {
+    let [subject] = args else {
+        return ConstValue::Unknown;
+    };
+    let Some(text) = subject.scalar() else {
+        return ConstValue::Unknown;
+    };
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => {
+            let first = if first.is_ascii() {
+                first.to_ascii_uppercase()
+            } else {
+                first
+            };
+            ConstValue::Scalar(format!("{first}{}", chars.as_str()))
+        }
+        None => ConstValue::Scalar(String::new()),
+    }
+}
+
+/// The scalars a `str_replace`/`implode` argument reduces to: one for a
+/// scalar value, one per element for a literal array, or `None` the moment
+/// any element is not itself a known scalar.
+fn scalar_list(value: &ConstValue) -> Option<Vec<&str>> {
+    match value {
+        ConstValue::Scalar(value) => Some(vec![value.as_str()]),
+        ConstValue::Array(entries) => entries.iter().map(|(_, value)| value.scalar()).collect(),
+        ConstValue::Unknown => None,
+    }
+}
+
+/// Fold `str_replace($search, $replace, $subject)`.  `$search`/`$replace`
+/// may each be a scalar or a literal array; PHP pairs array entries
+/// positionally (padding a short `$replace` with `""`), applies each pair in
+/// order — so a later search can act on an earlier replacement's output —
+/// and, when `$replace` is a scalar but `$search` an array, broadcasts the
+/// one replacement to every search term. The 4-argument form (`&$count`) is
+/// not folded, since a call site passing it wants the by-reference count.
+fn fold_str_replace(args: &[ConstValue]) -> ConstValue {
+    let [search, replace, subject] = args else {
+        return ConstValue::Unknown;
+    };
+    let Some(subject) = subject.scalar() else {
+        return ConstValue::Unknown;
+    };
+    // A scalar `$search` paired with an array `$replace` has no PHP meaning
+    // that reduces to a single replacement text.
+    if matches!(search, ConstValue::Scalar(_)) && matches!(replace, ConstValue::Array(_)) {
+        return ConstValue::Unknown;
+    }
+    let Some(searches) = scalar_list(search) else {
+        return ConstValue::Unknown;
+    };
+    let mut replacements = if matches!(replace, ConstValue::Scalar(_)) {
+        let Some(replacement) = scalar_list(replace) else {
+            return ConstValue::Unknown;
+        };
+        vec![replacement[0]; searches.len()]
+    } else {
+        let Some(replacements) = scalar_list(replace) else {
+            return ConstValue::Unknown;
+        };
+        replacements
+    };
+    while replacements.len() < searches.len() {
+        replacements.push("");
+    }
+
+    let mut result = subject.to_string();
+    for (needle, replacement) in searches.iter().zip(replacements.iter()) {
+        // PHP leaves the subject untouched for an empty search term rather
+        // than inserting the replacement at every position.
+        if !needle.is_empty() {
+            result = result.replace(needle, replacement);
+        }
+    }
+    ConstValue::Scalar(result)
+}
+
+/// Fold `implode()`, accepting both `implode($array)` and either argument
+/// order of `implode($glue, $array)` (PHP allows both, though the reversed
+/// form is deprecated).
+fn fold_implode(args: &[ConstValue]) -> ConstValue {
+    let (glue, pieces) = match args {
+        [ConstValue::Array(pieces)] => ("", pieces),
+        [glue, ConstValue::Array(pieces)] => {
+            let Some(glue) = glue.scalar() else {
+                return ConstValue::Unknown;
+            };
+            (glue, pieces)
+        }
+        [ConstValue::Array(pieces), glue] => {
+            let Some(glue) = glue.scalar() else {
+                return ConstValue::Unknown;
+            };
+            (glue, pieces)
+        }
+        _ => return ConstValue::Unknown,
+    };
+
+    let mut joined = String::new();
+    for (index, (_, value)) in pieces.iter().enumerate() {
+        let Some(value) = value.scalar() else {
+            return ConstValue::Unknown;
+        };
+        if index > 0 {
+            joined.push_str(glue);
+        }
+        joined.push_str(value);
+    }
+    ConstValue::Scalar(joined)
+}
+
+/// Fold `preg_replace($pattern, $replacement, $subject)`.  Only the 3-argument,
+/// all-scalar form folds: an array `$pattern`/`$subject`, or a `$limit`
+/// argument, is left unknown rather than approximated.
+///
+/// A `$` or `\` in `$replacement` could be a PHP backreference (`$1`, `\1`),
+/// whose syntax differs from the `regex` crate's own replacement syntax, so
+/// that case is left unknown rather than substituted literally.
+fn fold_preg_replace(args: &[ConstValue]) -> ConstValue {
+    let [pattern, replacement, subject] = args else {
+        return ConstValue::Unknown;
+    };
+    let Some(pattern) = pattern.scalar() else {
+        return ConstValue::Unknown;
+    };
+    let Some(replacement) = replacement.scalar() else {
+        return ConstValue::Unknown;
+    };
+    let Some(subject) = subject.scalar() else {
+        return ConstValue::Unknown;
+    };
+    if replacement.contains(['$', '\\']) {
+        return ConstValue::Unknown;
+    }
+    let Some(regex) = compile_pcre_pattern(pattern) else {
+        return ConstValue::Unknown;
+    };
+    ConstValue::Scalar(regex.replace_all(subject, replacement).into_owned())
+}
+
+/// Compile a PHP-delimited pattern (e.g. `#^/xmas/#i`) with the `regex`
+/// crate, or return `None` when the delimiter, a modifier, or the pattern
+/// syntax itself is something the two engines might not agree on.
+///
+/// Only self-closing delimiters are supported (the common case: `/`, `#`,
+/// `~`, …); a bracket delimiter (`(`, `{`, `[`, `<`) pairs with a different
+/// closing character and can nest, which is not worth the complexity here.
+fn compile_pcre_pattern(pattern: &str) -> Option<Regex> {
+    let mut chars = pattern.chars();
+    let delimiter = chars.next()?;
+    if delimiter.is_alphanumeric()
+        || delimiter == '\\'
+        || delimiter.is_whitespace()
+        || "([{<".contains(delimiter)
+    {
+        return None;
+    }
+    let rest = chars.as_str();
+    let close = rest.rfind(delimiter)?;
+    let body = &rest[..close];
+    let modifiers = &rest[close + delimiter.len_utf8()..];
+
+    let mut flags = String::new();
+    for modifier in modifiers.chars() {
+        match modifier {
+            'i' | 'm' | 's' => flags.push(modifier),
+            // PCRE's UTF-8 mode; the `regex` crate is Unicode-aware by
+            // default, so there is nothing to translate.
+            'u' => {}
+            _ => return None,
+        }
+    }
+
+    let full_pattern = if flags.is_empty() {
+        body.to_string()
+    } else {
+        format!("(?{flags}){body}")
+    };
+    Regex::new(&full_pattern).ok()
+}
+
+/// Fold the `sprintf` specifiers this evaluator understands: `%%`, `%s`, and
+/// `%d`, with the `-` (left-justify) and `0` (zero-pad) flags and a width.
+/// Anything else — precision, a custom pad character, positional (`%1$s`)
+/// arguments, other specifiers — is left unknown rather than guessed at.
+fn fold_sprintf(args: &[ConstValue]) -> ConstValue {
+    let [format, values @ ..] = args else {
+        return ConstValue::Unknown;
+    };
+    let Some(format) = format.scalar() else {
+        return ConstValue::Unknown;
+    };
+
+    let mut result = String::new();
+    let mut chars = format.chars().peekable();
+    let mut values = values.iter();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            result.push(c);
+            continue;
+        }
+        if chars.peek() == Some(&'%') {
+            chars.next();
+            result.push('%');
+            continue;
+        }
+
+        let mut left_justify = false;
+        let mut zero_pad = false;
+        while let Some(&flag) = chars.peek() {
+            match flag {
+                '-' => left_justify = true,
+                '0' => zero_pad = true,
+                _ => break,
+            }
+            chars.next();
+        }
+
+        let mut width_digits = String::new();
+        while let Some(&digit) = chars.peek() {
+            if !digit.is_ascii_digit() {
+                break;
+            }
+            width_digits.push(digit);
+            chars.next();
+        }
+        let width: usize = width_digits.parse().unwrap_or(0);
+
+        let Some(specifier) = chars.next() else {
+            return ConstValue::Unknown;
+        };
+        let Some(value) = values.next().and_then(ConstValue::scalar) else {
+            return ConstValue::Unknown;
+        };
+        let formatted = match specifier {
+            's' => value.to_string(),
+            'd' => match value.parse::<i64>() {
+                Ok(number) => number.to_string(),
+                Err(_) => return ConstValue::Unknown,
+            },
+            _ => return ConstValue::Unknown,
+        };
+
+        if formatted.len() >= width {
+            result.push_str(&formatted);
+            continue;
+        }
+        let pad_count = width - formatted.len();
+        if left_justify {
+            result.push_str(&formatted);
+            result.extend(std::iter::repeat_n(' ', pad_count));
+        } else if zero_pad {
+            // The sign, if any, stays ahead of the padding zeros rather than
+            // being pushed to the front of the whole field.
+            let (sign, digits) = formatted.split_at(if formatted.starts_with('-') { 1 } else { 0 });
+            result.push_str(sign);
+            result.extend(std::iter::repeat_n('0', pad_count));
+            result.push_str(digits);
+        } else {
+            result.extend(std::iter::repeat_n(' ', pad_count));
+            result.push_str(&formatted);
+        }
+    }
+    ConstValue::Scalar(result)
 }
 
 /// Fold a literal array, numbering the elements that were written without a

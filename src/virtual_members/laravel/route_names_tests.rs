@@ -555,6 +555,86 @@ fn an_unevaluable_element_contributes_no_name() {
     assert_eq!(names, vec!["shop.gifts"]);
 }
 
+/// A loop that normalizes its element with a pure string function before
+/// naming the route still yields a known name, rather than leaving every
+/// name built from `$slug` unknown.
+#[test]
+fn preg_replace_normalizes_a_loop_variable_before_naming_the_route() {
+    let content = "<?php
+foreach (['/xmas/gift-sets', '/xmas/decorations'] as $subcategory) {
+    $slug = preg_replace('#^/xmas/#', '', $subcategory);
+
+    Route::get('/xmas/' . $slug, 'page')
+        ->name('events.xmas.' . $slug);
+}
+";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(
+        names,
+        vec!["events.xmas.gift-sets", "events.xmas.decorations"]
+    );
+    assert_eq!(uri_of(content, "events.xmas.gift-sets"), "xmas/gift-sets");
+}
+
+/// A pattern using a bracket delimiter, or a replacement containing a
+/// backreference, is not folded: the two are not worth the complexity of
+/// nested delimiter matching and PHP-to-`regex`-crate backreference
+/// translation, so the name they would produce stays unknown.
+#[test]
+fn an_unsupported_preg_replace_form_leaves_the_name_unknown() {
+    let bracket_delimiter =
+        "<?php\n$slug = preg_replace('(a)', 'b', 'a');\nRoute::get('/x', 'x')->name($slug);\n";
+    assert!(routes_of(bracket_delimiter).is_empty());
+
+    let backreference = r"<?php
+$slug = preg_replace('/(a)/', '\1\1', 'a');
+Route::get('/x', 'x')->name($slug);
+";
+    assert!(routes_of(backreference).is_empty());
+}
+
+/// `str_replace` folds with both scalar and array search/replace arguments,
+/// pairing array entries positionally and padding a short `$replace` with
+/// `""` exactly as PHP does.
+#[test]
+fn str_replace_folds_into_a_route_name() {
+    let content = "<?php\n$slug = str_replace(['_', ' '], '-', 'blog_posts recent');\nRoute::get('/x', 'x')->name($slug);\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["blog-posts-recent"]);
+}
+
+/// `trim`/`ltrim`/`rtrim`, `strtolower`/`strtoupper`, and `ucfirst` all fold,
+/// composing through concatenation the same way a plain string builder does.
+#[test]
+fn trim_and_case_functions_fold_into_a_route_name() {
+    let content = "<?php
+$name = ucfirst(strtolower(trim(' Blog ')));
+Route::get('/x', 'x')->name($name . '.' . ltrim('//posts', '/') . '.' . rtrim('index//', '/'));
+";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["Blog.posts.index"]);
+}
+
+/// `implode` folds a literal array of scalars, and `sprintf` folds its `%s`
+/// and zero-padded `%d` specifiers.
+#[test]
+fn implode_and_sprintf_fold_into_a_route_name() {
+    let content = "<?php
+$name = implode('.', ['shop', 'section']) . '.' . sprintf('%s-%03d', 'item', 7);
+Route::get('/x', 'x')->name($name);
+";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["shop.section.item-007"]);
+}
+
+/// A call to a function outside the fixed list contributes nothing, rather
+/// than being mistaken for one of the folded ones.
+#[test]
+fn a_call_to_an_unlisted_function_leaves_the_name_unknown() {
+    let content = "<?php\n$slug = strrev('x');\nRoute::get('/x', 'x')->name($slug);\n";
+    assert!(routes_of(content).is_empty());
+}
+
 /// A loop over something that is not a literal array still walks its body
 /// once, and the interpolated name stays unknown rather than being guessed.
 #[test]
