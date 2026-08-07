@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b43-appmake-appmakewith-with-a-class-string-do-not-resolve" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B43. <code>App::make()</code> / <code>App::makeWith()</code> with a class-string do not resolve
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b44-string-container-bindings-do-not-resolve" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1350,17 +1339,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b43-appmake-appmakewith-with-a-class-string-do-not-resolve" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B43. <code>App::make()</code> / <code>App::makeWith()</code> with a class-string do not resolve
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b44-string-container-bindings-do-not-resolve" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1434,24 +1412,12 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b43-appmake-appmakewith-with-a-class-string-do-not-resolve">B43. <code>App::make()</code> / <code>App::makeWith()</code> with a class-string do not resolve<a class="headerlink" href="#b43-appmake-appmakewith-with-a-class-string-do-not-resolve" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Effort: Low</strong></p>
-<p>The <code>app()</code> helper resolves a class-string argument to that class; the
-<code>App</code> facade does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">app(CurrencyHelper::class)-&gt;noSuchMethod();          // resolves ✓</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">app()-&gt;make(CurrencyHelper::class)-&gt;noSuchMethod();  // resolves ✓</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">App::make(CurrencyHelper::class)-&gt;noSuchMethod();    // could not be resolved ✗</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">App::makeWith(CurrencyHelper::class, [])-&gt;…          // could not be resolved ✗</span>
-</code></pre></div>
-<p>8 diagnostics in one sample project. Whatever gives the helper its
-class-string return needs to apply to the facade's <code>make</code>, <code>makeWith</code>
-and <code>resolve</code> too.</p>
 <h4 id="b44-string-container-bindings-do-not-resolve">B44. String container bindings do not resolve<a class="headerlink" href="#b44-string-container-bindings-do-not-resolve" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p><code>app()-&gt;make('sentry')</code> resolves to nothing, because nothing indexes the
 string keys that service providers bind:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// Sentry\Laravel\ServiceProvider</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;sentry&#39;, fn () =&gt; new HubAdapter());</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// Sentry\Laravel\ServiceProvider</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;sentry&#39;, fn () =&gt; new HubAdapter());</span>
 </code></pre></div>
 <p>Provider scanning already walks <code>register()</code> for config and route
 resources, so the <code>bind()</code> / <code>singleton()</code> / <code>instance()</code> calls with a
@@ -1461,8 +1427,8 @@ string abstract and a resolvable concrete are within reach.</p>
 <p>A project pinned to PHP 8.4 (<code>"require": {"php": "^8.4"}</code>,
 <code>"config": {"platform": {"php": "8.4"}}</code>) is reported for a deprecation
 introduced in 8.5:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&#39;Pdo\PDO::sqliteCreateFunction&#39; is deprecated: use Pdo\Sqlite::createFunction
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>instead (since PHP 8.5)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&#39;Pdo\PDO::sqliteCreateFunction&#39; is deprecated: use Pdo\Sqlite::createFunction
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>instead (since PHP 8.5)
 </code></pre></div>
 <p>6 diagnostics in one sample project. The stub already carries the
 version the deprecation landed in; it should be compared against the
@@ -1475,11 +1441,11 @@ the target predates it.</p>
 return type (or the type of the named column). PHPantom keeps the
 original <code>int</code> key from the Eloquent collection, so every subsequent
 <code>get()</code> with the new key is reported:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$byMarket = ProductPrice::query()-&gt;get()</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$byMarket-&gt;get($translation-&gt;lang_code-&gt;value);</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">// Argument 1 ($key) expects int|null, got string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$byMarket = ProductPrice::query()-&gt;get()</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$byMarket-&gt;get($translation-&gt;lang_code-&gt;value);</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">// Argument 1 ($key) expects int|null, got string</span>
 </code></pre></div>
 <p>3 diagnostics across two sample projects (one of them through a Blade
 view that receives the collection).</p>
@@ -1487,8 +1453,8 @@ view that receives the collection).</p>
 <p><strong>Impact: Medium · Effort: Low</strong></p>
 <p><code>$string::method()</code> is valid PHP — the string is the class name — but it
 is reported as a member access on a scalar:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$job-&gt;class_name::dispatch();</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">// Cannot access method &#39;dispatch&#39; on type &#39;string&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$job-&gt;class_name::dispatch();</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">// Cannot access method &#39;dispatch&#39; on type &#39;string&#39;</span>
 </code></pre></div>
 <p>A <code>class-string&lt;T&gt;</code> subject should resolve to <code>T</code>; a plain <code>string</code>
 subject is unresolvable, which is a "cannot verify" at most, never a
