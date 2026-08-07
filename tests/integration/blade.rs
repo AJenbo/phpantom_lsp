@@ -502,4 +502,38 @@ mod tests {
             _ => String::new(),
         }
     }
+
+    /// A `@var` block at the top of a template stays in scope for the
+    /// whole raw `<?php` region, even when a line comment separates it
+    /// from the first statement and the use site sits in a later sibling
+    /// `if` block.
+    #[tokio::test]
+    async fn test_var_docblock_survives_line_comment_and_sibling_blocks() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///ShowViewModel.php").unwrap();
+        let php_text = "<?php\nclass ShowViewModel {\n    public ?string $rawImageUrl = null;\n    public int $ratingCount = 0;\n    public float $ratingScore = 0.0;\n}\n";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri,
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let uri = Url::parse("file:///show.blade.php").unwrap();
+        let body = "@php\n    /**\n     * @var ShowViewModel $model\n     */\n@endphp\n<?php\n// short\n$schema = [];\n\nif ($model->rawImageUrl !== null) {\n    $schema['image'] = $model->rawImageUrl;\n}\n\nif ($model->ratingCount > 0) {\n    $schema['aggregateRating'] = [\n        'ratingValue' => $model->ratingScore,\n    ];\n}\n?>\n";
+        open_blade(&backend, &uri, body).await;
+
+        // `'ratingValue' => $model->ratingScore,` — the deepest use site.
+        let hover = hover_text(&backend, &uri, 15, 26).await;
+        assert!(
+            hover.contains("ShowViewModel"),
+            "$model must still be typed inside the nested array literal, got: {}",
+            hover
+        );
+    }
 }

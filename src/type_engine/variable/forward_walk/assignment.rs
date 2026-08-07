@@ -20,6 +20,14 @@ pub(crate) fn process_statement<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // An expression statement runs its own `@var` handling, which has
+    // extra rules (the LHS is left alone while the cursor sits in the
+    // RHS, a scalar RHS blocks a class override).  Every other statement
+    // kind only ever sees standalone annotations.
+    if !matches!(stmt, Statement::Expression(_)) {
+        apply_standalone_var_docblocks(stmt.span().start.offset, scope, ctx);
+    }
+
     match stmt {
         Statement::Expression(expr_stmt) => {
             process_expression_statement(expr_stmt, scope, ctx);
@@ -753,7 +761,7 @@ pub(crate) fn try_process_inline_var_override<'b>(
 
     // Look for `/** @var Type $varName */` before this expression.
     let before = &ctx.content[..offset.min(ctx.content.len())];
-    let trimmed = before.trim_end();
+    let trimmed = trim_trailing_line_comments(before);
 
     // Quick check: does it end with `*/`?
     if !trimmed.ends_with("*/") {
@@ -915,7 +923,7 @@ pub(crate) fn apply_preceding_var_docblocks(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let mut remaining = before.trim_end();
+    let mut remaining = trim_trailing_line_comments(before);
     // Keep scanning as long as the preceding text ends with a docblock.
     while remaining.ends_with("*/") {
         let doc_end = remaining.len();
@@ -933,8 +941,77 @@ pub(crate) fn apply_preceding_var_docblocks(
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
             scope.set(var_name, resolved);
         }
-        remaining = remaining[..doc_start].trim_end();
+        remaining = trim_trailing_line_comments(&remaining[..doc_start]);
     }
+}
+
+/// Trim trailing whitespace and whole-line `//` / `#` comments from
+/// `before`, so that a `/** @var Type $var */` block separated from the
+/// code it annotates by ordinary comment lines is still discovered.
+///
+/// Only comments that occupy a whole line are removed: a `//` following
+/// code on the same line may well sit inside a string literal
+/// (`$url = 'https://…';`), and `#[` opens an attribute rather than a
+/// comment.
+///
+/// This runs once per statement the forward walker visits, so the search
+/// for the start of the trailing line is capped at
+/// [`MAX_COMMENT_LINE_LOOKBACK`] bytes.  Beyond that the line is far too
+/// long to be a comment worth stepping over, and an unbounded scan would
+/// be quadratic on a file written as one very long line.
+pub(crate) fn trim_trailing_line_comments(before: &str) -> &str {
+    let mut head = before.trim_end();
+    loop {
+        // A docblock ends the search: the caller wants exactly this.
+        if head.ends_with("*/") {
+            return head;
+        }
+        let line_start = match head
+            .as_bytes()
+            .iter()
+            .rev()
+            .take(MAX_COMMENT_LINE_LOOKBACK)
+            .position(|&b| b == b'\n')
+        {
+            // `position` counts back from the end, so the byte after the
+            // newline sits at `len - offset`.  That is a char boundary.
+            Some(offset) => head.len() - offset,
+            None if head.len() <= MAX_COMMENT_LINE_LOOKBACK => 0,
+            None => return head,
+        };
+        let line = head[line_start..].trim_start();
+        if line.starts_with("//") || (line.starts_with('#') && !line.starts_with("#[")) {
+            head = head[..line_start].trim_end();
+        } else {
+            return head;
+        }
+    }
+}
+
+/// How far back [`trim_trailing_line_comments`] looks for the start of
+/// the line it is inspecting.
+const MAX_COMMENT_LINE_LOOKBACK: usize = 512;
+
+/// Apply `/** @var Type $var */` docblocks that precede a statement
+/// without being attached to an assignment.
+///
+/// [`try_process_inline_var_override`] covers the assignment case
+/// (`/** @var Foo $x */ $x = …`); this covers annotations that stand on
+/// their own, such as the `@var` block a Blade template opens with or a
+/// docblock written above an `if`.  Without it the variable never enters
+/// the walker's scope and every use of it falls back to a backward text
+/// scan, which cannot tell a preceding sibling block from a preceding
+/// sibling function body.
+pub(crate) fn apply_standalone_var_docblocks(
+    stmt_offset: u32,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let offset = (stmt_offset as usize).min(ctx.content.len());
+    if offset == 0 {
+        return;
+    }
+    apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx);
 }
 
 /// Resolve a [`PhpType`] to a complete `Vec<ResolvedType>` with
@@ -2728,6 +2805,36 @@ pub(crate) fn resolved_types_differ(a: &[ResolvedType], b: &[ResolvedType]) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trailing_line_comments_are_stepped_over_to_reach_a_docblock() {
+        // Whole-line `//` and `#` comments separate the block from the
+        // code but do not detach it.
+        assert!(trim_trailing_line_comments("/** @var Foo $x */\n// short\n").ends_with("*/"));
+        assert!(trim_trailing_line_comments("/** @var Foo $x */\n\n# short\n\n").ends_with("*/"));
+        assert!(trim_trailing_line_comments("/** @var Foo $x */\n// a\n  // b\n").ends_with("*/"));
+
+        // A `//` after code on the same line may be inside a string.
+        assert_eq!(
+            trim_trailing_line_comments("/** @var Foo $x */\n$url = 'https://example.test';"),
+            "/** @var Foo $x */\n$url = 'https://example.test';"
+        );
+
+        // `#[` opens an attribute, not a comment.
+        assert_eq!(
+            trim_trailing_line_comments("/** @var Foo $x */\n#[Attr]"),
+            "/** @var Foo $x */\n#[Attr]"
+        );
+
+        // A comment line longer than the look-back window is left alone
+        // rather than triggering an unbounded backward scan.
+        let long = format!("/** @var Foo $x */\n// {}\n", "x".repeat(600));
+        assert!(!trim_trailing_line_comments(&long).ends_with("*/"));
+
+        // Nothing but comments: the scan bottoms out at an empty string.
+        assert_eq!(trim_trailing_line_comments("// only\n"), "");
+        assert_eq!(trim_trailing_line_comments(""), "");
+    }
 
     #[test]
     fn increment_decrement_preserves_only_values_that_cannot_change() {

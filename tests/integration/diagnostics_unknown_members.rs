@@ -12171,3 +12171,68 @@ async fn union_of_same_short_name_classes_still_flags_missing_members() {
         diags
     );
 }
+
+/// A standalone `/** @var … */` block declares the variable for the rest
+/// of the enclosing body.  A whole-line `//` comment between the block
+/// and the first statement must not detach it, and a preceding sibling
+/// `if` block must not hide it from a later use site.
+///
+/// Before the forward walker applied standalone `@var` blocks, `$model`
+/// only resolved through a backward text scan whose brace bookkeeping
+/// mistook the closing `}` of an earlier `if` for the end of a sibling
+/// function body, dropping the annotation from that point on.
+#[tokio::test]
+async fn standalone_var_docblock_survives_line_comment_and_sibling_blocks() {
+    let backend = create_test_backend();
+    let text = concat!(
+        "<?php\n",
+        "class Model {\n",
+        "    public ?string $rawImageUrl = null;\n",
+        "    public int $ratingCount = 0;\n",
+        "    public float $ratingScore = 0.0;\n",
+        "}\n",
+        "function render() {\n",
+        "    /**\n",
+        "     * @var Model $model\n",
+        "     */\n",
+        "\n",
+        "// short\n",
+        "$schema = [];\n",
+        "\n",
+        "if ($model->rawImageUrl !== null) {\n",
+        "    $schema['image'] = $model->nope;\n",
+        "}\n",
+        "\n",
+        "if ($model->ratingCount > 0) {\n",
+        "    $schema['aggregateRating'] = [\n",
+        "        'ratingValue' => $model->alsoNope,\n",
+        "    ];\n",
+        "}\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        "file:///test/standalone_var_docblock.php",
+        text,
+    );
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+
+    // Both bogus members are flagged as *missing from Model*, which is
+    // only possible when `$model` resolved to `Model` at both sites.
+    assert!(
+        messages.iter().any(|m| m.contains("nope")),
+        "expected 'nope' to be flagged on Model, got: {:?}",
+        messages
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("alsoNope")),
+        "expected 'alsoNope' to be flagged on Model, got: {:?}",
+        messages
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("could not be resolved")),
+        "$model must resolve at every use site, got: {:?}",
+        messages
+    );
+}
