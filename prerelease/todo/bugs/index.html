@@ -981,17 +981,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b54-a-line-comment-plus-an-array-key-assignment-loses-scope-in-a-blade-php-block" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B54. A line comment plus an array-key assignment loses scope in a Blade <code>&lt;?php</code> block
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1613,17 +1602,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b54-a-line-comment-plus-an-array-key-assignment-loses-scope-in-a-blade-php-block" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B54. A line comment plus an array-key assignment loses scope in a Blade <code>&lt;?php</code> block
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1844,38 +1822,6 @@ callers annotate:</p>
 <a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">}</span>
 </code></pre></div>
 <p>Same treatment for <code>partialMock()</code>, <code>spy()</code> and <code>instance()</code>.</p>
-<h4 id="b54-a-line-comment-plus-an-array-key-assignment-loses-scope-in-a-blade-php-block">B54. A line comment plus an array-key assignment loses scope in a Blade <code>&lt;?php</code> block<a class="headerlink" href="#b54-a-line-comment-plus-an-array-key-assignment-loses-scope-in-a-blade-php-block" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
-<p>Two ingredients that are individually harmless combine to drop a
-<code>@var</code>-declared variable from scope for the rest of the block: a <code>//</code>
-(or <code>#</code>) line comment inside the raw PHP region, and an array-key
-assignment before the failing statement. Minimal reproduction:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>@php
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    /**
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>     * @var App\ViewModels\ShowViewModel $model
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>     */
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>@endphp
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>&lt;?php
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>// short
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>$schema = [];
-<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
-<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>if ($model-&gt;rawImageUrl !== null) {
-<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>    $schema[&#39;image&#39;] = $model-&gt;rawImageUrl;
-<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>}
-<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>
-<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>if ($model-&gt;ratingCount &gt; 0) {
-<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>    $schema[&#39;aggregateRating&#39;] = [
-<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>        &#39;ratingValue&#39; =&gt; $model-&gt;ratingScore,   // type of &#39;$model&#39; could not be resolved
-<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>    ];
-<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a>}
-<a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a>?&gt;
-</code></pre></div>
-<p><code>$model-&gt;rawImageUrl</code> and <code>$model-&gt;ratingCount</code> resolve; <code>$model</code> inside
-the nested array literal does not. Remove either the comment or the
-<code>$schema['image']</code> assignment and it resolves. A <code>/* … */</code> block comment
-in place of the line comment also resolves, which points at offset
-mapping between the Blade source and the preprocessed PHP rather than at
-the walker itself.</p>
 
 
 
