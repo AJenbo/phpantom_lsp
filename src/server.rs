@@ -2504,17 +2504,16 @@ impl Backend {
             let Some(content) = self.get_file_content(&uri) else {
                 continue;
             };
-            let file_dir = tower_lsp::lsp_types::Url::parse(&uri)
+            let file_path = tower_lsp::lsp_types::Url::parse(&uri)
                 .ok()
-                .and_then(|u| u.to_file_path().ok())
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-            let Some(file_dir) = file_dir else {
+                .and_then(|u| u.to_file_path().ok());
+            let Some(file_path) = file_path else {
                 continue;
             };
 
             resources.merge(crate::virtual_members::laravel::extract_provider_resources(
                 &content,
-                &file_dir,
+                &file_path,
                 &workspace_root,
             ));
         }

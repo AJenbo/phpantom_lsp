@@ -4,7 +4,7 @@ use super::*;
 /// per file (without the workspace walk).
 fn routes_of(content: &str) -> Vec<RouteEntry> {
     let mut out = Vec::new();
-    collect_all_names_from_file(content, None, &mut out);
+    collect_all_names_from_file(content, None, None, &mut out);
     out
 }
 
@@ -440,4 +440,38 @@ fn a_group_sharing_the_resource_chain_still_registers_its_routes() {
     assert!(names.contains(&"dashboard".to_string()), "{names:?}");
     assert!(names.contains(&"photos.show".to_string()), "{names:?}");
     assert_eq!(uri_of(content, "dashboard"), "admin/dashboard");
+}
+
+/// Route files guard registrations behind configuration (`if ($domain)`) and
+/// register variants from loops.  Skipping those bodies loses every route
+/// they declare, so each `route()` call naming one reads as unknown.
+#[test]
+fn registrations_inside_control_flow_are_collected() {
+    let content = "<?php\nif ($fqdn) {\n    Route::domain($fqdn)->group(function () {\n        Route::middleware('kiosk')->name('kiosk.')->group(function () {\n            Route::get('/register', 'register')->name('register');\n        });\n    });\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["kiosk.register".to_string()]);
+}
+
+#[test]
+fn registrations_inside_a_foreach_body_are_collected() {
+    let content = "<?php\nforeach ($locales as $locale) {\n    Route::get('/about', 'about')->name('about');\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["about".to_string()]);
+}
+
+#[test]
+fn registrations_inside_a_try_block_are_collected() {
+    let content = "<?php\ntry {\n    Route::get('/health', 'health')->name('health');\n} catch (Throwable $e) {\n    Route::get('/down', 'down')->name('down');\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["health".to_string(), "down".to_string()]);
+}
+
+/// A `RouteServiceProvider` registers routes from a method body rather than
+/// at the top level of a route file, so the provider is itself a route
+/// source and its methods must be walked.
+#[test]
+fn registrations_inside_a_provider_method_are_collected() {
+    let content = "<?php\nfinal class RouteServiceProvider extends ServiceProvider {\n    public function map(): void {\n        Route::middleware('web')->name('admin.')->group(function () {\n            Route::get('/dashboard', 'index')->name('dashboard');\n        });\n    }\n}\n";
+    let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    assert_eq!(names, vec!["admin.dashboard".to_string()]);
 }

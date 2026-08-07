@@ -28,12 +28,33 @@ impl ProviderResources {
 
 pub(crate) fn extract_provider_resources(
     content: &str,
-    file_dir: &Path,
+    file_path: &Path,
     workspace_root: &Path,
 ) -> ProviderResources {
     let mut resources = ProviderResources::default();
+    let file_dir = file_path.parent().unwrap_or(file_path);
+    // Route files reached through `Route::…->group('path')`.  They are only
+    // kept when the provider turns out not to register any routes inline:
+    // an inline registration means the provider itself is scanned as a route
+    // source, and that scan reaches the same files *with* the name and URI
+    // prefixes their enclosing group applies.
+    let mut grouped_route_files: Vec<PathBuf> = Vec::new();
+    let mut registers_routes_inline = false;
 
     super::helpers::walk_all_php_expressions(content, &mut |expr| {
+        // Any direct use of the `Route` facade means routes are registered
+        // from this file rather than only pointed at.
+        if let Expression::Call(Call::StaticMethod(sc)) = expr
+            && let Expression::Identifier(id) = sc.class
+            && id
+                .value()
+                .rsplit(|&b| b == b'\\')
+                .next()
+                .is_some_and(|seg| seg.eq_ignore_ascii_case(b"Route"))
+        {
+            registers_routes_inline = true;
+        }
+
         let Expression::Call(Call::Method(mc)) = expr else {
             return ControlFlow::Continue(());
         };
@@ -54,7 +75,7 @@ pub(crate) fn extract_provider_resources(
             && let Some(path) =
                 resolve_path_arg(first_arg.value(), content, file_dir, workspace_root)
         {
-            resources.route_files.push(path);
+            grouped_route_files.push(path);
             return ControlFlow::Continue(());
         }
 
@@ -112,6 +133,12 @@ pub(crate) fn extract_provider_resources(
         ControlFlow::Continue(())
     });
 
+    if registers_routes_inline {
+        resources.route_files.push(file_path.to_path_buf());
+    } else {
+        resources.route_files.extend(grouped_route_files);
+    }
+
     resources
 }
 
@@ -122,7 +149,12 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
     )
 }
 
-fn resolve_path_arg(
+/// Resolve an expression that names a file to the path it points at.
+///
+/// Covers the forms Laravel projects use to locate route, config, view, and
+/// translation files: `__DIR__ . '/…'`, `base_path('…')`, and a bare literal
+/// (absolute, or relative to the referring file).
+pub(crate) fn resolve_path_arg(
     expr: &Expression<'_>,
     content: &str,
     file_dir: &Path,
@@ -189,7 +221,9 @@ mod tests {
     fn detects_route_group_base_path_registration() {
         // A RouteServiceProvider that registers routes via the fluent
         // `Route::middleware(...)->group(base_path('...'))` API rather than
-        // `$this->loadRoutesFrom(...)`.
+        // `$this->loadRoutesFrom(...)`.  Because the provider touches the
+        // `Route` facade it is itself the route source: scanning it applies
+        // the group's prefixes to the file it points at.
         let content = "<?php\n\
             class RouteServiceProvider {\n\
                 protected function mapWebRoutes(): void {\n\
@@ -198,29 +232,26 @@ mod tests {
                         ->group(base_path('app/Contexts/Backoffice/Routes/web.php'));\n\
                 }\n\
             }\n";
-        let file_dir = Path::new("/ws/app/Providers");
-        let root = Path::new("/ws");
-        let resources = extract_provider_resources(content, file_dir, root);
+        let file_path = Path::new("/ws/app/Providers/RouteServiceProvider.php");
+        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
         assert_eq!(
             resources.route_files,
-            vec![root.join("app/Contexts/Backoffice/Routes/web.php")],
-            "Route::...->group(base_path(...)) should register the route file"
+            vec![file_path.to_path_buf()],
+            "a provider that uses the Route facade is scanned as a route source"
         );
     }
 
     #[test]
-    fn ignores_route_group_with_closure_body() {
-        // An inline `Route::group(function () { ... })` has no file to scan.
+    fn treats_inline_route_registration_as_a_route_source() {
+        // An inline `Route::group(function () { ... })` registers its routes
+        // in the provider itself, so the provider is the file to scan.
         let content = "<?php\n\
             Route::middleware('web')->group(function () {\n\
                 Route::get('/')->name('home');\n\
             });\n";
-        let resources =
-            extract_provider_resources(content, Path::new("/ws/routes"), Path::new("/ws"));
-        assert!(
-            resources.route_files.is_empty(),
-            "closure group bodies are not route files"
-        );
+        let file_path = Path::new("/ws/app/Providers/RouteServiceProvider.php");
+        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        assert_eq!(resources.route_files, vec![file_path.to_path_buf()]);
     }
 
     #[test]
@@ -233,11 +264,11 @@ mod tests {
                     $this->loadRoutesFrom(__DIR__ . '/../routes/pkg.php');\n\
                 }\n\
             }\n";
-        let file_dir = Path::new("/ws/vendor/acme/src");
-        let resources = extract_provider_resources(content, file_dir, Path::new("/ws"));
+        let file_path = Path::new("/ws/vendor/acme/src/PackageServiceProvider.php");
+        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
         assert_eq!(
             resources.route_files,
-            vec![file_dir.join("../routes/pkg.php")],
+            vec![Path::new("/ws/vendor/acme/src").join("../routes/pkg.php")],
             "loadRoutesFrom must still be detected"
         );
     }
@@ -248,7 +279,8 @@ mod tests {
         // must not be misread as a route-file registration.
         let content = "<?php\n\
             Blade::directive('x')->group(base_path('resources/views'));\n";
-        let resources = extract_provider_resources(content, Path::new("/ws"), Path::new("/ws"));
+        let resources =
+            extract_provider_resources(content, Path::new("/ws/Provider.php"), Path::new("/ws"));
         assert!(resources.route_files.is_empty());
     }
 }

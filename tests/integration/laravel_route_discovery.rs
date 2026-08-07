@@ -1,0 +1,172 @@
+//! Tests for discovering route files that do not live under `routes/`.
+//!
+//! A project is free to keep its route files anywhere and wire them up from
+//! a `RouteServiceProvider` — with `Route::…->group(base_path('…'))`, or with
+//! a plain `require` inside a `Route::group([…], function () { … })` body.
+//! Both forms must be followed, along with the group prefixes they apply,
+//! or every `route('…')` call naming one of those routes is reported as
+//! unknown.
+
+use crate::common::create_psr4_workspace;
+use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
+
+const COMPOSER_JSON: &str = r#"{
+    "require": { "laravel/framework": "^11.0" },
+    "autoload": { "psr-4": { "App\\": "src/" } }
+}"#;
+
+const PROVIDERS_PHP: &str =
+    "<?php\nreturn [\n    App\\Providers\\RouteServiceProvider::class,\n];\n";
+
+/// A provider that keeps its route files under `app/Contexts/…/Routes/`
+/// rather than `routes/`, and reaches them both ways.
+const ROUTE_SERVICE_PROVIDER: &str = "\
+<?php
+namespace App\\Providers;
+
+use Illuminate\\Support\\Facades\\Route;
+
+class RouteServiceProvider {
+    public function map(): void {
+        Route::middleware('kiosk')
+            ->group(base_path('app/Contexts/Kiosk/Routes/kiosk.php'));
+
+        Route::group(['as' => 'api.', 'prefix' => 'api'], function (): void {
+            require base_path('app/Contexts/Api/Routes/api.php');
+        });
+    }
+}
+";
+
+/// Route registrations guarded by configuration, as a route file that only
+/// applies on a configured domain writes them.
+const KIOSK_ROUTES: &str = "\
+<?php
+use Illuminate\\Support\\Facades\\Route;
+
+$fqdn = config('kiosk.url');
+
+if ($fqdn) {
+    Route::domain($fqdn)->name('kiosk.')->prefix('kiosk')->group(function (): void {
+        Route::get('/register', 'register')->name('register');
+    });
+}
+";
+
+const API_ROUTES: &str = "\
+<?php
+use Illuminate\\Support\\Facades\\Route;
+
+Route::get('/users', 'index')->name('users.index');
+";
+
+const CONSUMER: &str = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        route('kiosk.register');
+        route('api.users.index');
+        route('kiosk.nope');
+    }
+}
+";
+
+fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
+    create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", PROVIDERS_PHP),
+            (
+                "src/Providers/RouteServiceProvider.php",
+                ROUTE_SERVICE_PROVIDER,
+            ),
+            ("app/Contexts/Kiosk/Routes/kiosk.php", KIOSK_ROUTES),
+            ("app/Contexts/Api/Routes/api.php", API_ROUTES),
+            ("src/Services/Service.php", CONSUMER),
+        ],
+    )
+}
+
+async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn routes_outside_the_routes_directory_are_not_reported_as_unknown() {
+    let (backend, dir) = workspace();
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    open(&backend, &uri, CONSUMER).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);
+
+    let messages: Vec<&String> = diags
+        .iter()
+        .filter(
+            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
+        )
+        .map(|d| &d.message)
+        .collect();
+
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the genuinely missing route should be flagged, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("kiosk.nope"),
+        "the flagged route should be the missing one, got: {}",
+        messages[0]
+    );
+}
+
+#[tokio::test]
+async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
+    let (backend, dir) = workspace();
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    open(&backend, &uri, CONSUMER).await;
+
+    // Cursor inside 'kiosk.register' on line 4.
+    let result = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 4,
+                    character: 20,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .expect("goto_definition should not error")
+        .expect("route('kiosk.register') should resolve to its ->name('register')");
+
+    let target = match result {
+        GotoDefinitionResponse::Scalar(location) => location.uri,
+        GotoDefinitionResponse::Array(locations) => locations[0].uri.clone(),
+        GotoDefinitionResponse::Link(links) => links[0].target_uri.clone(),
+    };
+    assert!(
+        target
+            .as_str()
+            .ends_with("/app/Contexts/Kiosk/Routes/kiosk.php"),
+        "should jump to the kiosk route file, got: {target}"
+    );
+}
