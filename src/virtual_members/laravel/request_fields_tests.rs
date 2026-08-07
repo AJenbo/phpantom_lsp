@@ -116,6 +116,24 @@ fn detects_array_access_past_a_comment() {
     assert_eq!(ctx.prefix, "ti");
 }
 
+/// A comment between the receiver and the arrow does not hide it either.
+#[test]
+fn detects_receiver_past_a_comment_before_the_arrow() {
+    let content = "<?php\n$request /* the request */ ->input('na');\n";
+    let ctx = detect_at(content, "'na").expect("should detect input()");
+    assert_eq!(ctx.receiver, "$request");
+    assert_eq!(ctx.prefix, "na");
+}
+
+/// A comment between the `safe()` hop and the arrow that follows it does not
+/// hide the request it narrows either.
+#[test]
+fn looks_through_safe_to_the_request_past_a_comment() {
+    let content = "<?php\n$data = $request->safe() /* validated */ ->only(['na']);\n";
+    let ctx = detect_at(content, "'na").expect("should detect safe()->only() key");
+    assert_eq!(ctx.receiver, "$request");
+}
+
 #[test]
 fn full_value_is_none_for_an_unterminated_string() {
     let content = "<?php\n$request->input('na\n";

@@ -134,13 +134,22 @@ pub(crate) fn detect_request_field_context(
         return None;
     }
 
-    let before_paren = content.get(..call.code_before_call)?;
-    let before_method = strip_trailing_ident(before_paren);
-    let receiver_text = strip_arrow(before_method)?;
-    // `$request->safe()->only([…])` narrows the same rules array, so look
-    // through the `safe()` hop to the request it came from.
-    let receiver_text = strip_safe_call(receiver_text).unwrap_or(receiver_text);
-    let receiver = trailing_variable(receiver_text)?;
+    // The scan records the `->` / `?->` / `::` before the callee, and the hop
+    // through any call that closed immediately before it, so a comment
+    // anywhere in `$request /* … */ ->safe() /* … */ ->only('|')` cannot
+    // hide the receiver the way a raw backwards text walk would.
+    let op = call.callee_operator?;
+    let receiver_end = match op.hop {
+        Some(hop)
+            if content
+                .get(hop.name_start..hop.name_end)?
+                .eq_ignore_ascii_case("safe") =>
+        {
+            hop.code_before
+        }
+        _ => op.code_before,
+    };
+    let receiver = trailing_variable(content.get(..receiver_end)?)?;
 
     Some(RequestFieldContext {
         receiver,
@@ -158,27 +167,6 @@ fn strip_trailing_ident(text: &str) -> &str {
         end -= 1;
     }
     &text[..end]
-}
-
-/// Strip a trailing `->` or `?->` operator.
-fn strip_arrow(text: &str) -> Option<&str> {
-    let trimmed = text.trim_end();
-    trimmed
-        .strip_suffix("?->")
-        .or_else(|| trimmed.strip_suffix("->"))
-        .map(str::trim_end)
-}
-
-/// Strip a trailing `->safe()` hop, returning the text of the object it was
-/// called on.
-fn strip_safe_call(text: &str) -> Option<&str> {
-    let trimmed = text.trim_end().strip_suffix(')')?.trim_end();
-    let trimmed = trimmed.strip_suffix('(')?.trim_end();
-    let before_name = strip_trailing_ident(trimmed);
-    if !trimmed[before_name.len()..].eq_ignore_ascii_case("safe") {
-        return None;
-    }
-    strip_arrow(before_name)
 }
 
 /// Extract a trailing `$variable` token.

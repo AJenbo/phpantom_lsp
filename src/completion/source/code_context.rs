@@ -41,11 +41,16 @@ pub(crate) struct OpenBracket {
     /// when it is a `(` that opens a method or static call.  `None` for a
     /// plain function call, or for a `[`/`{`.
     pub(crate) callee_operator: Option<Operator>,
+    /// Byte offset where this bracket's callee identifier starts, alongside
+    /// `callee_operator`.  Kept separately from `callee_operator.code_before`
+    /// (which ends *before* the identifier) so a later hop can read the
+    /// identifier's own text.
+    pub(crate) callee_name_start: Option<usize>,
 }
 
 /// A `->`, `?->`, or `::` seen while scanning code, naming where the
 /// receiver in front of it ends.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Operator {
     /// One past the last byte of code before the operator, so
     /// `&content[..code_before]` is the receiver with trailing whitespace
@@ -53,6 +58,23 @@ pub(crate) struct Operator {
     pub(crate) code_before: usize,
     /// `true` for `::`, `false` for `->` and `?->`.
     pub(crate) is_static: bool,
+    /// Set when the text immediately before this operator is the closing
+    /// `)` of a method/static call, e.g. the `->` before `only` in
+    /// `$request->safe()->only(…)`.  Lets a consumer look through that one
+    /// call to the receiver beneath it, and identify the call by name.
+    pub(crate) hop: Option<Hop>,
+}
+
+/// A call whose closing `)` sits immediately (modulo whitespace/comments)
+/// before an operator, letting that operator's receiver be traced through it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Hop {
+    /// One past the last byte of code before the hopped-through call's own
+    /// receiver, e.g. where `$request` ends in `$request->safe()->only(…)`.
+    pub(crate) code_before: usize,
+    /// Byte range of the hopped-through call's method name, e.g. `safe`.
+    pub(crate) name_start: usize,
+    pub(crate) name_end: usize,
 }
 
 /// The lexical position of an offset in PHP source.
@@ -163,6 +185,13 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
     // those can follow a call's callee.
     let mut current_op: Option<Operator> = None;
     let mut op_callee_seen = false;
+    // Byte offset where `current_op`'s callee identifier started, once seen.
+    let mut current_op_name_start: Option<usize> = None;
+    // The hop through the call that a `)` just closed, valid only while
+    // nothing but whitespace/comments follows it — the same invalidation
+    // rules as `current_op`, since a new operator right after is what
+    // consumes it.
+    let mut last_closed_call: Option<Hop> = None;
 
     while i < end {
         match state {
@@ -281,8 +310,10 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         current_op = Some(Operator {
                             code_before: code_end,
                             is_static: false,
+                            hop: last_closed_call.take(),
                         });
                         op_callee_seen = false;
+                        current_op_name_start = None;
                         code_end = i + 3;
                         i += 3;
                         continue;
@@ -291,8 +322,10 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         current_op = Some(Operator {
                             code_before: code_end,
                             is_static: false,
+                            hop: last_closed_call.take(),
                         });
                         op_callee_seen = false;
+                        current_op_name_start = None;
                         code_end = i + 2;
                         i += 2;
                         continue;
@@ -301,8 +334,10 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         current_op = Some(Operator {
                             code_before: code_end,
                             is_static: true,
+                            hop: last_closed_call.take(),
                         });
                         op_callee_seen = false;
+                        current_op_name_start = None;
                         code_end = i + 2;
                         i += 2;
                         continue;
@@ -327,20 +362,24 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                     }
                     b'(' | b'[' | b'{' => {
                         // Only a `(` can open a call, so only it takes the
-                        // pending operator as its callee's receiver; either
-                        // way a fresh bracket starts a new scope for it.
-                        let callee_operator = if byte == b'(' {
-                            current_op.take()
+                        // pending operator (and its callee's name start) as
+                        // its callee's receiver; either way a fresh bracket
+                        // starts a new scope for it.
+                        let (callee_operator, callee_name_start) = if byte == b'(' {
+                            (current_op.take(), current_op_name_start.take())
                         } else {
-                            None
+                            (None, None)
                         };
                         current_op = None;
+                        current_op_name_start = None;
+                        last_closed_call = None;
                         open_brackets.push(OpenBracket {
                             offset: i,
                             byte,
                             code_before: code_end,
                             commas: 0,
                             callee_operator,
+                            callee_name_start,
                         });
                     }
                     b')' | b']' | b'}' => {
@@ -349,11 +388,24 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                             b']' => b'[',
                             _ => b'{',
                         };
+                        last_closed_call = None;
                         // A closer that does not match the innermost opener
                         // belongs to an unbalanced edit; dropping it keeps
                         // the brackets that do pair up intact.
-                        if open_brackets.last().is_some_and(|b| b.byte == opener) {
-                            open_brackets.pop();
+                        if let Some(popped) = open_brackets.pop_if(|b| b.byte == opener) {
+                            // A call that just closed right before an
+                            // operator lets that operator's receiver be
+                            // traced through it (the `safe()` hop).
+                            if byte == b')'
+                                && let Some(op) = popped.callee_operator
+                                && let Some(name_start) = popped.callee_name_start
+                            {
+                                last_closed_call = Some(Hop {
+                                    code_before: op.code_before,
+                                    name_start,
+                                    name_end: popped.code_before,
+                                });
+                            }
                         }
                         current_op = None;
                     }
@@ -362,24 +414,33 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                             bracket.commas += 1;
                         }
                         current_op = None;
+                        last_closed_call = None;
                     }
                     _ if byte.is_ascii_alphanumeric() || byte == b'_' => {
                         // The start of an identifier run: the first one after
                         // an operator is its callee, so it keeps the operator
-                        // alive; a second (e.g. `and`/`or`, or an unrelated
-                        // name) means the callee was never called and the
-                        // operator does not belong to whatever comes next.
+                        // alive (recording where it starts); a second (e.g.
+                        // `and`/`or`, or an unrelated name) means the callee
+                        // was never called and the operator does not belong
+                        // to whatever comes next.
                         let word_start = i == 0
                             || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
-                        if word_start && current_op.is_some() {
-                            if op_callee_seen {
-                                current_op = None;
-                            } else {
-                                op_callee_seen = true;
+                        if word_start {
+                            if current_op.is_some() {
+                                if op_callee_seen {
+                                    current_op = None;
+                                } else {
+                                    op_callee_seen = true;
+                                    current_op_name_start = Some(i);
+                                }
                             }
+                            last_closed_call = None;
                         }
                     }
-                    _ if !byte.is_ascii_whitespace() => current_op = None,
+                    _ if !byte.is_ascii_whitespace() => {
+                        current_op = None;
+                        last_closed_call = None;
+                    }
                     _ => {}
                 }
                 if !byte.is_ascii_whitespace() {

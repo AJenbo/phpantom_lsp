@@ -21,6 +21,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::completion::source::code_context::Operator;
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
@@ -117,14 +118,11 @@ pub(crate) struct StringCallContext {
     pub is_static: bool,
     pub arg_index: usize,
     pub string_content_start: usize,
-    /// One past the last byte of code before the `(` that opens the call's
-    /// argument list.
-    ///
-    /// `subject` only captures a bare identifier or `$variable`; callers that
-    /// need the full receiver expression (e.g. `$request->safe()`) re-read it
-    /// from `&content[..code_before_call]`, which ends at code even when a
-    /// comment sits between the receiver and the paren.
-    pub code_before_call: usize,
+    /// The `->` / `?->` / `::` immediately before the callee, if any — the
+    /// same value `subject` and `is_static` were derived from, kept around
+    /// so a caller can look through a hop (e.g. `$request->safe()->only(…)`)
+    /// via [`Operator::hop`].
+    pub(crate) callee_operator: Option<Operator>,
 }
 
 /// Detect a string-inside-call context at the cursor position.
@@ -176,7 +174,7 @@ pub(crate) fn detect_string_call_context(
         is_static,
         arg_index: call.commas,
         string_content_start,
-        code_before_call: call.code_before,
+        callee_operator: call.callee_operator,
     })
 }
 
