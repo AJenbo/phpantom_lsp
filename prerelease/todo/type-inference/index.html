@@ -2400,6 +2400,19 @@ Fixed by adding array-literal element inference in the
 <code>GenericWrapper</code> arm of <code>build_function_template_subs</code>, so
 <code>each([1, 2, 3], fn($x) =&gt; ...)</code> now infers <code>T = int</code> and shows
 the correct type hint for <code>$x</code>.</p>
+<p><strong>Still missing: the type engine itself, not just the hint.</strong> Steps 1
+and 2 wired the substitution into the inlay hint path only. Hover,
+completion and diagnostics resolve a closure parameter through the
+forward walker, which never consults the enclosing call's
+<code>callable(T)</code> annotation, so the parameter stays untyped there:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @var list&lt;Foo&gt; $rows */</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">each($rows, fn ($x) =&gt; $x-&gt;name);   // $x has no type on hover</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">array_map(fn ($case) =&gt; $case[0]-&gt;name, $rows);</span>
+</code></pre></div>
+<p>The binding belongs in the shared pipeline (a closure literal passed
+as an argument should seed its parameters from the callable parameter
+type the call site substitutes), so every consumer benefits rather
+than inlay hints alone.</p>
 <p><strong>References:</strong>
 - PHPStan: <code>GenericFunctionsReturnTypeExtension</code>, argument-based
   template inference in <code>FunctionCallNode</code>.
@@ -2409,15 +2422,15 @@ the correct type hint for <code>$x</code>.</p>
 <p>Resolve wildcard constant patterns like <code>Foo::BAR_*</code> to the union of
 all matching constant types on the class. PHPStan supports this syntax
 in docblock type strings:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class Status {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    const STATUS_ACTIVE = 1;</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    const STATUS_INACTIVE = 2;</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    const STATUS_PENDING = 3;</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">/** @param Status::STATUS_* $status */</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">function setStatus(int $status): void { ... }</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">// $status should resolve to 1|2|3</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">class Status {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    const STATUS_ACTIVE = 1;</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    const STATUS_INACTIVE = 2;</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    const STATUS_PENDING = 3;</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">/** @param Status::STATUS_* $status */</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">function setStatus(int $status): void { ... }</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="x">// $status should resolve to 1|2|3</span>
 </code></pre></div>
 <p>When the type engine encounters a constant pattern containing <code>*</code>,
 it should:</p>
@@ -2471,19 +2484,19 @@ When the same template param receives bounds from multiple sources,
 the shallowest (most direct) match wins. Only union bounds at the
 same depth level.</p>
 <p>For example, given:
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">function wrap(T $value, array&lt;T&gt; $context): T { ... }</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">wrap(&quot;hello&quot;, [1, 2, 3]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function wrap(T $value, array&lt;T&gt; $context): T { ... }</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">wrap(&quot;hello&quot;, [1, 2, 3]);</span>
 </code></pre></div></p>
 <p>The <code>$value</code> argument gives <code>T = string</code> at depth 0. The <code>$context</code>
 argument gives <code>T = int</code> at depth 1 (inside <code>array&lt;&gt;</code>). The shallow
 bound (<code>string</code>) should win, not produce <code>string|int</code>.</p>
 <p><strong>Design:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>struct TemplateBound {
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    ty: PhpType,
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    depth: u8,        // 0 = direct match, 1 = one generic layer deep, etc.
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    arg_offset: u8,   // which argument produced this bound
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>struct TemplateBound {
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    ty: PhpType,
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    depth: u8,        // 0 = direct match, 1 = one generic layer deep, etc.
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    arg_offset: u8,   // which argument produced this bound
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>}
 </code></pre></div>
 <p>When selecting the final type for a template param:
 1. Group bounds by depth.
@@ -2553,12 +2566,12 @@ blowup.</p>
 <p>A closure whose native return hint is just <code>array</code> but whose body
 returns a literal array should get the literal shape as its
 inferred return type, so <code>array_map()</code> results carry it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$declarations = array_map(function (ASTNode $child): array {</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    return [$child-&gt;getType(), $childChildren[1]];</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">}, $children);</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">[$type, $variable] = $declarations[$index];</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">$type-&gt;getImage();   // &quot;type of &#39;$type&#39; could not be resolved&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$declarations = array_map(function (ASTNode $child): array {</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    return [$child-&gt;getType(), $childChildren[1]];</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">}, $children);</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">[$type, $variable] = $declarations[$index];</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">$type-&gt;getImage();   // &quot;type of &#39;$type&#39; could not be resolved&quot;</span>
 </code></pre></div>
 <p>Found in the 2026-07 analyze triage: ~10 pdepend errors
 (<code>tests/.../PHP82/TrueTypeTest.php:89</code>,
@@ -2678,13 +2691,13 @@ some of these).</p>
 <p>A class constant reached through a variable produces no type at all, so
 hover is blank and anything downstream of it loses the value. The same
 constant reached through a class name or <code>self</code> resolves fine.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    const INTEGER_CONSTANT = 1;</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">}</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">$foo = new Foo();</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">$a = Foo::INTEGER_CONSTANT;    // 1</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">$b = $foo::INTEGER_CONSTANT;   // (nothing — PHPStan: 1)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    const INTEGER_CONSTANT = 1;</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">}</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">$foo = new Foo();</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">$a = Foo::INTEGER_CONSTANT;    // 1</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">$b = $foo::INTEGER_CONSTANT;   // (nothing — PHPStan: 1)</span>
 </code></pre></div>
 <p>The class-constant branch of <code>resolve_rhs_property_access</code> matches only
 <code>Identifier</code>, <code>Self_</code>, <code>Static</code>, and <code>Parent</code> for the left-hand side and
@@ -2703,17 +2716,17 @@ resolves to the value declared on the <em>current</em> class, even though a
 subclass may redeclare it. This is unsound in the false-positive
 direction, since the narrowed literal can drive a bogus argument-type
 mismatch or mark a live <code>match</code> arm dead.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    const NO_TYPE = 1;</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    /** @var string */</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    const TYPE = &#39;foo&#39;;</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">    public function doFoo(): void {</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">        self::NO_TYPE;      // 1      (correct)</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="x">        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)</span>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="x">        static::TYPE;       // &#39;foo&#39;  (PHPStan: string — a child must respect @var)</span>
-<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="x">    }</span>
-<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    const NO_TYPE = 1;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">    /** @var string */</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    const TYPE = &#39;foo&#39;;</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">    public function doFoo(): void {</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">        self::NO_TYPE;      // 1      (correct)</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="x">        static::TYPE;       // &#39;foo&#39;  (PHPStan: string — a child must respect @var)</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="x">    }</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>PHPStan's model: <code>self::</code> always yields the declared value. <code>static::</code>
 (and <code>$this::</code>) yields the value only when it cannot be overridden, i.e.
