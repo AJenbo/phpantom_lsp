@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b31-route-names-built-with-a-string-function-are-reported-as-unknown" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B31. Route names built with a string function are reported as unknown
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b31-route-names-built-with-a-string-function-are-reported-as-unknown" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B31. Route names built with a string function are reported as unknown
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,33 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b31-route-names-built-with-a-string-function-are-reported-as-unknown">B31. Route names built with a string function are reported as unknown<a class="headerlink" href="#b31-route-names-built-with-a-string-function-are-reported-as-unknown" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p>The route-name evaluator
-(<code>src/virtual_members/laravel/const_eval.rs</code>) folds literals,
-interpolation, concatenation and the <code>foreach</code> bindings around them, but
-it stops at any call.  A loop that normalizes its element before naming
-the route therefore contributes nothing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">foreach ($subcategories as $subcategory) {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $slug = preg_replace(&#39;#^/xmas/#&#39;, &#39;&#39;, $subcategory);</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    Route::get(&#39;/xmas/&#39; . $slug, [EventsController::class, &#39;page&#39;])</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        -&gt;name(&#39;events.xmas.&#39; . $slug);</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>$slug</code> is unknown, so the name is too, and every <code>route('events.xmas.…')</code>
-naming one is flagged <code>invalid_laravel_route</code>.</p>
-<p><strong>Where to look:</strong> <code>const_value</code> could fold a short list of pure string
-functions whose result is fully determined by constant arguments —
-<code>str_replace</code>, <code>preg_replace</code>, <code>trim</code>/<code>ltrim</code>/<code>rtrim</code>,
-<code>strtolower</code>/<code>strtoupper</code>, <code>sprintf</code>, <code>implode</code>, <code>ucfirst</code>.  Only fold
-when every argument is already a <code>ConstValue::Scalar</code>; a call with an
-unknown argument, or any function not on the list, must stay
-<code>ConstValue::Unknown</code> so a partial name is never invented.  <code>preg_replace</code>
-means running a real regex, so it is the one that needs care: PHP's
-delimiters and modifiers are not the <code>regex</code> crate's syntax, and an
-unsupported pattern has to fall back to unknown rather than a wrong
-substitution.</p>
+<p>No outstanding items.</p>
 
 
 
