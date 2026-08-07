@@ -7,24 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B47. Deprecation diagnostics ignore the project's target PHP version
-
-**Impact: Medium · Effort: Low-Medium**
-
-A project pinned to PHP 8.4 (`"require": {"php": "^8.4"}`,
-`"config": {"platform": {"php": "8.4"}}`) is reported for a deprecation
-introduced in 8.5:
-
-```
-'Pdo\PDO::sqliteCreateFunction' is deprecated: use Pdo\Sqlite::createFunction
-instead (since PHP 8.5)
-```
-
-6 diagnostics in one sample project. The stub already carries the
-version the deprecation landed in; it should be compared against the
-project's resolved target version, and the diagnostic suppressed when
-the target predates it.
-
 #### B48. `Collection::keyBy()` does not rebind the key template
 
 **Impact: Medium · Effort: Medium**

@@ -107,7 +107,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B47 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b47-deprecation-diagnostics-ignore-the-projects-target-php-version)                           | Medium      | Low-Medium  |
 | B48 | [`Collection::keyBy()` does not rebind the key template](todo/bugs.md#b48-collectionkeyby-does-not-rebind-the-key-template)                                                  | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |

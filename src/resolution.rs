@@ -685,13 +685,24 @@ impl Backend {
         // PSR-4 / class index carry their namespace.  This mirrors the
         // same assignment done in `update_ast_inner` for files opened
         // through `did_open` / `did_change`.
+        //
+        // In a file with several namespace blocks the per-class namespace is
+        // authoritative, including when it is `None`: a class in an anonymous
+        // `namespace { }` block (as in the bundled `PDO/PDO.php`, which pairs
+        // one with a `namespace Pdo { }` block) is global, and falling back to
+        // the file-level namespace would label it `Pdo\PDO`.  The fallback is
+        // only meaningful for single-namespace files, where a missing
+        // per-class value means the namespace simply was not tracked.
+        let single_namespace = ns_groups.len() <= 1;
         for (i, cls) in classes.iter_mut().enumerate() {
             if cls.file_namespace.is_none() {
-                cls.file_namespace = classes_with_ns[i]
-                    .1
-                    .as_deref()
-                    .or(file_namespace.as_deref())
-                    .map(crate::atom::atom);
+                let class_ns = classes_with_ns[i].1.as_deref();
+                cls.file_namespace = if single_namespace {
+                    class_ns.or(file_namespace.as_deref())
+                } else {
+                    class_ns
+                }
+                .map(crate::atom::atom);
             }
             cls.cache_fqn();
         }
