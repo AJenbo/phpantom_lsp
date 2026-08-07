@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786138180156,
+  "lastUpdate": 1786138289400,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15027,6 +15027,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f0ba73ab7896e3acddb52fc0d73c3b6e4758b9a3",
+          "message": "Translation keys are no longer judged when the application loads them\nfrom elsewhere",
+          "timestamp": "2026-08-07T23:15:42+02:00",
+          "tree_id": "0dea1a882aacb654fc3611944dc948377022936e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f0ba73ab7896e3acddb52fc0d73c3b6e4758b9a3"
+        },
+        "date": 1786138285833,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.1,
             "unit": "MiB"
           }
         ]
