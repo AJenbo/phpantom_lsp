@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786064067754,
+  "lastUpdate": 1786065517181,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14381,6 +14381,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f3203582de8ea2f91e2d1ea688a3a8769527c4e9",
+          "message": "A comment no longer hides a request field's receiver, including through\nthe `safe()` hop",
+          "timestamp": "2026-08-07T03:02:23+02:00",
+          "tree_id": "7a73b2a9d87dd64656a351c7265a94483ada2f90",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f3203582de8ea2f91e2d1ea688a3a8769527c4e9"
+        },
+        "date": 1786065514167,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72,
             "unit": "MiB"
           }
         ]
