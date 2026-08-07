@@ -2144,6 +2144,20 @@ class ArrayFuncDemo
         $total = array_sum([10, 20, 30]);
         $product = array_product([2, 3, 4]);
     }
+
+    /**
+     * A callback may declare the widest hint PHP has a keyword for; the
+     * element shape from the call site still narrows it.
+     *
+     * @return list<string>
+     */
+    public function pairColors(ScaffoldingArrayFunc $src): array
+    {
+        return array_map(
+            static fn(array $pair): string => $pair[0]->color(),  // Pen from array{Pen, string}
+            $src->pairs()
+        );
+    }
 }
 
 
@@ -5113,6 +5127,9 @@ class ScaffoldingArrayFunc
 
     /** @return list<Pen> */
     public function roster(): array { return []; }
+
+    /** @return list<array{Pen, string}> */
+    public function pairs(): array { return [[new Pen('blue'), 'ink'], [new Pen('red'), 'ink']]; }
 }
 
 class ScaffoldingException
@@ -6637,6 +6654,10 @@ function runDemoAssertions(): void
     $ternaryResp->$field = 'e';
     assert($memberDemo->ternary($ternaryResp) === 'd|e', 'property_exists and isset ternaries read the proven properties');
     assert($memberDemo->ternary(new ApiResponse()) === 'none|none', 'member-existence ternaries fall back when the properties are absent');
+
+    // ── Wide `array` callback parameter narrows to the element shape ────
+    $pairColors = (new ArrayFuncDemo())->pairColors(new ScaffoldingArrayFunc());
+    assert($pairColors === ['blue', 'red'], 'array_map callback reads Pen::color() through a declared `array` parameter');
 
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = loadPensOrFail();
