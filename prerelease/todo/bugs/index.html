@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,37 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b33-included-route-file-paths-behind-a-local-variable-are-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B33. Included route file paths behind a local variable are not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1282,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1298,25 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b33-included-route-file-paths-behind-a-local-variable-are-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B33. Included route file paths behind a local variable are not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1274,7 +1346,27 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>No outstanding items.</p>
+<h4 id="b33-included-route-file-paths-behind-a-local-variable-are-not-resolved">B33. Included route file paths behind a local variable are not resolved<a class="headerlink" href="#b33-included-route-file-paths-behind-a-local-variable-are-not-resolved" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p><code>resolve_path_arg</code> (<code>src/virtual_members/laravel/provider_resources.rs</code>)
+now follows a <code>Variable</code> argument back to its most recent assignment in
+the enclosing method when resolving <code>mergeConfigFrom</code>/<code>loadViewsFrom</code>/
+<code>loadTranslationsFrom</code>/<code>loadRoutesFrom</code> paths, but <code>route_names.rs</code>'s
+<code>open_included_file</code> (which resolves <code>require __DIR__ . '/x.php'</code> and
+<code>Route::group([], base_path('x.php'))</code> targets while following include
+chains during route scanning) calls <code>resolve_path_arg</code> with <code>program:
+None</code>, so the same local-variable indirection is still unresolved there:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$routes = __DIR__.&#39;/../routes/api.php&#39;;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">Route::group([&#39;prefix&#39; =&gt; &#39;v1&#39;], $routes);</span>
+</code></pre></div>
+<p><code>open_included_file</code> never opens <code>routes/api.php</code>, so any route defined
+in it is invisible to <code>route()</code> / route-name completion.</p>
+<p><strong>Where to look:</strong> <code>open_included_file</code> would need the already-parsed
+<code>Program</code> threaded through <code>scan_route_file</code> → <code>scan_stmt</code> → <code>scan_expr</code>
+→ <code>scan_included_file</code> (each currently receives only <code>content</code> and
+<code>ScanPaths</code>), which is a larger, more invasive change than the
+provider-resources fix since <code>Program</code> does not currently travel through
+that call chain.</p>
 
 
 
