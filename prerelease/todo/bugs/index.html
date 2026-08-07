@@ -849,17 +849,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b30-a-package-with-no-route-files-flags-every-route-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B30. A package with no route files flags every <code>route()</code> call
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1349,17 +1338,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b30-a-package-with-no-route-files-flags-every-route-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B30. A package with no route files flags every <code>route()</code> call
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1438,21 +1416,6 @@ index and walking the registered closure's body — with the group prefix
 in force at the call site — would pick the names up the same way an
 inline <code>Route::group(…, function () { … })</code> is picked up. Note the macro
 body registers on <code>$this</code> (the router) rather than the <code>Route</code> facade.</p>
-<h4 id="b30-a-package-with-no-route-files-flags-every-route-call">B30. A package with no route files flags every <code>route()</code> call<a class="headerlink" href="#b30-a-package-with-no-route-files-flags-every-route-call" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p>A Laravel <em>package</em> (a composer library, not an application) has no route
-files of its own: the names it references are registered by the host
-application. Analysing such a package alone discovers zero routes, and
-because an empty enumeration is read as "these are all the routes that
-exist", every <code>route('…')</code> call in the package is reported as unknown.</p>
-<p>Zero discovered route sources means the valid set is <em>unknown</em>, not
-empty. The <code>Trans</code>, <code>Command</code>, and <code>MorphAlias</code> arms of
-<code>check_laravel_string_keys</code> (<code>src/diagnostics/mod.rs</code>) already draw that
-distinction; the <code>Route</code> arm does not.</p>
-<p><strong>Where to look:</strong> <code>enumerate_all_routes</code> returning an empty list is not
-the same signal as "no route file declared this name". The route arm
-needs to know whether any route source was found at all, and skip the
-check when none was, exactly as the trans arm does.</p>
 
 
 
