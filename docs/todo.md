@@ -118,7 +118,6 @@ unlikely to move the needle for most users.
 | B48 | [`Collection::keyBy()` does not rebind the key template](todo/bugs.md#b48-collectionkeyby-does-not-rebind-the-key-template)                                                  | Medium      | Medium      |
 | B50 | [Closure parameter types are not narrowed from the call site](todo/bugs.md#b50-closure-parameter-types-are-not-narrowed-from-the-call-site)                                  | Medium      | Medium      |
 | B51 | [An `instanceof` result stored in a variable does not narrow](todo/bugs.md#b51-an-instanceof-result-stored-in-a-variable-does-not-narrow)                                    | Medium      | Medium      |
-| B53 | [`$this->mock(Foo::class)` loses the intersection with `Foo`](todo/bugs.md#b53-this-mockfooclass-loses-the-intersection-with-foo)                                             | Low-Medium  | Low         |
 | B44 | [String container bindings do not resolve](todo/bugs.md#b44-string-container-bindings-do-not-resolve)                                                                        | Low-Medium  | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |

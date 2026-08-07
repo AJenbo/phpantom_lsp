@@ -236,23 +236,3 @@ existence question from
 [T29](type-inference.md#t29-definite-vs-possible-variable-existence-tracking),
 narrowed to the one shape that shows up constantly in templates.
 
-#### B53. `$this->mock(Foo::class)` loses the intersection with `Foo`
-
-**Impact: Low-Medium · Effort: Low**
-
-Laravel declares `InteractsWithContainer::mock()` as returning
-`MockInterface`; the useful type is `Foo&MockInterface`, which is what
-callers annotate:
-
-```php
-private function mockHelloRetailClient(): Client&MockInterface
-{
-    $mock = $this->mock(Client::class);
-    // Return type Mockery\MockInterface is incompatible with declared
-    // return type Client&MockInterface
-    return $mock;
-}
-```
-
-Same treatment for `partialMock()`, `spy()` and `instance()`.
-
