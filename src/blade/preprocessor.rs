@@ -187,8 +187,15 @@ pub fn preprocess_with_vars(
     // the closing paren is reached and the whole span is transformed as
     // one unit.
     let mut capture_buffer = String::new();
+    // Whether the bound attribute currently open in `Mode::BoundAttr` has
+    // its closing quote on a later line, so the expression must stay open
+    // at end of line instead of being closed off. Set when the attribute
+    // opens; see `bound_attr_spans_lines`.
+    let mut bound_attr_multiline = false;
 
-    for line in content.lines() {
+    let lines: Vec<&str> = content.lines().collect();
+
+    for (line_idx, line) in lines.iter().enumerate() {
         let mut processed = String::new();
         let mut adjustments = vec![(0, 0)]; // (blade_utf16_col, php_utf16_col)
 
@@ -521,11 +528,17 @@ pub fn preprocess_with_vars(
                         match_len = 1;
                         replacement = " blade_directive(".to_string();
                         next_mode = Mode::BoundAttr(None);
+                        bound_attr_multiline = false;
                     } else if let Some(open_len) = bound_attr_open_len(remaining) {
                         let quote = remaining[open_len - 1];
                         match_len = open_len;
                         replacement = " blade_directive(".to_string();
                         next_mode = Mode::BoundAttr(Some(quote));
+                        bound_attr_multiline = bound_attr_spans_lines(
+                            quote,
+                            &remaining[open_len..],
+                            &lines[line_idx + 1..],
+                        );
                     }
                 }
             } else if mode == Mode::Comment {
@@ -740,9 +753,15 @@ pub fn preprocess_with_vars(
             current_utf16_col += ch.len_utf16() as u32;
         }
 
-        // A bound-attribute expression must not span lines. If its closing
-        // quote never appeared on this line, close the `blade_directive(`
-        // call here so the rest of the template is not corrupted.
+        // A bound-attribute expression whose closing quote is on a later
+        // line (what a formatter produces for a long array or argument
+        // list) stays open: this line's PHP is flushed as-is and the next
+        // line continues the same `blade_directive(` call. Cutting it off
+        // here would truncate the expression mid-syntax.
+        //
+        // When the closing quote never appears at all the attribute is
+        // malformed, and the call is closed off so only the attribute
+        // itself is lost rather than the rest of the template.
         if let Mode::BoundAttr(_) = mode {
             flush_buffer(
                 &mut processed,
@@ -751,10 +770,12 @@ pub fn preprocess_with_vars(
                 current_utf16_col,
                 &mut adjustments,
             );
-            processed.push_str(");");
-            adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
-            mode = Mode::Html;
-            in_string = None;
+            if !bound_attr_multiline {
+                processed.push_str(");");
+                adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
+                mode = Mode::Html;
+                in_string = None;
+            }
         }
 
         if let Mode::CaptureArgs(_) = mode {
@@ -786,6 +807,13 @@ pub fn preprocess_with_vars(
     // unparseable. Close it so only the comment itself is lost.
     if mode == Mode::Comment {
         virtual_php.push_str(" */\n");
+    }
+
+    // Likewise for a multi-line bound attribute whose closing quote turned
+    // out to be unreachable: leaving `blade_directive(` open would swallow
+    // the wrapper's closing brace.
+    if let Mode::BoundAttr(_) = mode {
+        virtual_php.push_str(");\n");
     }
 
     // Close the wrapper function.
@@ -1058,6 +1086,57 @@ fn bound_attr_open_len(rem: &[char]) -> Option<usize> {
         Some('"') | Some('\'') => Some(i + 1),
         _ => None,
     }
+}
+
+/// Whether a bound attribute delimited by `quote` closes on a line after
+/// the one it opens on. `rest` is the remainder of the opening line (after
+/// the opening quote) and `following` the lines after it.
+///
+/// `false` covers both the single-line case and a malformed attribute whose
+/// closing quote never appears, so the caller closes the expression at end
+/// of line in either case. A malformed attribute can still pick up a quote
+/// from further down the template, but that markup is already broken.
+fn bound_attr_spans_lines(quote: char, rest: &[char], following: &[&str]) -> bool {
+    let mut in_string = None;
+    let mut is_escaped = false;
+    if scan_to_bound_attr_end(quote, rest.iter().copied(), &mut in_string, &mut is_escaped) {
+        return false;
+    }
+    following
+        .iter()
+        .any(|line| scan_to_bound_attr_end(quote, line.chars(), &mut in_string, &mut is_escaped))
+}
+
+/// Scan one line's worth of a bound-attribute expression, reporting whether
+/// the closing `quote` was reached. `in_string` and `is_escaped` carry the
+/// PHP string state into the next line and must mirror how the main scan
+/// tracks it, or the two disagree about where the attribute ends.
+fn scan_to_bound_attr_end(
+    quote: char,
+    chars: impl Iterator<Item = char>,
+    in_string: &mut Option<char>,
+    is_escaped: &mut bool,
+) -> bool {
+    for ch in chars {
+        match *in_string {
+            _ if ch == quote && in_string.is_none() => return true,
+            Some(delim) => {
+                if *is_escaped {
+                    *is_escaped = false;
+                } else if ch == '\\' {
+                    *is_escaped = true;
+                } else if ch == delim {
+                    *in_string = None;
+                }
+            }
+            None => {
+                if ch == '\'' || ch == '"' {
+                    *in_string = Some(ch);
+                }
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1487,6 +1566,66 @@ mod tests {
         assert!(
             php.contains("blade_directive($image);"),
             "binding on a continuation line should be recognized: {}",
+            php
+        );
+    }
+
+    /// A bound attribute whose expression is wrapped over several lines
+    /// (what a formatter does to a long array) must be emitted whole, not
+    /// truncated at the first line break.
+    #[test]
+    fn test_preprocess_bound_attribute_multiline_expression() {
+        let content = "<x-file.upload name=\"image\"\n    :rules=\"[\n        'Dimensions must match: 2420 x 1614',\n        'Max file size: 2 mb',\n    ]\" />\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive([") && php.contains("]);"),
+            "the wrapped array must be emitted whole: {}",
+            php
+        );
+        assert!(
+            php.contains("'Dimensions must match: 2420 x 1614',"),
+            "continuation lines must survive: {}",
+            php
+        );
+        assert!(
+            !php.contains("[);"),
+            "the expression must not be closed off at the line break: {}",
+            php
+        );
+        assert!(
+            !php.contains("name=\"image\""),
+            "the surrounding tag markup must stay masked: {}",
+            php
+        );
+    }
+
+    /// A multi-line bound attribute holding a call must keep every argument,
+    /// otherwise the truncated call reports a bogus argument-count mismatch.
+    #[test]
+    fn test_preprocess_bound_attribute_multiline_call() {
+        let content = "<x-alert\n    :message=\"__('a.b',\n        ['count' => 2])\"\n/>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("__('a.b',") && php.contains("['count' => 2]));"),
+            "both call arguments must survive the wrap: {}",
+            php
+        );
+    }
+
+    /// A bound attribute whose closing quote never appears is malformed;
+    /// the call is closed at end of line so only that attribute is lost.
+    #[test]
+    fn test_preprocess_bound_attribute_unterminated() {
+        let content = "<x-alert :message=\"$msg\n<p>{{ $after }}</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("blade_directive($msg);"),
+            "an unterminated attribute must be closed at end of line: {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $after );"),
+            "the rest of the template must still be processed: {}",
             php
         );
     }

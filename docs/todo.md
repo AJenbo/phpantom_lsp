@@ -109,7 +109,6 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B43 | [`App::make()` / `App::makeWith()` with a class-string do not resolve](todo/bugs.md#b43-appmake--appmakewith-with-a-class-string-do-not-resolve)                             | Medium-High | Low         |
 | B41 | [Translation-key diagnostics fire when the app replaces the translation loader](todo/bugs.md#b41-translation-key-diagnostics-fire-when-the-app-replaces-the-translation-loader) | Medium-High | Low-Medium  |
-| B39 | [Multi-line PHP expressions in Blade component attributes are truncated](todo/bugs.md#b39-multi-line-php-expressions-in-blade-component-attributes-are-truncated)            | Medium-High | Medium      |
 | B40 | [Assignments in the inline `@php(…)` directive are not recorded](todo/bugs.md#b40-assignments-in-the-inline-php-directive-are-not-recorded)                                  | Medium      | Low         |
 | B49 | [Static call through a string-typed variable is reported as scalar access](todo/bugs.md#b49-static-call-through-a-string-typed-variable-is-reported-as-scalar-access)        | Medium      | Low         |
 | B47 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b47-deprecation-diagnostics-ignore-the-projects-target-php-version)                           | Medium      | Low-Medium  |

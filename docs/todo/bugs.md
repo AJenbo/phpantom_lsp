@@ -7,32 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B39. Multi-line PHP expressions in Blade component attributes are truncated
-
-**Impact: Medium-High · Effort: Medium**
-
-A `:attribute="…"` value that spans several source lines is cut short,
-producing a syntax error at the wrap point plus a bogus
-`argument_count_mismatch` for the call that got truncated:
-
-```blade
-<x-backoffice::file.upload name="image"
-    :rules="[
-        'Dimensions must match: 2420 x 1614',
-        'Max file size: 2 mb',
-    ]" />
-```
-
-```
-Syntax error: unexpected token `)`
-Syntax error: unexpected token `;`, expected `]`
-```
-
-14 diagnostics across two sample projects (10 `syntax_error` in one; 2
-`syntax_error` plus 2 `argument_count_mismatch` in the other). Wrapping
-long attribute expressions is what a formatter produces, so this fires
-on ordinary, well-formatted templates.
-
 #### B40. Assignments in the inline `@php(…)` directive are not recorded
 
 **Impact: Medium · Effort: Low**
