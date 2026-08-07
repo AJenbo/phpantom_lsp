@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_span::{HasSpan, Span};
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
@@ -31,7 +31,7 @@ use crate::atom::bytes_to_str;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::short_name;
 
-use super::helpers::extract_string_literal;
+use super::helpers::{beats_best, enclosing_body, extract_string_literal, walk_before_cursor};
 
 /// The FQN of Laravel's base form-request class.
 pub(crate) const FORM_REQUEST_FQN: &str = "Illuminate\\Foundation\\Http\\FormRequest";
@@ -403,79 +403,6 @@ fn condense(text: &str) -> String {
     }
     out.truncate(out.trim_end().len());
     out
-}
-
-// ─── Scope walking ──────────────────────────────────────────────────────────
-
-/// Whether `span` covers `offset`, inclusive at both ends.
-fn covers(span: Span, offset: u32) -> bool {
-    offset >= span.start.offset && offset <= span.end.offset
-}
-
-/// The outermost function-like body containing `offset`.
-///
-/// Outermost rather than innermost so that a `validate()` call in a
-/// controller action still applies inside a closure nested in that action —
-/// "earlier in the same method" covers everything the method wraps.  A
-/// sibling method's body never contains the offset, so rules stay scoped to
-/// the one being edited.
-///
-/// Spans nest, so only the cursor's own ancestors are descended into: a
-/// subtree that does not cover the offset cannot hold the body that does.
-/// That keeps the search proportional to nesting depth rather than to file
-/// size.
-fn enclosing_body<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
-    offset: u32,
-) -> Option<Node<'ast, 'arena>> {
-    let body = match node {
-        Node::Method(m) => match &m.body {
-            MethodBody::Concrete(block) => Some(Node::Block(block)),
-            MethodBody::Abstract(_) => None,
-        },
-        Node::Function(f) => Some(Node::Block(&f.body)),
-        Node::Closure(c) => Some(Node::Block(&c.body)),
-        _ => None,
-    };
-    if let Some(body) = body
-        && covers(body.span(), offset)
-    {
-        return Some(body);
-    }
-
-    let mut found = None;
-    node.visit_children(|child| {
-        if found.is_none() && covers(child.span(), offset) {
-            found = enclosing_body(child, offset);
-        }
-    });
-    found
-}
-
-/// Hand every node of `node`'s subtree that starts before `cursor` to
-/// `visit`.
-///
-/// Callers are looking for a construct that *completes* before the cursor,
-/// and one cannot end before the cursor without starting before it, so
-/// subtrees that begin at or after the cursor are skipped rather than walked.
-fn walk_before_cursor<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
-    cursor: u32,
-    visit: &mut impl FnMut(Node<'ast, 'arena>),
-) {
-    visit(node);
-    node.visit_children(|child| {
-        if child.span().start.offset < cursor {
-            walk_before_cursor(child, cursor, visit);
-        }
-    });
-}
-
-/// Whether a construct ending at `end` is a better candidate than the one
-/// already in `best`: it has to finish before the cursor, and later beats
-/// earlier so the nearest preceding construct wins.
-fn beats_best<T>(best: &Option<(u32, T)>, end: u32, cursor: u32) -> bool {
-    end <= cursor && best.as_ref().is_none_or(|(seen, _)| end >= *seen)
 }
 
 // ─── Inline `validate()` / `Validator::make()` ──────────────────────────────

@@ -916,6 +916,7 @@ pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Optio
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 /// Parse `content` as PHP and call `visitor` for every expression node
@@ -932,11 +933,98 @@ pub(crate) fn walk_all_php_expressions(
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+    walk_program_expressions(program, visitor);
+}
+
+/// Like [`walk_all_php_expressions`], but for a `Program` the caller has
+/// already parsed and needs to keep around afterwards (e.g. to resolve a
+/// local variable back to its assignment).
+pub(crate) fn walk_program_expressions(
+    program: &Program<'_>,
+    visitor: &mut impl FnMut(&Expression<'_>) -> ControlFlow<()>,
+) {
     for stmt in program.statements.iter() {
         if walk_stmt_exprs(stmt, visitor).is_break() {
             return;
         }
     }
+}
+
+// ─── Scope walking ──────────────────────────────────────────────────────────
+
+/// Whether `span` covers `offset`, inclusive at both ends.
+pub(in crate::virtual_members::laravel) fn covers(span: Span, offset: u32) -> bool {
+    offset >= span.start.offset && offset <= span.end.offset
+}
+
+/// The outermost function-like body containing `offset`.
+///
+/// Outermost rather than innermost so that a construct in a controller
+/// action still applies inside a closure nested in that action — "earlier
+/// in the same method" covers everything the method wraps. A sibling
+/// method's body never contains the offset, so a lookup stays scoped to the
+/// one being edited.
+///
+/// Spans nest, so only the cursor's own ancestors are descended into: a
+/// subtree that does not cover the offset cannot hold the body that does.
+/// That keeps the search proportional to nesting depth rather than to file
+/// size.
+pub(in crate::virtual_members::laravel) fn enclosing_body<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    offset: u32,
+) -> Option<Node<'ast, 'arena>> {
+    let body = match node {
+        Node::Method(m) => match &m.body {
+            MethodBody::Concrete(block) => Some(Node::Block(block)),
+            MethodBody::Abstract(_) => None,
+        },
+        Node::Function(f) => Some(Node::Block(&f.body)),
+        Node::Closure(c) => Some(Node::Block(&c.body)),
+        _ => None,
+    };
+    if let Some(body) = body
+        && covers(body.span(), offset)
+    {
+        return Some(body);
+    }
+
+    let mut found = None;
+    node.visit_children(|child| {
+        if found.is_none() && covers(child.span(), offset) {
+            found = enclosing_body(child, offset);
+        }
+    });
+    found
+}
+
+/// Hand every node of `node`'s subtree that starts before `cursor` to
+/// `visit`.
+///
+/// Callers are looking for a construct that *completes* before the cursor,
+/// and one cannot end before the cursor without starting before it, so
+/// subtrees that begin at or after the cursor are skipped rather than walked.
+pub(in crate::virtual_members::laravel) fn walk_before_cursor<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    cursor: u32,
+    visit: &mut impl FnMut(Node<'ast, 'arena>),
+) {
+    visit(node);
+    node.visit_children(|child| {
+        if child.span().start.offset < cursor {
+            walk_before_cursor(child, cursor, visit);
+        }
+    });
+}
+
+/// Whether a construct ending at `end` is a better candidate than the one
+/// already in `best`: it has to finish before the cursor, and later beats
+/// earlier so the nearest preceding construct wins.
+pub(in crate::virtual_members::laravel) fn beats_best<T>(
+    best: &Option<(u32, T)>,
+    end: u32,
+    cursor: u32,
+) -> bool {
+    end <= cursor && best.as_ref().is_none_or(|(seen, _)| end >= *seen)
 }
 
 /// Extract the raw string value and inner byte offsets from a PHP string

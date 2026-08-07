@@ -1,6 +1,9 @@
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
+use mago_allocator::LocalArena;
+use mago_database::file::FileId;
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 #[derive(Debug, Clone)]
@@ -41,7 +44,11 @@ pub(crate) fn extract_provider_resources(
     let mut grouped_route_files: Vec<PathBuf> = Vec::new();
     let mut registers_routes_inline = false;
 
-    super::helpers::walk_all_php_expressions(content, &mut |expr| {
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+
+    super::helpers::walk_program_expressions(program, &mut |expr| {
         // Any direct use of the `Route` facade means routes are registered
         // from this file rather than only pointed at.
         if let Expression::Call(Call::StaticMethod(sc)) = expr
@@ -72,8 +79,13 @@ pub(crate) fn extract_provider_resources(
         if method_lower == b"group"
             && chain_roots_at_route(mc.object)
             && let Some(first_arg) = mc.argument_list.arguments.iter().next()
-            && let Some(path) =
-                resolve_path_arg(first_arg.value(), content, file_dir, workspace_root)
+            && let Some(path) = resolve_path_arg(
+                first_arg.value(),
+                content,
+                file_dir,
+                workspace_root,
+                Some(program),
+            )
         {
             grouped_route_files.push(path);
             return ControlFlow::Continue(());
@@ -86,9 +98,14 @@ pub(crate) fn extract_provider_resources(
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
         if method_lower == b"mergeconfigfrom" && args.len() >= 2 {
-            if let Some(path) = resolve_path_arg(args[0].value(), content, file_dir, workspace_root)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
+            if let Some(path) = resolve_path_arg(
+                args[0].value(),
+                content,
+                file_dir,
+                workspace_root,
+                Some(program),
+            ) && let Some((ns, _, _)) =
+                super::helpers::extract_string_literal(args[1].value(), content)
             {
                 resources.config_files.push(ProviderResource {
                     path,
@@ -96,9 +113,14 @@ pub(crate) fn extract_provider_resources(
                 });
             }
         } else if method_lower == b"loadviewsfrom" && args.len() >= 2 {
-            if let Some(path) = resolve_path_arg(args[0].value(), content, file_dir, workspace_root)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
+            if let Some(path) = resolve_path_arg(
+                args[0].value(),
+                content,
+                file_dir,
+                workspace_root,
+                Some(program),
+            ) && let Some((ns, _, _)) =
+                super::helpers::extract_string_literal(args[1].value(), content)
             {
                 resources.view_dirs.push(ProviderResource {
                     path,
@@ -106,9 +128,14 @@ pub(crate) fn extract_provider_resources(
                 });
             }
         } else if method_lower == b"loadtranslationsfrom" && args.len() >= 2 {
-            if let Some(path) = resolve_path_arg(args[0].value(), content, file_dir, workspace_root)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
+            if let Some(path) = resolve_path_arg(
+                args[0].value(),
+                content,
+                file_dir,
+                workspace_root,
+                Some(program),
+            ) && let Some((ns, _, _)) =
+                super::helpers::extract_string_literal(args[1].value(), content)
             {
                 resources.trans_dirs.push(ProviderResource {
                     path,
@@ -116,8 +143,13 @@ pub(crate) fn extract_provider_resources(
                 });
             }
         } else if method_lower == b"loadjsontranslationsfrom" && !args.is_empty() {
-            if let Some(path) = resolve_path_arg(args[0].value(), content, file_dir, workspace_root)
-            {
+            if let Some(path) = resolve_path_arg(
+                args[0].value(),
+                content,
+                file_dir,
+                workspace_root,
+                Some(program),
+            ) {
                 resources.trans_dirs.push(ProviderResource {
                     path,
                     namespace: String::new(),
@@ -125,7 +157,13 @@ pub(crate) fn extract_provider_resources(
             }
         } else if method_lower == b"loadroutesfrom"
             && !args.is_empty()
-            && let Some(path) = resolve_path_arg(args[0].value(), content, file_dir, workspace_root)
+            && let Some(path) = resolve_path_arg(
+                args[0].value(),
+                content,
+                file_dir,
+                workspace_root,
+                Some(program),
+            )
         {
             resources.route_files.push(path);
         }
@@ -152,13 +190,20 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
 /// Resolve an expression that names a file to the path it points at.
 ///
 /// Covers the forms Laravel projects use to locate route, config, view, and
-/// translation files: `__DIR__ . '/…'`, `base_path('…')`, and a bare literal
-/// (absolute, or relative to the referring file).
+/// translation files: `__DIR__ . '/…'`, `base_path('…')`, a bare literal
+/// (absolute, or relative to the referring file), and a local variable
+/// assigned one of those forms earlier in the same method (Livewire's
+/// service provider writes `$config = __DIR__.'/../config/x.php';` before
+/// passing `$config` to `mergeConfigFrom`).  `program` is only needed for
+/// that last form, so callers that cannot easily thread it through (e.g. a
+/// route-file `require` reached mid-traversal) may pass `None` and simply
+/// lose local-variable resolution.
 pub(crate) fn resolve_path_arg(
     expr: &Expression<'_>,
     content: &str,
     file_dir: &Path,
     workspace_root: &Path,
+    program: Option<&Program<'_>>,
 ) -> Option<PathBuf> {
     if let Some(rel) = super::helpers::extract_dir_concat_path(expr, content) {
         let resolved = file_dir.join(rel.trim_start_matches('/'));
@@ -190,7 +235,45 @@ pub(crate) fn resolve_path_arg(
         return resolved.canonicalize().ok().or(Some(resolved));
     }
 
+    if let Expression::Variable(Variable::Direct(dv)) = expr {
+        let program = program?;
+        let assigned = last_assignment_before(program, dv.start_offset(), dv.name)?;
+        return resolve_path_arg(assigned, content, file_dir, workspace_root, Some(program));
+    }
+
     None
+}
+
+/// The RHS of the last `$name = <expr>;` assignment before `offset` in the
+/// enclosing method or function body: PHP's own resolution rule for a
+/// variable read, the most recent write to it in the same function scope.
+fn last_assignment_before<'ast, 'arena>(
+    program: &'ast Program<'arena>,
+    offset: u32,
+    name: &[u8],
+) -> Option<&'ast Expression<'arena>> {
+    let body = super::helpers::enclosing_body(Node::Program(program), offset)?;
+
+    let mut best: Option<(u32, &Expression<'_>)> = None;
+    super::helpers::walk_before_cursor(body, offset, &mut |node| {
+        let Node::Assignment(assignment) = node else {
+            return;
+        };
+        if !assignment.operator.is_assign() {
+            return;
+        }
+        let Expression::Variable(Variable::Direct(target)) = assignment.lhs else {
+            return;
+        };
+        if target.name != name {
+            return;
+        }
+        let end = node.span().end.offset;
+        if super::helpers::beats_best(&best, end, offset) {
+            best = Some((end, assignment.rhs));
+        }
+    });
+    best.map(|(_, rhs)| rhs)
 }
 
 /// Check whether an instance-method call chain roots at the `Route` facade,
@@ -282,5 +365,51 @@ mod tests {
         let resources =
             extract_provider_resources(content, Path::new("/ws/Provider.php"), Path::new("/ws"));
         assert!(resources.route_files.is_empty());
+    }
+
+    #[test]
+    fn resolves_config_path_behind_a_local_variable() {
+        // Livewire's own service provider assigns the path to a local
+        // variable before passing it to `mergeConfigFrom`, rather than
+        // writing the `__DIR__ . '...'` concatenation inline.
+        let content = "<?php\n\
+            class LivewireServiceProvider {\n\
+                protected function registerConfig(): void {\n\
+                    $config = __DIR__.'/../config/livewire.php';\n\
+                    $this->mergeConfigFrom($config, 'livewire');\n\
+                }\n\
+            }\n";
+        let file_path = Path::new("/ws/vendor/livewire/livewire/src/LivewireServiceProvider.php");
+        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        assert_eq!(resources.config_files.len(), 1);
+        assert_eq!(
+            resources.config_files[0].path,
+            Path::new("/ws/vendor/livewire/livewire/src").join("../config/livewire.php")
+        );
+        assert_eq!(resources.config_files[0].namespace, "livewire");
+    }
+
+    #[test]
+    fn local_variable_scan_stays_within_its_own_method() {
+        // `$path` is assigned in `registerConfig` but `registerViews` never
+        // assigns it: resolving `registerViews`'s `$path` must not pick up
+        // the other method's assignment.
+        let content = "<?php\n\
+            class PackageServiceProvider {\n\
+                public function registerConfig(): void {\n\
+                    $path = __DIR__.'/../config/a.php';\n\
+                    $this->mergeConfigFrom($path, 'a');\n\
+                }\n\
+                public function registerViews(): void {\n\
+                    $this->loadViewsFrom($path, 'b');\n\
+                }\n\
+            }\n";
+        let file_path = Path::new("/ws/vendor/acme/src/PackageServiceProvider.php");
+        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        assert_eq!(resources.config_files.len(), 1);
+        assert!(
+            resources.view_dirs.is_empty(),
+            "an undefined `$path` in a different method must not resolve to another method's assignment"
+        );
     }
 }

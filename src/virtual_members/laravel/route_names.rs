@@ -571,7 +571,7 @@ fn open_included_file<'a>(
     paths: ScanPaths<'a>,
 ) -> Option<IncludedFile<'a>> {
     let dir = paths.dir?;
-    let path = resolve_path_arg(target, content, dir, paths.root.unwrap_or(dir))?;
+    let path = resolve_path_arg(target, content, dir, paths.root.unwrap_or(dir), None)?;
     let path = path.canonicalize().unwrap_or(path);
     if !paths.open.borrow_mut().insert(path.clone()) {
         return None;
