@@ -57,6 +57,15 @@ pub(crate) struct MacroRegistration {
     /// Kept so the backend can infer a return type from the body when the
     /// registration has no explicit `: ReturnType` annotation.
     pub closure_text: Option<String>,
+    /// Byte offset of the closure / arrow-function argument in the file named
+    /// by [`definition_uri`](Self::definition_uri) (or the contributing file
+    /// when that is `None`).
+    ///
+    /// Lets a caller re-parse the body in its own file, with offsets that still
+    /// point at real source — the route collector walks the bodies of router
+    /// macros this way so `Route::auth()` contributes its route names.  `None`
+    /// when the registration has no closure to point at.
+    pub closure_offset: Option<u32>,
     /// Optional override for the go-to-definition location, as a file URI.
     ///
     /// A plain `Target::macro('name', ...)` registration has its definition in
@@ -373,6 +382,7 @@ fn build_mixin_macro(
         method: synthesized,
         name_offset: method.name.span.start.offset,
         closure_text,
+        closure_offset: Some(closure_expr.span().start.offset),
         definition_uri: Some(mixin_uri.to_string()),
     })
 }
@@ -422,6 +432,7 @@ fn build_direct_mixin_macro(
         method: synthesized,
         name_offset: method.name.span.start.offset,
         closure_text: None,
+        closure_offset: None,
         definition_uri: Some(mixin_uri.to_string()),
     })
 }
@@ -615,6 +626,35 @@ impl LaravelMacroIndex {
                     map.entry(reg.method.name.to_string())
                         .or_insert_with(|| text.clone());
                 }
+            }
+        }
+        map
+    }
+
+    /// Locate the closure body of every macro registered on one of `targets`,
+    /// keyed by lowercased macro name.
+    ///
+    /// Each value is the URI of the file the closure was written in and its
+    /// byte offset there, so the caller can re-parse the body against real
+    /// source positions.  The route collector uses this to walk the body of
+    /// `Route::auth()` and friends, whose route registrations are written in a
+    /// macro rather than in a route file.
+    pub(crate) fn macro_closures_on(&self, targets: &[&str]) -> HashMap<String, (String, u32)> {
+        let mut map = HashMap::new();
+        for (uri, regs) in self.by_uri.iter() {
+            for reg in regs {
+                let Some(offset) = reg.closure_offset else {
+                    continue;
+                };
+                if !targets
+                    .iter()
+                    .any(|fqn| reg.target.eq_ignore_ascii_case(fqn))
+                {
+                    continue;
+                }
+                let location_uri = reg.definition_uri.as_deref().unwrap_or(uri.as_str());
+                map.entry(reg.method.name.to_ascii_lowercase())
+                    .or_insert_with(|| (location_uri.to_string(), offset));
             }
         }
         map
@@ -990,6 +1030,7 @@ fn build_instance_registration(
         method,
         name_offset,
         closure_text,
+        closure_offset: Some(closure_expr.span().start.offset),
         definition_uri: None,
     })
 }
@@ -1026,6 +1067,7 @@ fn build_registration(
         method,
         name_offset,
         closure_text,
+        closure_offset: Some(closure_expr.span().start.offset),
         definition_uri: None,
     })
 }

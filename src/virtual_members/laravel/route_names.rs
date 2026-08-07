@@ -1,9 +1,11 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Url};
 
@@ -369,6 +371,7 @@ struct ScanPaths<'a> {
     dir: Option<&'a Path>,
     root: Option<&'a Path>,
     open: &'a RefCell<HashSet<PathBuf>>,
+    macros: &'a MacroScope,
 }
 
 impl<'a> ScanPaths<'a> {
@@ -376,9 +379,168 @@ impl<'a> ScanPaths<'a> {
         dir: Option<&'a Path>,
         root: Option<&'a Path>,
         open: &'a RefCell<HashSet<PathBuf>>,
+        macros: &'a MacroScope,
     ) -> Self {
-        Self { dir, root, open }
+        Self {
+            dir,
+            root,
+            open,
+            macros,
+        }
     }
+}
+
+// ─── Router macros ───────────────────────────────────────────────────────────
+
+/// The classes a route-registering macro attaches to.
+///
+/// `Route::macro('auth', …)` records the facade, and the macro index carries a
+/// second copy targeting the concrete router the facade proxies.
+/// `Route::mixin(new AuthRouteMethods)` — how `laravel/ui` ships
+/// `Route::auth()` — lands on the same pair.
+const ROUTER_MACRO_TARGETS: &[&str] = &[
+    "Illuminate\\Support\\Facades\\Route",
+    "Illuminate\\Routing\\Router",
+    "Illuminate\\Routing\\RouteRegistrar",
+];
+
+/// The router macros a scan may need to expand, and the state of the scan's
+/// expansions so far.
+///
+/// A route file that calls `Route::auth()` registers whatever that macro's
+/// closure registers, but the closure lives outside the route tree (in a
+/// service provider, or in a mixin class a provider passes to
+/// `Route::mixin()`).  This resolves such calls through the project's macro
+/// index and reads the file holding the body on demand, so a project with no
+/// router macros pays only for the (empty) lookup table.
+#[derive(Default)]
+struct MacroScope {
+    /// Lowercased macro name → the URI of the file its closure was written in
+    /// and the closure's byte offset there.
+    bodies: HashMap<String, (String, u32)>,
+    /// The macro names on the expansion stack.  `Route::auth()` calls
+    /// `$this->resetPassword()`, so bodies legitimately nest; this is what
+    /// stops a macro that reaches itself again from recursing forever.
+    expanding: RefCell<HashSet<String>>,
+    /// Source of each macro file, read once per scan.  `None` records a file
+    /// that could not be read so the failure is not retried.
+    sources: RefCell<HashMap<String, Option<Arc<str>>>>,
+}
+
+impl MacroScope {
+    /// The router macros registered in `backend`'s project.
+    fn for_backend(backend: &Backend) -> Self {
+        if !backend
+            .laravel_has_macros
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Self::default();
+        }
+        Self {
+            bodies: backend
+                .laravel_macros
+                .read()
+                .macro_closures_on(ROUTER_MACRO_TARGETS),
+            ..Self::default()
+        }
+    }
+
+    /// Read (and memoize) the source of the file a macro closure lives in.
+    fn source(&self, uri: &str) -> Option<Arc<str>> {
+        if let Some(cached) = self.sources.borrow().get(uri) {
+            return cached.clone();
+        }
+        let loaded = Url::parse(uri)
+            .ok()
+            .and_then(|url| url.to_file_path().ok())
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(Arc::<str>::from);
+        self.sources
+            .borrow_mut()
+            .insert(uri.to_string(), loaded.clone());
+        loaded
+    }
+}
+
+/// A router macro's body, opened for walking.
+///
+/// Dropping it takes the macro's name back off the expansion stack, so a
+/// second, sibling call to the same macro still expands while a cycle stops.
+struct OpenMacro<'a> {
+    name: String,
+    content: Arc<str>,
+    uri: Url,
+    path: PathBuf,
+    /// Byte offset of the closure within `content`.
+    offset: u32,
+    scope: &'a MacroScope,
+}
+
+impl Drop for OpenMacro<'_> {
+    fn drop(&mut self) {
+        self.scope.expanding.borrow_mut().remove(&self.name);
+    }
+}
+
+/// Resolve a call to `method` against the project's router macros and open the
+/// file holding the macro's body.
+///
+/// Returns `None` when no router macro of that name is registered, when its
+/// file cannot be read, or when the macro is already being expanded further up
+/// the call stack.
+fn open_route_macro<'a>(scope: &'a MacroScope, method: &[u8]) -> Option<OpenMacro<'a>> {
+    if scope.bodies.is_empty() {
+        return None;
+    }
+    let name = std::str::from_utf8(method).ok()?.to_ascii_lowercase();
+    let (uri, offset) = scope.bodies.get(&name)?;
+    let url = Url::parse(uri).ok()?;
+    let path = url.to_file_path().ok()?;
+    if !scope.expanding.borrow_mut().insert(name.clone()) {
+        return None;
+    }
+    // Constructed before the read so a failed read still pops the name off the
+    // expansion stack when `open` is dropped.
+    let mut open = OpenMacro {
+        name,
+        content: Arc::from(""),
+        uri: url,
+        path,
+        offset: *offset,
+        scope,
+    };
+    open.content = scope.source(uri)?;
+    Some(open)
+}
+
+/// A macro body: the closure a `macro()` registration was given, or the one a
+/// mixin method returns.
+enum MacroBody<'ast, 'arena> {
+    Closure(&'ast Closure<'arena>),
+    Arrow(&'ast ArrowFunction<'arena>),
+}
+
+/// Find the closure a macro registration points at, by its byte offset.
+fn macro_body_at<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    offset: u32,
+) -> Option<MacroBody<'ast, 'arena>> {
+    match node {
+        Node::Closure(closure) if closure.span().start.offset == offset => {
+            return Some(MacroBody::Closure(closure));
+        }
+        Node::ArrowFunction(arrow) if arrow.span().start.offset == offset => {
+            return Some(MacroBody::Arrow(arrow));
+        }
+        _ => {}
+    }
+    let mut found = None;
+    node.visit_children(|child| {
+        if found.is_none() {
+            found = macro_body_at(child, offset);
+        }
+    });
+    found
 }
 
 /// A file that a route source pulls in, opened for scanning.
@@ -514,6 +676,7 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
     let mut scanned: HashSet<PathBuf> = HashSet::new();
     let snapshot = backend.user_file_symbol_maps();
     let workspace_root = backend.workspace.workspace_root.read().clone();
+    let macros = MacroScope::for_backend(backend);
 
     for (file_uri, _) in snapshot {
         if !file_uri.contains("/routes/") {
@@ -537,6 +700,7 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
             path.as_deref(),
             file_dir,
             workspace_root.as_deref(),
+            &macros,
         ));
     }
 
@@ -557,6 +721,7 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
                 Some(route_path),
                 route_path.parent(),
                 workspace_root.as_deref(),
+                &macros,
             ));
         }
     }
@@ -573,13 +738,14 @@ fn scan_route_file(
     file_path: Option<&Path>,
     file_dir: Option<&Path>,
     workspace_root: Option<&Path>,
+    macros: &MacroScope,
 ) -> Vec<Location> {
     let open = RefCell::new(HashSet::new());
     if let Some(path) = file_path {
         open.borrow_mut()
             .insert(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     }
-    let paths = ScanPaths::new(file_dir, workspace_root, &open);
+    let paths = ScanPaths::new(file_dir, workspace_root, &open, macros);
 
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
@@ -688,7 +854,12 @@ fn scan_expr(
                 }
                 results.extend(scan_expr(mc.object, content, prefix, target, uri, paths));
             } else {
-                results.extend(scan_expr(mc.object, content, prefix, target, uri, paths));
+                match scan_macro(ident.value, Some(mc.object), content, prefix, target, paths) {
+                    Some(found) => results.extend(found),
+                    None => {
+                        results.extend(scan_expr(mc.object, content, prefix, target, uri, paths))
+                    }
+                }
             }
             results
         }
@@ -719,7 +890,7 @@ fn scan_expr(
                 }
                 results
             } else {
-                Vec::new()
+                scan_macro(ident.value, None, content, prefix, target, paths).unwrap_or_default()
             }
         }
 
@@ -798,6 +969,60 @@ fn scan_included_file(
         ));
     }
     results
+}
+
+/// Look for `target` in the body of the router macro `method` invokes.
+///
+/// The macro's routes are declared in the macro body's own file, so that is
+/// where a hit resolves to.  Returns `None` when `method` names no known router
+/// macro, which is how the caller tells "the macro declares nothing named
+/// `target`" apart from "this was an ordinary chain link".
+fn scan_macro(
+    method: &[u8],
+    chain: Option<&Expression<'_>>,
+    content: &str,
+    prefix: &str,
+    target: &str,
+    paths: ScanPaths<'_>,
+) -> Option<Vec<Location>> {
+    let open = open_route_macro(paths.macros, method)?;
+    let new_prefix = match chain {
+        Some(chain) => format!("{prefix}{}", chain_name_prefix(chain, content)),
+        None => prefix.to_string(),
+    };
+    let sub_paths = ScanPaths {
+        dir: open.path.parent(),
+        ..paths
+    };
+
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"macro.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, open.content.as_bytes());
+    let mut results = Vec::new();
+    match macro_body_at(Node::Program(program), open.offset) {
+        Some(MacroBody::Closure(closure)) => {
+            for stmt in closure.body.statements.iter() {
+                results.extend(scan_stmt(
+                    stmt,
+                    &open.content,
+                    &new_prefix,
+                    target,
+                    &open.uri,
+                    sub_paths,
+                ));
+            }
+        }
+        Some(MacroBody::Arrow(arrow)) => results.extend(scan_expr(
+            arrow.expression,
+            &open.content,
+            &new_prefix,
+            target,
+            &open.uri,
+            sub_paths,
+        )),
+        None => {}
+    }
+    Some(results)
 }
 
 /// A named route recovered from the project's route files.
@@ -929,6 +1154,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> Vec<RouteEntry> {
     let mut scanned: HashSet<PathBuf> = HashSet::new();
     let snapshot = backend.user_file_symbol_maps();
     let workspace_root = backend.workspace.workspace_root.read().clone();
+    let macros = MacroScope::for_backend(backend);
 
     for (file_uri, _) in snapshot {
         if !file_uri.contains("/routes/") {
@@ -957,6 +1183,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> Vec<RouteEntry> {
             &content,
             path.as_deref(),
             workspace_root.as_deref(),
+            &macros,
             &mut routes,
         );
     }
@@ -973,6 +1200,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> Vec<RouteEntry> {
                 &content,
                 Some(route_path),
                 workspace_root.as_deref(),
+                &macros,
                 &mut routes,
             );
         }
@@ -997,6 +1225,7 @@ fn collect_all_names_from_file(
     content: &str,
     file_path: Option<&Path>,
     workspace_root: Option<&Path>,
+    macros: &MacroScope,
     out: &mut Vec<RouteEntry>,
 ) {
     let open = RefCell::new(HashSet::new());
@@ -1004,7 +1233,12 @@ fn collect_all_names_from_file(
         open.borrow_mut()
             .insert(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     }
-    let paths = ScanPaths::new(file_path.and_then(Path::parent), workspace_root, &open);
+    let paths = ScanPaths::new(
+        file_path.and_then(Path::parent),
+        workspace_root,
+        &open,
+        macros,
+    );
 
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
@@ -1096,7 +1330,14 @@ fn collect_names_from_expr(
                     }
                 }
                 collect_names_from_expr(mc.object, content, group, paths, out);
-            } else {
+            } else if !collect_names_from_macro(
+                ident.value,
+                Some(mc.object),
+                content,
+                group,
+                paths,
+                out,
+            ) {
                 collect_names_from_expr(mc.object, content, group, paths, out);
             }
         }
@@ -1122,6 +1363,8 @@ fn collect_names_from_expr(
                 for arg in sc.argument_list.arguments.iter() {
                     collect_names_from_group_body(arg.value(), content, inner, paths, out);
                 }
+            } else {
+                collect_names_from_macro(ident.value, None, content, group, paths, out);
             }
         }
         // A route file pulled in by `require`/`include` registers its routes
@@ -1133,6 +1376,61 @@ fn collect_names_from_expr(
         }
         _ => {}
     }
+}
+
+/// Collect the route names a call to the router macro `method` registers.
+///
+/// A macro body registers on the router itself (`$this->get(…)->name(…)`), so
+/// it is walked exactly as a `->group()` closure is, with the prefixes in force
+/// at the call site — both the enclosing groups' and any the chain ahead of the
+/// call adds, since `Route::name('admin.')->auth()` prefixes the macro's routes
+/// the way it would a group's.
+///
+/// Returns `false` when `method` names no known router macro, so a caller
+/// looking at an ordinary chain link can carry on down the chain.
+fn collect_names_from_macro(
+    method: &[u8],
+    chain: Option<&Expression<'_>>,
+    content: &str,
+    group: GroupPrefix<'_>,
+    paths: ScanPaths<'_>,
+    out: &mut Vec<RouteEntry>,
+) -> bool {
+    let Some(open) = open_route_macro(paths.macros, method) else {
+        return false;
+    };
+    let name_prefix = match chain {
+        Some(chain) => format!("{}{}", group.name, chain_name_prefix(chain, content)),
+        None => group.name.to_string(),
+    };
+    let uri_prefix = match chain {
+        Some(chain) => join_uri_segments(group.uri, &chain_uri_prefix(chain, content)),
+        None => group.uri.to_string(),
+    };
+    let inner = GroupPrefix {
+        name: &name_prefix,
+        uri: &uri_prefix,
+    };
+    let sub_paths = ScanPaths {
+        dir: open.path.parent(),
+        ..paths
+    };
+
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"macro.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, open.content.as_bytes());
+    match macro_body_at(Node::Program(program), open.offset) {
+        Some(MacroBody::Closure(closure)) => {
+            for stmt in closure.body.statements.iter() {
+                collect_names_from_stmt(stmt, &open.content, inner, sub_paths, out);
+            }
+        }
+        Some(MacroBody::Arrow(arrow)) => {
+            collect_names_from_expr(arrow.expression, &open.content, inner, sub_paths, out);
+        }
+        None => {}
+    }
+    true
 }
 
 /// Record the conventional routes a `Route::resource()` registration

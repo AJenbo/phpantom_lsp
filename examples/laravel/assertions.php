@@ -708,6 +708,45 @@ check(
     $wrong === []
 );
 
+// ─── Router macros ──────────────────────────────────────────────────────────
+
+// A macro body registers on the router the closure is bound to, so its routes
+// belong to whichever file called the macro and inherit the group prefixes in
+// force there.  This is how `laravel/ui` ships `Route::auth()`, and it is what
+// the LSP reproduces when it walks a macro body from a route file.
+\Illuminate\Routing\Router::macro('demoAuth', function (): void {
+    $this->get('login', fn () => 'login')->name('login');
+    $this->demoPasswordReset();
+});
+\Illuminate\Routing\Router::macro('demoPasswordReset', function (): void {
+    $this->post('password/reset', fn () => 'reset')->name('password.update');
+});
+
+$macroRouter = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+$macroRouter->demoAuth();
+$macroRouter->name('admin.')->prefix('admin')->group(static function ($router): void {
+    $router->demoAuth();
+});
+
+$macroUris = [];
+foreach ($macroRouter->getRoutes() as $route) {
+    $macroUris[$route->getName()] = $route->uri();
+}
+
+check(
+    'a macro body registers its routes on the router',
+    ($macroUris['login'] ?? null) === 'login'
+);
+check(
+    'a macro called from inside another macro registers its routes too',
+    ($macroUris['password.update'] ?? null) === 'password/reset'
+);
+check(
+    'the group prefixes at the call site reach the macro routes',
+    ($macroUris['admin.login'] ?? null) === 'admin/login'
+        && ($macroUris['admin.password.update'] ?? null) === 'admin/password/reset'
+);
+
 // ─── Higher-order collection proxies ────────────────────────────────────────
 
 // Every proxy the LSP knows how to type must actually be proxyable, and

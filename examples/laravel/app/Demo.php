@@ -375,6 +375,12 @@ class Demo
         // with the route file under app/Modules instead of the routes/ dir.
         route('reviews.update');
 
+        // Routes a router macro registers.  routes/web.php only calls
+        // Route::bakeryAuth(); the names come from the macro body in
+        // RouteServiceProvider, including the ones a nested macro adds.
+        route('login');
+        route('password.update');
+
         // Route parameters — the keys of the second argument are the
         // {parameters} of the route's URI (here bakeries/{bakery}, whose
         // prefix comes from the enclosing Route::prefix('bakeries') group).

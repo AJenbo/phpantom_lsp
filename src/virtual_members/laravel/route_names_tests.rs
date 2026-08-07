@@ -4,7 +4,39 @@ use super::*;
 /// per file (without the workspace walk).
 fn routes_of(content: &str) -> Vec<RouteEntry> {
     let mut out = Vec::new();
-    collect_all_names_from_file(content, None, None, &mut out);
+    collect_all_names_from_file(content, None, None, &MacroScope::default(), &mut out);
+    out
+}
+
+/// Collect the routes of a route file that can call the router macros
+/// `macro_source` registers.
+///
+/// Each name in `names` is located the way the macro index locates it: at the
+/// closure passed to `Route::macro('<name>', …)`.  The source is written to a
+/// real file because a macro body is read from the file it was written in.
+fn routes_with_macros(content: &str, macro_source: &str, names: &[&str]) -> Vec<RouteEntry> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("provider.php");
+    std::fs::write(&path, macro_source).unwrap();
+    let uri = Url::from_file_path(&path).unwrap().to_string();
+
+    let scope = MacroScope {
+        bodies: names
+            .iter()
+            .map(|name| {
+                let call = format!("macro('{name}', ");
+                let offset = macro_source
+                    .find(&call)
+                    .unwrap_or_else(|| panic!("no registration of macro {name}"))
+                    + call.len();
+                (name.to_ascii_lowercase(), (uri.clone(), offset as u32))
+            })
+            .collect(),
+        ..MacroScope::default()
+    };
+
+    let mut out = Vec::new();
+    collect_all_names_from_file(content, None, None, &scope, &mut out);
     out
 }
 
@@ -474,4 +506,112 @@ fn registrations_inside_a_provider_method_are_collected() {
     let content = "<?php\nfinal class RouteServiceProvider extends ServiceProvider {\n    public function map(): void {\n        Route::middleware('web')->name('admin.')->group(function () {\n            Route::get('/dashboard', 'index')->name('dashboard');\n        });\n    }\n}\n";
     let names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
     assert_eq!(names, vec!["admin.dashboard".to_string()]);
+}
+
+// ─── Router macros ───────────────────────────────────────────────────────────
+
+const ADMIN_PANEL_MACRO: &str = "\
+<?php
+Route::macro('adminPanel', function () {
+    $this->get('dashboard', 'index')->name('dashboard');
+    $this->post('dashboard', 'store');
+});
+";
+
+#[test]
+fn a_router_macro_contributes_the_routes_its_body_registers() {
+    let content = "<?php\nRoute::adminPanel();\n";
+    let routes = routes_with_macros(content, ADMIN_PANEL_MACRO, &["adminPanel"]);
+    let names: Vec<String> = routes.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(names, vec!["dashboard".to_string()]);
+    assert_eq!(routes[0].uri, "dashboard");
+}
+
+#[test]
+fn a_group_enclosing_a_macro_call_prefixes_the_routes_it_registers() {
+    let content = "<?php\nRoute::name('admin.')->prefix('admin')->group(function () {\n    Route::adminPanel();\n});\n";
+    let routes = routes_with_macros(content, ADMIN_PANEL_MACRO, &["adminPanel"]);
+    let names: Vec<String> = routes.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(names, vec!["admin.dashboard".to_string()]);
+    assert_eq!(routes[0].uri, "admin/dashboard");
+}
+
+/// `Route::name('admin.')->adminPanel()` prefixes the macro's routes the way
+/// the same chain would prefix a `->group()` body.
+#[test]
+fn a_chain_ahead_of_a_macro_call_prefixes_the_routes_it_registers() {
+    let content = "<?php\nRoute::name('admin.')->prefix('admin')->adminPanel();\n";
+    let routes = routes_with_macros(content, ADMIN_PANEL_MACRO, &["adminPanel"]);
+    let names: Vec<String> = routes.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(names, vec!["admin.dashboard".to_string()]);
+    assert_eq!(routes[0].uri, "admin/dashboard");
+}
+
+/// A macro body may call another macro (`laravel/ui`'s `auth()` delegates the
+/// password routes to `resetPassword()`), so the expansion has to nest.
+#[test]
+fn a_macro_body_that_calls_another_macro_contributes_both_sets() {
+    let macro_source = "\
+<?php
+Route::macro('auth', function () {
+    $this->get('login', 'show')->name('login');
+    $this->resetPassword();
+});
+Route::macro('resetPassword', function () {
+    $this->post('password/reset', 'reset')->name('password.update');
+});
+";
+    let content = "<?php\nRoute::auth();\n";
+    let names: Vec<String> = routes_with_macros(content, macro_source, &["auth", "resetPassword"])
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    assert_eq!(
+        names,
+        vec!["login".to_string(), "password.update".to_string()]
+    );
+}
+
+#[test]
+fn a_macro_that_calls_itself_back_terminates() {
+    let macro_source = "\
+<?php
+Route::macro('recursive', function () {
+    $this->get('a', 'index')->name('a');
+    $this->recursive();
+});
+";
+    let content = "<?php\nRoute::recursive();\n";
+    let names: Vec<String> = routes_with_macros(content, macro_source, &["recursive"])
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    assert_eq!(names, vec!["a".to_string()]);
+}
+
+/// Two calls to the same macro are both expanded — only re-entry while a
+/// macro is still being walked is a cycle.
+#[test]
+fn sibling_calls_to_one_macro_are_each_expanded() {
+    let content = "<?php\nRoute::adminPanel();\nRoute::name('admin.')->group(function () {\n    Route::adminPanel();\n});\n";
+    let names: Vec<String> = routes_with_macros(content, ADMIN_PANEL_MACRO, &["adminPanel"])
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    assert_eq!(
+        names,
+        vec!["dashboard".to_string(), "admin.dashboard".to_string()]
+    );
+}
+
+/// An ordinary chain link that happens not to be a macro must still be walked
+/// through, or the registration behind it is lost.
+#[test]
+fn an_unknown_chain_link_is_still_walked_through() {
+    let content = "<?php\nRoute::domain('admin.test')->get('/dashboard', 'index')->withoutMiddleware('web')->name('dashboard');\n";
+    let names: Vec<String> = routes_with_macros(content, ADMIN_PANEL_MACRO, &["adminPanel"])
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    assert_eq!(names, vec!["dashboard".to_string()]);
 }

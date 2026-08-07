@@ -134,6 +134,7 @@ mod laravel_references;
 mod laravel_request_keys;
 mod laravel_route_controller;
 mod laravel_route_discovery;
+mod laravel_route_macros;
 mod laravel_route_params;
 mod laravel_validated_shape;
 mod lsp_concurrency;

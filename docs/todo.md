@@ -108,7 +108,7 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B28 | [Route names built in a loop are reported as unknown](todo/bugs.md#b28-route-names-built-in-a-loop-are-reported-as-unknown)                                                  | Medium      | Medium      |
-| B29 | [`Route::auth()` and other route macros register no names](todo/bugs.md#b29-routeauth-and-other-route-macros-register-no-names)                                              | Low         | Medium      |
+| B30 | [`$this` inside a macro closure resolves to the enclosing class](todo/bugs.md#b30-this-inside-a-macro-closure-resolves-to-the-enclosing-class)                                | Medium      | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
