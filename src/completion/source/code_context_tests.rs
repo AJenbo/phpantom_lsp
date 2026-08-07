@@ -204,3 +204,50 @@ fn an_unmatched_closer_leaves_the_brackets_that_do_pair_up() {
     let ctx = at(src, "'user'").expect("the offset is in code");
     assert!(ctx.nested_pair(b'[', b'(').is_some());
 }
+
+#[test]
+fn a_call_records_its_receivers_arrow_and_double_colon() {
+    for (src, is_static) in [
+        ("<?php\n$q->where('a');\n", false),
+        ("<?php\n$q?->where('a');\n", false),
+        ("<?php\nUser::where('a');\n", true),
+    ] {
+        let ctx = at(src, "'a'").expect("the offset is in code");
+        let call = ctx.enclosing_paren().expect("the call's paren");
+        let op = call.callee_operator.expect("the arrow or double colon");
+        assert_eq!(op.is_static, is_static, "in {src}");
+    }
+}
+
+/// The receiver's boundary comes from the operator's own `code_before`, cut
+/// off at the last byte of code the same way a bracket's is, so a comment
+/// between the receiver and the operator does not leak into it.
+#[test]
+fn the_operators_code_before_stops_before_a_comment() {
+    let src = "<?php\n$q /* the query */ ->where('a');\n";
+    let ctx = at(src, "'a'").expect("the offset is in code");
+    let call = ctx.enclosing_paren().expect("the call's paren");
+    let op = call.callee_operator.expect("the arrow");
+    assert_eq!(&src[..op.code_before], "<?php\n$q");
+}
+
+/// A plain function call has no receiver, so it gets no operator, even when
+/// an unrelated one sits earlier in an argument list to another call.
+#[test]
+fn a_bare_call_has_no_callee_operator() {
+    let src = "<?php\nfoo($a->bar, baz('a'));\n";
+    let ctx = at(src, "'a'").expect("the offset is in code");
+    let call = ctx.enclosing_paren().expect("baz's call");
+    assert!(call.callee_operator.is_none());
+}
+
+/// A second identifier after the operator (here the `bar` of `and bar`) is
+/// not its callee, so the operator does not survive to credit `bar` with
+/// `$a`'s receiver.
+#[test]
+fn a_word_after_the_operators_callee_clears_it() {
+    let src = "<?php\nif ($a->foo and bar('a')) {}\n";
+    let ctx = at(src, "'a'").expect("the offset is in code");
+    let call = ctx.enclosing_paren().expect("bar's call");
+    assert!(call.callee_operator.is_none());
+}

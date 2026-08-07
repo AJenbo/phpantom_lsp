@@ -155,17 +155,17 @@ pub(crate) fn detect_string_call_context(
     // comma inside a comment cannot move it or shift the argument index.
     let call = code.enclosing_paren()?;
     let before_paren = content.get(..call.code_before)?;
-    let (method_name, before_method) = extract_identifier_backwards(before_paren)?;
+    let (method_name, _) = extract_identifier_backwards(before_paren)?;
 
-    let before_method_trimmed = before_method.trim_end();
-    let (is_static, subject) = if let Some(stripped) = before_method_trimmed.strip_suffix("::") {
-        (true, extract_subject_backwards(stripped.trim_end()))
-    } else if let Some(stripped) = before_method_trimmed.strip_suffix("?->") {
-        (false, extract_subject_backwards(stripped.trim_end()))
-    } else if let Some(stripped) = before_method_trimmed.strip_suffix("->") {
-        (false, extract_subject_backwards(stripped.trim_end()))
-    } else {
-        (false, None)
+    // The scan records the `->` / `?->` / `::` before the callee, if any,
+    // rather than this recovering it from the text after the fact, so a
+    // comment between the receiver and the operator cannot hide it.
+    let (is_static, subject) = match &call.callee_operator {
+        Some(op) => (
+            op.is_static,
+            extract_subject_backwards(content.get(..op.code_before)?),
+        ),
+        None => (false, None),
     };
 
     Some(StringCallContext {

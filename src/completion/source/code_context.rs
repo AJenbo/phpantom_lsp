@@ -8,7 +8,9 @@
 //! open at it (so the `[` of an argument array and the `(` of the call it
 //! belongs to can be told apart from any other nesting).  Each open bracket
 //! carries the commas seen inside it and where the code before it ends, which
-//! is the argument index and the callee of the call it opens.
+//! is the argument index and the callee of the call it opens, plus the
+//! `->` / `?->` / `::` immediately before that callee, if any, so the
+//! receiver in front of it can be read from a comment-free boundary too.
 //!
 //! All of it comes out of one forward pass.  A backwards walk cannot answer
 //! any of them: read from the right, a `//`, a `#`, or a quote is ambiguous
@@ -35,6 +37,22 @@ pub(crate) struct OpenBracket {
     /// belongs to that bracket, and one in a comment or a literal is not
     /// code, so neither is counted here.
     pub(crate) commas: usize,
+    /// The `->`, `?->`, or `::` immediately before this bracket's callee,
+    /// when it is a `(` that opens a method or static call.  `None` for a
+    /// plain function call, or for a `[`/`{`.
+    pub(crate) callee_operator: Option<Operator>,
+}
+
+/// A `->`, `?->`, or `::` seen while scanning code, naming where the
+/// receiver in front of it ends.
+#[derive(Clone, Copy)]
+pub(crate) struct Operator {
+    /// One past the last byte of code before the operator, so
+    /// `&content[..code_before]` is the receiver with trailing whitespace
+    /// and comments cut off.
+    pub(crate) code_before: usize,
+    /// `true` for `::`, `false` for `->` and `?->`.
+    pub(crate) is_static: bool,
 }
 
 /// The lexical position of an offset in PHP source.
@@ -138,6 +156,13 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
     let mut code_end = 0usize;
     let mut heredoc_label: &[u8] = &[];
     let mut i = 0usize;
+    // The most recent `->` / `?->` / `::` since the last time it was
+    // invalidated, and whether the identifier run that is its callee has
+    // been seen yet.  A second identifier run (e.g. the `bar` of `$a->foo
+    // and bar(`), a bracket, or a comma all invalidate it, since none of
+    // those can follow a call's callee.
+    let mut current_op: Option<Operator> = None;
+    let mut op_callee_seen = false;
 
     while i < end {
         match state {
@@ -252,6 +277,36 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         i += 2;
                         continue;
                     }
+                    b'?' if bytes[i + 1..end].starts_with(b"->") => {
+                        current_op = Some(Operator {
+                            code_before: code_end,
+                            is_static: false,
+                        });
+                        op_callee_seen = false;
+                        code_end = i + 3;
+                        i += 3;
+                        continue;
+                    }
+                    b'-' if bytes[i + 1..end].starts_with(b">") => {
+                        current_op = Some(Operator {
+                            code_before: code_end,
+                            is_static: false,
+                        });
+                        op_callee_seen = false;
+                        code_end = i + 2;
+                        i += 2;
+                        continue;
+                    }
+                    b':' if bytes[i + 1..end].starts_with(b":") => {
+                        current_op = Some(Operator {
+                            code_before: code_end,
+                            is_static: true,
+                        });
+                        op_callee_seen = false;
+                        code_end = i + 2;
+                        i += 2;
+                        continue;
+                    }
                     b'\'' => {
                         state = State::SingleString(i);
                         i += 1;
@@ -270,12 +325,24 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                             continue;
                         }
                     }
-                    b'(' | b'[' | b'{' => open_brackets.push(OpenBracket {
-                        offset: i,
-                        byte,
-                        code_before: code_end,
-                        commas: 0,
-                    }),
+                    b'(' | b'[' | b'{' => {
+                        // Only a `(` can open a call, so only it takes the
+                        // pending operator as its callee's receiver; either
+                        // way a fresh bracket starts a new scope for it.
+                        let callee_operator = if byte == b'(' {
+                            current_op.take()
+                        } else {
+                            None
+                        };
+                        current_op = None;
+                        open_brackets.push(OpenBracket {
+                            offset: i,
+                            byte,
+                            code_before: code_end,
+                            commas: 0,
+                            callee_operator,
+                        });
+                    }
                     b')' | b']' | b'}' => {
                         let opener = match byte {
                             b')' => b'(',
@@ -288,12 +355,31 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         if open_brackets.last().is_some_and(|b| b.byte == opener) {
                             open_brackets.pop();
                         }
+                        current_op = None;
                     }
                     b',' => {
                         if let Some(bracket) = open_brackets.last_mut() {
                             bracket.commas += 1;
                         }
+                        current_op = None;
                     }
+                    _ if byte.is_ascii_alphanumeric() || byte == b'_' => {
+                        // The start of an identifier run: the first one after
+                        // an operator is its callee, so it keeps the operator
+                        // alive; a second (e.g. `and`/`or`, or an unrelated
+                        // name) means the callee was never called and the
+                        // operator does not belong to whatever comes next.
+                        let word_start = i == 0
+                            || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+                        if word_start && current_op.is_some() {
+                            if op_callee_seen {
+                                current_op = None;
+                            } else {
+                                op_callee_seen = true;
+                            }
+                        }
+                    }
+                    _ if !byte.is_ascii_whitespace() => current_op = None,
                     _ => {}
                 }
                 if !byte.is_ascii_whitespace() {

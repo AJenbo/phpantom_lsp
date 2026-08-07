@@ -185,6 +185,51 @@ fn test_a_comment_before_the_argument_list_is_skipped() {
     assert_eq!(ctx.subject, "$q");
 }
 
+/// A comment between the receiver and the operator does not hide it either,
+/// since the operator's boundary comes from the scan rather than a raw
+/// backwards text walk.
+#[test]
+fn test_a_comment_before_the_arrow_does_not_hide_the_receiver() {
+    let content = "<?php\n$q /* the query */ ->where('";
+    let ctx = detect_eloquent_string_context(content, at_end(content))
+        .expect("the comment does not hide the receiver");
+    assert_eq!(ctx.kind, EloquentStringKind::Column);
+    assert_eq!(ctx.subject, "$q");
+    assert!(!ctx.is_static);
+}
+
+#[test]
+fn test_a_comment_before_the_double_colon_does_not_hide_the_receiver() {
+    let content = "<?php\nUser /* the model */ ::with('";
+    let ctx = detect_eloquent_string_context(content, at_end(content))
+        .expect("the comment does not hide the receiver");
+    assert_eq!(ctx.kind, EloquentStringKind::Relation);
+    assert_eq!(ctx.subject, "User");
+    assert!(ctx.is_static);
+}
+
+/// A word between the receiver's operator and an unrelated call (`and`/`or`,
+/// or any other identifier) must not be mistaken for that operator's callee.
+#[test]
+fn test_an_unrelated_call_after_a_receiver_chain_has_no_subject() {
+    let content = "<?php\nif ($a->foo and bar('";
+    let ctx = detect_string_call_context(content, at_end(content)).expect("a bar() call");
+    assert_eq!(ctx.method_name, "bar");
+    assert!(ctx.subject.is_none());
+    assert!(!ctx.is_static);
+}
+
+/// A comma of a plain call argument list to the operator's left resets the
+/// pending operator, so a later bare call in the same list is not credited
+/// with an earlier argument's receiver.
+#[test]
+fn test_a_bare_call_after_a_receiver_argument_has_no_subject() {
+    let content = "<?php\nfoo($a->bar, baz('";
+    let ctx = detect_string_call_context(content, at_end(content)).expect("a baz() call");
+    assert_eq!(ctx.method_name, "baz");
+    assert!(ctx.subject.is_none());
+}
+
 /// A comma of a nested array belongs to that array, so an element of it is
 /// still part of the argument the array is.
 #[test]

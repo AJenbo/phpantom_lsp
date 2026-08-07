@@ -7,27 +7,31 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B27. A comment before the arrow hides a string-argument call's receiver
+#### B28. A comment before the arrow hides a request field's receiver via the `safe()` hop
 
-**Impact: Low · Effort: Low-Medium**
+**Impact: Low · Effort: Low**
 
-`detect_string_call_context` (`src/completion/eloquent_string.rs`) takes
-the call's opening paren, its argument index, and the code before its
-callee from the forward lexical scan, so a comment is no longer read as
-code around any of those. The *receiver* is still recovered by
-`extract_subject_backwards` walking raw source right to left, which stops
-at the first byte that cannot continue an identifier. A comment between
-the receiver and the operator therefore ends the walk and the completion
-drops out:
+`detect_request_field_context` (`src/virtual_members/laravel/request_fields.rs`)
+recovers the receiver of `$request->input('|')` (and the `->safe()->only(['|'])`
+hop-through) with its own backwards text walk — `strip_trailing_ident`,
+`strip_arrow`, `strip_safe_call`, `trailing_variable` — over
+`content[..call.code_before_call]`, independently of
+`detect_string_call_context`'s own receiver extraction (fixed for the same
+class of bug by using `OpenBracket::callee_operator` from the forward scan,
+see the `A comment no longer hides a string-argument call's receiver`
+changelog entry). A comment between the receiver and `->` still ends this
+walk early:
 
 ```php
-$q /* the query */ ->where('|');   // no completion
-User /* the model */ ::with('|');  // no completion
+$request /* the request */ ->input('|');  // no completion
 ```
 
-**Where to look:** the callee is read from `OpenBracket::code_before`
-(`src/completion/source/code_context.rs`), which the forward scan records
-as the end of the code before the bracket. The receiver wants the same
-thing two tokens earlier — a code-before offset for the boundary in front
-of the callee and in front of the `->` / `::` — recorded by that scan
-rather than recovered from the text afterwards.
+**Where to look:** `strip_arrow` needs the same fix `detect_string_call_context`
+got — a code-before boundary from the scan rather than a raw trailing-comment
+trim. `call.callee_operator` already gives the boundary for the *last* `->`
+before the callee; the `safe()` hop needs a second one further back (the
+`->` before `safe`), which is not currently exposed since `OpenBracket` only
+records the operator immediately before its own callee. Extending the scan
+to expose that (e.g. a small chain of recent operators, not just the last
+one) would let both `strip_arrow` and `strip_safe_call` read comment-free
+boundaries instead of walking raw text.
