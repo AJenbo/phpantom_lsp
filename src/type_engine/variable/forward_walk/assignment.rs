@@ -174,110 +174,46 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     match expr {
-        Expression::Call(Call::Function(fc)) => {
-            let Some(func_name) = (match fc.function {
-                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                _ => None,
-            }) else {
-                return;
-            };
+        Expression::Call(call) => {
+            // The receiver runs before the arguments, and a chained call
+            // (`$db->connect()->transaction(...)`) hides closure arguments
+            // inside its receiver expression, so recurse into it first.
+            match call {
+                Call::Method(mc) => process_by_ref_closure_captures(mc.object, scope, ctx),
+                Call::NullSafeMethod(mc) => process_by_ref_closure_captures(mc.object, scope, ctx),
+                _ => {}
+            }
 
+            // `(function () use (&$x) { ... })()` runs the closure right
+            // here, so its final variable state replaces the outer one.
+            if let Call::Function(fc) = call
+                && let Expression::Closure(closure) = unwrap_parens(fc.function)
+            {
+                process_by_ref_closure_capture(closure, scope, ctx, true);
+            }
+
+            let args = match call {
+                Call::Function(fc) => &fc.argument_list,
+                Call::Method(mc) => &mc.argument_list,
+                Call::NullSafeMethod(mc) => &mc.argument_list,
+                Call::StaticMethod(sc) => &sc.argument_list,
+            };
             let mut next_positional = 0usize;
-            for arg in fc.argument_list.arguments.iter() {
+            for arg in args.arguments.iter() {
                 let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && function_invokes_callable_arg_immediately(&func_name, &selector, ctx)
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
+                if let Expression::Closure(closure) = arg_expr {
+                    let certain = call_invokes_arg_immediately(call, &selector, scope, ctx);
+                    process_by_ref_closure_capture(closure, scope, ctx, certain);
+                } else {
+                    process_by_ref_closure_captures(arg_expr, scope, ctx);
                 }
             }
         }
-        Expression::Call(Call::Method(mc)) => {
-            let Some(method_name) = (match &mc.method {
-                ClassLikeMemberSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
-                }
-                _ => None,
-            }) else {
-                return;
-            };
-            let receiver_names = receiver_class_names(mc.object, scope, ctx);
-            if receiver_names.is_empty() {
-                return;
-            }
-
-            let mut next_positional = 0usize;
-            for arg in mc.argument_list.arguments.iter() {
-                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && method_invokes_callable_arg_immediately(
-                        &receiver_names,
-                        &method_name,
-                        &selector,
-                        ctx,
-                    )
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
-                }
-            }
-        }
-        Expression::Call(Call::NullSafeMethod(mc)) => {
-            let Some(method_name) = (match &mc.method {
-                ClassLikeMemberSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
-                }
-                _ => None,
-            }) else {
-                return;
-            };
-            let receiver_names = receiver_class_names(mc.object, scope, ctx);
-            if receiver_names.is_empty() {
-                return;
-            }
-
-            let mut next_positional = 0usize;
-            for arg in mc.argument_list.arguments.iter() {
-                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && method_invokes_callable_arg_immediately(
-                        &receiver_names,
-                        &method_name,
-                        &selector,
-                        ctx,
-                    )
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
-                }
-            }
-        }
-        Expression::Call(Call::StaticMethod(sc)) => {
-            let Some(method_name) = (match &sc.method {
-                ClassLikeMemberSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
-                }
-                _ => None,
-            }) else {
-                return;
-            };
-            let receiver_names = static_receiver_class_names(sc.class, ctx);
-            if receiver_names.is_empty() {
-                return;
-            }
-
-            let mut next_positional = 0usize;
-            for arg in sc.argument_list.arguments.iter() {
-                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
-                if let Expression::Closure(closure) = arg_expr
-                    && method_invokes_callable_arg_immediately(
-                        &receiver_names,
-                        &method_name,
-                        &selector,
-                        ctx,
-                    )
-                {
-                    process_by_ref_closure_capture(closure, scope, ctx);
-                }
-            }
+        // A closure that is defined but not provably invoked (stored in a
+        // variable, passed somewhere opaque) may still run any time later,
+        // so the types it assigns are unioned into the captured variables.
+        Expression::Closure(closure) => {
+            process_by_ref_closure_capture(closure, scope, ctx, false);
         }
         Expression::Parenthesized(inner) => {
             process_by_ref_closure_captures(inner.expression, scope, ctx);
@@ -286,6 +222,71 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             process_by_ref_closure_captures(assignment.rhs, scope, ctx);
         }
         _ => {}
+    }
+}
+
+/// Whether a call provably invokes its callable argument before
+/// returning, so a by-ref capture's final state can *replace* the outer
+/// variable rather than widen it.
+///
+/// Follows PHPStan's defaults: function callable parameters are
+/// immediate unless tagged `@param-later-invoked-callable`; method
+/// callable parameters are later-invoked unless tagged
+/// `@param-immediately-invoked-callable`.  An unresolvable callee or
+/// receiver is not proof either way, so it answers `false` and the
+/// caller falls back to widening.
+fn call_invokes_arg_immediately(
+    call: &Call<'_>,
+    selector: &ArgSelector,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    match call {
+        Call::Function(fc) => {
+            let Expression::Identifier(ident) = fc.function else {
+                return false;
+            };
+            function_invokes_callable_arg_immediately(bytes_to_str(ident.value()), selector, ctx)
+        }
+        Call::Method(mc) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+                return false;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            !receiver_names.is_empty()
+                && method_invokes_callable_arg_immediately(
+                    &receiver_names,
+                    bytes_to_str(ident.value),
+                    selector,
+                    ctx,
+                )
+        }
+        Call::NullSafeMethod(mc) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+                return false;
+            };
+            let receiver_names = receiver_class_names(mc.object, scope, ctx);
+            !receiver_names.is_empty()
+                && method_invokes_callable_arg_immediately(
+                    &receiver_names,
+                    bytes_to_str(ident.value),
+                    selector,
+                    ctx,
+                )
+        }
+        Call::StaticMethod(sc) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return false;
+            };
+            let receiver_names = static_receiver_class_names(sc.class, ctx);
+            !receiver_names.is_empty()
+                && method_invokes_callable_arg_immediately(
+                    &receiver_names,
+                    bytes_to_str(ident.value),
+                    selector,
+                    ctx,
+                )
+        }
     }
 }
 
@@ -531,10 +532,20 @@ pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Optio
     Some(&before[doc_start..doc_end])
 }
 
+/// Walk a closure body and propagate the types it assigns to `use (&$x)`
+/// captures back into the outer scope.
+///
+/// `invoked_immediately` decides how: when the closure provably runs
+/// before the call returns, the closure's final state *replaces* the
+/// outer variable; otherwise the closure may run zero or more times at
+/// any later point, so the assigned types are *unioned* with the outer
+/// types (mirroring PHPStan, which widens by-ref captures even for
+/// closures that are merely defined).
 pub(crate) fn process_by_ref_closure_capture<'b>(
     closure: &'b Closure<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
+    invoked_immediately: bool,
 ) {
     let captured: Vec<String> = closure
         .use_clause
@@ -591,7 +602,13 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
         scope.invalidate_assertions(&var_name);
         let types = closure_scope.get(&var_name).to_vec();
         if !types.is_empty() {
-            scope.set(&var_name, types);
+            if invoked_immediately {
+                scope.set(&var_name, types);
+            } else {
+                let mut combined = scope.get(&var_name).to_vec();
+                ResolvedType::extend_unique(&mut combined, types);
+                scope.set(&var_name, combined);
+            }
         } else if closure_scope.contains(&var_name) {
             scope.set_empty(&var_name);
         }
