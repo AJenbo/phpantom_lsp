@@ -494,6 +494,23 @@ mod tests {
         );
     }
 
+    /// `isset($x) &&`/`!isset($x) ||` guards the rest of the same
+    /// short-circuit chain, a pattern that shows up constantly in
+    /// `@if` conditions.
+    #[tokio::test]
+    async fn test_isset_guards_short_circuit_chain_in_if_directive() {
+        let body = "@if (isset($isOutlet) && $isOutlet == 1)\nyes\n@endif\n@if (!isset($stockGtr0) || $stockGtr0 == 'true')\nyes\n@endif\n";
+        let (backend, _dir, uri) = component_workspace("resources/views/page.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let undefined = undefined_variables(&backend, &uri).await;
+        assert!(
+            undefined.is_empty(),
+            "isset()/!isset() should guard the rest of the && / || chain: {:?}",
+            undefined
+        );
+    }
+
     async fn open_blade(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
         backend
             .did_open(DidOpenTextDocumentParams {

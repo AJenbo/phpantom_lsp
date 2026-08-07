@@ -172,22 +172,3 @@ return $isHtml ? $raw->toHtml() : 'x';   // type of '$raw' could not be resolved
 
 The boolean carries the assertion, so a truthy check on it should apply
 the same narrowing as the original expression.
-
-#### B52. `isset()` in a short-circuit condition does not mark the variable defined
-
-**Impact: Medium · Effort: Low-Medium**
-
-The right-hand side of `isset($x) &&` only evaluates when `$x` exists,
-and the right-hand side of `!isset($x) ||` likewise. Both still report
-the variable as undefined:
-
-```blade
-@if (isset($isOutlet) && $isOutlet == 1)          {{-- Undefined variable '$isOutlet' --}}
-@if (!isset($stockGtr0) || $stockGtr0 == 'true')  {{-- Undefined variable '$stockGtr0' --}}
-```
-
-4 diagnostics in one sample project. This is the definite-vs-possible
-existence question from
-[T29](type-inference.md#t29-definite-vs-possible-variable-existence-tracking),
-narrowed to the one shape that shows up constantly in templates.
-
