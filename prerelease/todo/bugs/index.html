@@ -926,17 +926,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b52-isset-in-a-short-circuit-condition-does-not-mark-the-variable-defined" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B52. <code>isset()</code> in a short-circuit condition does not mark the variable defined
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1503,17 +1492,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b52-isset-in-a-short-circuit-condition-does-not-mark-the-variable-defined" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B52. <code>isset()</code> in a short-circuit condition does not mark the variable defined
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1656,18 +1634,6 @@ result is assigned first:</p>
 </code></pre></div>
 <p>The boolean carries the assertion, so a truthy check on it should apply
 the same narrowing as the original expression.</p>
-<h4 id="b52-isset-in-a-short-circuit-condition-does-not-mark-the-variable-defined">B52. <code>isset()</code> in a short-circuit condition does not mark the variable defined<a class="headerlink" href="#b52-isset-in-a-short-circuit-condition-does-not-mark-the-variable-defined" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>The right-hand side of <code>isset($x) &amp;&amp;</code> only evaluates when <code>$x</code> exists,
-and the right-hand side of <code>!isset($x) ||</code> likewise. Both still report
-the variable as undefined:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>@if (isset($isOutlet) &amp;&amp; $isOutlet == 1)          {{-- Undefined variable &#39;$isOutlet&#39; --}}
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>@if (!isset($stockGtr0) || $stockGtr0 == &#39;true&#39;)  {{-- Undefined variable &#39;$stockGtr0&#39; --}}
-</code></pre></div>
-<p>4 diagnostics in one sample project. This is the definite-vs-possible
-existence question from
-<a href="../type-inference/#t29-definite-vs-possible-variable-existence-tracking">T29</a>,
-narrowed to the one shape that shows up constantly in templates.</p>
 
 
 
