@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786062812259,
+  "lastUpdate": 1786064067754,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -14347,6 +14347,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c91a2549541d334576e83aea2d7a11cfb3365c79",
+          "message": "A comment before the arrow or double colon no longer hides a\nstring-argument call's receiver",
+          "timestamp": "2026-08-07T02:38:06+02:00",
+          "tree_id": "3e5ef1159f15b97851d1142e30f1e4d2bf2308ec",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c91a2549541d334576e83aea2d7a11cfb3365c79"
+        },
+        "date": 1786064063439,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.8,
             "unit": "MiB"
           }
         ]
