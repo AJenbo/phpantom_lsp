@@ -66,6 +66,34 @@ pub(super) fn try_emit_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
+    emit_laravel_string_span(kind, false, argument_list, content, spans);
+}
+
+/// Emit the config-key span for a call on the config repository, marking
+/// `Config::set('…')` as a write: it declares the key it names, so the key
+/// need not exist in any `config/*.php` file.
+pub(super) fn try_emit_laravel_config_key_span(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    emit_laravel_string_span(
+        crate::symbol_map::LaravelStringKind::Config,
+        member_name.eq_ignore_ascii_case("set"),
+        argument_list,
+        content,
+        spans,
+    );
+}
+
+fn emit_laravel_string_span(
+    kind: crate::symbol_map::LaravelStringKind,
+    is_write: bool,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
     let Some(first_arg) = argument_list.arguments.iter().next() else {
         return;
     };
@@ -91,10 +119,22 @@ pub(super) fn try_emit_laravel_string_span(
         start: inner_start,
         end: inner_end,
         kind: SymbolKind::LaravelStringKey {
+            key: normalised_key(kind.clone(), key),
             kind,
-            key: key.to_string(),
+            is_write,
         },
     });
+}
+
+/// A view name is stored in its canonical dotted spelling so that the
+/// slash-separated form Laravel also accepts compares equal to it; every
+/// other kind is stored as written.
+fn normalised_key(kind: crate::symbol_map::LaravelStringKind, key: &str) -> String {
+    if kind == crate::symbol_map::LaravelStringKind::View {
+        crate::virtual_members::laravel::canonical_view_name(key).into_owned()
+    } else {
+        key.to_string()
+    }
 }
 
 /// The morph-map API on `Illuminate\Database\Eloquent\Relations\Relation`
@@ -203,6 +243,7 @@ fn push_morph_alias_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<S
         kind: SymbolKind::LaravelStringKey {
             kind: crate::symbol_map::LaravelStringKind::MorphAlias,
             key: alias.to_string(),
+            is_write: false,
         },
     });
 }
@@ -281,8 +322,9 @@ pub(super) fn try_emit_laravel_string_span_partial(
         start: inner_start,
         end: inner_end,
         kind: SymbolKind::LaravelStringKey {
+            key: normalised_key(kind.clone(), key),
             kind,
-            key: key.to_string(),
+            is_write: false,
         },
     });
 }

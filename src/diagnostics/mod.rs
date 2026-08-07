@@ -552,7 +552,17 @@ impl Backend {
                 .spans
                 .iter()
                 .filter_map(|span| {
-                    if let SymbolKind::LaravelStringKey { kind, key } = &span.kind {
+                    if let SymbolKind::LaravelStringKey {
+                        kind,
+                        key,
+                        is_write,
+                    } = &span.kind
+                    {
+                        // A write declares the key it names, so there is
+                        // nothing to check it against.
+                        if *is_write {
+                            return None;
+                        }
                         match kind {
                             LaravelStringKind::Route => has_route = true,
                             LaravelStringKind::Config => has_config = true,
@@ -578,11 +588,11 @@ impl Backend {
         // Enumerate valid keys once per kind (lazy), using the cached
         // enumerations.  Safe to call now that the `symbol_maps` read
         // lock has been released.
+        let mut project_registers_routes = false;
         let route_keys: HashSet<String> = if has_route {
-            self.cached_routes()
-                .iter()
-                .map(|route| route.name.clone())
-                .collect()
+            let routes = self.cached_routes();
+            project_registers_routes = routes.iter().any(|route| !route.from_vendor);
+            routes.iter().map(|route| route.name.clone()).collect()
         } else {
             HashSet::new()
         };
@@ -591,6 +601,14 @@ impl Backend {
         } else {
             HashSet::new()
         };
+        // The config files we managed to enumerate keys from, by name.  A
+        // key whose root segment names none of them lives in a file we
+        // cannot see (a library whose config is supplied by the host
+        // application), so nothing about it is knowable.
+        let config_roots: HashSet<&str> = config_keys
+            .iter()
+            .map(|key| key.split('.').next().unwrap_or(key.as_str()))
+            .collect();
         let view_keys: HashSet<String> = if has_view {
             self.cached_view_names().into_iter().collect()
         } else {
@@ -626,16 +644,25 @@ impl Backend {
         for (kind, key, start, end) in &key_spans {
             let (valid, label, code) = match kind {
                 LaravelStringKind::Route => {
-                    // When no route sources were found at all (a package with
-                    // no routes of its own, whose names are registered by the
-                    // host application), the valid set is unknown, not empty.
-                    // Skip the check entirely, exactly as the trans arm does.
-                    if route_keys.is_empty() {
+                    // A package with no routes of its own, whose names are
+                    // registered by the host application, cannot be judged:
+                    // the valid set is unknown, not empty.  Installed
+                    // packages register routes of their own, so the question
+                    // is whether *this project* contributed any, not whether
+                    // the set is empty.
+                    if !project_registers_routes {
                         continue;
                     }
                     (route_keys.contains(key), "route", "invalid_laravel_route")
                 }
                 LaravelStringKind::Config => {
+                    // Only judge a key whose config file we actually read.
+                    // An unknown root means the file never reached us, so
+                    // the key cannot be wrong as far as we can tell, while
+                    // a typo inside a file we did read is still caught.
+                    if !config_roots.contains(key.split('.').next().unwrap_or(key.as_str())) {
+                        continue;
+                    }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
                     // which are valid even without a direct match.
                     let valid = config_keys.contains(key)

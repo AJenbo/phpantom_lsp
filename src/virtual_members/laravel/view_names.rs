@@ -2,12 +2,37 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
 
+/// The canonical spelling of a view name.
+///
+/// Laravel's `FileViewFinder` turns `.` into a directory separator and
+/// leaves `/` alone, so `partials/card`, `partials.card` and
+/// `/partials/card` all name one template.  Canonicalising to the dotted
+/// form means every consumer (diagnostics, references, go-to-definition,
+/// Blade call-site inference) compares the same spelling.
+pub(crate) fn canonical_view_name(name: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+
+    let (namespace, view) = match name.split_once("::") {
+        Some((namespace, view)) => (Some(namespace), view),
+        None => (None, name),
+    };
+    if !view.contains('/') && !view.starts_with('.') {
+        return Cow::Borrowed(name);
+    }
+    let normalised = view.trim_start_matches(['/', '.']).replace('/', ".");
+    Cow::Owned(match namespace {
+        Some(namespace) => format!("{namespace}::{normalised}"),
+        None => normalised,
+    })
+}
+
 /// Resolve `view('name')` or `View::make('name')` to the corresponding blade templates.
 ///
 /// Converts dot-notation to a file path under `resources/views/`:
 /// `'components.button'` → `resources/views/components/button.blade.php`
 pub(crate) fn resolve_view_definitions(backend: &Backend, name: &str) -> Vec<Location> {
     let mut results = Vec::new();
+    let name = &*canonical_view_name(name);
 
     if let Some((namespace, view_name)) = name.split_once("::") {
         let rel = view_name.replace('.', "/");

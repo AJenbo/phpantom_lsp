@@ -296,6 +296,10 @@ pub(crate) enum SymbolKind {
         kind: LaravelStringKind,
         /// The key value, e.g. `"app.name"` or `"users.index"`.
         key: String,
+        /// Whether the call *defines* the key rather than reading it, as
+        /// `Config::set('services.acme.token', …)` does.  A write is a
+        /// declaration site: it may name a key that exists nowhere else.
+        is_write: bool,
     },
 
     /// The string-literal name argument inside a Laravel `::macro('name', ...)`

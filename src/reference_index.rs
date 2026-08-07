@@ -327,7 +327,7 @@ impl Backend {
                     is_static: *is_static,
                 }]
             }
-            SymbolKind::LaravelStringKey { kind, key } => {
+            SymbolKind::LaravelStringKey { kind, key, .. } => {
                 vec![ReferenceIndexKey::LaravelString {
                     kind: kind.clone(),
                     key: key.to_string(),

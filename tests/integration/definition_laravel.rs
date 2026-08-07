@@ -3515,6 +3515,92 @@ class Service {
 }
 
 #[tokio::test]
+async fn test_view_name_with_slash_separators_resolves() {
+    // Laravel's view finder treats `/` and `.` as the same separator, and a
+    // leading slash just produces a harmless double separator, so all three
+    // spellings name the one template.
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        view('redirects/create');
+        view('/redirects/create');
+        view('redirects.create');
+        view('redirects/missing');
+    }
+}
+";
+    let blade = "<!-- Create redirect -->";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("resources/views/redirects/create.blade.php", blade),
+    ]);
+
+    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: service_php.to_string(),
+            },
+        })
+        .await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), service_php, &mut diags);
+
+    let messages: Vec<&String> = diags
+        .iter()
+        .filter(
+            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_view"),
+        )
+        .map(|d| &d.message)
+        .collect();
+
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the missing view should be flagged, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("redirects.missing"),
+        "the flagged view should be the missing one, got: {}",
+        messages[0]
+    );
+
+    // Cursor on `redirects/create` in the leading-slash spelling.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        5,
+        20,
+    )
+    .await
+    .expect("view('/redirects/create') should resolve to the template");
+    let target = match result {
+        GotoDefinitionResponse::Scalar(location) => location.uri,
+        GotoDefinitionResponse::Array(locations) => {
+            locations.first().expect("no location returned").uri.clone()
+        }
+        other => panic!("expected a definition location, got: {other:?}"),
+    };
+    assert!(
+        target
+            .to_file_path()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with("/resources/views/redirects/create.blade.php"),
+        "Should jump to the template, got: {target}"
+    );
+}
+
+#[tokio::test]
 async fn test_goto_definition_laravel_view_facade() {
     let service_php = "\
 <?php

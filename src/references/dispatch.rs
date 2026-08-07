@@ -336,7 +336,7 @@ impl Backend {
 
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
 
-            SymbolKind::LaravelStringKey { kind, key } => {
+            SymbolKind::LaravelStringKey { kind, key, .. } => {
                 let snapshot = if include_declaration
                     && matches!(kind, crate::symbol_map::LaravelStringKind::Config)
                 {

@@ -112,6 +112,7 @@ impl Backend {
                     SymbolKind::LaravelStringKey {
                         kind: LaravelStringKind::View,
                         key,
+                        ..
                     } if view_names.iter().any(|n| n == key) => Some(span.start),
                     _ => None,
                 })
@@ -265,6 +266,7 @@ impl Backend {
                 SymbolKind::LaravelStringKey {
                     kind: LaravelStringKind::View,
                     key,
+                    ..
                 } => Some(key.as_str()),
                 _ => None,
             })

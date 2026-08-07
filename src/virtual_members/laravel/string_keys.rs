@@ -138,6 +138,7 @@ fn find_string_key_usages(
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
                 key: span_key,
+                ..
             } = &span.kind
             {
                 span_kind == kind && span_key == key
@@ -160,6 +161,7 @@ fn find_string_key_usages(
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
                 key: span_key,
+                ..
             } = &span.kind
                 && span_kind == kind
                 && span_key == key

@@ -288,6 +288,7 @@ pub(crate) fn find_all_config_references(
             if let SymbolKind::LaravelStringKey {
                 kind: crate::symbol_map::LaravelStringKind::Config,
                 key,
+                ..
             } = &span.kind
                 && key == target_key
             {

@@ -197,7 +197,12 @@ fn range_matches(content: &str, range: Range, expected: &Expected) -> bool {
         }
         Expected::Name => is_name_token(text),
         Expected::Key(key) => {
-            text.eq_ignore_ascii_case(key) || key.split(['.', '/']).any(|segment| segment == text)
+            // A view name is stored in its canonical dotted spelling, so
+            // the source may still read `partials/card` for `partials.card`.
+            text.eq_ignore_ascii_case(key)
+                || crate::virtual_members::laravel::canonical_view_name(text)
+                    .eq_ignore_ascii_case(key)
+                || key.split(['.', '/']).any(|segment| segment == text)
         }
     }
 }

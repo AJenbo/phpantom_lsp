@@ -474,7 +474,9 @@ impl Backend {
                 }
             }
 
-            SymbolKind::LaravelStringKey { kind, key } => self.hover_laravel_string_key(kind, key),
+            SymbolKind::LaravelStringKey { kind, key, .. } => {
+                self.hover_laravel_string_key(kind, key)
+            }
 
             SymbolKind::CommandOwnParam { name, is_option } => {
                 hover_command_own_param(content, cursor_offset as usize, name, *is_option)

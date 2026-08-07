@@ -64,9 +64,10 @@ class AuthRouteMethods {
 
 const WEB_ROUTES: &str = "\
 <?php
+use Illuminate\\Support\\Facades\\Auth;
 use Illuminate\\Support\\Facades\\Route;
 
-Route::auth();
+Auth::routes();
 
 Route::name('admin.')->prefix('admin')->group(function (): void {
     Route::auth();

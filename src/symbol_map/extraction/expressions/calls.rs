@@ -174,8 +174,8 @@ fn extract_call<'a>(
                     );
                 }
                 if is_laravel_config_repository_call(method_call.object, &member_name) {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Config,
+                    try_emit_laravel_config_key_span(
+                        &member_name,
                         &method_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
@@ -282,8 +282,8 @@ fn extract_call<'a>(
             if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
                 let member_name = crate::atom::atom_bytes(ident.value);
                 if is_laravel_config_repository_call(method_call.object, &member_name) {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Config,
+                    try_emit_laravel_config_key_span(
+                        &member_name,
                         &method_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
@@ -360,8 +360,8 @@ fn extract_call<'a>(
                     || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config"))
                     && is_config_repository_method(&member_name)
                 {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::Config,
+                    try_emit_laravel_config_key_span(
+                        &member_name,
                         &static_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,

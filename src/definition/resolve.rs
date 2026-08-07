@@ -388,7 +388,7 @@ impl Backend {
                     .map(|loc| vec![loc])
             }
 
-            SymbolKind::LaravelStringKey { kind, key } => {
+            SymbolKind::LaravelStringKey { kind, key, .. } => {
                 let locs = laravel::resolve_laravel_string_key(self, kind, key);
                 if locs.is_empty() { None } else { Some(locs) }
             }
