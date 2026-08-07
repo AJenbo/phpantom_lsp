@@ -141,6 +141,7 @@ mod laravel_route_discovery;
 mod laravel_route_macros;
 mod laravel_route_ownership;
 mod laravel_route_params;
+mod laravel_trans_loader;
 mod laravel_validated_shape;
 mod lsp_concurrency;
 mod parser;

@@ -7,28 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B41. Translation-key diagnostics fire when the app replaces the translation loader
-
-**Impact: Medium-High · Effort: Low-Medium**
-
-The Trans arm skips the check when no translation files were found, but
-an application that keeps its strings in the database still has
-`vendor/`'s own `lang/` files on disk, so the set is non-empty and every
-application key is reported as unknown.
-
-```php
-$this->app->singleton('translation.loader', fn ($app) => new DatabaseTranslationLoader(
-    new FileLoader($app->make('files'), $app->make('path.lang')),
-));
-```
-
-28 diagnostics in one sample project, none of them real.
-
-**Fix:** when a service provider rebinds `translator` or
-`translation.loader` to something other than Laravel's own `FileLoader`,
-the valid-key set is unknowable — skip the check, the same way an
-unenforced morph map does.
-
 #### B43. `App::make()` / `App::makeWith()` with a class-string do not resolve
 
 **Impact: Medium-High · Effort: Low**

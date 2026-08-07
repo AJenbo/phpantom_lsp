@@ -18,6 +18,11 @@ pub(crate) struct ProviderResources {
     pub view_dirs: Vec<ProviderResource>,
     pub trans_dirs: Vec<ProviderResource>,
     pub route_files: Vec<PathBuf>,
+    /// A provider rebound `translator` or `translation.loader` to something
+    /// other than Laravel's own file-based pair, so the strings come from a
+    /// source we cannot enumerate (a database table, say) and the set of
+    /// valid translation keys is unknowable.
+    pub custom_translation_loader: bool,
 }
 
 impl ProviderResources {
@@ -26,8 +31,29 @@ impl ProviderResources {
         self.view_dirs.extend(other.view_dirs);
         self.trans_dirs.extend(other.trans_dirs);
         self.route_files.extend(other.route_files);
+        self.custom_translation_loader |= other.custom_translation_loader;
     }
 }
+
+/// Container keys whose binding decides where translation strings come from.
+const TRANSLATION_BINDINGS: [&str; 2] = ["translator", "translation.loader"];
+
+/// The classes Laravel's own `TranslationServiceProvider` binds those keys
+/// to.  A factory that builds anything else reads its lines from somewhere
+/// other than the `lang/` directories we scan.
+const FILE_TRANSLATION_CLASSES: [&str; 2] = ["FileLoader", "Translator"];
+
+/// Container methods that put a new value behind a key.
+const BINDING_METHODS: &[&[u8]] = &[
+    b"bind",
+    b"bindif",
+    b"singleton",
+    b"singletonif",
+    b"scoped",
+    b"scopedif",
+    b"instance",
+    b"extend",
+];
 
 pub(crate) fn extract_provider_resources(
     content: &str,
@@ -88,6 +114,27 @@ pub(crate) fn extract_provider_resources(
             )
         {
             grouped_route_files.push(path);
+            return ControlFlow::Continue(());
+        }
+
+        // `$this->app->singleton('translation.loader', …)` and friends decide
+        // where translation lines come from, and the container is reached
+        // through `$this->app`, not `$this`, so this is checked ahead of the
+        // `$this->…` resource loaders below.
+        if BINDING_METHODS.contains(&method_lower.as_slice())
+            && is_app_container_expr(mc.object)
+            && let Some(key_arg) = mc.argument_list.arguments.iter().next()
+            && let Some((key, _, _)) =
+                super::helpers::extract_string_literal(key_arg.value(), content)
+            && TRANSLATION_BINDINGS.contains(&key)
+        {
+            let factory = mc.argument_list.arguments.iter().nth(1).map(|a| a.value());
+            // `extend` decorates whatever is already bound, so even a
+            // file-based wrapper adds lines from somewhere else.
+            if method_lower != b"extend" && builds_file_translator(factory) {
+                return ControlFlow::Continue(());
+            }
+            resources.custom_translation_loader = true;
             return ControlFlow::Continue(());
         }
 
@@ -164,6 +211,87 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
         expr,
         Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
     )
+}
+
+/// Whether `expr` names the service container: `$this->app` in a provider
+/// method, the `$app` a deferred callback receives, or the `app()` helper.
+fn is_app_container_expr(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => dv.name == b"$app",
+        Expression::Access(Access::Property(pa)) => {
+            is_this_expr(pa.object)
+                && matches!(
+                    &pa.property,
+                    ClassLikeMemberSelector::Identifier(ident)
+                        if ident.value.eq_ignore_ascii_case(b"app")
+                )
+        }
+        Expression::Call(Call::Function(fc)) => {
+            matches!(fc.function, Expression::Identifier(id)
+                if id.value()
+                    .rsplit(|&b| b == b'\\')
+                    .next()
+                    .is_some_and(|seg| seg.eq_ignore_ascii_case(b"app")))
+                && fc.argument_list.arguments.is_empty()
+        }
+        _ => false,
+    }
+}
+
+/// Whether a translation binding's factory builds Laravel's own file-based
+/// translator, i.e. every class it names is one of `FILE_TRANSLATION_CLASSES`.
+///
+/// A factory that reaches for anything else has moved the lines out of the
+/// `lang/` directories, and one that names no class at all (a container
+/// lookup, a variable) says nothing either way, which is equally unknowable.
+fn builds_file_translator(factory: Option<&Expression<'_>>) -> bool {
+    let Some(factory) = factory else {
+        return false;
+    };
+
+    let mut named_any = false;
+    let mut all_file_based = true;
+    super::helpers::walk_expression_tree(factory, &mut |expr| {
+        if let Some(name) = instantiated_or_class_string(expr) {
+            named_any = true;
+            if !FILE_TRANSLATION_CLASSES
+                .iter()
+                .any(|known| crate::util::short_name(name).eq_ignore_ascii_case(known))
+            {
+                all_file_based = false;
+                return ControlFlow::Break(());
+            }
+        }
+        ControlFlow::Continue(())
+    });
+
+    named_any && all_file_based
+}
+
+/// The class an expression names, either by instantiating it (`new X(…)`) or
+/// by referring to it as a string (`X::class`).
+///
+/// An empty name means the expression names a class that is only known at
+/// runtime (`new $loaderClass`), which no more resolves to Laravel's own
+/// loader than an explicit replacement does.
+fn instantiated_or_class_string<'arena>(expr: &Expression<'arena>) -> Option<&'arena str> {
+    let class = match expr {
+        Expression::Instantiation(inst) => inst.class,
+        Expression::Access(Access::ClassConstant(access))
+            if matches!(
+                &access.constant,
+                ClassLikeConstantSelector::Identifier(constant)
+                    if constant.value.eq_ignore_ascii_case(b"class")
+            ) =>
+        {
+            access.class
+        }
+        _ => return None,
+    };
+    match class {
+        Expression::Identifier(id) => Some(crate::atom::bytes_to_str(id.value())),
+        _ => Some(""),
+    }
 }
 
 /// Resolve an expression that names a file to the path it points at.
@@ -373,6 +501,115 @@ mod tests {
             Path::new("/ws/vendor/livewire/livewire/src").join("../config/livewire.php")
         );
         assert_eq!(resources.config_files[0].namespace, "livewire");
+    }
+
+    #[test]
+    fn detects_a_database_backed_translation_loader() {
+        // An application that keeps its strings in a database still builds a
+        // FileLoader to hand to its own loader, so the decision has to follow
+        // what the factory *returns*, not merely which classes it mentions.
+        let content = "<?php\n\
+            class TranslationServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('translation.loader', function ($app) {\n\
+                        $fileLoader = new FileLoader($app->make('files'), $app->make('path.lang'));\n\
+                        return new DatabaseTranslationLoader($fileLoader);\n\
+                    });\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/src/TranslationServiceProvider.php"),
+            Path::new("/ws"),
+        );
+        assert!(resources.custom_translation_loader);
+    }
+
+    #[test]
+    fn detects_a_replaced_translator() {
+        let content = "<?php\n\
+            class TranslationServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('translator', fn ($app) => new DatabaseTranslator(\n\
+                        $app->make('translation.loader'),\n\
+                        $app->getLocale(),\n\
+                    ));\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/src/TranslationServiceProvider.php"),
+            Path::new("/ws"),
+        );
+        assert!(resources.custom_translation_loader);
+    }
+
+    #[test]
+    fn laravels_own_translation_bindings_are_not_a_replacement() {
+        // Laravel's own TranslationServiceProvider is itself scanned when the
+        // project lists the framework providers in `config/app.php`.  Reading
+        // its bindings as a replacement would silence translation diagnostics
+        // for every Laravel project.
+        let content = "<?php\n\
+            class TranslationServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('translator', function ($app) {\n\
+                        $loader = $app['translation.loader'];\n\
+                        $trans = new Translator($loader, $app->getLocale());\n\
+                        $trans->setFallback($app->getFallbackLocale());\n\
+                        return $trans;\n\
+                    });\n\
+                    $this->registerLoader();\n\
+                }\n\
+                protected function registerLoader(): void {\n\
+                    $this->app->singleton('translation.loader', function ($app) {\n\
+                        return new FileLoader($app['files'], [__DIR__.'/lang', $app['path.lang']]);\n\
+                    });\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new(
+                "/ws/vendor/laravel/framework/src/Illuminate/Translation/TranslationServiceProvider.php",
+            ),
+            Path::new("/ws"),
+        );
+        assert!(!resources.custom_translation_loader);
+    }
+
+    #[test]
+    fn a_decorated_translation_loader_counts_as_a_replacement() {
+        // `extend` wraps whatever is already bound, so the lines it serves are
+        // not limited to the ones on disk even when the wrapper is file-based.
+        let content = "<?php\n\
+            class CacheTranslationServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->extend('translation.loader', fn ($loader) => new FileLoader($loader));\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/src/CacheTranslationServiceProvider.php"),
+            Path::new("/ws"),
+        );
+        assert!(resources.custom_translation_loader);
+    }
+
+    #[test]
+    fn unrelated_container_bindings_are_ignored() {
+        let content = "<?php\n\
+            class AppServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', fn () => new HubAdapter());\n\
+                    $this->app->bind(Contract::class, Implementation::class);\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/src/AppServiceProvider.php"),
+            Path::new("/ws"),
+        );
+        assert!(!resources.custom_translation_loader);
     }
 
     #[test]
