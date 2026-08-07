@@ -626,6 +626,13 @@ impl Backend {
         for (kind, key, start, end) in &key_spans {
             let (valid, label, code) = match kind {
                 LaravelStringKind::Route => {
+                    // When no route sources were found at all (a package with
+                    // no routes of its own, whose names are registered by the
+                    // host application), the valid set is unknown, not empty.
+                    // Skip the check entirely, exactly as the trans arm does.
+                    if route_keys.is_empty() {
+                        continue;
+                    }
                     (route_keys.contains(key), "route", "invalid_laravel_route")
                 }
                 LaravelStringKind::Config => {

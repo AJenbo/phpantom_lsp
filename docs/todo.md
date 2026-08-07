@@ -108,7 +108,6 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B28 | [Route names built in a loop are reported as unknown](todo/bugs.md#b28-route-names-built-in-a-loop-are-reported-as-unknown)                                                  | Medium      | Medium      |
-| B30 | [A package with no route files flags every `route()` call](todo/bugs.md#b30-a-package-with-no-route-files-flags-every-route-call)                                            | Medium      | Low         |
 | B29 | [`Route::auth()` and other route macros register no names](todo/bugs.md#b29-routeauth-and-other-route-macros-register-no-names)                                              | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |

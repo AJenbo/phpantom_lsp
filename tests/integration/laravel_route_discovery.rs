@@ -133,6 +133,49 @@ async fn routes_outside_the_routes_directory_are_not_reported_as_unknown() {
     );
 }
 
+const PACKAGE_COMPOSER_JSON: &str = r#"{
+    "require": { "laravel/framework": "^11.0" },
+    "autoload": { "psr-4": { "Vendor\\Package\\": "src/" } }
+}"#;
+
+const PACKAGE_CONSUMER: &str = "\
+<?php
+namespace Vendor\\Package;
+class Widget {
+    public function link(): string {
+        return route('package.widgets.show');
+    }
+}
+";
+
+#[tokio::test]
+async fn a_package_with_no_route_files_does_not_flag_route_calls() {
+    let (backend, dir) = create_psr4_workspace(
+        PACKAGE_COMPOSER_JSON,
+        &[("src/Widget.php", PACKAGE_CONSUMER)],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Widget.php")).unwrap();
+    open(&backend, &uri, PACKAGE_CONSUMER).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), PACKAGE_CONSUMER, &mut diags);
+
+    let messages: Vec<&String> = diags
+        .iter()
+        .filter(
+            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
+        )
+        .map(|d| &d.message)
+        .collect();
+
+    assert!(
+        messages.is_empty(),
+        "a package with no route files of its own must not flag route() calls, got: {messages:?}"
+    );
+}
+
 #[tokio::test]
 async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
     let (backend, dir) = workspace();

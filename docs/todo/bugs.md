@@ -66,23 +66,3 @@ index and walking the registered closure's body — with the group prefix
 in force at the call site — would pick the names up the same way an
 inline `Route::group(…, function () { … })` is picked up. Note the macro
 body registers on `$this` (the router) rather than the `Route` facade.
-
-#### B30. A package with no route files flags every `route()` call
-
-**Impact: Medium · Effort: Low**
-
-A Laravel *package* (a composer library, not an application) has no route
-files of its own: the names it references are registered by the host
-application. Analysing such a package alone discovers zero routes, and
-because an empty enumeration is read as "these are all the routes that
-exist", every `route('…')` call in the package is reported as unknown.
-
-Zero discovered route sources means the valid set is *unknown*, not
-empty. The `Trans`, `Command`, and `MorphAlias` arms of
-`check_laravel_string_keys` (`src/diagnostics/mod.rs`) already draw that
-distinction; the `Route` arm does not.
-
-**Where to look:** `enumerate_all_routes` returning an empty list is not
-the same signal as "no route file declared this name". The route arm
-needs to know whether any route source was found at all, and skip the
-check when none was, exactly as the trans arm does.
