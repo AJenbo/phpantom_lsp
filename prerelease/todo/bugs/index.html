@@ -915,17 +915,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b51-an-instanceof-result-stored-in-a-variable-does-not-narrow" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B51. An <code>instanceof</code> result stored in a variable does not narrow
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1481,17 +1470,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b51-an-instanceof-result-stored-in-a-variable-does-not-narrow" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B51. An <code>instanceof</code> result stored in a variable does not narrow
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1624,16 +1602,6 @@ the declared <code>array</code>:</p>
 <p>3 diagnostics in one sample project. Related to
 <a href="../type-inference/#t25-call-site-template-argument-inference-for-callable-parameters">T25</a>,
 which covers the template side of the same call-site inference.</p>
-<h4 id="b51-an-instanceof-result-stored-in-a-variable-does-not-narrow">B51. An <code>instanceof</code> result stored in a variable does not narrow<a class="headerlink" href="#b51-an-instanceof-result-stored-in-a-variable-does-not-narrow" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Narrowing works on a direct <code>instanceof</code> condition but is lost when the
-result is assigned first:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$isHtml = $raw instanceof HtmlString;</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">return $isHtml ? $raw-&gt;toHtml() : &#39;x&#39;;   // type of &#39;$raw&#39; could not be resolved</span>
-</code></pre></div>
-<p>The boolean carries the assertion, so a truthy check on it should apply
-the same narrowing as the original expression.</p>
 
 
 
