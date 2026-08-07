@@ -117,12 +117,14 @@ pub(crate) struct StringCallContext {
     pub is_static: bool,
     pub arg_index: usize,
     pub string_content_start: usize,
-    /// Byte offset of the `(` that opens the call's argument list.
+    /// One past the last byte of code before the `(` that opens the call's
+    /// argument list.
     ///
     /// `subject` only captures a bare identifier or `$variable`; callers that
     /// need the full receiver expression (e.g. `$request->safe()`) re-read it
-    /// from the source text preceding this offset.
-    pub call_open_paren: usize,
+    /// from `&content[..code_before_call]`, which ends at code even when a
+    /// comment sits between the receiver and the paren.
+    pub code_before_call: usize,
 }
 
 /// Detect a string-inside-call context at the cursor position.
@@ -140,18 +142,19 @@ pub(crate) fn detect_string_call_context(
     let string_content_start = quote_pos + 1;
     let partial = content[string_content_start..cursor_offset].to_string();
 
-    // The code before the literal, with any comment between the call and the
-    // argument cut off, so `only([/* note */ '|'])` still reads as a key of the
-    // array.  It stays a prefix of `content`, so offsets into it carry over.
-    let trimmed = code.code_before;
-    let last_char = trimmed.as_bytes().last().copied()?;
+    // The literal has to open an argument, or an element of an argument's
+    // array, rather than continue an expression.  The last byte of code skips
+    // any comment before it, so `only([/* note */ '|'])` still reads as an
+    // element of the array.
+    let last_char = code.last_code_byte()?;
     if last_char != b'(' && last_char != b',' && last_char != b'[' {
         return None;
     }
 
-    let paren_pos = find_matching_open_paren(trimmed)?;
-    let arg_index = count_top_level_commas(&content[paren_pos + 1..quote_pos]);
-    let before_paren = content[..paren_pos].trim_end();
+    // The call is the innermost paren the scan left open, so a bracket or a
+    // comma inside a comment cannot move it or shift the argument index.
+    let call = code.enclosing_paren()?;
+    let before_paren = content.get(..call.code_before)?;
     let (method_name, before_method) = extract_identifier_backwards(before_paren)?;
 
     let before_method_trimmed = before_method.trim_end();
@@ -171,9 +174,9 @@ pub(crate) fn detect_string_call_context(
         method_name,
         subject,
         is_static,
-        arg_index,
+        arg_index: call.commas,
         string_content_start,
-        call_open_paren: paren_pos,
+        code_before_call: call.code_before,
     })
 }
 
@@ -223,45 +226,6 @@ pub(crate) fn detect_eloquent_string_context(
         is_static: ctx.is_static,
         string_content_start: ctx.string_content_start,
     })
-}
-
-/// How far back `find_matching_open_paren` will scan for the call's `(`.
-///
-/// Mid-edit or malformed source can leave an unbalanced `)`/`]` before the
-/// real opening paren, in which case the depth counter never returns to 0
-/// and an unbounded scan would run to the start of the file on every
-/// keystroke inside a string literal. A real argument list never spans
-/// anywhere near this much text.
-const MAX_OPEN_PAREN_SCAN: usize = 2000;
-
-/// Find the opening paren for the method call, scanning backwards.
-/// Handles the case where we might be past a comma (second+ argument).
-fn find_matching_open_paren(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let floor = bytes.len().saturating_sub(MAX_OPEN_PAREN_SCAN);
-    let mut depth = 0i32;
-    let mut i = bytes.len();
-    while i > floor {
-        i -= 1;
-        match bytes[i] {
-            b')' | b']' => depth += 1,
-            b'(' => {
-                if depth == 0 {
-                    return Some(i);
-                }
-                depth -= 1;
-            }
-            b'[' => {
-                if depth == 0 {
-                    // We hit an array bracket — keep scanning for the paren.
-                    continue;
-                }
-                depth -= 1;
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Extract an identifier (method name) scanning backwards from the end of `text`.
@@ -638,42 +602,6 @@ fn extract_model_property_from_generic_args(ty: &PhpType) -> Option<String> {
         }
     }
     None
-}
-
-/// Count commas at the top level (not inside nested parens, brackets,
-/// or string literals) to determine the argument index.
-fn count_top_level_commas(text: &str) -> usize {
-    let mut count = 0;
-    let mut paren_depth = 0i32;
-    let mut bracket_depth = 0i32;
-    let mut in_string = false;
-    let mut string_char = b'\0';
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let ch = bytes[i];
-        if in_string {
-            if ch == string_char && (i == 0 || bytes[i - 1] != b'\\') {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        match ch {
-            b'\'' | b'"' => {
-                in_string = true;
-                string_char = ch;
-            }
-            b'(' => paren_depth += 1,
-            b')' => paren_depth -= 1,
-            b'[' => bracket_depth += 1,
-            b']' => bracket_depth -= 1,
-            b',' if paren_depth == 0 && bracket_depth == 0 => count += 1,
-            _ => {}
-        }
-        i += 1;
-    }
-    count
 }
 
 /// Extract the model FQN from a `Builder<Model>` type.

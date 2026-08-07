@@ -7,34 +7,27 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B26. `detect_string_call_context` still walks backwards past comments
+#### B27. A comment before the arrow hides a string-argument call's receiver
 
 **Impact: Low · Effort: Low-Medium**
 
-`detect_string_call_context`
-(`src/completion/eloquent_string.rs`) now takes the literal the cursor is
-in and the code before it from the forward lexical scan, but it still
-recovers the *call* around that literal with backwards text scans that
-read comments as code. `find_matching_open_paren` balances brackets
-right-to-left, so a bracket in a comment unbalances it and the completion
-drops out; `count_top_level_commas` counts commas between the `(` and the
-literal without skipping comments, so it reports the wrong argument index
-and the completion offered is the one for another parameter:
+`detect_string_call_context` (`src/completion/eloquent_string.rs`) takes
+the call's opening paren, its argument index, and the code before its
+callee from the forward lexical scan, so a comment is no longer read as
+code around any of those. The *receiver* is still recovered by
+`extract_subject_backwards` walking raw source right to left, which stops
+at the first byte that cannot continue an identifier. A comment between
+the receiver and the operator therefore ends the walk and the completion
+drops out:
 
 ```php
-foo('a' /* ) */, 'b|');   // no completion at all
-$q->where('a' /* , */, 'b|');  // read as argument 2, not argument 1
+$q /* the query */ ->where('|');   // no completion
+User /* the model */ ::with('|');  // no completion
 ```
 
-Both fail on the same input the forward scan already handles.
-
-**Where to look:** `code_context_at` returns `open_brackets`, whose
-innermost `(` *is* the call's opening paren, from the same scan that
-already produces `code_before` here. Taking `paren_pos` from it removes
-`find_matching_open_paren` (and its `MAX_OPEN_PAREN_SCAN` bound)
-entirely. The argument index wants the same treatment: count the commas
-that the forward scan sees at the call's own bracket depth rather than
-re-lexing the span afterwards. `extract_identifier_backwards` and
-`extract_subject_backwards` read the callee and receiver before that
-paren and are comment-blind in the same way (`foo /* x */ ('|')`), though
-that shape is rarer.
+**Where to look:** the callee is read from `OpenBracket::code_before`
+(`src/completion/source/code_context.rs`), which the forward scan records
+as the end of the code before the bracket. The receiver wants the same
+thing two tokens earlier — a code-before offset for the boundary in front
+of the callee and in front of the `->` / `::` — recorded by that scan
+rather than recovered from the text afterwards.

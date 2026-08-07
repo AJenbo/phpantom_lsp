@@ -133,19 +133,63 @@ fn with_call_of_length(args: usize) -> (String, Position) {
     (format!("<?php\n{line}"), Position { line: 1, character })
 }
 
+/// The call is found however far back its opening paren sits, since the scan
+/// that finds it runs forward from the start of the file either way.
 #[test]
-fn test_open_paren_scan_finds_paren_within_bound() {
-    let (content, pos) = with_call_of_length(100);
-    let ctx = detect_eloquent_string_context(&content, pos).unwrap();
+fn test_a_long_argument_list_still_finds_the_call() {
+    for args in [100, 1000] {
+        let (content, pos) = with_call_of_length(args);
+        let ctx = detect_eloquent_string_context(&content, pos)
+            .unwrap_or_else(|| panic!("a with() call with {args} preceding arguments"));
+        assert_eq!(ctx.kind, EloquentStringKind::Relation);
+        assert_eq!(ctx.subject, "User");
+    }
+}
+
+/// The cursor's position in a file is `Position { line, character }` of the end
+/// of `content`, which every one of these fixtures is typed up to.
+fn at_end(content: &str) -> Position {
+    let line = content.lines().count() as u32 - 1;
+    let character = content.lines().next_back().unwrap_or("").chars().count() as u32;
+    Position { line, character }
+}
+
+/// A bracket inside a comment cannot unbalance the search for the call's
+/// opening paren, because there is no backwards search left to unbalance.
+#[test]
+fn test_a_paren_in_a_comment_does_not_hide_the_call() {
+    let content = "<?php\nUser::with('a' /* ) */, '";
+    let ctx =
+        detect_eloquent_string_context(content, at_end(content)).expect("the comment is not code");
     assert_eq!(ctx.kind, EloquentStringKind::Relation);
     assert_eq!(ctx.subject, "User");
 }
 
+/// Nor can a comma inside one shift the argument index onto the next
+/// parameter.
 #[test]
-fn test_open_paren_scan_is_bounded() {
-    let (content, pos) = with_call_of_length(MAX_OPEN_PAREN_SCAN / 5 + 10);
-    assert!(
-        detect_eloquent_string_context(&content, pos).is_none(),
-        "the backward paren scan must stop at MAX_OPEN_PAREN_SCAN bytes"
-    );
+fn test_a_comma_in_a_comment_is_not_an_argument_separator() {
+    let content = "<?php\n$q->where('a' /* , */, '";
+    let ctx = detect_string_call_context(content, at_end(content)).expect("a where() call");
+    assert_eq!(ctx.method_name, "where");
+    assert_eq!(ctx.arg_index, 1);
+}
+
+/// A comment between the callee and its argument list is skipped as well.
+#[test]
+fn test_a_comment_before_the_argument_list_is_skipped() {
+    let content = "<?php\n$q->orderBy /* asc */ ('";
+    let ctx = detect_eloquent_string_context(content, at_end(content))
+        .expect("the comment is not part of the callee");
+    assert_eq!(ctx.kind, EloquentStringKind::Column);
+    assert_eq!(ctx.subject, "$q");
+}
+
+/// A comma of a nested array belongs to that array, so an element of it is
+/// still part of the argument the array is.
+#[test]
+fn test_an_element_of_an_argument_array_keeps_the_array_index() {
+    let content = "<?php\n$q->where('a', ['b', '";
+    let ctx = detect_string_call_context(content, at_end(content)).expect("a where() call");
+    assert_eq!(ctx.arg_index, 1);
 }

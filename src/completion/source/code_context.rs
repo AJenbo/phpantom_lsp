@@ -6,9 +6,11 @@
 //! real code before it (so that key is still seen to follow a `[` across
 //! `route('name', [ // note (here)\n '|'`), and the chain of brackets left
 //! open at it (so the `[` of an argument array and the `(` of the call it
-//! belongs to can be told apart from any other nesting).
+//! belongs to can be told apart from any other nesting).  Each open bracket
+//! carries the commas seen inside it and where the code before it ends, which
+//! is the argument index and the callee of the call it opens.
 //!
-//! All three come out of one forward pass.  A backwards walk cannot answer
+//! All of it comes out of one forward pass.  A backwards walk cannot answer
 //! any of them: read from the right, a `//`, a `#`, or a quote is ambiguous
 //! (it may open a comment, sit inside a string, or close one), so a stray
 //! bracket or apostrophe inside a comment unbalances the walk.  Scanning
@@ -17,15 +19,32 @@
 
 use memchr::{memchr, memchr2, memmem};
 
+/// A bracket left open at the offset, with what the scan saw around it.
+pub(crate) struct OpenBracket {
+    /// Byte offset of the opening bracket.
+    pub(crate) offset: usize,
+    /// Which bracket it is: `(`, `[`, or `{`.
+    pub(crate) byte: u8,
+    /// One past the last byte of code before the bracket, so
+    /// `&content[..code_before]` is the text leading up to it with trailing
+    /// whitespace and comments cut off — the callee of a call, and the
+    /// receiver before that, are read from its end.
+    pub(crate) code_before: usize,
+    /// Commas seen directly inside this bracket, which is the index of the
+    /// argument or element the offset sits in.  A comma of a nested bracket
+    /// belongs to that bracket, and one in a comment or a literal is not
+    /// code, so neither is counted here.
+    pub(crate) commas: usize,
+}
+
 /// The lexical position of an offset in PHP source.
 pub(crate) struct CodeContext<'a> {
     /// The source text up to and including the last byte of code before the
     /// offset, with trailing whitespace and comments cut off.  A
     /// `ends_with` / `strip_suffix` check on it therefore sees code.
     pub(crate) code_before: &'a str,
-    /// The brackets still open at the offset, outermost first, each as
-    /// `(offset, byte)` where the byte is `(`, `[`, or `{`.
-    pub(crate) open_brackets: Vec<(usize, u8)>,
+    /// The brackets still open at the offset, outermost first.
+    pub(crate) open_brackets: Vec<OpenBracket>,
     /// Set when the offset sits inside a `'…'` or `"…"` literal, holding the
     /// offset and character of its opening quote.  The two fields above then
     /// describe where that quote sits, since nothing inside a literal opens a
@@ -51,12 +70,24 @@ impl CodeContext<'_> {
         expected_inner: u8,
         expected_outer: u8,
     ) -> Option<(usize, usize)> {
-        match self.open_brackets[..] {
-            [.., (outer, ob), (inner, ib)] if ib == expected_inner && ob == expected_outer => {
-                Some((inner, outer))
+        match &self.open_brackets[..] {
+            [.., outer, inner] if inner.byte == expected_inner && outer.byte == expected_outer => {
+                Some((inner.offset, outer.offset))
             }
             _ => None,
         }
+    }
+
+    /// The innermost `(` left open at the offset.
+    ///
+    /// For an offset in a call's argument list this is the `(` that opens it,
+    /// whether the offset sits in the list directly (`foo('|')`) or inside an
+    /// argument's array (`foo(['|'])`), and its comma count is the index of
+    /// the argument the offset belongs to.  A `(` opens other constructs too
+    /// (a condition, a grouped expression), so callers that need a call check
+    /// the callee before the paren.
+    pub(crate) fn enclosing_paren(&self) -> Option<&OpenBracket> {
+        self.open_brackets.iter().rev().find(|b| b.byte == b'(')
     }
 }
 
@@ -102,7 +133,7 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
     } else {
         State::Code
     };
-    let mut open_brackets: Vec<(usize, u8)> = Vec::new();
+    let mut open_brackets: Vec<OpenBracket> = Vec::new();
     // One past the last byte of code seen so far.
     let mut code_end = 0usize;
     let mut heredoc_label: &[u8] = &[];
@@ -239,7 +270,12 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                             continue;
                         }
                     }
-                    b'(' | b'[' | b'{' => open_brackets.push((i, byte)),
+                    b'(' | b'[' | b'{' => open_brackets.push(OpenBracket {
+                        offset: i,
+                        byte,
+                        code_before: code_end,
+                        commas: 0,
+                    }),
                     b')' | b']' | b'}' => {
                         let opener = match byte {
                             b')' => b'(',
@@ -249,8 +285,13 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         // A closer that does not match the innermost opener
                         // belongs to an unbalanced edit; dropping it keeps
                         // the brackets that do pair up intact.
-                        if open_brackets.last().is_some_and(|(_, b)| *b == opener) {
+                        if open_brackets.last().is_some_and(|b| b.byte == opener) {
                             open_brackets.pop();
+                        }
+                    }
+                    b',' => {
+                        if let Some(bracket) = open_brackets.last_mut() {
+                            bracket.commas += 1;
                         }
                     }
                     _ => {}

@@ -160,6 +160,44 @@ fn a_fragment_with_no_open_tag_is_read_as_code() {
     assert!(ctx.nested_pair(b'[', b'(').is_some());
 }
 
+/// Each bracket counts its own commas, so the count on the call's paren is the
+/// index of the argument the offset is in whatever nesting sits in between.
+#[test]
+fn commas_are_counted_per_bracket() {
+    let src = "<?php\nfoo('a', bar(1, 2), ['b', 'user']);\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    let call = ctx.enclosing_paren().expect("the call's paren");
+    assert_eq!(byte_at(src, call.offset), b'(');
+    assert_eq!(call.commas, 2, "the array is the third argument");
+    let (array, _) = ctx.nested_pair(b'[', b'(').expect("the argument's array");
+    assert_eq!(
+        ctx.open_brackets.last().map(|b| b.commas),
+        Some(1),
+        "the second element of the array at {array}"
+    );
+}
+
+/// A comma or a bracket inside a comment is not code, so neither moves the
+/// enclosing call nor the argument index.
+#[test]
+fn a_comment_holds_neither_commas_nor_brackets() {
+    let src = "<?php\nfoo('a' /* , ) [ */, 'user');\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    let call = ctx.enclosing_paren().expect("the call's paren");
+    assert_eq!(call.offset, src.find('(').unwrap());
+    assert_eq!(call.commas, 1);
+}
+
+/// The code before a bracket ends at code, so the callee is read without the
+/// comment that sits between it and its argument list.
+#[test]
+fn a_bracket_records_where_the_code_before_it_ends() {
+    let src = "<?php\n$q->orderBy /* asc */ ('user');\n";
+    let ctx = at(src, "'user'").expect("the offset is in code");
+    let call = ctx.enclosing_paren().expect("the call's paren");
+    assert_eq!(&src[..call.code_before], "<?php\n$q->orderBy");
+}
+
 #[test]
 fn an_unmatched_closer_leaves_the_brackets_that_do_pair_up() {
     let src = "<?php\n$x = [1, 2);\nroute('r', ['user' => 1]);\n";

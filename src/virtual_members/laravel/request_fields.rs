@@ -134,8 +134,8 @@ pub(crate) fn detect_request_field_context(
         return None;
     }
 
-    let before_paren = content.get(..call.call_open_paren)?;
-    let before_method = strip_trailing_ident(before_paren.trim_end());
+    let before_paren = content.get(..call.code_before_call)?;
+    let before_method = strip_trailing_ident(before_paren);
     let receiver_text = strip_arrow(before_method)?;
     // `$request->safe()->only([…])` narrows the same rules array, so look
     // through the `safe()` hop to the request it came from.
