@@ -828,10 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b26-detect_string_call_context-still-walks-backwards-past-comments" class="md-nav__link">
+  <a href="#b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B26. <code>detect_string_call_context</code> still walks backwards past comments
+        B27. A comment before the arrow hides a string-argument call's receiver
       </span>
     </span>
   </a>
@@ -1306,10 +1306,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b26-detect_string_call_context-still-walks-backwards-past-comments" class="md-nav__link">
+  <a href="#b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B26. <code>detect_string_call_context</code> still walks backwards past comments
+        B27. A comment before the arrow hides a string-argument call's receiver
       </span>
     </span>
   </a>
@@ -1346,31 +1346,25 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b26-detect_string_call_context-still-walks-backwards-past-comments">B26. <code>detect_string_call_context</code> still walks backwards past comments<a class="headerlink" href="#b26-detect_string_call_context-still-walks-backwards-past-comments" title="Permanent link">&para;</a></h4>
+<h4 id="b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver">B27. A comment before the arrow hides a string-argument call's receiver<a class="headerlink" href="#b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p><code>detect_string_call_context</code>
-(<code>src/completion/eloquent_string.rs</code>) now takes the literal the cursor is
-in and the code before it from the forward lexical scan, but it still
-recovers the <em>call</em> around that literal with backwards text scans that
-read comments as code. <code>find_matching_open_paren</code> balances brackets
-right-to-left, so a bracket in a comment unbalances it and the completion
-drops out; <code>count_top_level_commas</code> counts commas between the <code>(</code> and the
-literal without skipping comments, so it reports the wrong argument index
-and the completion offered is the one for another parameter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">foo(&#39;a&#39; /* ) */, &#39;b|&#39;);   // no completion at all</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$q-&gt;where(&#39;a&#39; /* , */, &#39;b|&#39;);  // read as argument 2, not argument 1</span>
+<p><code>detect_string_call_context</code> (<code>src/completion/eloquent_string.rs</code>) takes
+the call's opening paren, its argument index, and the code before its
+callee from the forward lexical scan, so a comment is no longer read as
+code around any of those. The <em>receiver</em> is still recovered by
+<code>extract_subject_backwards</code> walking raw source right to left, which stops
+at the first byte that cannot continue an identifier. A comment between
+the receiver and the operator therefore ends the walk and the completion
+drops out:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$q /* the query */ -&gt;where(&#39;|&#39;);   // no completion</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">User /* the model */ ::with(&#39;|&#39;);  // no completion</span>
 </code></pre></div>
-<p>Both fail on the same input the forward scan already handles.</p>
-<p><strong>Where to look:</strong> <code>code_context_at</code> returns <code>open_brackets</code>, whose
-innermost <code>(</code> <em>is</em> the call's opening paren, from the same scan that
-already produces <code>code_before</code> here. Taking <code>paren_pos</code> from it removes
-<code>find_matching_open_paren</code> (and its <code>MAX_OPEN_PAREN_SCAN</code> bound)
-entirely. The argument index wants the same treatment: count the commas
-that the forward scan sees at the call's own bracket depth rather than
-re-lexing the span afterwards. <code>extract_identifier_backwards</code> and
-<code>extract_subject_backwards</code> read the callee and receiver before that
-paren and are comment-blind in the same way (<code>foo /* x */ ('|')</code>), though
-that shape is rarer.</p>
+<p><strong>Where to look:</strong> the callee is read from <code>OpenBracket::code_before</code>
+(<code>src/completion/source/code_context.rs</code>), which the forward scan records
+as the end of the code before the bracket. The receiver wants the same
+thing two tokens earlier — a code-before offset for the boundary in front
+of the callee and in front of the <code>-&gt;</code> / <code>::</code> — recorded by that scan
+rather than recovered from the text afterwards.</p>
 
 
 
