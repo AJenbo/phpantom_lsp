@@ -45,19 +45,3 @@ $byMarket->get($translation->lang_code->value);
 
 3 diagnostics across two sample projects (one of them through a Blade
 view that receives the collection).
-
-#### B49. Static call through a string-typed variable is reported as scalar access
-
-**Impact: Medium · Effort: Low**
-
-`$string::method()` is valid PHP — the string is the class name — but it
-is reported as a member access on a scalar:
-
-```php
-$job->class_name::dispatch();
-// Cannot access method 'dispatch' on type 'string'
-```
-
-A `class-string<T>` subject should resolve to `T`; a plain `string`
-subject is unresolvable, which is a "cannot verify" at most, never a
-scalar-access error.

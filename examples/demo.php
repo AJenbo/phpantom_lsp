@@ -1672,6 +1672,30 @@ class ClassStringVarDemo
 }
 
 
+// ── class-string Property Resolution ────────────────────────────────────────
+// A property declared `class-string<T>` holds a class name at runtime, not
+// an instance of its own declared type, so a `::` access on it resolves
+// against `T`. A property that is merely a plain `string` also holds a
+// class name at runtime for all PHPantom can prove, so `::` on it is left
+// unresolved rather than reported as scalar access — see
+// ScalarMemberAccessDemo above for the case that is still flagged.
+
+class ClassStringPropertyDemo
+{
+    /** @var class-string<Pen> */
+    public string $penClass;
+
+    public string $anyClassName;
+
+    public function demo(): void
+    {
+        $this->penClass::make()->write();  // resolves Pen through class-string<T> property
+
+        $this->anyClassName::create();     // no diagnostic — unverifiable, not scalar access
+    }
+}
+
+
 // ── iterator_to_array Resolution ────────────────────────────────────────────
 
 class IteratorToArrayDemo
@@ -3373,6 +3397,13 @@ class ScalarMemberAccessDemo
         // Works with Response too — isSuccess() returns bool:
         $resp = new Response(200, 'OK');
         $resp->isSuccess()->flag;
+
+        // A `::` access is different: `$string::method()` is valid PHP
+        // (the string names a class at runtime), so it is left
+        // unresolved rather than flagged — see ClassStringPropertyDemo
+        // below. A scalar that can never name a class, like `int`,
+        // still triggers this same diagnostic through `::`:
+        $user->age::method();
     }
 }
 
