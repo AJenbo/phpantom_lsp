@@ -828,10 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver" class="md-nav__link">
+  <a href="#b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B27. A comment before the arrow hides a string-argument call's receiver
+        B28. A comment before the arrow hides a request field's receiver via the <code>safe()</code> hop
       </span>
     </span>
   </a>
@@ -1306,10 +1306,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver" class="md-nav__link">
+  <a href="#b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B27. A comment before the arrow hides a string-argument call's receiver
+        B28. A comment before the arrow hides a request field's receiver via the <code>safe()</code> hop
       </span>
     </span>
   </a>
@@ -1346,25 +1346,29 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver">B27. A comment before the arrow hides a string-argument call's receiver<a class="headerlink" href="#b27-a-comment-before-the-arrow-hides-a-string-argument-calls-receiver" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p><code>detect_string_call_context</code> (<code>src/completion/eloquent_string.rs</code>) takes
-the call's opening paren, its argument index, and the code before its
-callee from the forward lexical scan, so a comment is no longer read as
-code around any of those. The <em>receiver</em> is still recovered by
-<code>extract_subject_backwards</code> walking raw source right to left, which stops
-at the first byte that cannot continue an identifier. A comment between
-the receiver and the operator therefore ends the walk and the completion
-drops out:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$q /* the query */ -&gt;where(&#39;|&#39;);   // no completion</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">User /* the model */ ::with(&#39;|&#39;);  // no completion</span>
+<h4 id="b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop">B28. A comment before the arrow hides a request field's receiver via the <code>safe()</code> hop<a class="headerlink" href="#b28-a-comment-before-the-arrow-hides-a-request-fields-receiver-via-the-safe-hop" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><code>detect_request_field_context</code> (<code>src/virtual_members/laravel/request_fields.rs</code>)
+recovers the receiver of <code>$request-&gt;input('|')</code> (and the <code>-&gt;safe()-&gt;only(['|'])</code>
+hop-through) with its own backwards text walk — <code>strip_trailing_ident</code>,
+<code>strip_arrow</code>, <code>strip_safe_call</code>, <code>trailing_variable</code> — over
+<code>content[..call.code_before_call]</code>, independently of
+<code>detect_string_call_context</code>'s own receiver extraction (fixed for the same
+class of bug by using <code>OpenBracket::callee_operator</code> from the forward scan,
+see the <code>A comment no longer hides a string-argument call's receiver</code>
+changelog entry). A comment between the receiver and <code>-&gt;</code> still ends this
+walk early:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$request /* the request */ -&gt;input(&#39;|&#39;);  // no completion</span>
 </code></pre></div>
-<p><strong>Where to look:</strong> the callee is read from <code>OpenBracket::code_before</code>
-(<code>src/completion/source/code_context.rs</code>), which the forward scan records
-as the end of the code before the bracket. The receiver wants the same
-thing two tokens earlier — a code-before offset for the boundary in front
-of the callee and in front of the <code>-&gt;</code> / <code>::</code> — recorded by that scan
-rather than recovered from the text afterwards.</p>
+<p><strong>Where to look:</strong> <code>strip_arrow</code> needs the same fix <code>detect_string_call_context</code>
+got — a code-before boundary from the scan rather than a raw trailing-comment
+trim. <code>call.callee_operator</code> already gives the boundary for the <em>last</em> <code>-&gt;</code>
+before the callee; the <code>safe()</code> hop needs a second one further back (the
+<code>-&gt;</code> before <code>safe</code>), which is not currently exposed since <code>OpenBracket</code> only
+records the operator immediately before its own callee. Extending the scan
+to expose that (e.g. a small chain of recent operators, not just the last
+one) would let both <code>strip_arrow</code> and <code>strip_safe_call</code> read comment-free
+boundaries instead of walking raw text.</p>
 
 
 
