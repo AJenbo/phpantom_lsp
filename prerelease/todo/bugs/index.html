@@ -828,28 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b40-assignments-in-the-inline-php-directive-are-not-recorded" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B40. Assignments in the inline <code>@php(…)</code> directive are not recorded
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b41-translation-key-diagnostics-fire-when-the-app-replaces-the-translation-loader" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B41. Translation-key diagnostics fire when the app replaces the translation loader
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b43-appmake-appmakewith-with-a-class-string-do-not-resolve" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1383,28 +1361,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b40-assignments-in-the-inline-php-directive-are-not-recorded" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B40. Assignments in the inline <code>@php(…)</code> directive are not recorded
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b41-translation-key-diagnostics-fire-when-the-app-replaces-the-translation-loader" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B41. Translation-key diagnostics fire when the app replaces the translation loader
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b43-appmake-appmakewith-with-a-class-string-do-not-resolve" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1500,40 +1456,14 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b40-assignments-in-the-inline-php-directive-are-not-recorded">B40. Assignments in the inline <code>@php(…)</code> directive are not recorded<a class="headerlink" href="#b40-assignments-in-the-inline-php-directive-are-not-recorded" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p>The block form updates scope correctly; the inline form does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>@php($a = $order-&gt;orderProducts-&gt;whereIn(&#39;product_id&#39;, [1]))
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>{{ $a-&gt;isNotEmpty() }}   {{-- type of &#39;$a&#39; could not be resolved --}}
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>@php
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    $b = $order-&gt;orderProducts-&gt;whereIn(&#39;product_id&#39;, [1]);
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>@endphp
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>{{ $b-&gt;isNotEmpty() }}   {{-- resolves --}}
-</code></pre></div>
-<h4 id="b41-translation-key-diagnostics-fire-when-the-app-replaces-the-translation-loader">B41. Translation-key diagnostics fire when the app replaces the translation loader<a class="headerlink" href="#b41-translation-key-diagnostics-fire-when-the-app-replaces-the-translation-loader" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
-<p>The Trans arm skips the check when no translation files were found, but
-an application that keeps its strings in the database still has
-<code>vendor/</code>'s own <code>lang/</code> files on disk, so the set is non-empty and every
-application key is reported as unknown.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;translation.loader&#39;, fn ($app) =&gt; new DatabaseTranslationLoader(</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    new FileLoader($app-&gt;make(&#39;files&#39;), $app-&gt;make(&#39;path.lang&#39;)),</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">));</span>
-</code></pre></div>
-<p>28 diagnostics in one sample project, none of them real.</p>
-<p><strong>Fix:</strong> when a service provider rebinds <code>translator</code> or
-<code>translation.loader</code> to something other than Laravel's own <code>FileLoader</code>,
-the valid-key set is unknowable — skip the check, the same way an
-unenforced morph map does.</p>
 <h4 id="b43-appmake-appmakewith-with-a-class-string-do-not-resolve">B43. <code>App::make()</code> / <code>App::makeWith()</code> with a class-string do not resolve<a class="headerlink" href="#b43-appmake-appmakewith-with-a-class-string-do-not-resolve" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Effort: Low</strong></p>
 <p>The <code>app()</code> helper resolves a class-string argument to that class; the
 <code>App</code> facade does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">app(CurrencyHelper::class)-&gt;noSuchMethod();          // resolves ✓</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">app()-&gt;make(CurrencyHelper::class)-&gt;noSuchMethod();  // resolves ✓</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">App::make(CurrencyHelper::class)-&gt;noSuchMethod();    // could not be resolved ✗</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">App::makeWith(CurrencyHelper::class, [])-&gt;…          // could not be resolved ✗</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">app(CurrencyHelper::class)-&gt;noSuchMethod();          // resolves ✓</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">app()-&gt;make(CurrencyHelper::class)-&gt;noSuchMethod();  // resolves ✓</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">App::make(CurrencyHelper::class)-&gt;noSuchMethod();    // could not be resolved ✗</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">App::makeWith(CurrencyHelper::class, [])-&gt;…          // could not be resolved ✗</span>
 </code></pre></div>
 <p>8 diagnostics in one sample project. Whatever gives the helper its
 class-string return needs to apply to the facade's <code>make</code>, <code>makeWith</code>
@@ -1542,8 +1472,8 @@ and <code>resolve</code> too.</p>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p><code>app()-&gt;make('sentry')</code> resolves to nothing, because nothing indexes the
 string keys that service providers bind:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// Sentry\Laravel\ServiceProvider</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;sentry&#39;, fn () =&gt; new HubAdapter());</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// Sentry\Laravel\ServiceProvider</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;sentry&#39;, fn () =&gt; new HubAdapter());</span>
 </code></pre></div>
 <p>Provider scanning already walks <code>register()</code> for config and route
 resources, so the <code>bind()</code> / <code>singleton()</code> / <code>instance()</code> calls with a
@@ -1553,8 +1483,8 @@ string abstract and a resolvable concrete are within reach.</p>
 <p>A project pinned to PHP 8.4 (<code>"require": {"php": "^8.4"}</code>,
 <code>"config": {"platform": {"php": "8.4"}}</code>) is reported for a deprecation
 introduced in 8.5:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>&#39;Pdo\PDO::sqliteCreateFunction&#39; is deprecated: use Pdo\Sqlite::createFunction
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>instead (since PHP 8.5)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&#39;Pdo\PDO::sqliteCreateFunction&#39; is deprecated: use Pdo\Sqlite::createFunction
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>instead (since PHP 8.5)
 </code></pre></div>
 <p>6 diagnostics in one sample project. The stub already carries the
 version the deprecation landed in; it should be compared against the
@@ -1567,11 +1497,11 @@ the target predates it.</p>
 return type (or the type of the named column). PHPantom keeps the
 original <code>int</code> key from the Eloquent collection, so every subsequent
 <code>get()</code> with the new key is reported:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$byMarket = ProductPrice::query()-&gt;get()</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$byMarket-&gt;get($translation-&gt;lang_code-&gt;value);</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">// Argument 1 ($key) expects int|null, got string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$byMarket = ProductPrice::query()-&gt;get()</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$byMarket-&gt;get($translation-&gt;lang_code-&gt;value);</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">// Argument 1 ($key) expects int|null, got string</span>
 </code></pre></div>
 <p>3 diagnostics across two sample projects (one of them through a Blade
 view that receives the collection).</p>
@@ -1579,8 +1509,8 @@ view that receives the collection).</p>
 <p><strong>Impact: Medium · Effort: Low</strong></p>
 <p><code>$string::method()</code> is valid PHP — the string is the class name — but it
 is reported as a member access on a scalar:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$job-&gt;class_name::dispatch();</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">// Cannot access method &#39;dispatch&#39; on type &#39;string&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$job-&gt;class_name::dispatch();</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">// Cannot access method &#39;dispatch&#39; on type &#39;string&#39;</span>
 </code></pre></div>
 <p>A <code>class-string&lt;T&gt;</code> subject should resolve to <code>T</code>; a plain <code>string</code>
 subject is unresolvable, which is a "cannot verify" at most, never a
@@ -1591,13 +1521,13 @@ scalar-access error.</p>
 with a known element type, that element type should refine a wider
 declared parameter type. PHPStan does this at level max; PHPantom keeps
 the declared <code>array</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @return iterable&lt;array{DiscountType, ?CartLabel}&gt; */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">private static function yieldCases(): iterable { /* … */ }</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">array_map(</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    static fn (array $case): string =&gt; $case[0]-&gt;name,   // type of &#39;$case[0]&#39; could not be resolved</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">    iterator_to_array(self::yieldCases()),</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @return iterable&lt;array{DiscountType, ?CartLabel}&gt; */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">private static function yieldCases(): iterable { /* … */ }</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">array_map(</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    static fn (array $case): string =&gt; $case[0]-&gt;name,   // type of &#39;$case[0]&#39; could not be resolved</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    iterator_to_array(self::yieldCases()),</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">);</span>
 </code></pre></div>
 <p>3 diagnostics in one sample project. Related to
 <a href="../type-inference/#t25-call-site-template-argument-inference-for-callable-parameters">T25</a>,
