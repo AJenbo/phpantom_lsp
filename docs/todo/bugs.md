@@ -7,24 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B43. `App::make()` / `App::makeWith()` with a class-string do not resolve
-
-**Impact: Medium-High · Effort: Low**
-
-The `app()` helper resolves a class-string argument to that class; the
-`App` facade does not:
-
-```php
-app(CurrencyHelper::class)->noSuchMethod();          // resolves ✓
-app()->make(CurrencyHelper::class)->noSuchMethod();  // resolves ✓
-App::make(CurrencyHelper::class)->noSuchMethod();    // could not be resolved ✗
-App::makeWith(CurrencyHelper::class, [])->…          // could not be resolved ✗
-```
-
-8 diagnostics in one sample project. Whatever gives the helper its
-class-string return needs to apply to the facade's `make`, `makeWith`
-and `resolve` too.
-
 #### B44. String container bindings do not resolve
 
 **Impact: Low-Medium · Effort: Medium**

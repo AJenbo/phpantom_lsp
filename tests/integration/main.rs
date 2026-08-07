@@ -126,6 +126,7 @@ mod folding_ranges;
 mod hover;
 mod implementation;
 mod inlay_hints;
+mod laravel_app_facade_container;
 mod laravel_commands;
 mod laravel_config_keys;
 mod laravel_contract_concrete;
