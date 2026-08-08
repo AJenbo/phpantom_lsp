@@ -769,7 +769,12 @@ impl Backend {
             .or_else(|| {
                 let body =
                     crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
+                // A body that resolves to `mixed` says nothing about the
+                // template, and binding it hides the template's own bound
+                // (`@template TNewKey of array-key`), which is strictly more
+                // informative.  Leave the template unbound instead.
                 Self::resolve_closure_body_type(arg_text, body, None, ctx)
+                    .filter(|ty| !ty.is_mixed())
             })
     }
 

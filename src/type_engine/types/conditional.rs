@@ -959,8 +959,11 @@ fn condition_includes_array(condition: &PhpType) -> bool {
     }
 }
 
-/// Split a textual argument list by commas, respecting nested parentheses
+/// Split a textual argument list by commas, respecting nested brackets
 /// so that `"foo(a, b), c"` splits into `["foo(a, b)", "c"]`.
+///
+/// Braces count as brackets too, so a closure argument written out in full
+/// (`function ($a) { return [$a, 1]; }, $rest`) stays one argument.
 pub fn split_text_args(text: &str) -> Vec<&str> {
     let mut result = Vec::new();
     let mut depth = 0u32;
@@ -987,10 +990,10 @@ pub fn split_text_args(text: &str) -> Vec<&str> {
             '"' if !in_single_quote => {
                 in_double_quote = !in_double_quote;
             }
-            '(' | '[' if !in_single_quote && !in_double_quote => {
+            '(' | '[' | '{' if !in_single_quote && !in_double_quote => {
                 depth += 1;
             }
-            ')' | ']' if !in_single_quote && !in_double_quote => {
+            ')' | ']' | '}' if !in_single_quote && !in_double_quote => {
                 depth = depth.saturating_sub(1);
             }
             ',' if depth == 0 && !in_single_quote && !in_double_quote => {

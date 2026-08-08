@@ -1783,12 +1783,9 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
 /// literals (`42`, `-1`), float literals (`3.14`), boolean literals
 /// (`true`, `false`), `null`, and array literals (`[…]`).
 pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
-    // Closure / arrow function literals: fn(...) or function(...)
-    if text.starts_with("fn(")
-        || text.starts_with("fn (")
-        || text.starts_with("function(")
-        || text.starts_with("function (")
-    {
+    // Closure / arrow function literals: fn(...), function(...), and the
+    // `static`-prefixed forms of both.
+    if crate::completion::source::helpers::is_closure_like_text(text) {
         return Some(PhpType::named(atom("Closure")));
     }
 

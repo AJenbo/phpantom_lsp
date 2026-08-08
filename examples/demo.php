@@ -1028,6 +1028,13 @@ class ClosureReturnTemplateDemo
         $cache->remember('marker', function () {
             return new Marker('cached');
         })->highlight();                                                // block-closure return → Marker
+
+        // The `static` modifier is just a modifier: a static closure binds
+        // the template exactly like a plain one.
+        $cache->remember('static-pen', static fn(): Pen => new Pen('cached'))->write();
+        $cache->remember('static-marker', static function () {
+            return new Marker('cached');
+        })->highlight();                                                // static block-closure → Marker
     }
 }
 
@@ -6959,6 +6966,12 @@ function runDemoAssertions(): void
         return new Marker('cached');
     });
     assert($cachedMarker instanceof Marker, 'remember(function () { return new Marker(); }) must return Marker (T from closure body)');
+    $staticPen = $cache->remember('static-pen', static fn(): Pen => new Pen('cached'));
+    assert($staticPen instanceof Pen, 'remember(static fn(): Pen => ...) must return Pen (T from static arrow function)');
+    $staticMarker = $cache->remember('static-marker', static function () {
+        return new Marker('cached');
+    });
+    assert($staticMarker instanceof Marker, 'remember(static function () { return new Marker(); }) must return Marker (T from static closure body)');
 
     // ── ScaffoldingEventBus::listen() — closure param type binding ──────
     $bus = new ScaffoldingEventBus();
