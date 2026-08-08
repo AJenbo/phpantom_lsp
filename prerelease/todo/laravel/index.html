@@ -1039,22 +1039,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#l1-facade-completion-upstream-method-template-improvement" class="md-nav__link">
+  <a href="#l1-facade-completion-upstream-method-generator-improvement" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L1. Facade completion — upstream <code>@method</code> template improvement
+        L1. Facade completion — upstream <code>@method</code> generator improvement
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="L1. Facade completion — upstream @method template improvement">
+    <nav class="md-nav" aria-label="L1. Facade completion — upstream @method generator improvement">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#the-problem-flattened-templates" class="md-nav__link">
+  <a href="#the-problem-flattened-signatures" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        The problem: flattened templates
+        The problem: flattened signatures
       </span>
     </span>
   </a>
@@ -1062,10 +1062,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#why-getfacadeaccessor-resolution-is-not-the-right-fix" class="md-nav__link">
+  <a href="#why-this-has-to-be-fixed-upstream" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Why <code>getFacadeAccessor()</code> resolution is not the right fix
+        Why this has to be fixed upstream
       </span>
     </span>
   </a>
@@ -1073,10 +1073,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#preferred-approach-upstream-generator-improvement" class="md-nav__link">
+  <a href="#upstream-generator-changes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Preferred approach: upstream generator improvement
+        Upstream generator changes
       </span>
     </span>
   </a>
@@ -1084,10 +1084,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fallback-getfacadeaccessor-resolution-if-upstream-declines" class="md-nav__link">
+  <a href="#tooling-support-for-the-richer-syntax" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Fallback: <code>getFacadeAccessor</code> resolution (if upstream declines)
+        Tooling support for the richer syntax
       </span>
     </span>
   </a>
@@ -1096,6 +1096,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#l46-facade-member-completion-from-the-concrete-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. Facade member completion from the concrete class
+      </span>
+    </span>
+  </a>
   
 </li>
       
@@ -1765,22 +1776,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#l1-facade-completion-upstream-method-template-improvement" class="md-nav__link">
+  <a href="#l1-facade-completion-upstream-method-generator-improvement" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L1. Facade completion — upstream <code>@method</code> template improvement
+        L1. Facade completion — upstream <code>@method</code> generator improvement
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="L1. Facade completion — upstream @method template improvement">
+    <nav class="md-nav" aria-label="L1. Facade completion — upstream @method generator improvement">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#the-problem-flattened-templates" class="md-nav__link">
+  <a href="#the-problem-flattened-signatures" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        The problem: flattened templates
+        The problem: flattened signatures
       </span>
     </span>
   </a>
@@ -1788,10 +1799,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#why-getfacadeaccessor-resolution-is-not-the-right-fix" class="md-nav__link">
+  <a href="#why-this-has-to-be-fixed-upstream" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Why <code>getFacadeAccessor()</code> resolution is not the right fix
+        Why this has to be fixed upstream
       </span>
     </span>
   </a>
@@ -1799,10 +1810,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#preferred-approach-upstream-generator-improvement" class="md-nav__link">
+  <a href="#upstream-generator-changes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Preferred approach: upstream generator improvement
+        Upstream generator changes
       </span>
     </span>
   </a>
@@ -1810,10 +1821,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fallback-getfacadeaccessor-resolution-if-upstream-declines" class="md-nav__link">
+  <a href="#tooling-support-for-the-richer-syntax" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Fallback: <code>getFacadeAccessor</code> resolution (if upstream declines)
+        Tooling support for the richer syntax
       </span>
     </span>
   </a>
@@ -1822,6 +1833,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#l46-facade-member-completion-from-the-concrete-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. Facade member completion from the concrete class
+      </span>
+    </span>
+  </a>
   
 </li>
       
@@ -2320,27 +2342,24 @@ within the same impact tier.</p>
 <li><strong>Facades rely on <code>@method</code> tags.</strong> Laravel's facades ship with
   comprehensive <code>@method static</code> tags (2,047 across all facades as of
   Laravel 12.x) generated by a script. Our PHPDoc provider already
-  parses these. The main gap is that the generator flattens template
-  parameters, so <code>@method static mixed make(string $abstract)</code> loses
-  the <code>@template T</code> that would let <code>App::make(Foo::class)</code> resolve to
-  <code>Foo</code>. The preferred fix is upstream: improve the generator to emit
-  <code>@method static T make&lt;T of object&gt;(class-string&lt;T&gt; $abstract)</code>.
-  PHPStan already supports this syntax. See L1 for details.</li>
+  parses these, and where a tag is too wide because the generator
+  flattened it, a static call falls through to the class the facade's
+  <code>getFacadeAccessor()</code> names. The residual gap is upstream: the
+  generator throws away template parameters, generic arguments and
+  conditional returns that the source method declares. See L1.</li>
 </ul>
 <hr />
-<h2 id="l1-facade-completion-upstream-method-template-improvement">L1. Facade completion — upstream <code>@method</code> template improvement<a class="headerlink" href="#l1-facade-completion-upstream-method-template-improvement" title="Permanent link">&para;</a></h2>
+<h2 id="l1-facade-completion-upstream-method-generator-improvement">L1. Facade completion — upstream <code>@method</code> generator improvement<a class="headerlink" href="#l1-facade-completion-upstream-method-generator-improvement" title="Permanent link">&para;</a></h2>
 <p>Facades are the primary way Laravel developers interact with framework
 services (<code>Cache::get(...)</code>, <code>DB::table(...)</code>, <code>Route::get(...)</code>, etc.).
 The facade pattern works by forwarding static calls on the facade class
 to instance methods on a concrete service class via <code>__callStatic()</code>.</p>
 <p>Every facade already ships with comprehensive <code>@method static</code> tags
 (2,047 tags across all facades in Laravel 12.x), generated by
-Laravel's <code>facade-documenter</code> script. Our PHPDoc provider already
-parses these and provides completion for all facade methods. <strong>Basic
-facade completion already works.</strong></p>
-<h3 id="the-problem-flattened-templates">The problem: flattened templates<a class="headerlink" href="#the-problem-flattened-templates" title="Permanent link">&para;</a></h3>
-<p>The generator strips <code>@template</code> parameters when emitting <code>@method</code>
-tags. For example, the <code>Application</code> class has:</p>
+Laravel's <code>facade-documenter</code> script.</p>
+<h3 id="the-problem-flattened-signatures">The problem: flattened signatures<a class="headerlink" href="#the-problem-flattened-signatures" title="Permanent link">&para;</a></h3>
+<p>The generator throws away everything the source method's docblock says
+beyond a bare type name. The <code>Application</code> class has:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * @template T of object</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> * @param class-string&lt;T&gt; $abstract</span>
@@ -2349,19 +2368,30 @@ tags. For example, the <code>Application</code> class has:</p>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">public function make($abstract) { ... }</span>
 </code></pre></div>
 <p>But the <code>App</code> facade emits:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">@method static mixed make(string $abstract)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">@method static object|mixed make(string $abstract, array $parameters = [])</span>
 </code></pre></div>
-<p>This means <code>App::make(MyService::class)-&gt;doSomething()</code> resolves to
-<code>mixed</code> instead of <code>MyService</code>. The same flattening affects
-conditional return types and other template-dependent signatures.</p>
-<h3 id="why-getfacadeaccessor-resolution-is-not-the-right-fix">Why <code>getFacadeAccessor()</code> resolution is not the right fix<a class="headerlink" href="#why-getfacadeaccessor-resolution-is-not-the-right-fix" title="Permanent link">&para;</a></h3>
-<p>The original L1 plan proposed resolving facades by parsing
-<code>getFacadeAccessor()</code> to find the concrete class and forwarding its
-methods. This has fundamental problems:</p>
+<p>Four separate losses, all in <code>facade.php</code>:</p>
+<ul>
+<li>Template parameters (<code>T of object</code>) are resolved to their bound or to
+  <code>mixed</code>.</li>
+<li>Generic arguments are dropped (<code>Collection&lt;int, User&gt;</code> →
+  <code>Collection</code>).</li>
+<li>Conditional returns are unioned
+  (<code>($id is int ? static : Collection)</code> → <code>static|Collection</code>).</li>
+<li><code>class-string&lt;T&gt;</code> collapses to <code>string</code>, losing the binding that
+  connects the argument to the return.</li>
+</ul>
+<p>Every consumer of the tags — us, PHPStan, Psalm, PhpStorm — is left
+with a signature far wider than the truth.</p>
+<h3 id="why-this-has-to-be-fixed-upstream">Why this has to be fixed upstream<a class="headerlink" href="#why-this-has-to-be-fixed-upstream" title="Permanent link">&para;</a></h3>
+<p>Resolving facades ourselves by parsing <code>getFacadeAccessor()</code> covers
+only part of the problem:</p>
 <ol>
 <li><strong>Half the facades use string aliases.</strong> <code>Auth</code> returns <code>'auth'</code>,
-   <code>Cache</code> returns <code>'cache'</code>, <code>DB</code> returns <code>'db'</code>, etc. These require
-   booting the container to resolve, which is out of scope.</li>
+   <code>Cache</code> returns <code>'cache'</code>, <code>DB</code> returns <code>'db'</code>. We resolve the ones
+   the framework's own <code>registerCoreContainerAliases()</code> and the app's
+   config declare; a binding registered at runtime by an arbitrary
+   provider stays unresolvable without booting.</li>
 <li><strong>The <code>@see</code> annotations are informal.</strong> Facades list multiple
    <code>@see</code> classes (e.g. <code>Auth</code> references both <code>AuthManager</code> and
    <code>SessionGuard</code>), and the relationship between them isn't formal
@@ -2375,97 +2405,131 @@ methods. This has fundamental problems:</p>
    <code>@method</code> tags are already a flattened merge of both levels. We'd
    need to replicate that merging logic.</li>
 </ol>
-<h3 id="preferred-approach-upstream-generator-improvement">Preferred approach: upstream generator improvement<a class="headerlink" href="#preferred-approach-upstream-generator-improvement" title="Permanent link">&para;</a></h3>
-<p>PHPStan already supports <code>@template</code> on <code>@method</code> tags:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * @method static T make&lt;T of object&gt;(class-string&lt;T&gt; $abstract)</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> */</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">class App extends Facade { ... }</span>
-</code></pre></div>
-<p>This syntax is documented in PHPStan's test suite
-(<code>tests/PHPStan/Rules/Generics/data/method-tag-template.php</code>) and
-supported by the type checker. If Laravel's <code>facade-documenter</code> script
-preserved template parameters instead of stripping them, the <code>@method</code>
-tags would be self-sufficient for all static analysis tools.</p>
-<p><strong>Proposed upstream changes:</strong></p>
-<ol>
-<li>When a method has <code>@template</code> parameters, emit them in the
-   <code>@method</code> tag using <code>&lt;T&gt;</code> syntax after the method name.</li>
-<li>When a method has conditional return types, emit them using
-   PHPStan's <code>($param is Type ? A : B)</code> syntax instead of flattening
-   to the widest type.</li>
-<li>For facades using string aliases: the <code>@method</code> tags already list
-   all methods. The template preservation just makes them richer.
-   No container resolution needed.</li>
-</ol>
-<p><strong>Impact: High · Effort: Low (for us) / Medium (upstream PR)</strong></p>
-<p>On our side, we need to:
-- Parse <code>@template</code> parameters on <code>@method</code> tags (the <code>&lt;T&gt;</code> syntax
-  after the method name). Our <code>extract_method_tags</code> in
-  <code>docblock/virtual_members.rs</code> currently ignores this syntax.
-- Apply template substitution at call sites for <code>@method</code> tags, the
-  same way we do for regular generic methods.</p>
-<p>This is a smaller, more maintainable change than building a facade
-resolution provider, and it benefits the entire PHP tooling ecosystem.</p>
-<p><strong>Upstream PR target:</strong> <code>laravel/facade-documenter</code> repository
+<h3 id="upstream-generator-changes">Upstream generator changes<a class="headerlink" href="#upstream-generator-changes" title="Permanent link">&para;</a></h3>
+<p><strong>PR target:</strong> <code>laravel/facade-documenter</code>
 (https://github.com/laravel/facade-documenter). The entire generator
-is a single file (<code>facade.php</code>, ~600 lines) that uses PHPStan's own
-phpDoc parser. The specific functions that flatten templates:</p>
+is a single file (<code>facade.php</code>, ~850 lines) that uses PHPStan's own
+phpDoc parser. The functions that flatten:</p>
 <ul>
 <li><code>resolveDocblockTypes()</code> — the <code>GenericTypeNode</code> branch strips
-  generic arguments entirely (<code>Collection&lt;int, User&gt;</code> → <code>Collection</code>).
-  Needs to preserve args in the output string.</li>
+  generic arguments entirely. Needs to preserve args in the output
+  string.</li>
 <li><code>handleUnknownIdentifierType()</code> — when encountering a template
   parameter like <code>T</code>, resolves it to its bound (<code>T of object</code> →
   <code>object</code>) or <code>mixed</code>. Needs to instead emit <code>T</code> as-is and add a
-  <code>&lt;T of object&gt;</code> clause to the <code>@method</code> tag.</li>
+  <code>&lt;T of object&gt;</code> clause after the method name in the <code>@method</code> tag.</li>
 <li><code>ConditionalTypeForParameterNode</code> handling — unions the if/else
-  branches (<code>($id is int ? static : Collection)</code> → <code>static|Collection</code>).
-  Needs to preserve the conditional syntax verbatim.</li>
+  branches. Needs to preserve the conditional syntax verbatim.</li>
 <li>The <code>class-string</code> case in <code>IdentifierTypeNode</code> handling — maps
-  <code>class-string</code> to <code>string</code>, losing the generic arg that carries the
-  template binding. Needs to preserve <code>class-string&lt;T&gt;</code>.</li>
+  <code>class-string</code> to <code>string</code>. Needs to preserve <code>class-string&lt;T&gt;</code>.</li>
 </ul>
-<p><strong>Potential adoption concern:</strong> Laravel may be reluctant to emit richer
-<code>@method</code> tags if major IDEs choke on the syntax. Before submitting the
-upstream PR, we should research how the following tools handle
-<code>@method static T make&lt;T&gt;(class-string&lt;T&gt; $abstract)</code>:</p>
-<ul>
-<li><strong>PhpStorm</strong> — the dominant PHP IDE. Does it parse <code>&lt;T&gt;</code> on <code>@method</code>
-  tags? Does it resolve the template at call sites? If it ignores the
-  template but still shows the method, that's acceptable (graceful
-  degradation). If it errors or hides the method, that's a blocker.</li>
-<li><strong>Psalm</strong> — supports <code>@method</code> with templates via <code>@template</code> tags
-  on the class docblock, but does it support inline <code>&lt;T&gt;</code> on the
-  <code>@method</code> tag itself?</li>
-<li><strong>Intelephense</strong> — popular VS Code PHP extension. Same questions as
-  PhpStorm.</li>
-<li><strong>PHPStan</strong> — already supports this syntax (confirmed via test
-  suite). No concern here.</li>
-</ul>
-<p>If PhpStorm and Intelephense gracefully degrade (show the method but
-ignore the template), the PR has a strong case: existing tools lose
-nothing, and tools that support the syntax gain full generic
-resolution. If any major tool breaks on the syntax, we'd need to
-propose a fallback mechanism (e.g. <code>@phpstan-method</code> variant that
-coexists with the plain <code>@method</code>).</p>
-<h3 id="fallback-getfacadeaccessor-resolution-if-upstream-declines">Fallback: <code>getFacadeAccessor</code> resolution (if upstream declines)<a class="headerlink" href="#fallback-getfacadeaccessor-resolution-if-upstream-declines" title="Permanent link">&para;</a></h3>
-<p>If Laravel is unwilling to change their generator, we could fall back
-to the original L1 plan for the subset of facades that return a
-<code>::class</code> reference (~half of all facades). This would be a new
-virtual member provider that:</p>
+<h3 id="tooling-support-for-the-richer-syntax">Tooling support for the richer syntax<a class="headerlink" href="#tooling-support-for-the-richer-syntax" title="Permanent link">&para;</a></h3>
+<p>Laravel will not emit tags that break the tools their users run, so
+the four changes have very different odds. Support as researched:</p>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>PHPStan</th>
+<th>Psalm</th>
+<th>PhpStorm</th>
+<th>Intelephense</th>
+<th>PHPantom</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Generic args (<code>Collection&lt;int, User&gt;</code>)</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes, since 2022.1 (<a href="https://youtrack.jetbrains.com/issue/WI-62267">WI-62267</a>, Verified)</td>
+<td>unknown</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Conditional return (<code>($id is int ? A : B)</code>)</td>
+<td>yes</td>
+<td>yes</td>
+<td>unknown</td>
+<td>yes, since 1.15.0</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>class-string&lt;T&gt;</code> preserved</td>
+<td>yes</td>
+<td>yes</td>
+<td>needs the template below</td>
+<td>unknown</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Inline <code>&lt;T of object&gt;</code> after the method name</td>
+<td>yes</td>
+<td><strong>no</strong></td>
+<td><strong>no</strong></td>
+<td>unknown</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<p>The last row is the blocker. PhpStorm reports a false-positive
+<code>Undefined class 'T'</code> inspection for a template referenced from a
+<code>@method</code> tag (<a href="https://youtrack.jetbrains.com/issue/WI-64921">WI-64921</a>,
+Open since 2022; the inference half is
+<a href="https://youtrack.jetbrains.com/issue/WI-72659">WI-72659</a>, In Progress).
+Psalm parses each <code>@method</code> entry with its own <code>ParseTreeCreator</code> and
+raises <code>InvalidDocblock</code> when the entry does not come out as a method
+tree; its method-name regex requires the name to be followed directly
+by <code>(</code>, so <code>make&lt;T of object&gt;(</code> is not recognised as a method at all
+(<code>Internal/PhpVisitor/Reflector/ClassLikeDocblockParser.php</code>). Neither
+degrades gracefully.</p>
+<p>So split the upstream work:</p>
 <ol>
-<li>Detects facade classes (extends <code>Illuminate\Support\Facades\Facade</code>).</li>
-<li>Parses <code>getFacadeAccessor()</code> for a <code>::class</code> return value.</li>
-<li>Loads the concrete service class and forwards its instance methods
-   as static virtual methods, preserving full signatures.</li>
-<li>Runs at higher priority than <code>PHPDocProvider</code> to shadow the
-   flattened <code>@method</code> tags.</li>
+<li><strong>Generic arguments, conditional returns, <code>class-string</code> without a
+   template arg.</strong> No known breakage anywhere, immediate benefit in
+   four tools. Submit these first, as separate PRs so one contentious
+   change cannot stall the rest.</li>
+<li><strong>Inline templates.</strong> Hold until PhpStorm ships WI-64921/WI-72659,
+   or propose it as a <code>@phpstan-method</code> line that coexists with the
+   plain <code>@method</code> so tools that choke keep reading the flattened one.</li>
 </ol>
-<p>String-alias facades would still rely on the (flattened) <code>@method</code>
-tags. This is a worse outcome than the upstream fix because it only
-helps PHPantom users, only covers half the facades, and requires
-ongoing maintenance as Laravel's facade internals evolve.</p>
+<p><strong>Impact: High · Effort: Medium (upstream PRs)</strong></p>
+<hr />
+<h2 id="l46-facade-member-completion-from-the-concrete-class">L46. Facade member completion from the concrete class<a class="headerlink" href="#l46-facade-member-completion-from-the-concrete-class" title="Permanent link">&para;</a></h2>
+<p>Calling a method on a facade types correctly even when the facade
+declares no <code>@method</code> tag for it: the static call falls through to the
+class <code>getFacadeAccessor()</code> names. Listing is a step behind. Completion
+on <code>MyFacade::</code> offers only what the facade class itself declares, so
+an app-defined facade with no generated docblock offers nothing but
+<code>__callStatic</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Container {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public function resolveThing(string $id): object {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">class MyFacade extends \Illuminate\Support\Facades\Facade {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    protected static function getFacadeAccessor() { return Container::class; }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">MyFacade::resolveThing(&#39;x&#39;);   // types fine</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">MyFacade::                      // completion offers no `resolveThing`</span>
+</code></pre></div>
+<p>Laravel's own facades are unaffected: their <code>@method static</code> tags list
+every method, so the list is already complete. This bites app-defined
+and package facades that never ran <code>facade-documenter</code>.</p>
+<p>The fix is a virtual member provider that forwards the concrete
+class's public instance methods as static virtual methods, ranked
+below the facade's own <code>@method</code> tags. The blocker is plumbing rather
+than logic: providers receive only a <code>ClassInfo</code> and a class loader,
+and the accessor's <code>::class</code> return is recoverable only from source
+(the container-alias case additionally needs the <code>Backend</code> alias
+table, which <code>facade_owner.rs</code> already reaches at call sites). Either
+record the parsed accessor on <code>ClassInfo</code> at parse time (costs a field
+on every class, and startup memory is a hard constraint) or give
+providers a project-context handle. Pick the plumbing before writing
+the provider, and do not solve it inside the completion handler alone:
+hover, go-to-definition, and unknown-member diagnostics need the same
+member set.</p>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
 <hr />
 <h2 id="model-property-source-gaps">Model property source gaps<a class="headerlink" href="#model-property-source-gaps" title="Permanent link">&para;</a></h2>
 <p>The <code>LaravelModelProvider</code> synthesizes virtual properties from several
