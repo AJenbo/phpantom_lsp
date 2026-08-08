@@ -779,9 +779,7 @@ impl Backend {
                         if let Some(ref mut hint_out) = return_type_hint_out {
                             **hint_out = Some(element_type);
                         }
-                        if !classes.is_empty() {
-                            return classes;
-                        }
+                        return classes;
                     }
 
                     // Array-producing functions (`array_filter`,
@@ -790,6 +788,13 @@ impl Backend {
                     // (`array_map(…)[0]`) needs, so it travels as the
                     // hint.  The classes stay the element's, since an
                     // array has none of its own.
+                    //
+                    // Both rules answer for the whole call, so they return
+                    // even with no classes to report: an element that names
+                    // no class (a scalar, an `array{…}` shape) still leaves
+                    // the hint carrying the real type.  Falling through
+                    // would overwrite it with the stub's bare `array` /
+                    // `mixed`, which is what these rules exist to replace.
                     if let Some(raw_type) = array_func_raw_type(func_name, &fn_args) {
                         let classes: Vec<Arc<ClassInfo>> = raw_type
                             .extract_value_type(true)
@@ -805,9 +810,7 @@ impl Backend {
                         if let Some(ref mut hint_out) = return_type_hint_out {
                             **hint_out = Some(raw_type);
                         }
-                        if !classes.is_empty() {
-                            return classes;
-                        }
+                        return classes;
                     }
                 }
 

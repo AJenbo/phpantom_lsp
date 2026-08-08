@@ -717,3 +717,63 @@ class Cases {
          array_map() call site, got: {unresolved:?}"
     );
 }
+
+/// The same narrowing must survive when the array argument is itself an
+/// inline call to a generic array function.  `iterator_to_array()` keeps
+/// the iterator's element type, and the callback's bare `array` hint must
+/// narrow to it just as it does for a plain variable or a direct call.
+#[test]
+fn wide_array_closure_param_narrows_through_inline_array_function_call() {
+    let backend = create_test_backend_with_full_stubs();
+
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    let uri = "file:///wide_array_param_inline_call.php";
+    let text = r#"<?php
+class DiscountType {
+    public string $name = '';
+}
+
+class Cases {
+    /** @return iterable<array{DiscountType, string}> */
+    private static function cases(): iterable { return []; }
+
+    /** @return list<string> */
+    public function run(): array {
+        return array_map(
+            static fn (array $case): string => $case[0]->name,
+            iterator_to_array(self::cases())
+        );
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(
+                    c,
+                    NumberOrString::String(s)
+                        if s == "unresolved_member_access" || s == "unknown_member"
+                )
+            })
+        })
+        .map(|d| d.message.clone())
+        .collect();
+
+    assert!(
+        unresolved.is_empty(),
+        "Expected no unresolved/unknown member diagnostics: the declared `array` \
+         parameter must narrow to `array{{DiscountType, string}}` produced by the \
+         inline iterator_to_array() argument, got: {unresolved:?}"
+    );
+}

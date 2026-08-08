@@ -117,39 +117,6 @@ reported.
 message but never compared against `self.php_version()`. Deprecations
 with no recorded version keep firing, as today.
 
-#### B61. An `array_map()` callback parameter is not bound when the array argument is an inline array-function call
-
-**Impact: Medium · Effort: Medium**
-
-```php
-/** @return iterable<array{DiscountType, ?CartLabel}> */
-private static function cases(): iterable { … }
-
-$names = array_map(
-    static fn (array $case): string => $case[0]->name,   // "type of '$case[0]' could not be resolved"
-    iterator_to_array(self::cases()),
-);
-```
-
-Assigning `iterator_to_array(self::cases())` to a variable first and
-passing the variable resolves correctly, and so does passing a call
-whose return type needs no substitution. It is specifically a nested
-call to a generic array function — `iterator_to_array()`,
-`array_values()`, `array_filter()` — that loses the element type on the
-way into the callback's parameter.
-
-Two rules that each work alone fail to compose here: the array
-functions keep their element type when the call is used inline, and a
-callback parameter declared as plain `array` narrows to what the call
-site passes. The second does not see what the first produced.
-
-**Where to look:** the callback-parameter binding in
-`type_engine/call_resolution/arg_type_resolution.rs` resolves the array
-argument through a path that does not run the array-function element
-rules in `type_engine/variable/array_func_rules.rs`. Both should go
-through the shared expression resolution so any array-producing
-expression works, not an enumerated set of argument shapes.
-
 #### B62. An application's container binding loses to the framework default for the same key
 
 **Impact: Medium · Effort: Medium**
