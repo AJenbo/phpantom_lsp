@@ -435,15 +435,13 @@ impl Backend {
                     }
                 }
                 TemplateBindingMode::CallableReturnType => {
-                    // `@param callable(...): T $cb` — infer the closure's
-                    // return type from its annotation, generator yields, or
-                    // (for unannotated closures) its resolved body expression.
-                    let ret_type = Self::infer_closure_return_type(arg_text, ctx);
-                    if let Some(ret_type) = ret_type {
+                    if let Some(bound) =
+                        bind_callable_return_template(arg_text, param_hint, tpl_name, ctx)
+                    {
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
                             tpl_name.to_string(),
-                            ret_type,
+                            bound,
                         );
                     }
                 }
@@ -1010,6 +1008,55 @@ fn first_array_literal_element_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> 
     let elems = crate::type_engine::types::conditional::split_text_args(inner);
     let elem = elems.first()?;
     Backend::resolve_arg_text_to_type(elem.trim(), ctx)
+}
+
+/// Bind the template a `@param callable(...): …` hint names in its return
+/// type, from the closure argument written at the call site.
+///
+/// The closure's own return type comes from its annotation, its generator
+/// yields, or (unannotated) its body.  Two things then stand between that
+/// type and the template:
+///
+/// The annotation may be less specific than what the closure actually
+/// returns.  `fn ($c): array => arrStr($c)` says only `array` while
+/// `arrStr()` declares `array<int, string>`, so a hint that asks for
+/// `array<TKey, TValue>` has nothing to take a key or a value from.  When
+/// the declared return has structure to fill and the closure's own is the
+/// opaque `array` keyword, the body is resolved instead.
+///
+/// And the template is rarely the whole return type: `array<TKey, TValue>`,
+/// `list<TValue>`, and Laravel's `Collection<TKey, TValue>|array<TKey,
+/// TValue>` each name it at a position inside a larger shape.  The inferred
+/// type is matched against that shape so each template binds to its own
+/// part rather than to the whole return type.
+pub(crate) fn bind_callable_return_template(
+    arg_text: &str,
+    param_hint: Option<&PhpType>,
+    tpl_name: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let declared_ret = param_hint.and_then(|h| h.callable_return_type());
+    let mut ret_type = Backend::infer_closure_return_type(arg_text, ctx);
+
+    // `callable(): T` binds the whole return type, so a bare `array` is the
+    // right answer there and there is no shape to decompose against.  Any
+    // richer declared return has parts the bare keyword cannot fill.
+    let has_shape =
+        declared_ret.is_some_and(|d| !matches!(d.kind(), TypeKind::Named(n) if &**n == tpl_name));
+
+    if has_shape
+        && ret_type.as_ref().is_some_and(PhpType::is_bare_array)
+        && let Some(body_type) =
+            crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)
+                .and_then(|body| Backend::resolve_closure_body_type(arg_text, body, None, ctx))
+                .filter(|ty| !ty.is_mixed() && !ty.is_bare_array())
+    {
+        ret_type = Some(body_type);
+    }
+
+    let ret_type = ret_type?;
+    let bound = declared_ret.and_then(|declared| unify_template(declared, &ret_type, tpl_name));
+    Some(bound.unwrap_or(ret_type))
 }
 
 /// Bind a template parameter by walking a parameter hint and an argument

@@ -1143,12 +1143,8 @@ impl Backend {
                                     }
                                 }
                                 TemplateBindingMode::CallableReturnType => {
-                                    // Infer from annotation, generator yields,
-                                    // or the unannotated closure's body.
-                                    let ret_type =
-                                        Backend::infer_closure_return_type(arg_text, ctx);
-                                    if let Some(ret_type) = ret_type {
-                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
+                                    if let Some(bound) = super::bind_callable_return_template(arg_text, param_hint, tpl_name, ctx) {
+                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), bound);
                                     }
                                 }
                                 TemplateBindingMode::CallableReturnArrayPosition(position) => {

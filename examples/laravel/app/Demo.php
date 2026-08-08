@@ -247,6 +247,33 @@ class Demo
             ->get('Sourdough');             // → ReviewCollection<array-key, Review>
     }
 
+    /**
+     * `flatMap()` declares two templates and types its callback as
+     * returning either a collection or an array of them, so each template
+     * has to bind to its own part of that shape.  Binding both to the
+     * callback's whole return type leaves the chunked wrapper in place and
+     * reports the flattened result as the wrong type.
+     *
+     * @param  array<int, string>  $titles
+     * @return array<int, string>
+     */
+    public function flatMappedTitles(array $titles): array
+    {
+        return collect($titles)
+            ->chunk(10)
+            ->flatMap(fn ($chunk) => $this->normaliseTitles($chunk->all()))
+            ->all();                        // → array<int, string>
+    }
+
+    /**
+     * @param  array<int, string>  $titles
+     * @return array<int, string>
+     */
+    private function normaliseTitles(array $titles): array
+    {
+        return array_map(strtolower(...), $titles);
+    }
+
 
     // ── Higher-Order Collection Proxies ─────────────────────────────────────
 

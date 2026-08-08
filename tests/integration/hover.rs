@@ -13368,3 +13368,125 @@ $result;
         "$result = factory() should resolve to ResultObj, got: {text}"
     );
 }
+
+// ─── Callable return types that name more than one template ─────────────────
+
+/// A `@param callable(…): array<TKey, TValue>` binds each template from the
+/// part of the closure's return type it names.  The closure's own `: array`
+/// annotation says less than its body does, so the body is what gets
+/// decomposed.  The shape is Laravel's `Collection::flatMap()`, which offers
+/// a collection or an array as the two alternatives the callback may return.
+#[test]
+fn hover_flat_map_union_callable_return_binds_both_templates() {
+    let backend = create_test_backend();
+    let uri = "file:///flat_map_union.php";
+    let content = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template-covariant TValue
+ */
+class Coll {
+    /**
+     * @template TFlatMapKey of array-key
+     * @template TFlatMapValue
+     * @param callable(TValue): (Coll<TFlatMapKey, TFlatMapValue>|array<TFlatMapKey, TFlatMapValue>) $cb
+     * @return Coll<TFlatMapKey, TFlatMapValue>
+     */
+    public function flatMap(callable $cb): static { return $this; }
+}
+
+/** @return array<int, string> */
+function arrStr(mixed $x): array { return ['id']; }
+
+function run(): void {
+    $flat = (new Coll)->flatMap(fn ($c): array => arrStr($c));
+    $flat;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 20, 5).expect("expected hover on $flat");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Coll<int, string>"),
+        "flatMap should bind the key and value templates separately, got: {text}"
+    );
+}
+
+/// The same decomposition through a single-argument `array<TValue>` return,
+/// where only the value template is named and the key keeps its declared
+/// `array-key` bound.
+#[test]
+fn hover_single_arg_callable_return_binds_value_template() {
+    let backend = create_test_backend();
+    let uri = "file:///flat_map_single.php";
+    let content = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template-covariant TValue
+ */
+class Coll {
+    /**
+     * @template TFlatMapKey of array-key
+     * @template TFlatMapValue
+     * @param callable(TValue): array<TFlatMapValue> $cb
+     * @return Coll<TFlatMapKey, TFlatMapValue>
+     */
+    public function flatMap(callable $cb): static { return $this; }
+}
+
+/** @return array<int, string> */
+function arrStr(mixed $x): array { return ['id']; }
+
+function run(): void {
+    $flat = (new Coll)->flatMap(fn ($c): array => arrStr($c));
+    $flat;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 20, 5).expect("expected hover on $flat");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Coll<array-key, string>"),
+        "the value template should bind to the element type, got: {text}"
+    );
+}
+
+/// A callable whose return type *is* the template binds the whole return
+/// type, so a closure annotated `: array` still binds a bare `array` there.
+/// Decomposition must not reach into a return type that has nothing to
+/// decompose.
+#[test]
+fn hover_bare_template_callable_return_binds_whole_type() {
+    let backend = create_test_backend();
+    let uri = "file:///flat_map_direct.php";
+    let content = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template-covariant TValue
+ */
+class Coll {
+    /**
+     * @template TFlatMapKey of array-key
+     * @template TFlatMapValue
+     * @param callable(TValue): TFlatMapValue $cb
+     * @return Coll<TFlatMapKey, TFlatMapValue>
+     */
+    public function flatMap(callable $cb): static { return $this; }
+}
+
+/** @return array<int, string> */
+function arrStr(mixed $x): array { return ['id']; }
+
+function run(): void {
+    $flat = (new Coll)->flatMap(fn ($c): array => arrStr($c));
+    $flat;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 20, 5).expect("expected hover on $flat");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Coll<array-key, array>"),
+        "a bare template return should bind the whole annotated type, got: {text}"
+    );
+}

@@ -101,11 +101,12 @@ pub(crate) fn build_function_template_subs(
                 }
             }
             TemplateBindingMode::CallableReturnType => {
-                // `@param callable(...): T $cb` — infer the closure's return
-                // type from its annotation, generator yields, or (for
-                // unannotated closures) its resolved body expression.
-                if let Some(ret_type) = Backend::infer_closure_return_type(arg_text, rctx) {
-                    insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
+                if let Some(bound) =
+                    crate::type_engine::call_resolution::bind_callable_return_template(
+                        arg_text, param_hint, tpl_name, rctx,
+                    )
+                {
+                    insert_or_union(&mut subs, tpl_name.to_string(), bound);
                 }
             }
             TemplateBindingMode::CallableReturnArrayPosition(position) => {

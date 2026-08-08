@@ -63,3 +63,4 @@ mod template_subs;
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use return_types::MethodReturnCtx;
 pub(crate) use target_cache::{activate_type_engine_caches, try_infer_body_return_type};
+pub(crate) use template_subs::bind_callable_return_template;
