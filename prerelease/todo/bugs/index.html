@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b48-blade-drops-a-variables-generic-arguments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B48. Blade drops a variable's generic arguments
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1317,17 +1306,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b48-blade-drops-a-variables-generic-arguments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B48. Blade drops a variable's generic arguments
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1368,22 +1346,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b48-blade-drops-a-variables-generic-arguments">B48. Blade drops a variable's generic arguments<a class="headerlink" href="#b48-blade-drops-a-variables-generic-arguments" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>A collection passed to a template keeps its class but loses its generic
-arguments, so every member typed through a class-level <code>@template</code> falls
-back to that template's bound. With an explicit annotation in the
-template:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>@php
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>/** @var \Illuminate\Database\Eloquent\Collection&lt;string, \App\Models\Loaf&gt; $byName */
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>@endphp
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>{{ $byName-&gt;get([1]) }}
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>{{-- Argument 1 ($key) expects array-key|null, got list&lt;int&gt; --}}
-</code></pre></div>
-<p>The identical <code>@var</code> in a plain PHP file resolves <code>$key</code> to
-<code>string|null</code>. <code>array-key</code> is the bound of <code>Eloquent\Collection</code>'s
-<code>@template TKey of array-key</code>, so the <code>&lt;string, Loaf&gt;</code> arguments never
-reach parameter substitution on the Blade side.</p>
 <h4 id="b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template">B49. An unannotated callback body that is a method call binds no template<a class="headerlink" href="#b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>When a callback has no return-type annotation, the template bound from
@@ -1391,9 +1353,9 @@ its return type is inferred from the body expression. A body that is a
 <em>call</em> resolves to <code>mixed</code> (the call-return step is missing from
 argument-text resolution), so the template stays unbound and falls back
 to its declared bound:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$byRating = $reviews-&gt;keyBy(fn (Review $r) =&gt; $r-&gt;getRating());</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">foreach ($byRating as $key =&gt; $review) { … }</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">// $key is array-key|\UnitEnum, should be int</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$byRating = $reviews-&gt;keyBy(fn (Review $r) =&gt; $r-&gt;getRating());</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">foreach ($byRating as $key =&gt; $review) { … }</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">// $key is array-key|\UnitEnum, should be int</span>
 </code></pre></div>
 <p>A body that is a variable, a literal, or a <code>new</code> expression binds
 correctly, so this is specifically the call case.</p>
