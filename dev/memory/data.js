@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786211919405,
+  "lastUpdate": 1786212046288,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16047,6 +16047,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4798eb0655ae86b2276244ba26339951ed0fbf81",
+          "message": "`Storage::disk()` and friends resolve to the concrete adapter instead of\nthe bare contract",
+          "timestamp": "2026-08-08T19:18:53+02:00",
+          "tree_id": "03ddbcba81b0fa3ec73f0f247dabe1483fddd576",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4798eb0655ae86b2276244ba26339951ed0fbf81"
+        },
+        "date": 1786212041657,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.8,
             "unit": "MiB"
           }
         ]
