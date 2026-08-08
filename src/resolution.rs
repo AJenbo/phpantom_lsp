@@ -172,6 +172,17 @@ impl Backend {
                 .unwrap_or_else(|| crate::virtual_members::laravel::SUPPORT_CARBON_FQN.to_string());
             return self.find_or_load_class(&configured);
         }
+        // A dot can never appear in a PHP identifier or namespace separator,
+        // so a name containing one (a Laravel container key like
+        // `demo.bakery` or `view.engine.resolver`) is never a class name.
+        // `PhpType::parse` stops at the first character an identifier
+        // cannot contain, so handing such a key to it would silently
+        // truncate `demo.bakery` down to `demo` and let the ordinary
+        // lookup phases match an unrelated class of that short name before
+        // the alias table is ever consulted. Go there directly instead.
+        if class_name.contains('.') {
+            return self.resolve_laravel_alias(class_name);
+        }
         // Defensively strip nullable prefix (`?Foo` → `Foo`) and generic
         // parameters (`Collection<int, User>` → `Collection`) so that
         // callers don't need to normalise before lookup.

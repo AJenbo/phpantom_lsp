@@ -113,8 +113,6 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B56 | [Attributes passed to an anonymous component are undefined unless `@props` lists them](todo/bugs.md#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them) | Medium-High | Low-Medium  |
-| B58 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b58-deprecation-diagnostics-ignore-the-projects-target-php-version)                          | Medium      | Low-Medium  |
-| B64 | [A dotted container key resolves to a class named after its first segment](todo/bugs.md#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment)       | Medium      | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

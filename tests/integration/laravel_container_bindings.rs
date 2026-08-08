@@ -178,7 +178,14 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
 /// Open a consumer that assigns `$x` and hover the following `$x;` statement,
 /// returning the hover text.
 async fn hover_over_x(consumer: &str) -> String {
+    hover_over_x_with_extra_files(&[], consumer).await
+}
+
+/// Like [`hover_over_x`], but with additional project files alongside the
+/// standard fixture set.
+async fn hover_over_x_with_extra_files(extra: &[(&str, &str)], consumer: &str) -> String {
     let mut files = base_files();
+    files.extend_from_slice(extra);
     files.push(("src/Consumer.php", consumer));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
@@ -281,5 +288,48 @@ async fn an_unbound_string_key_stays_unresolved() {
     assert!(
         !text.contains("nothing.binds.this"),
         "an unbound key must not be reported as a class, got: {text}"
+    );
+}
+
+/// A dotted container key's first segment can collide with an unrelated
+/// project class (`demo.bakery` vs `App\Demo`). The whole key must still
+/// resolve to the class bound in the provider, not the short-name match on
+/// its truncated first segment.
+#[tokio::test]
+async fn a_dotted_key_does_not_resolve_to_a_class_named_after_its_first_segment() {
+    const BAKERY_SERVICE_PHP: &str = r#"<?php
+namespace App;
+class BakeryService
+{
+    public function bake(string $item): string { return $item; }
+}
+"#;
+    const BAKERY_SERVICE_PROVIDER_PHP: &str = r#"<?php
+namespace App;
+class BakeryServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton('demo.bakery', fn () => new BakeryService());
+    }
+}
+"#;
+    const PROVIDERS_WITH_BAKERY_PHP: &str = "<?php\nreturn [\n    App\\AppServiceProvider::class,\n    Sentry\\Laravel\\ServiceProvider::class,\n    App\\BakeryServiceProvider::class,\n];\n";
+
+    let extra_files = [
+        ("src/Demo.php", "<?php\nnamespace App;\nclass Demo {}\n"),
+        ("src/BakeryService.php", BAKERY_SERVICE_PHP),
+        ("src/BakeryServiceProvider.php", BAKERY_SERVICE_PROVIDER_PHP),
+        ("bootstrap/providers.php", PROVIDERS_WITH_BAKERY_PHP),
+    ];
+    let text = hover_over_x_with_extra_files(&extra_files, &consumer("app('demo.bakery')")).await;
+
+    assert!(
+        text.contains("BakeryService"),
+        "expected 'demo.bakery' to resolve to BakeryService, got: {text}"
+    );
+    assert!(
+        !text.contains("class Demo"),
+        "'demo.bakery' must not resolve to the unrelated App\\Demo class, got: {text}"
     );
 }
