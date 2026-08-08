@@ -828,32 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b55-props-overwrites-a-var-declaration-with-null-for-every-key-but-the-first" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B55. <code>@props</code> overwrites a <code>@var</code> declaration with <code>null</code> for every key but the first
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         B56. Attributes passed to an anonymous component are undefined unless <code>@props</code> lists them
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b57-a-props-declared-key-is-reported-as-an-unused-variable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B57. A <code>@props</code>-declared key is reported as an unused variable
       </span>
     </span>
   </a>
@@ -887,6 +865,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B64. A dotted container key resolves to a class named after its first segment
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B65. A <code>@var</code> whose type is a closure signature binds the wrong variable
       </span>
     </span>
   </a>
@@ -1361,32 +1350,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b55-props-overwrites-a-var-declaration-with-null-for-every-key-but-the-first" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B55. <code>@props</code> overwrites a <code>@var</code> declaration with <code>null</code> for every key but the first
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         B56. Attributes passed to an anonymous component are undefined unless <code>@props</code> lists them
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b57-a-props-declared-key-is-reported-as-an-unused-variable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B57. A <code>@props</code>-declared key is reported as an unused variable
       </span>
     </span>
   </a>
@@ -1426,6 +1393,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B65. A <code>@var</code> whose type is a closure signature binds the wrong variable
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1456,34 +1434,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b55-props-overwrites-a-var-declaration-with-null-for-every-key-but-the-first">B55. <code>@props</code> overwrites a <code>@var</code> declaration with <code>null</code> for every key but the first<a class="headerlink" href="#b55-props-overwrites-a-var-declaration-with-null-for-every-key-but-the-first" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Effort: Low</strong></p>
-<p>A Blade component that declares its contract in a standalone docblock and
-then lists the same names in <code>@props</code> keeps the declared type for the
-first key only. Every later key is bound to <code>null</code> instead:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>@php
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    /**
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>     * @var string $poster
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>     * @var string $video
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>     */
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>@endphp
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>@props([&#39;poster&#39;, &#39;video&#39;])
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>{{ imgix($poster) }}   {{-- string, correct --}}
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>{{ imgix($video) }}    {{-- null — &quot;expects …|string, got null&quot; --}}
-</code></pre></div>
-<p>Reversing the order of the two <code>@var</code> lines does not move the diagnostic,
-so it follows the order of the <code>@props</code> list, not the docblock.</p>
-<p>Two things are wrong. A <code>@props</code> key with no default is a <em>required</em>
-prop, so it should be typed by whatever the caller passes (or left
-unknown), never <code>null</code> — a component with no docblock at all currently
-types every defaultless prop as <code>null</code>. And a declared <code>@var</code> must win
-over whatever <code>@props</code> derives, for every key rather than the first one.</p>
-<p><strong>Where to look:</strong> the <code>@props</code> handling added when the directive
-started declaring its keys as local variables. It writes one binding per
-key; only the first appears to be merged with the standalone <code>@var</code>
-scope, and the default for a key written as a bare list entry is being
-taken as <code>null</code> rather than "declared, value supplied by the caller".</p>
 <h4 id="b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them">B56. Attributes passed to an anonymous component are undefined unless <code>@props</code> lists them<a class="headerlink" href="#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
 <p><code>Illuminate\View\AnonymousComponent::data()</code> merges
@@ -1493,42 +1443,29 @@ template — <code>@props</code> only adds defaults and removes the key from
 <code>$attributes</code>. PHPantom only creates the variable when <code>@props</code> names
 it, so a component that reads an attribute directly is reported
 <code>unknown_variable</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>{{-- caller --}}
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&lt;x-brand.boxes :hairAnalysis=&quot;$model-&gt;hairAnalysis&quot; /&gt;
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>{{-- components/brand/boxes.blade.php, no @props --}}
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>&lt;x-promo-box :href=&quot;$hairAnalysis&quot; /&gt;   {{-- &quot;Undefined variable &#39;$hairAnalysis&#39;&quot; --}}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>{{-- caller --}}
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>&lt;x-brand.boxes :hairAnalysis=&quot;$model-&gt;hairAnalysis&quot; /&gt;
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>{{-- components/brand/boxes.blade.php, no @props --}}
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>&lt;x-promo-box :href=&quot;$hairAnalysis&quot; /&gt;   {{-- &quot;Undefined variable &#39;$hairAnalysis&#39;&quot; --}}
 </code></pre></div>
 <p>Adding <code>@props(['hairAnalysis'])</code> silences it, which is the tell: the
 call-site attributes are already parsed, they just are not turned into
 variables unless the directive declares them.</p>
-<p><strong>Where to look:</strong> wherever <code>@props</code> keys become scope entries, the same
-scope should also receive the union of the attributes each <code>&lt;x-…&gt;</code> call
-site passes, the way template variables are already inferred from
-<code>view()</code> call sites. The two sources should merge rather than one
-gating the other.</p>
-<h4 id="b57-a-props-declared-key-is-reported-as-an-unused-variable">B57. A <code>@props</code>-declared key is reported as an unused variable<a class="headerlink" href="#b57-a-props-declared-key-is-reported-as-an-unused-variable" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>@props([&#39;accordionId&#39;, &#39;headingId&#39;, &#39;contentId&#39;])
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>&lt;button id=&quot;{{ $headingId }}&quot; aria-controls=&quot;{{ $contentId }}&quot; {{ $attributes }}&gt;&lt;/button&gt;
-</code></pre></div>
-<p><code>$accordionId</code> is flagged <code>unused_variable</code>. It is not a local
-assignment, though: naming a key in <code>@props</code> is what <em>removes</em> it from
-<code>$attributes</code>, so deleting the entry changes the rendered output (the
-attribute starts leaking into the tag). A declared prop the body never
-reads is a component-API observation, not a dead variable, and the
-unused-variable check should not claim it.</p>
-<p><strong>Where to look:</strong> the unused-variable collector treats the scope
-entries <code>@props</code> creates like ordinary assignments. Props need a marker
-that exempts them, the same way a function parameter is exempt.</p>
+<p><strong>Where to look:</strong> the declaration chain in <code>src/blade/signature.rs</code>
+needs a source below <code>@props</code>: the union of the attributes each <code>&lt;x-…&gt;</code>
+call site passes, the way template variables are already inferred from
+<code>view()</code> call sites. <code>call_site_inference.rs</code> skips Blade files
+entirely, so component tags are never read as call sites — that is the
+gap. The two sources should merge, with <code>@props</code> winning per name rather
+than gating the other.</p>
 <h4 id="b58-deprecation-diagnostics-ignore-the-projects-target-php-version">B58. Deprecation diagnostics ignore the project's target PHP version<a class="headerlink" href="#b58-deprecation-diagnostics-ignore-the-projects-target-php-version" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
 <p>A project pinned to PHP 8.4 (<code>"php": "^8.4"</code> plus
 <code>config.platform.php: "8.4"</code> in <code>composer.json</code>) is still told about
 deprecations introduced in 8.5:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&#39;PDO::sqliteCreateFunction&#39; is deprecated: use Pdo\Sqlite::createFunction
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>instead (since PHP 8.5)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&#39;PDO::sqliteCreateFunction&#39; is deprecated: use Pdo\Sqlite::createFunction
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>instead (since PHP 8.5)
 </code></pre></div>
 <p>The message already carries the version the deprecation landed in, and
 <code>Backend</code> already knows the project's target version, so nothing new
@@ -1542,16 +1479,16 @@ with no recorded version keep firing, as today.</p>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>An application that replaces a framework binding still resolves to the
 framework's class:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// config/app.php registers Acme\Translation\TranslationServiceProvider,</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">// which extends Illuminate&#39;s and re-binds &#39;translator&#39;:</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;translator&#39;, function (Application $app) {</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    return new DatabaseTranslator($loader, $locale);</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">});</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">// …but:</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">return $this-&gt;app-&gt;make(&#39;translator&#39;);</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">// &quot;Return type Illuminate\Translation\Translator is incompatible with</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">//  declared return type Acme\Translation\DatabaseTranslator&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// config/app.php registers Acme\Translation\TranslationServiceProvider,</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">// which extends Illuminate&#39;s and re-binds &#39;translator&#39;:</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;translator&#39;, function (Application $app) {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    return new DatabaseTranslator($loader, $locale);</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">});</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">// …but:</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">return $this-&gt;app-&gt;make(&#39;translator&#39;);</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">// &quot;Return type Illuminate\Translation\Translator is incompatible with</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">//  declared return type Acme\Translation\DatabaseTranslator&quot;</span>
 </code></pre></div>
 <p>Both providers are indexed and the framework's wins. Overriding a
 framework binding from an application provider is the normal way to swap
@@ -1571,10 +1508,10 @@ classes beats picking one arbitrarily.</p>
 contain. A container key is handed to it verbatim, so <code>'demo.bakery'</code>
 becomes <code>demo</code> and matches any class of that short name before the
 binding table is ever consulted:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// app/Demo.php declares class App\Demo</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;demo.bakery&#39;, fn () =&gt; new BakeryService());</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">app(&#39;demo.bakery&#39;)-&gt;bake(&#39;croissant&#39;);   // resolves to App\Demo, not BakeryService</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// app/Demo.php declares class App\Demo</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;demo.bakery&#39;, fn () =&gt; new BakeryService());</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">app(&#39;demo.bakery&#39;)-&gt;bake(&#39;croissant&#39;);   // resolves to App\Demo, not BakeryService</span>
 </code></pre></div>
 <p>The bound class is indexed correctly; it is simply never reached,
 because the ordinary class-lookup phases claim the key first and the
@@ -1585,6 +1522,22 @@ project class named <code>View</code>).</p>
 holding a character no PHP identifier can contain is not a class name at
 all, so the ordinary phases have nothing to say about it and the alias
 tables should be consulted first (or exclusively) for it.</p>
+<h4 id="b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable">B65. A <code>@var</code> whose type is a closure signature binds the wrong variable<a class="headerlink" href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p>A closure type writes <code>$</code>-prefixed names for its own parameters, and the
+<code>@var</code> scan takes the first <code>$</code> it finds after the tag as the annotated
+variable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @var \Closure(\App\Models\User $user): string $callback */</span>
+</code></pre></div>
+<p>is read as declaring <code>$user</code> of type <code>\Closure(\App\Models\User</code>, so
+<code>$callback</code> stays untyped and a bogus <code>$user</code> enters the scope. The same
+shape appears in <code>@param</code> and in a Blade template's signature docblock,
+where it also decides which names the contract declares.</p>
+<p><strong>Where to look:</strong> <code>parse_var_docblock_pairs</code> in
+<code>type_engine/variable/forward_walk/assignment.rs</code> scans for the first
+<code>$</code> after <code>@var</code>. The annotated variable is the <code>$name</code> at paren depth 0
+and angle depth 0, so the scan has to track both while walking the type
+rather than stopping at the first <code>$</code>.</p>
 
 
 
