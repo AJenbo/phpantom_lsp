@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786221410392,
+  "lastUpdate": 1786223201484,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16285,6 +16285,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b56702680bcd2d4e9456aad36fb906a3b4211059",
+          "message": "A layout's declared variables reach the templates that extend it",
+          "timestamp": "2026-08-08T22:51:02+02:00",
+          "tree_id": "3aa4f64a96abf9ece8a32ad33f38660d94ea9b4c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b56702680bcd2d4e9456aad36fb906a3b4211059"
+        },
+        "date": 1786223198008,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.1,
             "unit": "MiB"
           }
         ]
