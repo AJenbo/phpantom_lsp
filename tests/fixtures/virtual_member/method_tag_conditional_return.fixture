@@ -1,0 +1,23 @@
+// test: conditional return type on a @method tag narrows by argument type
+// feature: completion
+// expect: getName(
+// expect_absent: first(
+---
+<?php
+
+class User {
+    public function getName(): string { return ''; }
+}
+
+class UserCollection {
+    public function first(): User {}
+}
+
+/**
+ * @method static ($id is int ? User : UserCollection) find($id)
+ */
+class UserFacade {
+}
+
+$u = UserFacade::find(1);
+$u-><>

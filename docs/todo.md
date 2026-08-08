@@ -29,7 +29,7 @@ within the same impact tier.
 | BL20 | [`$this` in a Livewire view resolves to nothing](todo/blade.md#bl20-this-in-a-livewire-view-resolves-to-nothing)                                                             | Medium      | Medium      |
 | BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |
 | BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures, depends on BL6)                                                       | Medium-High | Medium-High |
-| L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
+| L46 | [Facade member completion from the concrete class](todo/laravel.md#l46-facade-member-completion-from-the-concrete-class)                                        | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | L42 | [`keyBy()` and friends do not rebind a collection's key template](todo/laravel.md#l42-keyby-and-friends-do-not-rebind-a-collections-key-template)                           | Medium      | Low-Medium  |
@@ -40,6 +40,7 @@ within the same impact tier.
 | #   | Item                                                                                                                                                            | Impact      | Effort      |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | Medium      |
 | E5  | [Extension stub coverage audit](todo/external-stubs.md#e5-extension-stub-selection-stubs-extensions)                                                            | Medium      | Low         |
 | E1  | [External stub packages (ide-helper, etc.)](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                                     | Medium-High | Medium      |
 | E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | Medium      |

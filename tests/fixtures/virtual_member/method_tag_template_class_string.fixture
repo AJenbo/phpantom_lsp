@@ -1,0 +1,20 @@
+// test: @method tag template bound through class-string<T> resolves at the call site
+// feature: completion
+// expect: doSomething(
+// expect_absent: doNotExist
+---
+<?php
+
+class MyService {
+    public function doSomething(): void {}
+}
+
+/**
+ * @method T make<T of object>(class-string<T> $abstract)
+ */
+class Container {
+}
+
+$c = new Container();
+$x = $c->make(MyService::class);
+$x-><>

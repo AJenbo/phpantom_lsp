@@ -1,0 +1,19 @@
+// test: @method static tag template resolves on a static call
+// feature: completion
+// expect: doSomething(
+// expect_absent: doNotExist
+---
+<?php
+
+class MyService {
+    public function doSomething(): void {}
+}
+
+/**
+ * @method static T make<T of object>(class-string<T>|string $abstract, array $parameters = [])
+ */
+class App {
+}
+
+$x = App::make(MyService::class);
+$x-><>

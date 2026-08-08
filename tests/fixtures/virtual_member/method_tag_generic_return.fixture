@@ -1,0 +1,28 @@
+// test: generic arguments on a @method tag return type survive to the call site
+// feature: completion
+// expect: getName(
+// expect_absent: doNotExist
+---
+<?php
+
+class User {
+    public function getName(): string { return ''; }
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ */
+class Collection {
+    /** @return TValue */
+    public function first() {}
+}
+
+/**
+ * @method static Collection<int, User> all()
+ */
+class UserFacade {
+}
+
+$u = UserFacade::all()->first();
+$u-><>
