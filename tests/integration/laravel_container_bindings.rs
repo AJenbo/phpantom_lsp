@@ -22,7 +22,7 @@ const COMPOSER_JSON: &str = r#"{
     }
 }"#;
 
-const PROVIDERS_PHP: &str = "<?php\nreturn [\n    App\\AppServiceProvider::class,\n];\n";
+const PROVIDERS_PHP: &str = "<?php\nreturn [\n    App\\AppServiceProvider::class,\n    Sentry\\Laravel\\ServiceProvider::class,\n];\n";
 
 /// The three binding shapes a provider writes: a factory closure, a bare
 /// `::class`, and a ready-made instance.
@@ -48,6 +48,49 @@ namespace Sentry;
 class HubAdapter
 {
     public function captureException($exception): string { return ''; }
+}
+"#;
+
+const HUB_INTERFACE_PHP: &str = r#"<?php
+namespace Sentry\State;
+interface HubInterface
+{
+    public function getLastEventId(): string;
+}
+"#;
+
+const SENTRY_CLIENT_PHP: &str = r#"<?php
+namespace Sentry;
+class Client
+{
+    public function getOptions(): array { return []; }
+}
+"#;
+
+/// A package that declares its container key on a base provider and binds
+/// under `static::$abstract` from the subclass the application registers.
+const SENTRY_BASE_PROVIDER_PHP: &str = r#"<?php
+namespace Sentry\Laravel;
+
+abstract class BaseServiceProvider
+{
+    public static $abstract = 'sentry.hub';
+}
+"#;
+
+const SENTRY_PROVIDER_PHP: &str = r#"<?php
+namespace Sentry\Laravel;
+
+use Sentry\Client;
+use Sentry\State\HubInterface;
+
+class ServiceProvider extends BaseServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->alias(HubInterface::class, static::$abstract);
+        $this->app->singleton(static::$abstract . '.client', fn () => new Client());
+    }
 }
 "#;
 
@@ -115,6 +158,16 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         ("src/Support/FeatureFlags.php", FEATURE_FLAGS_PHP),
         ("src/helpers.php", HELPERS_PHP),
         ("vendor/sentry/HubAdapter.php", HUB_ADAPTER_PHP),
+        ("vendor/sentry/Client.php", SENTRY_CLIENT_PHP),
+        ("vendor/sentry/State/HubInterface.php", HUB_INTERFACE_PHP),
+        (
+            "vendor/sentry/Laravel/BaseServiceProvider.php",
+            SENTRY_BASE_PROVIDER_PHP,
+        ),
+        (
+            "vendor/sentry/Laravel/ServiceProvider.php",
+            SENTRY_PROVIDER_PHP,
+        ),
         (
             "vendor/illuminate/Foundation/Application.php",
             APPLICATION_PHP,
@@ -195,6 +248,28 @@ async fn app_helper_resolves_a_provider_bound_string_key() {
     assert!(
         text.contains("HubAdapter"),
         "expected app('sentry') to resolve to HubAdapter, got: {text}"
+    );
+}
+
+/// `alias(Contract::class, 'key')` is the other way a provider gives a class a
+/// string name, and the key it uses is not always a literal: Sentry keeps it in
+/// a static property on the base provider its subclass extends.
+#[tokio::test]
+async fn alias_resolves_a_key_named_by_an_inherited_static_property() {
+    let text = hover_over_x(&consumer("app('sentry.hub')")).await;
+    assert!(
+        text.contains("HubInterface"),
+        "expected the aliased 'sentry.hub' key to resolve to HubInterface, got: {text}"
+    );
+}
+
+/// The same folded key, this time built into a longer one by concatenation.
+#[tokio::test]
+async fn make_resolves_a_key_built_from_an_inherited_static_property() {
+    let text = hover_over_x(&consumer("app()->make('sentry.hub.client')")).await;
+    assert!(
+        text.contains("Client"),
+        "expected the 'sentry.hub.client' binding to resolve to Client, got: {text}"
     );
 }
 

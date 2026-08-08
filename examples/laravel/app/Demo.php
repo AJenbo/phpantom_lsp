@@ -764,6 +764,12 @@ class Demo
         $controller->index();                                   // → View
         App::make(BakeryController::class)->index();            // → View
         App::makeWith(BakeryController::class, [])->index();    // → View
+
+        // A key a project's own provider registers resolves the same way.
+        // DemoServiceProvider writes neither key as a literal: both are built
+        // from `static::$abstract`, declared on the base provider it extends.
+        app('pastry.oven')->bake('croissant');                  // → BakeryService
+        app('pastry.oven.supplier')->supply(12);                // → CroissantSupplier
     }
 
 

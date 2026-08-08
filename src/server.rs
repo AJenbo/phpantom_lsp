@@ -2515,8 +2515,13 @@ impl Backend {
                 &content,
                 &file_path,
                 &workspace_root,
+                self.provider_class_context(&fqn),
             ));
         }
+
+        // Every provider has been scanned, so an alias can now be pointed at
+        // the binding it stands for regardless of which provider made it.
+        resources.resolve_aliases();
 
         let config_count = resources.config_files.len();
         let view_count = resources.view_dirs.len();
@@ -2549,6 +2554,24 @@ impl Backend {
             route_count,
             binding_count,
         );
+    }
+
+    /// The constants and static-property defaults a provider's own source
+    /// folds `self::` and `static::` against.
+    ///
+    /// Merged over the parent chain, because a package commonly declares the
+    /// container key on a base provider (`public static $abstract = 'sentry';`)
+    /// and binds `static::$abstract` from the subclass the application
+    /// registers.  Only the base resolution is used: the virtual member
+    /// providers add nothing a declared constant is read from, and one of them
+    /// is the very table being built here.
+    fn provider_class_context(&self, fqn: &str) -> crate::virtual_members::laravel::ClassContext {
+        let Some(class) = self.find_or_load_class(fqn) else {
+            return Default::default();
+        };
+        let loader = |name: &str| self.find_or_load_class(name);
+        let merged = crate::inheritance::resolve_class_with_inheritance(&class, &loader);
+        crate::virtual_members::laravel::ClassContext::from_class(&merged)
     }
 
     fn infer_laravel_macro_return_types(

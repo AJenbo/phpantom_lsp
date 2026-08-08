@@ -150,30 +150,30 @@ outranks a framework default, and a provider that `extends` another
 outranks its parent. Where two bindings genuinely tie, the union of both
 classes beats picking one arbitrarily.
 
-#### B63. `Container::alias()` bindings and non-literal binding keys do not resolve
+#### B64. A dotted container key resolves to a class named after its first segment
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Medium · Effort: Low-Medium**
 
-`singleton()`, `bind()`, and `instance()` are indexed; `alias()` is not,
-and a key that is not a string literal is not evaluated. Sentry's
-provider uses both at once:
+`find_or_load_class` normalises through `PhpType::parse`, whose
+`base_name()` stops at the first character a PHP identifier cannot
+contain. A container key is handed to it verbatim, so `'demo.bakery'`
+becomes `demo` and matches any class of that short name before the
+binding table is ever consulted:
 
 ```php
-class BaseServiceProvider extends ServiceProvider
-{
-    public static $abstract = 'sentry';
-}
+// app/Demo.php declares class App\Demo
+$this->app->singleton('demo.bakery', fn () => new BakeryService());
 
-// in the subclass:
-$this->app->alias(HubInterface::class, static::$abstract);
+app('demo.bakery')->bake('croissant');   // resolves to App\Demo, not BakeryService
 ```
 
-so every `app()->make('sentry')`, `app('sentry')`, and
-`App::make('sentry')` is unresolved, including through a variable.
+The bound class is indexed correctly; it is simply never reached,
+because the ordinary class-lookup phases claim the key first and the
+Laravel alias table is only a fallback. Framework keys hit this too
+wherever the leading segment collides (`view.engine.resolver` against a
+project class named `View`).
 
-**Where to look:** `virtual_members/laravel/provider_resources.rs`.
-`alias(Concrete::class, 'key')` binds `'key'` to the class in the first
-argument — note the argument order is the reverse of `bind()`. The key
-needs the same constant folding the route-name collector does for
-`static::$prop` and `self::CONST`, resolved against the concrete
-provider class so a property declared on a parent is found.
+**Where to look:** `resolution.rs`, `Backend::find_or_load_class`. A name
+holding a character no PHP identifier can contain is not a class name at
+all, so the ordinary phases have nothing to say about it and the alias
+tables should be consulted first (or exclusively) for it.

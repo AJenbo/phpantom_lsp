@@ -4,15 +4,30 @@ namespace App\Providers;
 
 use App\Models\Bakery;
 use App\Models\BlogPost;
+use App\Support\BakeryService;
 use App\Support\CarbonMixin;
 use App\Support\CollectionMixin;
+use App\Support\CroissantSupplier;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Collection;
-use Illuminate\Support\ServiceProvider;
 
-class DemoServiceProvider extends ServiceProvider
+class DemoServiceProvider extends BaseDemoServiceProvider
 {
+    public function register(): void
+    {
+        // A container key is not always written as a literal.  This one lives
+        // in a static property on the base provider, so `static::$abstract`
+        // is all the subclass writes.  PHPantom folds the property against
+        // this concrete provider class, which is where the parent chain is
+        // known, so `app('demo.bakery')` resolves to BakeryService.
+        $this->app->singleton(static::$abstract, fn () => new BakeryService());
+
+        // `alias()` takes its arguments the other way round from `bind()`:
+        // the second one is the new name, the first is what it stands for.
+        $this->app->alias(CroissantSupplier::class, static::$abstract . '.supplier');
+    }
+
     public function boot(): void
     {
         // The morph map replaces the model FQCN with a short alias in every

@@ -8,6 +8,7 @@ use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
+use super::const_eval::{ClassContext, Scope, const_string};
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
 
@@ -29,6 +30,12 @@ pub(crate) struct ProviderResources {
     /// binding keyed by `Contract::class` needs no table: the written name
     /// already resolves.
     pub bindings: HashMap<String, String>,
+    /// `alias('other-key', 'key')` entries, as key → the key they stand for.
+    /// These name a binding by another *string* key rather than by a class,
+    /// so they are folded into `bindings` by [`Self::resolve_aliases`] once
+    /// every provider has been scanned: the key an alias points at may well
+    /// be bound by a provider that comes later.
+    pub aliases: HashMap<String, String>,
     /// A provider rebound `translator` or `translation.loader` to something
     /// other than Laravel's own file-based pair, so the strings come from a
     /// source we cannot enumerate (a database table, say) and the set of
@@ -43,7 +50,36 @@ impl ProviderResources {
         self.trans_dirs.extend(other.trans_dirs);
         self.route_files.extend(other.route_files);
         self.bindings.extend(other.bindings);
+        self.aliases.extend(other.aliases);
         self.custom_translation_loader |= other.custom_translation_loader;
+    }
+
+    /// Give every alias the concrete class of the key it stands for.
+    ///
+    /// Laravel resolves an alias by following it until it reaches a key that
+    /// is not itself aliased, so a chain (`'a'` → `'b'` → a bound class) is
+    /// followed here too.  The walk is bounded by the number of aliases, which
+    /// leaves a cycle unresolved instead of looping forever.
+    pub fn resolve_aliases(&mut self) {
+        let limit = self.aliases.len();
+        let resolved: Vec<(String, String)> = self
+            .aliases
+            .iter()
+            .filter_map(|(key, target)| {
+                let mut target = target;
+                for _ in 0..limit {
+                    match self.aliases.get(target) {
+                        Some(next) => target = next,
+                        None => break,
+                    }
+                }
+                let concrete = self.bindings.get(target)?;
+                Some((key.clone(), concrete.clone()))
+            })
+            .collect();
+        // The container consults its alias table before its bindings, so an
+        // alias decides the key it covers.
+        self.bindings.extend(resolved);
     }
 }
 
@@ -67,12 +103,19 @@ const BINDING_METHODS: &[&[u8]] = &[
     b"extend",
 ];
 
+/// Scan a service provider for the resources it registers.
+///
+/// `class_context` carries the provider class's own constants and static
+/// property defaults, merged over its parent chain, so a binding key written
+/// as `static::$abstract` folds to the string it holds.
 pub(crate) fn extract_provider_resources(
     content: &str,
     file_path: &Path,
     workspace_root: &Path,
+    class_context: ClassContext,
 ) -> ProviderResources {
     let mut resources = ProviderResources::default();
+    let scope = Scope::for_class(class_context);
     let file_dir = file_path.parent().unwrap_or(file_path);
     // Route files reached through `Route::…->group('path')`.  They are only
     // kept when the provider turns out not to register any routes inline:
@@ -133,6 +176,35 @@ pub(crate) fn extract_provider_resources(
             return ControlFlow::Continue(());
         }
 
+        // `$this->app->alias(Concrete::class, 'key')` gives an existing
+        // binding another name.  The arguments read the other way round from
+        // `bind()`: the key is the second one, and the first names what it
+        // stands for.
+        if method_lower == b"alias"
+            && is_app_container_expr(mc.object)
+            && let Some(target) = mc.argument_list.arguments.iter().next()
+            && let Some(key) = mc
+                .argument_list
+                .arguments
+                .iter()
+                .nth(1)
+                .and_then(|arg| alias_key(arg.value(), content, &scope, &resolved))
+        {
+            match binding_concrete(Some(target.value()), &resolved) {
+                Some(concrete) => {
+                    resources.bindings.insert(key, concrete);
+                }
+                // The target is another string key, whose own binding may not
+                // have been scanned yet.
+                None => {
+                    if let Some(aliased) = const_string(target.value(), content, &scope) {
+                        resources.aliases.insert(key, aliased);
+                    }
+                }
+            }
+            return ControlFlow::Continue(());
+        }
+
         // `$this->app->singleton('translation.loader', …)` and friends decide
         // where translation lines come from, and the container is reached
         // through `$this->app`, not `$this`, so this is checked ahead of the
@@ -140,12 +212,11 @@ pub(crate) fn extract_provider_resources(
         if BINDING_METHODS.contains(&method_lower.as_slice())
             && is_app_container_expr(mc.object)
             && let Some(key_arg) = mc.argument_list.arguments.iter().next()
-            && let Some((key, _, _)) =
-                super::helpers::extract_string_literal(key_arg.value(), content)
+            && let Some(key) = const_string(key_arg.value(), content, &scope)
         {
             let factory = mc.argument_list.arguments.iter().nth(1).map(|a| a.value());
 
-            if TRANSLATION_BINDINGS.contains(&key) {
+            if TRANSLATION_BINDINGS.contains(&key.as_str()) {
                 // `extend` decorates whatever is already bound, so even a
                 // file-based wrapper adds lines from somewhere else.
                 if method_lower != b"extend" && builds_file_translator(factory) {
@@ -161,7 +232,7 @@ pub(crate) fn extract_provider_resources(
             if method_lower != b"extend"
                 && let Some(concrete) = binding_concrete(factory, &resolved)
             {
-                resources.bindings.insert(key.to_string(), concrete);
+                resources.bindings.insert(key, concrete);
             }
             return ControlFlow::Continue(());
         }
@@ -279,23 +350,13 @@ fn binding_concrete(
     expr: Option<&Expression<'_>>,
     resolved: &OwnedResolvedNames,
 ) -> Option<String> {
-    match expr? {
+    let expr = expr?;
+    match expr {
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(id) => resolved_class_fqn(id, resolved),
             _ => None,
         },
-        Expression::Access(Access::ClassConstant(cca))
-            if matches!(
-                &cca.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if constant.value.eq_ignore_ascii_case(b"class")
-            ) =>
-        {
-            match cca.class {
-                Expression::Identifier(id) => resolved_class_fqn(id, resolved),
-                _ => None,
-            }
-        }
+        Expression::Access(Access::ClassConstant(_)) => class_string_fqn(expr, resolved),
         Expression::ArrowFunction(arrow) => binding_concrete(Some(arrow.expression), resolved),
         Expression::Closure(closure) => {
             closure.body.statements.iter().find_map(|stmt| match stmt {
@@ -304,6 +365,39 @@ fn binding_concrete(
             })
         }
         Expression::Parenthesized(inner) => binding_concrete(Some(inner.expression), resolved),
+        _ => None,
+    }
+}
+
+/// The container key an `alias()` argument names.
+///
+/// An alias is keyed either by a string (`alias(HubInterface::class,
+/// 'sentry')`) or by a contract's name (`alias('sentry',
+/// HubInterface::class)`), and both sides of the call accept both forms.
+fn alias_key(
+    expr: &Expression<'_>,
+    content: &str,
+    scope: &Scope,
+    resolved: &OwnedResolvedNames,
+) -> Option<String> {
+    const_string(expr, content, scope).or_else(|| class_string_fqn(expr, resolved))
+}
+
+/// The FQN an `X::class` expression spells, or `None` for any other
+/// expression.
+fn class_string_fqn(expr: &Expression<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
+    let Expression::Access(Access::ClassConstant(access)) = expr else {
+        return None;
+    };
+    if !matches!(
+        &access.constant,
+        ClassLikeConstantSelector::Identifier(constant)
+            if constant.value.eq_ignore_ascii_case(b"class")
+    ) {
+        return None;
+    }
+    match access.class {
+        Expression::Identifier(id) => resolved_class_fqn(id, resolved),
         _ => None,
     }
 }
@@ -511,7 +605,12 @@ mod tests {
                 }\n\
             }\n";
         let file_path = Path::new("/ws/app/Providers/RouteServiceProvider.php");
-        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        let resources = extract_provider_resources(
+            content,
+            file_path,
+            Path::new("/ws"),
+            ClassContext::default(),
+        );
         assert_eq!(
             resources.route_files,
             vec![file_path.to_path_buf()],
@@ -528,7 +627,12 @@ mod tests {
                 Route::get('/')->name('home');\n\
             });\n";
         let file_path = Path::new("/ws/app/Providers/RouteServiceProvider.php");
-        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        let resources = extract_provider_resources(
+            content,
+            file_path,
+            Path::new("/ws"),
+            ClassContext::default(),
+        );
         assert_eq!(resources.route_files, vec![file_path.to_path_buf()]);
     }
 
@@ -543,7 +647,12 @@ mod tests {
                 }\n\
             }\n";
         let file_path = Path::new("/ws/vendor/acme/src/PackageServiceProvider.php");
-        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        let resources = extract_provider_resources(
+            content,
+            file_path,
+            Path::new("/ws"),
+            ClassContext::default(),
+        );
         assert_eq!(
             resources.route_files,
             vec![Path::new("/ws/vendor/acme/src").join("../routes/pkg.php")],
@@ -557,8 +666,12 @@ mod tests {
         // must not be misread as a route-file registration.
         let content = "<?php\n\
             Blade::directive('x')->group(base_path('resources/views'));\n";
-        let resources =
-            extract_provider_resources(content, Path::new("/ws/Provider.php"), Path::new("/ws"));
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/Provider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+        );
         assert!(resources.route_files.is_empty());
     }
 
@@ -575,7 +688,12 @@ mod tests {
                 }\n\
             }\n";
         let file_path = Path::new("/ws/vendor/livewire/livewire/src/LivewireServiceProvider.php");
-        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        let resources = extract_provider_resources(
+            content,
+            file_path,
+            Path::new("/ws"),
+            ClassContext::default(),
+        );
         assert_eq!(resources.config_files.len(), 1);
         assert_eq!(
             resources.config_files[0].path,
@@ -602,6 +720,7 @@ mod tests {
             content,
             Path::new("/ws/src/TranslationServiceProvider.php"),
             Path::new("/ws"),
+            ClassContext::default(),
         );
         assert!(resources.custom_translation_loader);
     }
@@ -621,6 +740,7 @@ mod tests {
             content,
             Path::new("/ws/src/TranslationServiceProvider.php"),
             Path::new("/ws"),
+            ClassContext::default(),
         );
         assert!(resources.custom_translation_loader);
     }
@@ -654,6 +774,7 @@ mod tests {
                 "/ws/vendor/laravel/framework/src/Illuminate/Translation/TranslationServiceProvider.php",
             ),
             Path::new("/ws"),
+            ClassContext::default(),
         );
         assert!(!resources.custom_translation_loader);
     }
@@ -672,6 +793,7 @@ mod tests {
             content,
             Path::new("/ws/src/CacheTranslationServiceProvider.php"),
             Path::new("/ws"),
+            ClassContext::default(),
         );
         assert!(resources.custom_translation_loader);
     }
@@ -689,6 +811,7 @@ mod tests {
             content,
             Path::new("/ws/src/AppServiceProvider.php"),
             Path::new("/ws"),
+            ClassContext::default(),
         );
         assert!(!resources.custom_translation_loader);
     }
@@ -709,11 +832,156 @@ mod tests {
                 }\n\
             }\n";
         let file_path = Path::new("/ws/vendor/acme/src/PackageServiceProvider.php");
-        let resources = extract_provider_resources(content, file_path, Path::new("/ws"));
+        let resources = extract_provider_resources(
+            content,
+            file_path,
+            Path::new("/ws"),
+            ClassContext::default(),
+        );
         assert_eq!(resources.config_files.len(), 1);
         assert!(
             resources.view_dirs.is_empty(),
             "an undefined `$path` in a different method must not resolve to another method's assignment"
         );
+    }
+
+    /// The fold table a provider whose base class declares
+    /// `public static $abstract = 'sentry';` is scanned with, as
+    /// `provider_class_context` builds it from the inheritance-merged class.
+    fn sentry_context() -> ClassContext {
+        let mut class = crate::test_fixtures::make_class("ServiceProvider");
+        let mut abstract_key = crate::test_fixtures::make_property("abstract", Some("string"));
+        abstract_key.is_static = true;
+        abstract_key.source = Some(crate::types::PropertySource::DeclaredDefault {
+            value: "'sentry'".into(),
+        });
+        class.properties = vec![std::sync::Arc::new(abstract_key)].into();
+
+        let mut version = crate::test_fixtures::make_constant("VERSION");
+        version.value = Some("'4.0'".to_string());
+        class.constants = vec![std::sync::Arc::new(version)].into();
+
+        ClassContext::from_class(&class)
+    }
+
+    fn scan_sentry_provider(content: &str) -> ProviderResources {
+        let mut resources = extract_provider_resources(
+            content,
+            Path::new("/ws/vendor/sentry/sentry-laravel/src/Sentry/Laravel/ServiceProvider.php"),
+            Path::new("/ws"),
+            sentry_context(),
+        );
+        resources.resolve_aliases();
+        resources
+    }
+
+    #[test]
+    fn binds_a_key_named_by_an_inherited_static_property() {
+        // Sentry declares the container key on the base provider and binds
+        // under `static::$abstract` from the subclass the application
+        // registers, so `app('sentry')` only resolves once the property folds.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton(static::$abstract, fn () => new HubAdapter());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(String::as_str),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn binds_a_key_built_from_a_class_constant() {
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton(self::VERSION . '.hub', fn () => new HubAdapter());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("4.0.hub").map(String::as_str),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn a_key_named_by_another_class_does_not_fold() {
+        // `Unrelated::$abstract` names a class this scan never read; borrowing
+        // the scanned provider's property of that name would bind the wrong key.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton(Unrelated::$abstract, fn () => new HubAdapter());\n\
+                }\n\
+            }\n";
+        assert!(scan_sentry_provider(content).bindings.is_empty());
+    }
+
+    #[test]
+    fn alias_binds_its_second_argument_to_the_class_in_its_first() {
+        // `alias()` takes its arguments the other way round from `bind()`.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            use Sentry\\State\\HubInterface;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->alias(HubInterface::class, static::$abstract);\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(String::as_str),
+            Some("Sentry\\State\\HubInterface")
+        );
+    }
+
+    #[test]
+    fn alias_to_another_key_resolves_to_that_keys_concrete() {
+        // Aliasing an already-bound string key is how a package exposes its
+        // service under a contract name as well.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            use Sentry\\State\\HubInterface;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton(static::$abstract, fn () => new HubAdapter());\n\
+                    $this->app->alias(static::$abstract, HubInterface::class);\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources
+                .bindings
+                .get("Sentry\\State\\HubInterface")
+                .map(String::as_str),
+            Some("Sentry\\Laravel\\HubAdapter"),
+            "the contract name has to reach the class the aliased key is bound to"
+        );
+    }
+
+    #[test]
+    fn an_alias_cycle_leaves_its_keys_unresolved() {
+        let content = "<?php\n\
+            class AppServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->alias('a', 'b');\n\
+                    $this->app->alias('b', 'a');\n\
+                }\n\
+            }\n";
+        let mut resources = extract_provider_resources(
+            content,
+            Path::new("/ws/src/AppServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+        );
+        resources.resolve_aliases();
+        assert!(resources.bindings.is_empty());
     }
 }

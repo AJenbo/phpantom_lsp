@@ -1,5 +1,5 @@
-//! A small constant evaluator for the statically-known values a route file
-//! builds its route names and URIs from.
+//! A small constant evaluator for the statically-known strings a project
+//! builds its route names, URIs, and container binding keys from.
 //!
 //! Route files legitimately register one route per entry of a literal array
 //! and name each of them by interpolation, so a name is not always a plain
@@ -12,6 +12,11 @@
 //! }
 //! ```
 //!
+//! Service providers do the same with the key they bind under, keeping it in
+//! a constant or a static property rather than repeating the string
+//! (`$this->app->singleton(static::$abstract, …)`), which a [`ClassContext`]
+//! on the [`Scope`] resolves.
+//!
 //! Everything here folds only what PHP would fold to the same value without
 //! running any code.  A call to one of a fixed list of pure string functions
 //! (`trim`, `str_replace`, `preg_replace`, …) folds when every argument is
@@ -19,10 +24,13 @@
 //! outside the list — is [`ConstValue::Unknown`], which yields no name at
 //! all rather than a partial one.
 
+use std::collections::HashMap;
+
 use mago_syntax::cst::*;
 use regex::Regex;
 
 use crate::atom::bytes_to_str;
+use crate::types::{ClassInfo, PropertySource};
 
 /// The value a PHP expression folds to, as far as it folds without executing
 /// anything.
@@ -47,23 +55,108 @@ impl ConstValue {
     }
 }
 
-/// The variables in scope while a route file is scanned, innermost last.
+/// The class that `self::` and `static::` name in the file being scanned,
+/// together with the values its constants and static-property defaults hold.
+///
+/// The members are inheritance-merged by the caller, so a service provider
+/// binding under `static::$abstract` folds even when the property is declared
+/// on the base provider it extends.
+#[derive(Default)]
+pub(crate) struct ClassContext {
+    /// The class's short name, which an explicit `Provider::ABSTRACT`
+    /// qualifier is matched against.
+    short_name: String,
+    /// Constant name (`ABSTRACT`) or static property name including its `$`
+    /// (`$abstract`) → the string the member holds.
+    members: HashMap<String, String>,
+}
+
+impl ClassContext {
+    /// Collect the members of `class` whose declared value is a plain
+    /// literal.  Anything computed (a concatenation, another constant, a
+    /// call) is left out rather than folded from its source text.
+    pub(crate) fn from_class(class: &ClassInfo) -> Self {
+        let mut members = HashMap::new();
+
+        for constant in class.constants.iter() {
+            if constant.is_enum_case {
+                continue;
+            }
+            if let Some(value) = constant.value.as_deref().and_then(literal_text) {
+                members.insert(constant.name.to_string(), value);
+            }
+        }
+
+        for property in class.properties.iter() {
+            let Some(PropertySource::DeclaredDefault { value }) = property.source.as_ref() else {
+                continue;
+            };
+            if property.is_static
+                && let Some(value) = literal_text(value)
+            {
+                members.insert(format!("${}", property.name), value);
+            }
+        }
+
+        Self {
+            short_name: class.name.to_string(),
+            members,
+        }
+    }
+}
+
+/// The string a declared constant or property default holds, given the source
+/// text of its initializer (`"'sentry'"`, `"42"`).
+///
+/// Only a plain quoted literal or an integer folds.  An escape sequence or an
+/// interpolation would mean re-implementing PHP's string syntax over text the
+/// parser already threw away, and no container key is written that way.
+fn literal_text(source: &str) -> Option<String> {
+    let source = source.trim();
+    let quote = source.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return source.parse::<i64>().ok().map(|number| number.to_string());
+    }
+    let inner = source.strip_prefix(quote)?.strip_suffix(quote)?;
+    // A second quote of the same kind means the text is not one literal but a
+    // concatenation of several, and a backslash or `$` means PHP would read
+    // the contents rather than take them verbatim.
+    if inner.contains([quote, '\\']) || (quote == '"' && inner.contains(['$', '{'])) {
+        return None;
+    }
+    Some(inner.to_string())
+}
+
+/// The variables in scope while a file is scanned, innermost last, plus the
+/// class its `self::` / `static::` references resolve against.
 ///
 /// A `foreach` binds its key/value variables for the duration of the body and
 /// truncates back afterwards, so a nested loop sees the enclosing loop's
 /// variables while a later sibling loop does not.
 #[derive(Default)]
-pub(crate) struct Scope(Vec<(String, ConstValue)>);
+pub(crate) struct Scope {
+    variables: Vec<(String, ConstValue)>,
+    class: Option<ClassContext>,
+}
 
 impl Scope {
+    /// A scope for a file that declares `class`, so its own constants and
+    /// static properties fold.
+    pub(crate) fn for_class(class: ClassContext) -> Self {
+        Self {
+            variables: Vec::new(),
+            class: Some(class),
+        }
+    }
+
     fn bind(&mut self, name: &str, value: ConstValue) {
-        self.0.push((name.to_string(), value));
+        self.variables.push((name.to_string(), value));
     }
 
     /// The innermost binding of `name`, so a rebound variable shadows the
     /// outer one rather than resurrecting it.
     fn get(&self, name: &str) -> Option<&ConstValue> {
-        self.0
+        self.variables
             .iter()
             .rev()
             .find(|(bound, _)| bound == name)
@@ -118,7 +211,7 @@ pub(crate) fn for_each_iteration(
     };
 
     for (key, value) in entries {
-        let depth = scope.0.len();
+        let depth = scope.variables.len();
         if let Some(name) = key_name {
             scope.bind(name, key);
         }
@@ -126,7 +219,7 @@ pub(crate) fn for_each_iteration(
             scope.bind(name, value);
         }
         body(scope);
-        scope.0.truncate(depth);
+        scope.variables.truncate(depth);
     }
 }
 
@@ -175,7 +268,51 @@ fn const_value(expr: &Expression<'_>, content: &str, scope: &Scope) -> ConstValu
                 .unwrap_or(ConstValue::Unknown)
         }
         Expression::Call(Call::Function(call)) => const_function_call(call, content, scope),
+        Expression::Access(Access::StaticProperty(access)) => match &access.property {
+            Variable::Direct(property) => {
+                class_member_value(access.class, bytes_to_str(property.name), scope)
+            }
+            _ => ConstValue::Unknown,
+        },
+        Expression::Access(Access::ClassConstant(access)) => match &access.constant {
+            // `Foo::class` is the class's own name rather than a declared
+            // constant, and a binding keyed by one already resolves as written.
+            ClassLikeConstantSelector::Identifier(constant)
+                if !constant.value.eq_ignore_ascii_case(b"class") =>
+            {
+                class_member_value(access.class, bytes_to_str(constant.value), scope)
+            }
+            _ => ConstValue::Unknown,
+        },
         _ => ConstValue::Unknown,
+    }
+}
+
+/// The value of a class member named through `self::`, `static::`, or the
+/// scanned class's own name.
+///
+/// Every other qualifier names a class this scan never read, so it stays
+/// unknown rather than borrowing the scanned class's member of that name.
+/// `parent::` is unknown too: the members are merged over the parent chain,
+/// which cannot tell an inherited value from one the child overrode.
+fn class_member_value(class: &Expression<'_>, member: &str, scope: &Scope) -> ConstValue {
+    let Some(context) = scope.class.as_ref() else {
+        return ConstValue::Unknown;
+    };
+    let names_context = match class {
+        Expression::Self_(_) | Expression::Static(_) => true,
+        Expression::Identifier(identifier) => {
+            crate::util::short_name(bytes_to_str(identifier.value()))
+                .eq_ignore_ascii_case(&context.short_name)
+        }
+        _ => false,
+    };
+    if !names_context {
+        return ConstValue::Unknown;
+    }
+    match context.members.get(member) {
+        Some(value) => ConstValue::Scalar(value.clone()),
+        None => ConstValue::Unknown,
     }
 }
 

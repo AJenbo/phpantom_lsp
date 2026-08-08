@@ -114,7 +114,7 @@ unlikely to move the needle for most users.
 | B57 | [A `@props`-declared key is reported as an unused variable](todo/bugs.md#b57-a-props-declared-key-is-reported-as-an-unused-variable)                                        | Medium      | Low         |
 | B58 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b58-deprecation-diagnostics-ignore-the-projects-target-php-version)                          | Medium      | Low-Medium  |
 | B62 | [An application's container binding loses to the framework default for the same key](todo/bugs.md#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key) | Medium      | Medium      |
-| B63 | [`Container::alias()` bindings and non-literal binding keys do not resolve](todo/bugs.md#b63-containeralias-bindings-and-non-literal-binding-keys-do-not-resolve)           | Low-Medium  | Medium      |
+| B64 | [A dotted container key resolves to a class named after its first segment](todo/bugs.md#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment)       | Medium      | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

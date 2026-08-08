@@ -919,6 +919,26 @@ check(
     (new \Illuminate\View\ComponentSlot('<b>hi</b>'))->toHtml() === '<b>hi</b>'
 );
 
+// A provider that keeps its container key in a static property on the base
+// class it extends reads that key through late static binding, so the value
+// the subclass registers under is the one declared up the parent chain.
+check(
+    'static::$abstract on a subclass reads the base provider\'s declared key',
+    \App\Providers\DemoServiceProvider::$abstract === 'pastry.oven'
+        && \App\Providers\BaseDemoServiceProvider::$abstract === 'pastry.oven'
+);
+
+// `alias($abstract, $alias)` registers the *second* argument as the new name,
+// the reverse of `bind()`, and `make()` follows the alias before it looks at
+// the bindings.
+$container = new \Illuminate\Container\Container();
+$container->singleton('pastry.oven', fn () => new \App\Support\BakeryService());
+$container->alias('pastry.oven', 'pastry.oven.alias');
+check(
+    'alias() names its second argument, which make() follows to the binding',
+    $container->make('pastry.oven.alias') instanceof \App\Support\BakeryService
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
