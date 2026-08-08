@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786212962452,
+  "lastUpdate": 1786216051585,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16115,6 +16115,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "92f742e808919fa4bce6d4d7aa5134d457e70986",
+          "message": "Variable resolution no longer recurses when building the top-level scope\nfor `global`",
+          "timestamp": "2026-08-08T20:51:52+02:00",
+          "tree_id": "fdb9991b8c6505ee173e5d5d62c567185823cc13",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/92f742e808919fa4bce6d4d7aa5134d457e70986"
+        },
+        "date": 1786216046653,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.5,
             "unit": "MiB"
           }
         ]
