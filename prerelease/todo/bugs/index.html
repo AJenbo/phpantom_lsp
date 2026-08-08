@@ -839,21 +839,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b58-deprecation-diagnostics-ignore-the-projects-target-php-version" class="md-nav__link">
+  <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B58. Deprecation diagnostics ignore the project's target PHP version
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B64. A dotted container key resolves to a class named after its first segment
+        B65. A <code>@var</code> whose type is a closure signature binds the wrong variable
       </span>
     </span>
   </a>
@@ -1339,21 +1328,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b58-deprecation-diagnostics-ignore-the-projects-target-php-version" class="md-nav__link">
+  <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B58. Deprecation diagnostics ignore the project's target PHP version
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B64. A dotted container key resolves to a class named after its first segment
+        B65. A <code>@var</code> whose type is a closure signature binds the wrong variable
       </span>
     </span>
   </a>
@@ -1415,43 +1393,22 @@ call site passes, the way template variables are already inferred from
 entirely, so component tags are never read as call sites — that is the
 gap. The two sources should merge, with <code>@props</code> winning per name rather
 than gating the other.</p>
-<h4 id="b58-deprecation-diagnostics-ignore-the-projects-target-php-version">B58. Deprecation diagnostics ignore the project's target PHP version<a class="headerlink" href="#b58-deprecation-diagnostics-ignore-the-projects-target-php-version" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>A project pinned to PHP 8.4 (<code>"php": "^8.4"</code> plus
-<code>config.platform.php: "8.4"</code> in <code>composer.json</code>) is still told about
-deprecations introduced in 8.5:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&#39;PDO::sqliteCreateFunction&#39; is deprecated: use Pdo\Sqlite::createFunction
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>instead (since PHP 8.5)
+<h4 id="b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable">B65. A <code>@var</code> whose type is a closure signature binds the wrong variable<a class="headerlink" href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p>A closure type writes <code>$</code>-prefixed names for its own parameters, and the
+<code>@var</code> scan takes the first <code>$</code> it finds after the tag as the annotated
+variable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var \Closure(\App\Models\User $user): string $callback */</span>
 </code></pre></div>
-<p>The message already carries the version the deprecation landed in, and
-<code>Backend</code> already knows the project's target version, so nothing new
-needs discovering. A deprecation newer than the target must not be
-reported.</p>
-<p><strong>Where to look:</strong> <code>collect_deprecated_diagnostics_with_context</code> in
-<code>src/diagnostics/deprecated.rs</code>. The "since" version is parsed for the
-message but never compared against <code>self.php_version()</code>. Deprecations
-with no recorded version keep firing, as today.</p>
-<h4 id="b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment">B64. A dotted container key resolves to a class named after its first segment<a class="headerlink" href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p><code>find_or_load_class</code> normalises through <code>PhpType::parse</code>, whose
-<code>base_name()</code> stops at the first character a PHP identifier cannot
-contain. A container key is handed to it verbatim, so <code>'demo.bakery'</code>
-becomes <code>demo</code> and matches any class of that short name before the
-binding table is ever consulted:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// app/Demo.php declares class App\Demo</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;demo.bakery&#39;, fn () =&gt; new BakeryService());</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">app(&#39;demo.bakery&#39;)-&gt;bake(&#39;croissant&#39;);   // resolves to App\Demo, not BakeryService</span>
-</code></pre></div>
-<p>The bound class is indexed correctly; it is simply never reached,
-because the ordinary class-lookup phases claim the key first and the
-Laravel alias table is only a fallback. Framework keys hit this too
-wherever the leading segment collides (<code>view.engine.resolver</code> against a
-project class named <code>View</code>).</p>
-<p><strong>Where to look:</strong> <code>resolution.rs</code>, <code>Backend::find_or_load_class</code>. A name
-holding a character no PHP identifier can contain is not a class name at
-all, so the ordinary phases have nothing to say about it and the alias
-tables should be consulted first (or exclusively) for it.</p>
+<p>is read as declaring <code>$user</code> of type <code>\Closure(\App\Models\User</code>, so
+<code>$callback</code> stays untyped and a bogus <code>$user</code> enters the scope. The same
+shape appears in <code>@param</code> and in a Blade template's signature docblock,
+where it also decides which names the contract declares.</p>
+<p><strong>Where to look:</strong> <code>parse_var_docblock_pairs</code> in
+<code>type_engine/variable/forward_walk/assignment.rs</code> scans for the first
+<code>$</code> after <code>@var</code>. The annotated variable is the <code>$name</code> at paren depth 0
+and angle depth 0, so the scan has to track both while walking the type
+rather than stopping at the first <code>$</code>.</p>
 
 
 
