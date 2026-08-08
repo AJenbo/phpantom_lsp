@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b1-a-rename-reaching-a-blade-prologue-writes-into-the-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. A rename reaching a Blade prologue writes into the template
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b1-a-rename-reaching-a-blade-prologue-writes-into-the-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. A rename reaching a Blade prologue writes into the template
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,26 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h3 id="b1-a-rename-reaching-a-blade-prologue-writes-into-the-template">B1. A rename reaching a Blade prologue writes into the template<a class="headerlink" href="#b1-a-rename-reaching-a-blade-prologue-writes-into-the-template" title="Permanent link">&para;</a></h3>
-<p>The Blade preprocessor puts declarations no template wrote into the
-virtual PHP's prologue: <code>$errors</code> and <code>$__env</code>, the <code>@var</code> docblocks that
-carry the injected variable types, and the <code>extends</code> clause of the
-wrapper class a bound <code>$this</code> synthesizes. Those name real classes, and
-the reference scanner reads a template's virtual PHP, so the names count
-as references to them.</p>
-<p><code>BladeSourceMap::php_to_blade</code> maps every position above the prologue to
-Blade <code>0:0</code> (there is no template text behind it). Find-references
-therefore reports the template at <code>0:0</code>, and rename produces a text edit
-there: an empty range at the very start of the file, so renaming a class
-a template only mentions through its prologue <em>inserts the new name into
-the template</em>. Renaming <code>App\Models\Order</code> while <code>resources/views/page.blade.php</code>
-receives an <code>$order</code> of that type prepends <code>Invoice</code> to the template.</p>
-<p>The fix is to drop matches that fall inside the prologue rather than
-clamping them: a prologue position is not a position in the template, and
-no consumer wants one. <code>php_to_blade</code> cannot express that today, so it
-needs a fallible form (<code>try_php_to_blade</code>) that returns <code>None</code> above
-<code>prologue_lines</code>, with the reference, rename, highlight, and code-action
-paths filtering on it.</p>
+<p>No outstanding items.</p>
 
 
 
