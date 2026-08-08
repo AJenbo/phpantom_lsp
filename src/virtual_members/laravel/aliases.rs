@@ -37,9 +37,9 @@ use mago_syntax::parser::parse_file_content;
 use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::names::OwnedResolvedNames;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, FacadeAccessor};
 
 /// FQN of the framework class that declares the core container aliases.
 const APPLICATION_FQN: &str = "Illuminate\\Foundation\\Application";
@@ -145,8 +145,8 @@ impl Backend {
         }
         let source = read_source_by_fqn(self, target)?;
         match parse_facade_accessor(&source)? {
-            FacadeAccessor::Alias(key) => aliases.container.get(&key).cloned(),
-            FacadeAccessor::Class(fqn) => Some(fqn),
+            FacadeAccessor::Alias(key) => aliases.container.get(key.as_str()).cloned(),
+            FacadeAccessor::Class(fqn) => Some(fqn.to_string()),
         }
     }
 
@@ -333,16 +333,6 @@ fn parse_config_facade_aliases(content: &str) -> HashMap<String, String> {
     })
 }
 
-/// What a facade's `getFacadeAccessor()` returns.
-pub(crate) enum FacadeAccessor {
-    /// A container-binding string (`return 'view';`), looked up in the core
-    /// container alias table to find the concrete class.
-    Alias(String),
-    /// A direct class reference (`return Factory::class;`), already the FQN of
-    /// the concrete class.
-    Class(String),
-}
-
 /// Parse the return value of a facade's `getFacadeAccessor()` method.
 ///
 /// Facades declare `protected static function getFacadeAccessor()` returning
@@ -352,52 +342,10 @@ pub(crate) fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
     with_parsed(content, |program, resolved| {
         let return_value = find_facade_accessor_return(Node::Program(program))?;
         if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
-            return Some(FacadeAccessor::Alias(text.to_string()));
+            return Some(FacadeAccessor::Alias(atom(text)));
         }
-        class_const_fqn(return_value, resolved, None).map(FacadeAccessor::Class)
+        class_const_fqn(return_value, resolved, None).map(|fqn| FacadeAccessor::Class(atom(&fqn)))
     })
-}
-
-/// Like [`parse_facade_accessor`] but scoped to the class named
-/// `class_name` within `content`.
-///
-/// A single file may declare several facades (or a facade alongside
-/// unrelated classes), so resolving the accessor for a specific facade
-/// must not pick up the first `getFacadeAccessor()` in the file. Returns
-/// `None` when no class of that name is present (e.g. the facade lives in
-/// another file).
-pub(crate) fn parse_facade_accessor_for_class(
-    content: &str,
-    class_name: &str,
-) -> Option<FacadeAccessor> {
-    with_parsed(content, |program, resolved| {
-        let return_value =
-            find_facade_accessor_return_in_class(Node::Program(program), class_name)?;
-        if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
-            return Some(FacadeAccessor::Alias(text.to_string()));
-        }
-        class_const_fqn(return_value, resolved, None).map(FacadeAccessor::Class)
-    })
-}
-
-/// Find the `getFacadeAccessor()` return value inside the class named
-/// `class_name` reachable from `node`.
-fn find_facade_accessor_return_in_class<'ast, 'arena>(
-    node: Node<'ast, 'arena>,
-    class_name: &str,
-) -> Option<&'ast Expression<'arena>> {
-    if let Node::Class(class) = node
-        && bytes_to_str(class.name.value).eq_ignore_ascii_case(class_name)
-    {
-        return find_facade_accessor_return(node);
-    }
-    let mut found = None;
-    node.visit_children(|child| {
-        if found.is_none() {
-            found = find_facade_accessor_return_in_class(child, class_name);
-        }
-    });
-    found
 }
 
 /// Find the first return-statement value inside a `getFacadeAccessor()` method

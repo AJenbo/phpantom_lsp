@@ -191,47 +191,38 @@ So split the upstream work:
 
 ---
 
-## L46. Facade member completion from the concrete class
+## L47. Facade members for a container-binding accessor
 
-Calling a method on a facade types correctly even when the facade
-declares no `@method` tag for it: the static call falls through to the
-class `getFacadeAccessor()` names. Listing is a step behind. Completion
-on `MyFacade::` offers only what the facade class itself declares, so
-an app-defined facade with no generated docblock offers nothing but
-`__callStatic`:
+`LaravelFacadeProvider` forwards the concrete class's members onto a
+facade whose `getFacadeAccessor()` names a class directly
+(`return Container::class;`). A facade that names a container binding
+instead gets nothing:
 
 ```php
-class Container {
-    public function resolveThing(string $id): object {}
+class Sentry extends \Illuminate\Support\Facades\Facade {
+    protected static function getFacadeAccessor() { return 'sentry'; }
 }
 
-class MyFacade extends \Illuminate\Support\Facades\Facade {
-    protected static function getFacadeAccessor() { return Container::class; }
-}
-
-MyFacade::resolveThing('x');   // types fine
-MyFacade::                      // completion offers no `resolveThing`
+Sentry::         // completion offers nothing the HubAdapter binding has
 ```
 
-Laravel's own facades are unaffected: their `@method static` tags list
-every method, so the list is already complete. This bites app-defined
-and package facades that never ran `facade-documenter`.
+Laravel's own facades all take this shape, but they carry generated
+`@method static` tags that already list everything, so the gap is
+confined to app and package facades that bind a string in a service
+provider.
 
-The fix is a virtual member provider that forwards the concrete
-class's public instance methods as static virtual methods, ranked
-below the facade's own `@method` tags. The blocker is plumbing rather
-than logic: providers receive only a `ClassInfo` and a class loader,
-and the accessor's `::class` return is recoverable only from source
-(the container-alias case additionally needs the `Backend` alias
-table, which `facade_owner.rs` already reaches at call sites). Either
-record the parsed accessor on `ClassInfo` at parse time (costs a field
-on every class, and startup memory is a hard constraint) or give
-providers a project-context handle. Pick the plumbing before writing
-the provider, and do not solve it inside the completion handler alone:
-hover, go-to-definition, and unknown-member diagnostics need the same
-member set.
+Mapping the binding key to its class needs the container alias table,
+which lives on the `Backend`; a virtual member provider receives only a
+`ClassInfo`, a class loader, and the resolved-class cache. Going through
+the class loader is not a substitute: `find_or_load_class` consults the
+alias table only after every ordinary lookup phase has missed, so a key
+like `'view'` would first match an unrelated class of that short name
+and forward the wrong members. So the fix is the plumbing: give
+providers a project-context handle, or put the container table
+somewhere all of them can already see. `facade_owner.rs` reaches the
+`Backend` at call sites and shows what the lookup should be.
 
-**Impact: Medium · Effort: Medium**
+**Impact: Low-Medium · Effort: Medium**
 
 ---
 

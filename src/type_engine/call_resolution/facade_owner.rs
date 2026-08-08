@@ -22,26 +22,18 @@ use crate::virtual_members::ResolvedClassCache;
 pub(crate) fn facade_concrete_owner(
     owner: &ClassInfo,
     method_name: &str,
-    content: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
     backend: Option<&Backend>,
 ) -> Option<ClassInfo> {
     if !class_has_method(owner, method_name, class_loader, cache) {
-        return facade_accessor_concrete_owner(
-            owner,
-            method_name,
-            content,
-            class_loader,
-            cache,
-            backend,
-        );
+        return facade_accessor_concrete_owner(owner, method_name, class_loader, cache, backend);
     }
 
     // Real Laravel facades declare `getFacadeAccessor()` directly (never
     // inherited), so this raw lookup is a cheap way to rule out the
     // overwhelming majority of static calls that are not on a facade at
-    // all, before paying for the source re-parse inside
+    // all, before paying for the resolution inside
     // `facade_accessor_concrete_owner` below.
     if owner.get_method_ci("getFacadeAccessor").is_none()
         || method_has_conditional_return(owner, method_name, class_loader, cache)
@@ -55,10 +47,9 @@ pub(crate) fn facade_concrete_owner(
     // becomes a bare `object|mixed` on the `App` facade's tag). Fall
     // through to the concrete accessor only when it actually supplies a
     // conditional return the facade's own tag does not.
-    facade_accessor_concrete_owner(owner, method_name, content, class_loader, cache, backend)
-        .filter(|concrete| {
-            method_has_conditional_return(concrete, method_name, class_loader, cache)
-        })
+    facade_accessor_concrete_owner(owner, method_name, class_loader, cache, backend).filter(
+        |concrete| method_has_conditional_return(concrete, method_name, class_loader, cache),
+    )
 }
 
 fn class_has_method(
@@ -97,7 +88,6 @@ fn method_has_conditional_return(
 fn facade_accessor_concrete_owner(
     facade: &ClassInfo,
     method_name: &str,
-    content: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
     backend: Option<&Backend>,
@@ -105,17 +95,15 @@ fn facade_accessor_concrete_owner(
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(facade, class_loader, cache);
 
-    // When the facade is declared in the current file, read its
-    // `getFacadeAccessor()` return directly from source: body-return
-    // inference honours the declared `: string` return type rather than
-    // the `::class` value we need here. Scope the parse to the facade's
-    // own class so a file declaring several facades does not
-    // cross-resolve.
-    if let Some(concrete) =
-        crate::virtual_members::laravel::parse_facade_accessor_for_class(content, &facade.name)
-            .and_then(|accessor| facade_accessor_to_class_name(accessor, backend))
-            .and_then(|name| class_loader(&name))
-            .filter(|class| class_has_method(class, method_name, class_loader, cache))
+    // Prefer the accessor recorded at parse time: body-return inference
+    // honours the declared `: string` return type rather than the
+    // `::class` value we need here.
+    if let Some(concrete) = facade
+        .laravel()
+        .and_then(|l| l.facade_accessor)
+        .and_then(|accessor| facade_accessor_to_class_name(accessor, backend))
+        .and_then(|name| class_loader(&name))
+        .filter(|class| class_has_method(class, method_name, class_loader, cache))
     {
         return Some(Arc::unwrap_or_clone(concrete));
     }
@@ -163,13 +151,13 @@ fn facade_accessor_class_name(ty: &PhpType, backend: Option<&Backend>) -> Option
 }
 
 fn facade_accessor_to_class_name(
-    accessor: crate::virtual_members::laravel::FacadeAccessor,
+    accessor: crate::types::FacadeAccessor,
     backend: Option<&Backend>,
 ) -> Option<String> {
     match accessor {
-        crate::virtual_members::laravel::FacadeAccessor::Class(name) => Some(name),
-        crate::virtual_members::laravel::FacadeAccessor::Alias(key) => {
-            backend?.container_alias_concrete_fqn(&key)
+        crate::types::FacadeAccessor::Class(name) => Some(name.to_string()),
+        crate::types::FacadeAccessor::Alias(key) => {
+            backend?.container_alias_concrete_fqn(key.as_str())
         }
     }
 }

@@ -112,6 +112,7 @@ pub(crate) mod config_values;
 mod const_eval;
 pub(crate) mod database_schema;
 mod env_vars;
+mod facade;
 mod factory;
 mod helpers;
 mod higher_order_proxy;
@@ -134,7 +135,7 @@ mod view_data;
 mod view_names;
 pub(crate) mod where_property;
 
-pub(crate) use aliases::{FacadeAccessor, LaravelAliases, parse_facade_accessor_for_class};
+pub(crate) use aliases::LaravelAliases;
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{
     LaravelCommandIndex, command_signature_at_offset, is_command_directory_uri, scan_command_file,
@@ -212,6 +213,7 @@ use std::sync::Arc;
 
 use builder::build_builder_forwarded_methods;
 use casts::cast_type_to_php_type;
+pub use facade::LaravelFacadeProvider;
 pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
     factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,

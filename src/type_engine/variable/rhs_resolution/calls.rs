@@ -2041,7 +2041,6 @@ pub(super) fn resolve_rhs_static_call(
             let concrete_owner = crate::type_engine::call_resolution::facade_concrete_owner(
                 owner,
                 &method_name,
-                ctx.content,
                 ctx.class_loader,
                 ctx.resolved_class_cache,
                 ctx.backend,

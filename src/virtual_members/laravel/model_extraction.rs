@@ -18,7 +18,7 @@ use mago_syntax::cst::*;
 use crate::atom::{Atom, atom, bytes_to_str, last_segment};
 use crate::parser::DocblockCtx;
 use crate::php_type::PhpType;
-use crate::types::{LaravelMetadata, MethodInfo, PivotRelation};
+use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotRelation};
 use crate::util::strip_fqn_prefix;
 
 use super::{extract_pivot_using, extract_with_pivot_columns, infer_relationship_from_body};
@@ -718,6 +718,54 @@ fn extract_dates_definitions<'a>(
     names
 }
 
+/// Extract what a facade's `getFacadeAccessor()` returns.
+///
+/// Facades name the container binding they proxy either as a string
+/// (`return 'view';`) or as a class reference (`return Factory::class;`).
+/// The class name is taken as written and resolved to an FQN in the
+/// name-resolution pass. Anything else (a computed value, a constant, a
+/// `self::class`) is not statically knowable, so it yields `None`.
+fn extract_facade_accessor<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    content: &str,
+) -> Option<FacadeAccessor> {
+    let method = members.into_iter().find_map(|member| match member {
+        class_like::member::ClassLikeMember::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case("getFacadeAccessor") =>
+        {
+            Some(method)
+        }
+        _ => None,
+    })?;
+    let class_like::method::MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    let value = block.statements.iter().find_map(|stmt| match stmt {
+        Statement::Return(ret) => ret.value,
+        _ => None,
+    })?;
+
+    if let Some((text, _, _)) = super::helpers::extract_string_literal(value, content) {
+        return Some(FacadeAccessor::Alias(atom(text)));
+    }
+    let Expression::Access(Access::ClassConstant(access)) = value else {
+        return None;
+    };
+    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
+        return None;
+    };
+    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
+        return None;
+    }
+    // `self::class` / `static::class` name the facade itself, which is
+    // never the class it forwards to.
+    let Expression::Identifier(identifier) = access.class else {
+        return None;
+    };
+    let name = bytes_to_str(identifier.value());
+    (!name.is_empty()).then(|| FacadeAccessor::Class(atom(name)))
+}
+
 fn extract_string_property<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
@@ -894,6 +942,15 @@ pub(crate) fn extract_laravel_metadata<'a>(
     let (timestamps, created_at_name, updated_at_name) =
         extract_timestamp_config(class.members.iter(), content);
 
+    // Gate the member walk on the already-extracted method list: all but
+    // the handful of facades in a project declare no `getFacadeAccessor()`,
+    // and the slice is still warm from the checks above.
+    let facade_accessor = methods
+        .iter()
+        .any(|m| m.name.eq_ignore_ascii_case("getFacadeAccessor"))
+        .then(|| extract_facade_accessor(class.members.iter(), content))
+        .flatten();
+
     LaravelMetadata {
         custom_collection,
         casts_definitions,
@@ -913,6 +970,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
         updated_at_name,
         custom_builder,
         belongs_to_many_pivots,
+        facade_accessor,
     }
 }
 

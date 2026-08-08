@@ -1584,6 +1584,30 @@ pub struct LaravelMetadata {
     /// resolved to an FQN in the name-resolution pass.  Used to surface the
     /// custom pivot class and extra pivot columns in hover.
     pub belongs_to_many_pivots: Vec<PivotRelation>,
+    /// What this class's `getFacadeAccessor()` returns, when it declares
+    /// one.
+    ///
+    /// Recorded at parse time because the accessor's value is only
+    /// recoverable from source: the method's declared `: string` return
+    /// type hides a `::class` reference, and body-return inference would
+    /// report the hint rather than the name. `None` for every class that
+    /// does not declare the method, which is all but the handful of
+    /// facades in a project.
+    pub facade_accessor: Option<FacadeAccessor>,
+}
+
+/// What a facade's `getFacadeAccessor()` returns.
+///
+/// Both payloads are the value exactly as written in source; the
+/// [`Class`](Self::Class) name is rewritten to its fully-qualified form
+/// during the name-resolution pass (see `parser/ast_update.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FacadeAccessor {
+    /// A container-binding string (`return 'view';`), looked up in the
+    /// container alias table to find the concrete class.
+    Alias(Atom),
+    /// A direct class reference (`return Factory::class;`).
+    Class(Atom),
 }
 
 /// Pivot metadata recovered from a single many-to-many relationship method.

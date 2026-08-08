@@ -340,8 +340,13 @@ pub fn apply_virtual_members(
 /// 1. Laravel model provider (highest priority — richest type info)
 /// 2. Laravel factory provider (convention-based create/make methods)
 /// 3. PHPDoc provider (`@method` / `@property` / `@mixin` tags)
+/// 4. Laravel facade provider (concrete class forwarded as static)
 ///
-/// When `is_laravel` is `false`, the two Laravel providers are omitted so
+/// The facade provider deliberately comes last: a facade that carries
+/// generated `@method static` tags should keep them, and only a facade
+/// without them falls through to the concrete class's own signatures.
+///
+/// When `is_laravel` is `false`, the Laravel providers are omitted so
 /// that a non-Laravel project does not pay for their parent-chain walks.
 /// The framework-agnostic PHPDoc provider is always included.
 pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>> {
@@ -351,6 +356,9 @@ pub fn default_providers(is_laravel: bool) -> Vec<Box<dyn VirtualMemberProvider>
         providers.push(Box::new(laravel::LaravelFactoryProvider));
     }
     providers.push(Box::new(phpdoc::PHPDocProvider));
+    if is_laravel {
+        providers.push(Box::new(laravel::LaravelFacadeProvider));
+    }
     providers
 }
 

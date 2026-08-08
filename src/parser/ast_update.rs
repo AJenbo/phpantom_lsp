@@ -1229,6 +1229,17 @@ impl Backend {
                 class.laravel_mut().custom_builder = Some(builder.resolve_names(&resolver));
             }
 
+            // Resolve a facade's `getFacadeAccessor()` class reference to an
+            // FQN so the concrete class it forwards to is loadable from any
+            // file, not just the one that imported it.
+            if let Some(crate::types::FacadeAccessor::Class(written)) =
+                class.laravel().and_then(|l| l.facade_accessor)
+            {
+                let resolved = atom(&Self::resolve_name(&written, use_map, namespace));
+                class.laravel_mut().facade_accessor =
+                    Some(crate::types::FacadeAccessor::Class(resolved));
+            }
+
             // Resolve custom pivot class names (`->using(X::class)`) to FQNs so
             // that hover shows the fully-qualified pivot class and it is
             // loadable cross-file.

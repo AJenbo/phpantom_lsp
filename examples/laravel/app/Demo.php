@@ -8,6 +8,7 @@
 
 namespace App;
 
+use App\Facades\Oven;
 use App\Http\Controllers\BakeryController;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
@@ -797,6 +798,19 @@ class Demo
         // replacement rather than the default it swapped out.
         app('pastry.oven')->bake('croissant');                  // → BakeryService
         app('pastry.oven.supplier')->supply(12);                // → CroissantSupplier
+    }
+
+
+    // ── App-defined facade without a generated docblock ────────────────
+
+    public function appFacade(): void
+    {
+        // `App\Facades\Oven` declares no `@method static` tags, so its
+        // members come from the class its `getFacadeAccessor()` names.
+        // Trigger completion on `Oven::` and the BakeryService methods
+        // are all there.
+        Oven::bake('sourdough');                                // → string
+        Oven::heatedTo('hot')->bake('rye');                     // → string
     }
 
 

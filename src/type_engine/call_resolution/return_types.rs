@@ -607,7 +607,6 @@ impl Backend {
                     let concrete_owner = super::facade_concrete_owner(
                         owner,
                         method_name,
-                        ctx.content,
                         ctx.class_loader,
                         ctx.resolved_class_cache,
                         ctx.backend,

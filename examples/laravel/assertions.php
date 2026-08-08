@@ -1006,6 +1006,22 @@ check(
         && $prune->getDefinition()->getOption('days')->getDefault() === '7'
 );
 
+// `Facade::__callStatic()` forwards to whatever the accessor resolves to, so
+// every public instance method of that class is reachable as a static call on
+// the facade even though the facade declares none of them.  This is what lets
+// PHPantom list the concrete class's members on a facade that never had a
+// `@method static` docblock generated.
+\App\Facades\Oven::swap(new \App\Support\BakeryService());
+check(
+    'a facade forwards a static call to a public instance method of its accessor class',
+    \App\Facades\Oven::bake('sourdough') === 'a fresh sourdough'
+);
+check(
+    'a `static` return on the concrete class hands back the concrete instance',
+    \App\Facades\Oven::heatedTo('hot') instanceof \App\Support\BakeryService
+);
+\Illuminate\Support\Facades\Facade::clearResolvedInstances();
+
 // ─── Component class members reaching the view ──────────────────────────────
 
 // Blade renders a class component's view with the data `Component::data()`

@@ -1145,8 +1145,9 @@ fn default_providers_has_laravel_and_phpdoc() {
     let providers = default_providers(true);
     assert_eq!(
         providers.len(),
-        3,
-        "should have LaravelModelProvider, LaravelFactoryProvider, and PHPDocProvider registered"
+        4,
+        "should have LaravelModelProvider, LaravelFactoryProvider, PHPDocProvider, \
+         and LaravelFacadeProvider registered"
     );
 }
 
