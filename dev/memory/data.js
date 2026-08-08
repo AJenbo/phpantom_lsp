@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786201654379,
+  "lastUpdate": 1786205237443,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15877,6 +15877,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7b5936905137ba8eb9438a31b48c30fed476fa12",
+          "message": "A command that declares both a signature and `#[AsCommand]` is indexed\nunder the name Artisan answers to",
+          "timestamp": "2026-08-08T17:50:56+02:00",
+          "tree_id": "5fdb9eb802b47b80d0caa13bdbf093c5c6cb0b8a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7b5936905137ba8eb9438a31b48c30fed476fa12"
+        },
+        "date": 1786205232614,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.4,
             "unit": "MiB"
           }
         ]
