@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786212046288,
+  "lastUpdate": 1786212962452,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16081,6 +16081,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "846ea94bef6cfb7cb6d8970b1ce005a53cdf8f35",
+          "message": "A custom `Storage::extend()` driver no longer costs the rest of the\nproject its disk type",
+          "timestamp": "2026-08-08T19:59:28+02:00",
+          "tree_id": "073ed053e24d09c9ba2b578d12f804ce097dd782",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/846ea94bef6cfb7cb6d8970b1ce005a53cdf8f35"
+        },
+        "date": 1786212958683,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.3,
             "unit": "MiB"
           }
         ]
