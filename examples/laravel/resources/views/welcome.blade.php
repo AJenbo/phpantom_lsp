@@ -86,6 +86,13 @@
             $posts->first()?->title,
         ]" />
 
+    {{-- The <x-panel> component view shows how a signature docblock,
+         @props defaults, and Blade's own component scope layer into one
+         set of variables: resources/views/components/panel.blade.php --}}
+    <x-panel :author="$posts->first()?->author" heading="Latest" variant="warning">
+        {{ __('messages.welcome') }}
+    </x-panel>
+
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim
         <p>This {{ $blade }} syntax is not processed</p>

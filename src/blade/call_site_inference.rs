@@ -60,9 +60,9 @@ impl Backend {
         blade_content: &str,
         shared: Option<&ViewCallerSnapshot>,
     ) -> InjectedVars {
-        // Templates that declare any `@var` annotation manage their own
-        // contract; injecting on top would fight the declared types.
-        if has_var_docblock(blade_content) {
+        // A template that declares a signature manages its own contract;
+        // injecting on top would fight the declared types.
+        if crate::blade::signature::has_declared_signature(blade_content) {
             return Vec::new();
         }
         let view_names = self.view_names_for_blade_uri(uri);
@@ -664,25 +664,6 @@ fn collect_from_data_expr<'ast, 'arena>(
         }
         _ => {}
     }
-}
-
-/// Whether the template declares any `@var` annotation inside a real
-/// PHP docblock (`/** … */`).  A `@var` mentioned in a Blade comment
-/// (`{{-- … --}}`) or in markup is not a declaration and must not
-/// suppress call-site inference.
-pub(crate) fn has_var_docblock(blade_content: &str) -> bool {
-    let mut rest = blade_content;
-    while let Some(start) = rest.find("/**") {
-        let after = &rest[start + 3..];
-        let Some(end) = after.find("*/") else {
-            return after.contains("@var");
-        };
-        if after[..end].contains("@var") {
-            return true;
-        }
-        rest = &after[end + 2..];
-    }
-    false
 }
 
 /// The contents of a single- or double-quoted string literal, when it

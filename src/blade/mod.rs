@@ -1,6 +1,7 @@
 pub(crate) mod call_site_inference;
 pub mod directives;
 pub mod preprocessor;
+pub(crate) mod signature;
 pub mod source_map;
 
 use std::path::{Path, PathBuf};
@@ -36,9 +37,11 @@ pub enum TemplateKind {
 /// Either signal is conclusive on its own: the template sits in a
 /// `components` directory (Laravel's anonymous-component convention, and
 /// where a class-based component's default view lives), or it uses a
-/// directive only a component can use.
+/// directive only a component can use.  The directive has to be a real one:
+/// a `@props` inside a comment, `@verbatim`, or `@php` block is inert to
+/// Blade and makes nothing a component.
 pub fn template_kind(uri: &str, content: &str) -> TemplateKind {
-    if uri.contains("/components/") || content.contains("@props") || content.contains("@aware") {
+    if uri.contains("/components/") || signature::declares_component_directive(content) {
         TemplateKind::Component
     } else {
         TemplateKind::View
@@ -271,6 +274,41 @@ mod tests {
         // Register via language_id
         backend.blade_uris.write().insert(uri.to_string());
         assert!(backend.is_blade_file(uri));
+    }
+
+    #[test]
+    fn template_kind_reads_only_real_component_directives() {
+        let view = "file:///resources/views/page.blade.php";
+        assert_eq!(
+            template_kind(view, "@props(['caption'])\n"),
+            TemplateKind::Component
+        );
+        assert_eq!(
+            template_kind(view, "@aware(['color'])\n"),
+            TemplateKind::Component
+        );
+        // A dynamic list is still a component; the directive is the signal.
+        assert_eq!(
+            template_kind(view, "@props($dynamic)\n"),
+            TemplateKind::Component
+        );
+        // Inert to Blade, so it makes nothing a component.
+        assert_eq!(
+            template_kind(view, "{{-- @props(['caption']) --}}\n"),
+            TemplateKind::View
+        );
+        assert_eq!(
+            template_kind(view, "@php\n$x = \"@props(['caption'])\";\n@endphp\n"),
+            TemplateKind::View
+        );
+        // The path convention is conclusive on its own.
+        assert_eq!(
+            template_kind(
+                "file:///resources/views/components/box.blade.php",
+                "{{ $slot }}"
+            ),
+            TemplateKind::Component
+        );
     }
 
     #[test]

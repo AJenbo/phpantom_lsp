@@ -1,8 +1,4 @@
-use mago_span::HasSpan;
-use mago_syntax::cst::*;
-
 use super::TemplateKind;
-use super::call_site_inference::string_literal_contents;
 use super::directives::{match_directive, translate_directive};
 use super::source_map::BladeSourceMap;
 
@@ -45,25 +41,36 @@ enum Mode {
 /// Which directive is having its argument list captured by
 /// [`Mode::CaptureArgs`]. Each has a different real-PHP translation:
 /// `@use` becomes a top-level `use` import (hoisted out of the wrapper
-/// function), `@inject` becomes an inline `$var = app(service);`
-/// assignment, and `@props` becomes one `$name = default;` assignment per
-/// declared prop.
+/// function) and `@inject` becomes an inline `$var = app(service);`
+/// assignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CapturedDirective {
     Use,
     Inject,
-    Props,
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     preprocess_with_vars(content, &[], TemplateKind::View)
 }
 
-/// The variables Laravel puts in a component view's scope on top of the
-/// data its caller passes: (name without `$`, fully qualified type).
-const COMPONENT_VARS: [(&str, &str); 2] = [
-    ("attributes", "\\Illuminate\\View\\ComponentAttributeBag"),
-    ("slot", "\\Illuminate\\View\\ComponentSlot"),
+/// The variables Blade puts in a component view's scope on top of the data
+/// its caller passes: (name without `$`, docblock type, initialiser).
+///
+/// No caller passes these — Blade injects them when it renders the
+/// component — so no signature or `@props` list can be expected to declare
+/// them.
+const COMPONENT_VARS: [(&str, &str, &str); 3] = [
+    (
+        "attributes",
+        "\\Illuminate\\View\\ComponentAttributeBag",
+        "new \\Illuminate\\View\\ComponentAttributeBag()",
+    ),
+    (
+        "slot",
+        "\\Illuminate\\View\\ComponentSlot",
+        "new \\Illuminate\\View\\ComponentSlot()",
+    ),
+    ("componentName", "string", "''"),
 ];
 
 /// A type string that is safe to place inside a one-line `/** @var … */`
@@ -90,12 +97,17 @@ fn docblock_safe_type(type_string: &str) -> &str {
 /// that makes `$errors`/`$__env` visible to every consumer (forward
 /// walker, docblock backward scan, undefined-variable diagnostics).
 ///
-/// Callers pass variables inferred from `view()` call sites; a template
-/// that declares its own `@var` for a name shadows the injected one
-/// because in-template annotations are nearer to every use site.
+/// Every variable the template does not assign itself is declared in the
+/// prologue, following the priority chain in [`super::signature`]: the
+/// template's own signature docblock wins, then `@props`/`@aware`, then the
+/// variables Blade injects into a component body, then the call-site
+/// inference the caller passes in.  A name declared by a higher source is
+/// not re-declared by a lower one.
 ///
-/// A [`TemplateKind::Component`] template also gets Laravel's implicit
-/// `$attributes` and `$slot`, which no caller passes explicitly.
+/// A signature-declared name is deliberately left out: its docblock stays
+/// in the template body, where the forward walker reads it and carries the
+/// type over the rest of the file.  Re-declaring it here would put a second
+/// (and, for a `@props` default, a *wrong*) type in front of the author's.
 pub fn preprocess_with_vars(
     content: &str,
     injected_vars: &[(String, String)],
@@ -104,53 +116,79 @@ pub fn preprocess_with_vars(
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
 
-    let component_vars: &[(&str, &str)] = match kind {
-        TemplateKind::Component => &COMPONENT_VARS,
-        TemplateKind::View => &[],
+    let signature = super::signature::extract(content);
+    // (name without `$`, the PHP that declares it), in priority order.
+    let mut declared: Vec<(String, String)> = Vec::new();
+    let mut declare = |name: &str, decl: String| {
+        if signature.declares(name) || declared.iter().any(|(existing, _)| existing == name) {
+            return;
+        }
+        declared.push((name.to_string(), decl));
     };
-    // A caller cannot pass `$attributes`/`$slot`, so an inferred entry
-    // of either name is a misreading of a call site; the framework's
-    // own type wins rather than being overwritten by a later `= null`.
-    let injected_vars = injected_vars
-        .iter()
-        .filter(|(name, _)| !component_vars.iter().any(|(own, _)| own == name));
+
+    // `@props`/`@aware` entries. A default value types its prop directly
+    // (the expression is emitted verbatim, so anything the type engine can
+    // resolve works); an entry without one is a *required* prop, whose
+    // value the caller supplies, so it is declared `mixed` rather than
+    // being invented as `null`.
+    let entries = super::signature::extract_props(content)
+        .into_iter()
+        .chain(super::signature::extract_aware(content))
+        .flatten();
+    for entry in entries {
+        let decl = match &entry.default {
+            Some(default) => format!("${} = {};\n", entry.name, default),
+            None => format!(
+                "/** @var mixed ${name} */\n${name} = null;\n",
+                name = entry.name
+            ),
+        };
+        declare(&entry.name, decl);
+    }
+
+    if kind == TemplateKind::Component {
+        for &(name, type_name, init) in &COMPONENT_VARS {
+            declare(
+                name,
+                format!("/** @var {type_name} ${name} */\n${name} = {init};\n"),
+            );
+        }
+    }
+
+    for (name, type_string) in injected_vars {
+        let type_string = docblock_safe_type(type_string);
+        declare(
+            name,
+            format!("/** @var {type_string} ${name} */\n${name} = null;\n"),
+        );
+    }
 
     // ── Prologue ──
     virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} }\n");
-    virtual_php.push_str("/** @var \\Illuminate\\Support\\ViewErrorBag $errors */\n");
-    virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
-    virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
-    virtual_php.push_str("$__env = new \\Illuminate\\View\\Factory();\n");
-    for &(name, type_name) in component_vars {
-        virtual_php.push_str(&format!("/** @var {type_name} ${name} */\n"));
-        virtual_php.push_str(&format!("${name} = new {type_name}();\n"));
-    }
-    for (name, type_string) in injected_vars.clone() {
-        let type_string = docblock_safe_type(type_string);
-        virtual_php.push_str(&format!("/** @var {type_string} ${name} */\n"));
-        virtual_php.push_str(&format!("${name} = null;\n"));
-    }
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
     // an import written after a use of the name does not apply to it).
     let uses_insert_at = virtual_php.len();
+    virtual_php.push_str("/** @var \\Illuminate\\Support\\ViewErrorBag $errors */\n");
+    virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
+    virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
+    virtual_php.push_str("$__env = new \\Illuminate\\View\\Factory();\n");
+    for (_, decl) in &declared {
+        virtual_php.push_str(decl);
+    }
 
     // Wrap the template body in a function so that diagnostic
     // collectors (which only analyse function/method bodies) treat
     // the Blade content as analysable code.  The closing brace is
-    // appended after the main loop.  `$errors`/`$__env` (and any
-    // injected variables) are assigned in the outer scope above, so
+    // appended after the main loop.  `$errors`/`$__env` (and every
+    // declared variable) are assigned in the outer scope above, so
     // pull them in with `global` — otherwise every use of them inside
     // the wrapped function is a false-positive "undefined variable".
     virtual_php.push_str("function ");
     virtual_php.push_str(super::WRAPPER_FUNCTION);
     virtual_php.push_str("() { global $errors, $__env");
-    for &(name, _) in component_vars {
-        virtual_php.push_str(", $");
-        virtual_php.push_str(name);
-    }
-    for (name, _) in injected_vars {
+    for (name, _) in &declared {
         virtual_php.push_str(", $");
         virtual_php.push_str(name);
     }
@@ -418,6 +456,7 @@ pub fn preprocess_with_vars(
                                 | "prepend"
                                 | "component"
                                 | "slot"
+                                | "props"
                                 | "aware"
                                 | "fragment"
                                 | "hasSection"
@@ -483,19 +522,19 @@ pub fn preprocess_with_vars(
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::Html; // These don't take args and return to HTML mode immediately
-                        } else if matches!(directive, "use" | "inject" | "props") {
-                            // `@use(...)` / `@inject(...)` / `@props(...)` need
-                            // their argument(s) parsed into a real PHP
-                            // construct, so the argument list is captured (not
-                            // emitted verbatim) and transformed when it
-                            // closes. Emit nothing inline until then.
+                        } else if matches!(directive, "use" | "inject") {
+                            // `@use(...)` / `@inject(...)` need their
+                            // argument(s) parsed into a real PHP construct, so
+                            // the argument list is captured (not emitted
+                            // verbatim) and transformed when it closes. Emit
+                            // nothing inline until then.
                             let after_dir: String = rest_str[directive.len()..].chars().collect();
                             if after_dir.trim_start().starts_with('(') {
                                 replacement = "".to_string();
-                                next_mode = Mode::CaptureArgs(match directive {
-                                    "use" => CapturedDirective::Use,
-                                    "inject" => CapturedDirective::Inject,
-                                    _ => CapturedDirective::Props,
+                                next_mode = Mode::CaptureArgs(if directive == "use" {
+                                    CapturedDirective::Use
+                                } else {
+                                    CapturedDirective::Inject
                                 });
                                 paren_depth = 0;
                             } else {
@@ -663,7 +702,6 @@ pub fn preprocess_with_vars(
                                 String::new()
                             }
                             CapturedDirective::Inject => build_inject_statement(&raw),
-                            CapturedDirective::Props => build_props_statement(&raw),
                         };
 
                         let start_suffix = utf16_count(&processed) as u32;
@@ -976,94 +1014,6 @@ fn build_inject_statement(raw: &str) -> String {
     format!(" ${variable} = app({service}); ")
 }
 
-/// Translate the captured argument text of a `@props(...)` directive into
-/// one `$name = default;` assignment per declared prop, so the forward
-/// walker sees each variable as defined (typed from its default value)
-/// without any dependency on the caller's `<x-… />` tag. `raw` is
-/// everything from the opening `(` up to (not including) the closing `)`;
-/// the argument list may span multiple lines.
-///
-/// Falls back to an inert `blade_directive(...)` call, matching how the
-/// other directives discard their arguments, when the argument is not a
-/// plain array literal (e.g. a variable holding a dynamically built props
-/// array) or no entry has a plain string key/value.
-fn build_props_statement(raw: &str) -> String {
-    // `raw` starts with the directive's own opening `(`, which has no
-    // matching `)` in this text; the array literal itself starts right
-    // after it.
-    let inner = match raw.find('(') {
-        Some(idx) => &raw[idx + 1..],
-        None => raw,
-    };
-
-    const PARSE_PREFIX: &str = "<?php ";
-    let synthetic = format!("{PARSE_PREFIX}{inner};");
-
-    let assignments = crate::parser::with_parsed_program(
-        &synthetic,
-        "blade_props_directive",
-        |program, _content| {
-            // `program.statements` includes the leading `<?php` opening tag
-            // as its own statement, so the array literal is the first
-            // *expression* statement, not necessarily `.first()`.
-            let Some(Statement::Expression(expr_stmt)) = program
-                .statements
-                .iter()
-                .find(|stmt| matches!(stmt, Statement::Expression(_)))
-            else {
-                return String::new();
-            };
-            let elements = match expr_stmt.expression {
-                Expression::Array(array) => &array.elements,
-                Expression::LegacyArray(array) => &array.elements,
-                _ => return String::new(),
-            };
-
-            let mut out = String::new();
-            for element in elements.iter() {
-                let (name, default_text) = match element {
-                    ArrayElement::KeyValue(kv) => {
-                        let Expression::Literal(Literal::String(s)) = kv.key else {
-                            continue;
-                        };
-                        let Some(name) = string_literal_contents(s) else {
-                            continue;
-                        };
-                        let span = kv.value.span();
-                        let start = (span.start.offset as usize).saturating_sub(PARSE_PREFIX.len());
-                        let end = (span.end.offset as usize).saturating_sub(PARSE_PREFIX.len());
-                        let Some(default_text) = inner.get(start..end) else {
-                            continue;
-                        };
-                        (name, default_text.to_string())
-                    }
-                    ArrayElement::Value(v) => {
-                        // A shorthand prop with no default (`@props(['visible'])`)
-                        // is only defined when the caller passes it; declare it
-                        // as `null` so it is at least never "undefined".
-                        let Expression::Literal(Literal::String(s)) = v.value else {
-                            continue;
-                        };
-                        let Some(name) = string_literal_contents(s) else {
-                            continue;
-                        };
-                        (name, "null".to_string())
-                    }
-                    _ => continue,
-                };
-                out.push_str(&format!(" ${name} = {default_text}; "));
-            }
-            out
-        },
-    );
-
-    if assignments.trim().is_empty() {
-        format!(" blade_directive({inner}); ")
-    } else {
-        assignments
-    }
-}
-
 /// If `rem` (starting at a `:`) opens a `:name="` or `:name='` bound
 /// attribute, return the length (in chars) of that opening span, up to and
 /// including the opening quote. Returns `None` when the syntax does not
@@ -1223,14 +1173,19 @@ mod tests {
             php
         );
         assert!(
+            php.contains("/** @var string $componentName */"),
+            "a component also knows its own name: {}",
+            php
+        );
+        assert!(
             php.contains(
-                "function __blade_template() { global $errors, $__env, $attributes, $slot;"
+                "function __blade_template() { global $errors, $__env, $attributes, $slot, $componentName;"
             ),
             "component variables must be pulled into the wrapper scope: {}",
             php
         );
-        // Two declarations of two lines each on top of the base prologue.
-        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 4);
+        // Three declarations of two lines each on top of the base prologue.
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 6);
     }
 
     #[test]
@@ -1257,7 +1212,7 @@ mod tests {
             "the inferred declaration must be dropped: {}",
             php
         );
-        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 4);
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 6);
     }
 
     #[test]
@@ -2268,63 +2223,125 @@ mod tests {
         );
     }
 
-    /// `@props` declares each key as a local variable assigned its default
+    /// The prologue text before the wrapper function: where every declared
+    /// variable lives.
+    fn prologue_of(php: &str) -> &str {
+        php.split_once("function __blade_template()").unwrap().0
+    }
+
+    /// `@props` declares each key in the prologue, typed from its default
     /// value, so the forward walker sees it as defined and typed without
     /// waiting on the caller's `<x-… />` attributes.
     #[test]
     fn test_preprocess_props_directive_declares_variables() {
         let content = "@props(['caption' => '', 'count' => 0])\n{{ $caption }}\n";
         let (php, _) = preprocess(content);
+        let prologue = prologue_of(&php);
         assert!(
-            php.contains("$caption = '';"),
-            "@props should declare $caption with its default: {}",
+            prologue.contains("$caption = '';") && prologue.contains("$count = 0;"),
+            "@props should declare each key with its default: {}",
             php
         );
         assert!(
-            php.contains("$count = 0;"),
-            "@props should declare $count with its default: {}",
+            php.contains("global $errors, $__env, $caption, $count;"),
+            "props must be pulled into the wrapper scope: {}",
+            php
+        );
+    }
+
+    /// The declaration belongs in the prologue, not the template body. An
+    /// assignment in the body would overwrite whatever type the author
+    /// declared for the same name, and read as a dead local assignment to
+    /// the unused-variable check.
+    #[test]
+    fn test_preprocess_props_directive_does_not_assign_in_the_body() {
+        let content = "@props(['caption' => ''])\n<span>{{ $caption }}</span>\n";
+        let (php, _) = preprocess(content);
+        let body = php.split_once("function __blade_template()").unwrap().1;
+        assert!(
+            !body.contains("$caption ="),
+            "the body must not re-assign a prop: {}",
+            php
+        );
+        // The default expression stays visible so it is still type-checked.
+        assert!(
+            body.contains("blade_directive"),
+            "the directive's arguments should still be analysed: {}",
+            php
+        );
+    }
+
+    /// A `@props` key the template's own docblock already declares keeps the
+    /// declared type: the signature is the contract, `@props` only supplies
+    /// what the signature leaves out.
+    #[test]
+    fn test_declared_signature_wins_over_a_props_default() {
+        let content = "@php\n/**\n * @var \\App\\Options $options\n */\n@endphp\n@props(['options' => []])\n{{ $options->first() }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            !php.contains("$options = [];"),
+            "the props default must not shadow the declared type: {}",
             php
         );
     }
 
     /// The array literal in `@props(...)` commonly spans multiple lines;
-    /// the whole argument list must be captured across lines, not just the
-    /// closing line, or every prop declared before the last line is lost.
+    /// the whole argument list must be read, not just the closing line, or
+    /// every prop declared before the last line is lost.
     #[test]
     fn test_preprocess_props_directive_spans_multiple_lines() {
         let content = "@props([\n    'caption' => '',\n])\n{{ $caption }}\n";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("$caption = '';"),
+            prologue_of(&php).contains("$caption = '';"),
             "a multi-line @props array must still declare its keys: {}",
             php
         );
     }
 
-    /// A prop with no default (`@props(['visible'])`) is declared `null`
-    /// rather than left undefined, matching Blade allowing the shorthand
-    /// form for a prop the caller may or may not pass.
+    /// A prop with no default (`@props(['visible'])`) is *required*: its
+    /// value comes from the caller, so it is declared `mixed` rather than
+    /// being invented as `null`, which would make every use of it a type
+    /// error against whatever the prop is really passed.
     #[test]
     fn test_preprocess_props_directive_shorthand_without_default() {
         let content = "@props(['visible'])\n{{ $visible }}\n";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("$visible = null;"),
-            "a defaultless prop should still be declared: {}",
+            prologue_of(&php).contains("/** @var mixed $visible */"),
+            "a defaultless prop should be declared mixed: {}",
             php
         );
     }
 
-    /// A dynamic props argument (not a plain array literal) cannot be read
-    /// directly; it must fall back to the inert directive call rather than
-    /// producing invalid PHP.
+    /// `@aware` pulls a value from the parent component, falling back to the
+    /// declared default, so it types the body exactly as `@props` does.
+    #[test]
+    fn test_preprocess_aware_directive_declares_variables() {
+        let content = "@aware(['color' => 'gray'])\n{{ $color }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            prologue_of(&php).contains("$color = 'gray';"),
+            "@aware should declare its keys: {}",
+            php
+        );
+    }
+
+    /// A dynamic props argument (not a plain array literal) cannot be read,
+    /// so no variable is invented; the expression still reaches PHP as an
+    /// inert call so its own variables are seen.
     #[test]
     fn test_preprocess_props_directive_dynamic_argument_falls_back() {
         let content = "@props($dynamicProps)\n";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($dynamicProps);"),
+            php.contains("blade_directive ($dynamicProps);"),
             "a non-literal @props argument should fall back to the inert call: {}",
+            php
+        );
+        assert!(
+            php.contains("global $errors, $__env;"),
+            "a non-literal @props argument declares nothing: {}",
             php
         );
     }

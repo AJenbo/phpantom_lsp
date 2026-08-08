@@ -11,12 +11,13 @@ For general architecture see `ARCHITECTURE.md`.
 - **No application booting.** Consistent with `laravel.md`. We
   never run PHP or boot a Laravel application.
 - **Signatures over call-site scanning.** A template's variable types
-  come from its declared contract: the Bladestan-compatible signature
-  chain — `@bladestan-signature` docblock, first docblock before
-  template code, `@props`, component class constructors (BL8). The
-  template declares what it expects; call sites are then *validated*
-  against that contract (BL9), exactly as a function signature
-  works. Inferring types *from* call sites inverts the contract and
+  come from its declared contract: the Bladestan-compatible chain in
+  `src/blade/signature.rs` — `@bladestan-signature` docblock, first
+  docblock before template code, `@props`/`@aware`, Blade's own
+  component scope, and (still to come) the backing component class
+  (BL18). The template declares what it expects; call sites are then
+  *validated* against that contract (BL9), exactly as a function
+  signature works. Inferring types *from* call sites inverts the contract and
   produces "true for one caller" types, so it is not the foundation —
   the shipped call-site inference fallback for unannotated projects
   is layered strictly below every declared source. Projects running
@@ -212,33 +213,6 @@ Parse `<livewire:name :attr="$expr" ...>` or
 Livewire attribute names use camelCase on the class, so apply the
 same kebab-to-camelCase conversion.
 
-### 12. `@props` and `@aware`
-
-#### 12a. `@props`
-
-`@props(['type' => 'info', 'message'])` becomes:
-
-```php
-$type = 'info';
-$message = null;
-/** @var \Illuminate\View\ComponentAttributeBag $attributes */
-$attributes = new \Illuminate\View\ComponentAttributeBag([]);
-/** @var \Illuminate\Support\HtmlString $slot */
-$slot = new \Illuminate\Support\HtmlString('');
-```
-
-The preprocessor parses the array literal in the `@props()`
-argument to extract variable names and default values. Variables
-listed without a key-value pair (just `'message'`) get a `null`
-default.
-
-#### 12b. `@aware`
-
-`@aware(['color' => 'gray'])` → `$color = 'gray';`
-
-Same parsing as `@props` but without the `$attributes`/`$slot`
-injection.
-
 ### BL4. Component and view name completion
 
 #### BL4a. `<x-` completion
@@ -355,19 +329,6 @@ When template A contains `@extends('layouts.app')`:
 This gives child templates access to the parent's declared
 variables without the user redeclaring them.
 
-### 17. Component class to template variable typing
-
-For class-based components, when editing the component's Blade
-template:
-
-1. Determine which component class backs this template. Convention:
-   `resources/views/components/alert.blade.php` is backed by
-   `App\View\Components\Alert`.
-2. Load the class via `find_or_load_class`.
-3. Read public properties and constructor parameter types.
-4. Inject those as `@var` declarations in the virtual PHP prologue
-   (unless the template already has explicit `@var` or `@props`).
-
 ### 18. Tests
 
 Create `tests/definition_blade.rs`:
@@ -449,28 +410,51 @@ Where Bladestan defines a concept (signature chain, covariant merging,
 call-site validation), we implement the same semantics so the
 ecosystem converges on one way to type a template.
 
-### BL8. Template signature resolution chain
+### BL18. Backed component class members in the template body
 
-Implement a signature resolution priority, matching Bladestan's model,
-as the source of a template's variable types:
+`src/blade/signature.rs` resolves a template's declared contract and the
+`@props`/`@aware` and Blade-injected sources below it, but the class
+backing a component view contributes nothing yet. Blade merges a class
+component's public properties and its zero-argument public methods into
+the view's data, and Livewire additionally gives its view `$this`,
+`$_instance`, and `$__livewire` (all the component instance) plus the
+component's public properties. A class component with no hand-written
+signature therefore reports every member it reads as undefined.
 
-1. **Backed component class** — public properties and constructor
-   parameters (item 17), merged with the blade-side signature.
-2. **`@bladestan-signature` docblock** — the canonical contract. The
-   marker tag is recognized and the `@var` tags in that docblock
-   become the template's declared variables.
-3. **First docblock before template code** — treated as an implicit
-   signature when no marker is present (zero-change migration for
-   codebases that already carry `@var` blocks).
-4. **`@props`** — default-value type inference for anonymous
-   components (item 12).
-5. **`mixed`** — otherwise.
+Resolve the backing class the way Laravel does — the registered class
+component namespaces and the default `App\View\Components` convention
+for `components.alert` → `App\View\Components\Alert`, and Livewire's
+`livewire.create-refund` → `App\Livewire\CreateRefund` under the
+configured `livewire.class_namespace` — then feed its members into the
+declaration chain below `@props` and above call-site inference. Skip
+members declared on the framework base class and any method that
+requires an argument, since Blade does not expose those.
 
-The `@var` parsing itself already works through the preprocessor;
-the work is the chain, the one-signature-per-file rule, and treating
-the signature as a *declaration set* rather than scattered
-assertions. Nullable-not-optional semantics follow Bladestan: a
-variable that may be absent is declared `?Type`, not omitted.
+The preprocessor is a pure function of the template text, so the members
+have to arrive through the same channel the call-site-inferred variables
+already use (`Backend::blade_injected_vars`, populated by a refresh
+pass), not by resolving classes inside the preprocessor.
+
+### BL19. Shared and view-composer variables in the declaration chain
+
+`View::share('key', $value)` puts a variable in *every* template's
+scope, and `View::composer('view.name', …)` (or a composer class's
+`compose(View $view)` body calling `$view->with(…)`) puts one in the
+scope of the views it targets. Neither is written in any template, so a
+template that reads a shared variable reports it undefined unless it
+declares the variable itself.
+
+Scan service providers for `View::share()` / `$this->app['view']
+->share()` and for composer registrations (including
+`View::composer([...], Class::class)` and the `composers` array a
+provider builds), then feed the resulting names into
+`src/blade/signature.rs`'s chain: below the Blade-injected component
+scope (a shared variable named `slot` does not displace the real one)
+and above call-site inference. Types come from resolving the shared
+expression, or from the `with()` calls in the composer's body, through
+the shared resolution pipeline. Like BL18, the values have to arrive
+via `Backend::blade_injected_vars` rather than being resolved inside the
+preprocessor.
 
 ### BL10. Cross-file `@section` / `@stack` name intelligence
 
@@ -507,7 +491,7 @@ scanner — so that:
 
 ### BL9. `view()` call-site validation
 
-The diagnostics counterpart of BL8, matching Bladestan's
+The diagnostics counterpart of the declaration chain, matching Bladestan's
 call-site validation rule: where a template has a
 declared signature, a `view('name', [...])` call (and
 `View::make()`, mailable content, `Route::view()` data,
@@ -815,7 +799,7 @@ Implement `@` directive name completion with snippets.
 **Deliverable:** Typing `@` in a Blade file shows all known
 directives with snippet templates.
 
-### Step 8: Cross-file intelligence (BL5, BL6, item 17)
+### Step 8: Cross-file intelligence (BL5, BL6, BL18)
 
 Implement go-to-definition for view names and component tags.
 Implement `@extends` signature merging. Implement component class to
@@ -824,13 +808,11 @@ template variable typing.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file. Parent layout variables are available in child templates.
 
-### Step 9: Template contracts (BL8, BL9, BL10, BL11)
+### Step 9: Template contracts (BL9, BL10, BL11)
 
-Implement the signature resolution chain, then call-site validation
-on top of it. Section/stack intelligence and custom directive
-discovery are independent and can land in either order. Call-site
-inference (shipped) sits below every declared source; the BL8 chain
-slots in above it.
+Call-site validation builds on the shipped declaration chain
+(`src/blade/signature.rs`). Section/stack intelligence and custom
+directive discovery are independent and can land in either order.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
 gets typed completion for its declared variables, and a `view()`

@@ -25,6 +25,12 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
+| B65 | [A `@var` whose type is a closure signature binds the wrong variable](todo/bugs.md#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable) | Low-Medium  | Low         |
+| BL18 | [Backed component class members in the template body](todo/blade.md#bl18-backed-component-class-members-in-the-template-body)                                              | High        | Medium      |
+| BL2  | [Template and component file discovery](todo/blade.md#bl2-template-and-component-file-discovery)                            | High       | Medium     |
+| BL19 | [Shared and view-composer variables in the declaration chain](todo/blade.md#bl19-shared-and-view-composer-variables-in-the-declaration-chain)                                | Medium      | Medium      |
+| BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |
+| BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures, depends on BL6)                                                       | Medium-High | Medium-High |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
@@ -53,12 +59,10 @@ within the same impact tier.
 | BL13 | [Mismatched and unbalanced directive diagnostics](todo/blade.md#bl13-mismatched-and-unbalanced-directive-diagnostics)       | Medium     | Low-Medium |
 | BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
 | BL7  | [Blade directive completion](todo/blade.md#bl7-directive-name-completion)                                                  | Medium     | Low        |
-| BL2  | [Template and component file discovery](todo/blade.md#bl2-template-and-component-file-discovery)                            | High       | Medium     |
 | BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
-| BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`, `@props`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor) | High       | High       |
+| BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor)          | High       | High       |
 | BL4  | [Component and view name completion](todo/blade.md#bl4-component-and-view-name-completion)                                 | High       | Medium     |
 | BL5  | [Go-to-definition for view names and components](todo/blade.md#bl5-go-to-definition-for-view-names-and-components)         | Medium     | Medium     |
-| BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
 | BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format---check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
 
@@ -109,9 +113,7 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B55 | [`@props` overwrites a `@var` declaration with `null` for every key but the first](todo/bugs.md#b55-props-overwrites-a-var-declaration-with-null-for-every-key-but-the-first) | High        | Low         |
 | B56 | [Attributes passed to an anonymous component are undefined unless `@props` lists them](todo/bugs.md#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them) | Medium-High | Low-Medium  |
-| B57 | [A `@props`-declared key is reported as an unused variable](todo/bugs.md#b57-a-props-declared-key-is-reported-as-an-unused-variable)                                        | Medium      | Low         |
 | B58 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b58-deprecation-diagnostics-ignore-the-projects-target-php-version)                          | Medium      | Low-Medium  |
 | B62 | [An application's container binding loses to the framework default for the same key](todo/bugs.md#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key) | Medium      | Medium      |
 | B64 | [A dotted container key resolves to a class named after its first segment](todo/bugs.md#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment)       | Medium      | Low-Medium  |
@@ -193,8 +195,6 @@ unlikely to move the needle for most users.
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
 | L44 | [Sibling resource registrations and degenerate resource names](todo/laravel.md#l44-sibling-resource-registrations-and-degenerate-resource-names)                             | Low-Medium  | Low-Medium  |
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
-| BL8 | [Template signature resolution chain](todo/blade.md#bl8-template-signature-resolution-chain) (Bladestan-compatible contract model)                                           | High        | Medium      |
-| BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
 | BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#bl10-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
 | BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Low-Medium  |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |

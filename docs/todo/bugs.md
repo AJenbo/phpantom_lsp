@@ -7,42 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B55. `@props` overwrites a `@var` declaration with `null` for every key but the first
-
-**Impact: High · Effort: Low**
-
-A Blade component that declares its contract in a standalone docblock and
-then lists the same names in `@props` keeps the declared type for the
-first key only. Every later key is bound to `null` instead:
-
-```blade
-@php
-    /**
-     * @var string $poster
-     * @var string $video
-     */
-@endphp
-@props(['poster', 'video'])
-
-{{ imgix($poster) }}   {{-- string, correct --}}
-{{ imgix($video) }}    {{-- null — "expects …|string, got null" --}}
-```
-
-Reversing the order of the two `@var` lines does not move the diagnostic,
-so it follows the order of the `@props` list, not the docblock.
-
-Two things are wrong. A `@props` key with no default is a *required*
-prop, so it should be typed by whatever the caller passes (or left
-unknown), never `null` — a component with no docblock at all currently
-types every defaultless prop as `null`. And a declared `@var` must win
-over whatever `@props` derives, for every key rather than the first one.
-
-**Where to look:** the `@props` handling added when the directive
-started declaring its keys as local variables. It writes one binding per
-key; only the first appears to be merged with the standalone `@var`
-scope, and the default for a key written as a bare list entry is being
-taken as `null` rather than "declared, value supplied by the caller".
-
 #### B56. Attributes passed to an anonymous component are undefined unless `@props` lists them
 
 **Impact: Medium-High · Effort: Low-Medium**
@@ -67,32 +31,13 @@ Adding `@props(['hairAnalysis'])` silences it, which is the tell: the
 call-site attributes are already parsed, they just are not turned into
 variables unless the directive declares them.
 
-**Where to look:** wherever `@props` keys become scope entries, the same
-scope should also receive the union of the attributes each `<x-…>` call
-site passes, the way template variables are already inferred from
-`view()` call sites. The two sources should merge rather than one
-gating the other.
-
-#### B57. A `@props`-declared key is reported as an unused variable
-
-**Impact: Medium · Effort: Low**
-
-```blade
-@props(['accordionId', 'headingId', 'contentId'])
-
-<button id="{{ $headingId }}" aria-controls="{{ $contentId }}" {{ $attributes }}></button>
-```
-
-`$accordionId` is flagged `unused_variable`. It is not a local
-assignment, though: naming a key in `@props` is what *removes* it from
-`$attributes`, so deleting the entry changes the rendered output (the
-attribute starts leaking into the tag). A declared prop the body never
-reads is a component-API observation, not a dead variable, and the
-unused-variable check should not claim it.
-
-**Where to look:** the unused-variable collector treats the scope
-entries `@props` creates like ordinary assignments. Props need a marker
-that exempts them, the same way a function parameter is exempt.
+**Where to look:** the declaration chain in `src/blade/signature.rs`
+needs a source below `@props`: the union of the attributes each `<x-…>`
+call site passes, the way template variables are already inferred from
+`view()` call sites. `call_site_inference.rs` skips Blade files
+entirely, so component tags are never read as call sites — that is the
+gap. The two sources should merge, with `@props` winning per name rather
+than gating the other.
 
 #### B58. Deprecation diagnostics ignore the project's target PHP version
 
@@ -177,3 +122,26 @@ project class named `View`).
 holding a character no PHP identifier can contain is not a class name at
 all, so the ordinary phases have nothing to say about it and the alias
 tables should be consulted first (or exclusively) for it.
+
+#### B65. A `@var` whose type is a closure signature binds the wrong variable
+
+**Impact: Low-Medium · Effort: Low**
+
+A closure type writes `$`-prefixed names for its own parameters, and the
+`@var` scan takes the first `$` it finds after the tag as the annotated
+variable:
+
+```php
+/** @var \Closure(\App\Models\User $user): string $callback */
+```
+
+is read as declaring `$user` of type `\Closure(\App\Models\User`, so
+`$callback` stays untyped and a bogus `$user` enters the scope. The same
+shape appears in `@param` and in a Blade template's signature docblock,
+where it also decides which names the contract declares.
+
+**Where to look:** `parse_var_docblock_pairs` in
+`type_engine/variable/forward_walk/assignment.rs` scans for the first
+`$` after `@var`. The annotated variable is the `$name` at paren depth 0
+and angle depth 0, so the scan has to track both while walking the type
+rather than stopping at the first `$`.

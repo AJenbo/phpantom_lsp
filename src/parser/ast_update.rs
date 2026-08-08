@@ -111,7 +111,7 @@ impl Backend {
             // once has deadlocked against the batch-publish locks.  The
             // serial refresh passes own the cache; this path only reads
             // it.
-            let injected = if crate::blade::call_site_inference::has_var_docblock(content) {
+            let injected = if crate::blade::signature::has_declared_signature(content) {
                 // The template declares its own contract; drop any
                 // cached set so removing the declaration later
                 // re-triggers inference.

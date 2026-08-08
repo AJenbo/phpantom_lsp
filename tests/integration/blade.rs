@@ -742,4 +742,88 @@ mod tests {
             messages
         );
     }
+
+    /// A component that declares its contract in a docblock and then lists
+    /// the same names in `@props` keeps the declared type for *every* key.
+    /// `@props` supplies defaults for what the contract leaves out; it never
+    /// overrides the contract.
+    #[tokio::test]
+    async fn test_declared_types_survive_a_props_list() {
+        let body = "@php\n/**\n * @var string $poster\n * @var string $video\n */\n@endphp\n@props(['poster', 'video'])\n\n{{ strlen($poster) }}\n{{ strlen($video) }}\n";
+        let (backend, _dir, uri) =
+            component_workspace("resources/views/components/player.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+
+        assert!(
+            !messages.iter().any(|m| m.contains("got null")),
+            "a @props key must not be typed null over its declared type: {:?}",
+            messages
+        );
+
+        for (line, name) in [(8u32, "$poster"), (9, "$video")] {
+            let hover = hover_text(&backend, &uri, line, 12).await;
+            assert!(
+                hover.contains("string"),
+                "{name} must keep its declared type, got: {hover}"
+            );
+        }
+    }
+
+    /// A `@props` entry with a default is typed from that default; an entry
+    /// without one is *required*, so its value comes from the caller and it
+    /// stays unknown rather than being invented as `null`.
+    #[tokio::test]
+    async fn test_props_are_typed_from_their_defaults() {
+        let body = "@props(['variant' => 'info', 'collapsed' => false, 'tags' => [], 'heading'])\n{{ $variant }}\n{{ $collapsed }}\n{{ $tags }}\n{{ $heading }}\n";
+        let (backend, _dir, uri) =
+            component_workspace("resources/views/components/panel.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        for (line, expected) in [(1u32, "'info'"), (2, "bool"), (3, "array")] {
+            let hover = hover_text(&backend, &uri, line, 5).await;
+            assert!(
+                hover.contains(expected),
+                "line {line} should be typed {expected}, got: {hover}"
+            );
+        }
+
+        // A required prop must not read as `null`: that would make every use
+        // of it a type error against whatever the caller really passes.
+        let hover = hover_text(&backend, &uri, 4, 5).await;
+        assert!(
+            !hover.contains("null"),
+            "a required prop must not be typed null, got: {hover}"
+        );
+    }
+
+    /// Naming a key in `@props` is what removes it from `$attributes`, so a
+    /// declared prop the body never reads is a component-API decision, not a
+    /// dead local assignment. Deleting it would change the rendered output.
+    #[tokio::test]
+    async fn test_a_declared_prop_is_not_an_unused_variable() {
+        let body = "@props(['accordionId', 'headingId'])\n\n<button id=\"{{ $headingId }}\" {{ $attributes }}></button>\n";
+        let (backend, _dir, uri) =
+            component_workspace("resources/views/components/accordion.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_unused_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+
+        assert!(
+            messages.is_empty(),
+            "a declared prop must not be reported unused: {:?}",
+            messages
+        );
+    }
 }
