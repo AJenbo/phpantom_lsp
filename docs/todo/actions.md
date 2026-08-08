@@ -334,57 +334,6 @@ switch ($status) {
 
 ---
 
-### A39. Convert to string interpolation
-
-**Impact: Low-Medium · Effort: Low**
-
-Replace simple string concatenation with double-quoted string
-interpolation:
-
-```php
-// Before
-$greeting = 'Hello ' . $name . ', welcome!';
-$msg = "Total: " . $order->getTotal();
-
-// After
-$greeting = "Hello {$name}, welcome!";
-$msg = "Total: {$order->getTotal()}";
-```
-
-#### When the conversion is safe
-
-- The concatenation contains at least one variable or simple
-  expression (`$var`, `$var->prop`, `$arr['key']`) and at least one
-  string literal.
-- No interpolated part contains characters that would need escaping
-  in a double-quoted string (`$`, `"`, `\`) beyond what is already
-  escaped, unless the tool handles the escaping.
-- Existing single-quoted string literals in the concatenation are
-  re-quoted as double-quoted, with `$` and `"` characters escaped.
-- Method calls like `$obj->method()` require curly-brace syntax
-  (`{$obj->method()}`), which is valid in PHP.
-- Integer, float, and boolean literals are left as concatenation
-  (they don't benefit from interpolation and `true`/`false` would
-  print as `1`/empty string).
-- The concatenation must be a top-level expression or RHS of an
-  assignment, not nested inside a function call argument where
-  readability is subjective.
-
-#### Implementation
-
-- Walk the AST for `Expression::Concat` (binary `.` operator) nodes.
-- Collect the flattened chain of concat operands (recursively unwrap
-  nested concats).
-- If the chain is all literals or all variables (no mix), skip.
-- Build a double-quoted string: literal parts are inserted verbatim
-  (with `$` and `"` escaped), variable/expression parts are wrapped
-  in `{...}`.
-- Replace the entire concat expression with the interpolated string.
-
-**Code action kind:** `refactor.rewrite`.
-
----
-
 ### A40. Generate method from call
 
 **Impact: High · Effort: Medium**

@@ -4127,6 +4127,41 @@ class SimplifyNullDemo
 }
 
 
+// ── Convert to String Interpolation ─────────────────────────────────────────
+// Place your cursor on any concatenation below and trigger code actions.
+// PHPantom offers "Convert to string interpolation" when the chain mixes
+// literal text with simple variable expressions.
+
+class ConvertToInterpolationDemo
+{
+    /** @param array<string, string> $row */
+    public function demo(string $name, User $user, Pen $pen, array $row): string
+    {
+        // Code action: → "Hello {$name}, welcome!"
+        $greeting = 'Hello ' . $name . ', welcome!';
+
+        // Property read.  Code action: → "signed by {$user->email}"
+        echo 'signed by ' . $user->email;
+
+        // A method call needs the curly form to interpolate at all.
+        // Code action: → "ink: {$pen->color()}"
+        echo 'ink: ' . $pen->color();
+
+        // Array read.  Code action: → "<{$row['email']}>"
+        $contact = '<' . $row['email'] . '>';
+
+        // Not offered: a numeric operand reads no better interpolated.
+        $count = 'items: ' . 12;
+
+        // Not offered: `strlen(…)` does not start with `$`, so PHP would not
+        // interpolate it inside `{…}`.
+        $length = 'length: ' . strlen($name);
+
+        return $greeting . $contact . $count . $length;
+    }
+}
+
+
 // ── Attribute Completion ────────────────────────────────────────────────────
 // Inside `#[…]`, completion only offers classes decorated with
 // `#[\Attribute]`, filtered by the target of the declaration the

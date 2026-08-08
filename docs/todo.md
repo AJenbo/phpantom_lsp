@@ -31,7 +31,6 @@ within the same impact tier.
 | BL20 | [Call-site data the checks stand down on](todo/blade.md#bl20-call-site-data-the-checks-stand-down-on)                                                         | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
-| A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 

@@ -50,6 +50,10 @@
 //!   `$x ?? $d`, `$x !== null ? $x : $d` → `$x ?? $d`, `$x === null
 //!   ? $d : $x` → `$x ?? $d`, `$x !== null ? $x->foo() : null` →
 //!   `$x?->foo()` (PHP 8.0+).
+//! - **Convert to string interpolation** — when the cursor is on a string
+//!   concatenation that mixes literal text with simple variable
+//!   expressions, offer to rewrite it as a single double-quoted
+//!   interpolated string (`'Hello ' . $name` → `"Hello {$name}"`).
 //! - **Extract constant** — when the user selects a literal expression
 //!   (string, integer, float, or boolean) inside a class body, offer to
 //!   extract it into a class constant.  The literal is replaced with
@@ -77,6 +81,7 @@ mod convert_switch_to_match;
 mod convert_to_arrow_function;
 mod convert_to_closure;
 mod convert_to_instance_variable;
+mod convert_to_interpolation;
 pub(crate) mod cursor_context;
 mod extract_constant;
 mod extract_function;
@@ -316,6 +321,9 @@ impl Backend {
 
         // ── Convert switch to match expression ──────────────────────────
         self.collect_convert_switch_to_match_actions(uri, content, params, &mut actions);
+
+        // ── Convert concatenation to string interpolation ───────────────
+        self.collect_convert_to_interpolation_actions(uri, content, params, &mut actions);
 
         // ── Fix namespace (PSR-4 mismatch) ──────────────────────────────
         self.collect_fix_namespace_actions(uri, content, params, &mut actions);
