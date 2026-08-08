@@ -521,6 +521,7 @@ impl LanguageServer for Backend {
         // the now-complete index rebuild every merge correctly.
         self.resolved_class_cache.write().clear();
         self.auth_user_type_cache.write().clear();
+        *self.storage_disk_safe_cache.write() = None;
         *self.laravel_aliases.write() = None;
 
         // Scan project source for Laravel macro registrations so macro

@@ -125,6 +125,7 @@ mod relationships;
 mod request_fields;
 mod route_names;
 mod scopes;
+mod storage;
 mod string_keys;
 mod trans_keys;
 pub(crate) mod validated_shape;
@@ -160,6 +161,7 @@ pub(crate) use provider_resources::{
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{RouteEntry, enumerate_all_routes, route_uri_parameters};
+pub(crate) use storage::patch_storage_disk_type;
 pub(crate) use trans_keys::collect_trans_declarations;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_names::canonical_view_name;

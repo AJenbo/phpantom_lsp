@@ -235,6 +235,30 @@ check(
     !method_exists(\Illuminate\Contracts\Filesystem\Filesystem::class, 'assertExists')
 );
 
+// ─── Storage::disk() / cloud() concrete adapter ──────────────────────────────
+
+// disk()/cloud() declare the Filesystem/Cloud contract, but every driver
+// config/filesystems.php configures ('local', 's3') builds a
+// FilesystemAdapter. The analyzer only corrects the return type when it can
+// confirm every configured disk uses a framework-shipped driver.
+check(
+    'FilesystemAdapter::download() exists',
+    method_exists(\Illuminate\Filesystem\FilesystemAdapter::class, 'download')
+);
+check(
+    'FilesystemAdapter implements the Cloud contract',
+    is_subclass_of(
+        \Illuminate\Filesystem\FilesystemAdapter::class,
+        \Illuminate\Contracts\Filesystem\Cloud::class
+    )
+);
+// The Cloud contract deliberately lacks download() — this is why the
+// precise adapter return type matters for cloud() too.
+check(
+    'Cloud contract does NOT declare download()',
+    !method_exists(\Illuminate\Contracts\Filesystem\Cloud::class, 'download')
+);
+
 // ─── View contract → concrete binding ────────────────────────────────────────
 
 // The object bound for the View contract is the concrete Illuminate\View\View,

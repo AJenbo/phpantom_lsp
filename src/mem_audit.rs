@@ -1584,6 +1584,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     probe("auth_user_type_cache", &mut || {
         backend.auth_user_type_cache.write().clear()
     });
+    probe("storage_disk_safe_cache", &mut || {
+        *backend.storage_disk_safe_cache.write() = None
+    });
     probe("parse_errors", &mut || backend.parse_errors.write().clear());
     probe("file_namespaces", &mut || {
         backend.file_namespaces.write().clear()

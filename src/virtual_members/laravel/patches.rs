@@ -114,18 +114,27 @@ const DB_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\DB";
 const CACHE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Cache";
 
 /// FQN of the `Storage` facade from `illuminate/support`.
-const STORAGE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Storage";
+///
+/// `pub(crate)` because [`super::storage`] also patches this class's
+/// `@method` tags (`drive()`/`disk()`/`cloud()`/`build()`) once
+/// `config/filesystems.php` proves it safe.
+pub(crate) const STORAGE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Storage";
 
 /// FQN of the base `Connection` class from `illuminate/database`.
 const DB_CONNECTION_FQN: &str = "Illuminate\\Database\\Connection";
 
 /// FQN of the `Filesystem` contract that `Storage::fake()` declares but
 /// never actually returns.
-const FILESYSTEM_CONTRACT_FQN: &str = "Illuminate\\Contracts\\Filesystem\\Filesystem";
+///
+/// `pub(crate)` because [`super::storage`] also corrects `drive()` /
+/// `disk()` / `build()`, which declare the same contract.
+pub(crate) const FILESYSTEM_CONTRACT_FQN: &str = "Illuminate\\Contracts\\Filesystem\\Filesystem";
 
 /// FQN of the concrete `FilesystemAdapter` that `Storage::fake()` and
 /// `Storage::persistentFake()` always construct at runtime.
-const FILESYSTEM_ADAPTER_FQN: &str = "Illuminate\\Filesystem\\FilesystemAdapter";
+///
+/// `pub(crate)` because [`super::storage`] targets the same concrete class.
+pub(crate) const FILESYSTEM_ADAPTER_FQN: &str = "Illuminate\\Filesystem\\FilesystemAdapter";
 
 /// FQN of the Mockery mock contract that Laravel's testing helpers
 /// (`mock()`, `partialMock()`, `spy()`) declare as their return type.

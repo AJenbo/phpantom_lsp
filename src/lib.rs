@@ -552,6 +552,17 @@ pub struct Backend {
     /// whenever files are re-parsed, so edits to `config/auth.php` take
     /// effect without a restart.
     pub(crate) auth_user_type_cache: Arc<RwLock<HashMap<String, Option<crate::php_type::PhpType>>>>,
+    /// Memoized "every configured filesystem disk uses a driver the framework
+    /// ships" flag, derived from `config/filesystems.php`.
+    ///
+    /// `Storage`/`FilesystemManager`'s `drive()`/`disk()`/`cloud()`/`build()`
+    /// are only safe to refine from the `Filesystem`/`Cloud` contract to the
+    /// concrete `FilesystemAdapter` when no disk uses a custom
+    /// `Storage::extend()` driver, whose return type cannot be read
+    /// statically. `None` means "not yet computed"; cleared whenever files are
+    /// re-parsed so edits to `config/filesystems.php` take effect without a
+    /// restart.
+    pub(crate) storage_disk_safe_cache: Arc<RwLock<Option<bool>>>,
     /// Memoized Laravel alias tables, parsed from the installed framework
     /// source (`registerCoreContainerAliases()`, `Facade::defaultAliases()`)
     /// and the project's `config/app.php`.
@@ -892,6 +903,7 @@ impl Backend {
             stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
+            storage_disk_safe_cache: Arc::new(RwLock::new(None)),
             laravel_aliases: Arc::new(RwLock::new(None)),
             laravel_macros: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMacroIndex::default(),
@@ -982,6 +994,7 @@ impl Backend {
             stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
+            storage_disk_safe_cache: Arc::new(RwLock::new(None)),
             laravel_aliases: Arc::new(RwLock::new(None)),
             laravel_macros: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMacroIndex::default(),
@@ -1616,6 +1629,7 @@ impl Backend {
             stub_index: Arc::clone(&self.stub_index),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
             auth_user_type_cache: Arc::clone(&self.auth_user_type_cache),
+            storage_disk_safe_cache: Arc::clone(&self.storage_disk_safe_cache),
             laravel_aliases: Arc::clone(&self.laravel_aliases),
             laravel_macros: Arc::clone(&self.laravel_macros),
             laravel_has_macros: Arc::clone(&self.laravel_has_macros),

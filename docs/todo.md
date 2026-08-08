@@ -34,7 +34,6 @@ within the same impact tier.
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | L42 | [`keyBy()` and friends do not rebind a collection's key template](todo/laravel.md#l42-keyby-and-friends-do-not-rebind-a-collections-key-template)                           | Medium      | Low-Medium  |
-| L46 | [`Storage::disk()` returns the contract instead of the configured adapter](todo/laravel.md#l46-storagedisk-returns-the-contract-instead-of-the-configured-adapter) | Medium      | Low         |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -175,6 +174,7 @@ unlikely to move the needle for most users.
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium      |
 | L36 | [Container binding registrations from service providers](todo/laravel.md#l36-container-binding-registrations-from-service-providers)                                        | Medium      | Medium      |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
+| L47 | [`Storage::extend()` custom drivers fold into the disk union](todo/laravel.md#l47-storageextend-custom-drivers-fold-into-the-disk-union)                                    | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |
 | L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Low-Medium  |
 | L41 | [Morph aliases in `*_type` column comparisons](todo/laravel.md#l41-morph-aliases-in-_type-column-comparisons)                                                               | Low-Medium  | Medium      |

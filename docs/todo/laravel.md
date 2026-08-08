@@ -716,61 +716,34 @@ declared under `filesystems.disks.*`. The config scanner already parses
 candidate set for completion, go-to-definition (jump to the disk's entry
 in `config/filesystems.php`), and an unknown-disk diagnostic.
 
-#### L46. `Storage::disk()` returns the contract instead of the configured adapter
+#### L47. `Storage::extend()` custom drivers fold into the disk union
 
-**Impact: Medium · Effort: Low**
+**Impact: Low-Medium · Effort: Medium**
 
-`FilesystemManager::disk()`, `get()`, and `build()` all declare
-`@return \Illuminate\Contracts\Filesystem\Filesystem`, but every driver
-the framework ships builds a `FilesystemAdapter` or a subclass of one:
+`FilesystemManager::drive()`/`disk()`/`cloud()`/`build()`, and the
+`Storage` facade's matching `@method` tags, now resolve to the concrete
+`Illuminate\Filesystem\FilesystemAdapter` when every disk in
+`config/filesystems.php` uses a driver the framework ships (`local`,
+`ftp`, `sftp`, `s3`, `scoped`; see `virtual_members/laravel/storage.rs`).
+A disk built by a `Storage::extend('name', function (...) { ... })`
+registration is not a `FilesystemAdapter`, so a project with even one
+such disk currently falls back to leaving the declared
+`Filesystem`/`Cloud` contract untouched for *every* disk, including the
+built-in ones alongside it.
 
-| `filesystems.disks.*.driver` | built at runtime                                |
-| ---------------------------- | ----------------------------------------------- |
-| `local`                      | `LocalFilesystemAdapter extends FilesystemAdapter` |
-| `ftp`, `sftp`                | `FilesystemAdapter`                             |
-| `s3`                         | `AwsS3V3Adapter extends FilesystemAdapter`      |
-| `scoped`                     | delegates to `build()` → the parent disk's driver |
-| custom, via `Storage::extend()` | whatever the registered closure returns      |
+Reading the registered closure's own return type — the way
+`extract_macro_registrations` already reads a `Target::macro('name',
+closure)` closure's signature/body in `macros.rs` — would let a custom
+driver's disks fold into the union (or keep the contract only for that
+specific disk) instead of widening the fallback to every disk in the
+project. This needs the same project-wide scan and cache invalidation
+`LaravelMacroIndex` already has, which is why it is tracked separately
+rather than folded into the disk-union patch itself.
 
-So `Storage::disk('cdn')->assertExists(…)` in a test, and
-`->download(…)` in a controller, report the assertion and adapter
-methods as missing even though they are always there. This is the same
-declared-type correction `patch_storage_fake_return_types` already makes
-for `Storage::fake()` / `persistentFake()`, and it is far more common:
-`fake()` is one call in a `setUp()`, `disk()` is every call after it.
-
-The correction is only unconditional in the absence of custom drivers.
-A project that calls `Storage::extend('name', …)` can bind a disk to
-anything, and the closure's declared return is the bare contract, so a
-blanket rewrite would be unsound there. That is exactly the shape
-`patch_auth_user_class` already handles for `config/auth.php`: read the
-config, map each candidate, union the results, and never widen to
-`mixed`.
-
-```text
-filesystems.disks.<name>.driver  →  concrete adapter class
-```
-
-Read `config/filesystems.php` with `parse_config_tree`, map each built-in
-driver to its concrete class, resolve any driver matched by a
-`Storage::extend()` registration to that closure's return type (or leave
-it as the contract when the closure is unreadable), and patch the
-manager methods and the `Storage` facade's `@method` tags to the union.
-`cloud()` wants the same treatment against the `Cloud` contract, which
-`AwsS3V3Adapter` implements.
-
-Note this inherits the limitation `patch_auth_user_class` has: the patch
-is per method, not per argument, so `disk('cdn')` and `disk('s3')` both
-receive the union rather than their own disk's type — the same way
-`auth('admin')->user()` currently receives the default guard's model.
-That is harmless while the union is a single class, and the fix for both
-is the same argument-aware work, not something to solve here.
-
-**Where to look:** `patch_storage_fake_return_types` in
-`virtual_members/laravel/patches.rs` for the rewrite, and
-`virtual_members/laravel/auth.rs` for the config traversal and fan-out
-to copy. L25 exposes the same `filesystems.disks` children as a string
-candidate set, so the two share a config read.
+**Where to look:** `virtual_members/laravel/storage.rs` for the current
+built-in-only patch, and `virtual_members/laravel/macros.rs` (particularly
+`extract_macro_registrations` and `LaravelMacroIndex`) for the scan-index
+pattern to copy.
 
 #### L26. Gate ability and policy strings
 

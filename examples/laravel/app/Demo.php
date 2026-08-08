@@ -748,6 +748,19 @@ class Demo
     }
 
 
+    // ── Storage::disk() resolves to the concrete adapter ────────────────
+
+    public function storageDisk(): void
+    {
+        // disk()/cloud() declare the Filesystem/Cloud contract, but every
+        // disk config/filesystems.php configures ('local', 's3') builds a
+        // FilesystemAdapter, so adapter-only methods like download()
+        // resolve on every configured disk, not just a faked one.
+        Storage::disk('s3')->download('report.pdf');
+        Storage::cloud()->assertExists('logo.png');
+    }
+
+
     // ── Container string aliases & global facades ───────────────────────
 
     public function containerAliases(): void

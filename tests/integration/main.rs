@@ -57,6 +57,7 @@ mod completion_laravel;
 mod completion_laravel_aliases;
 mod completion_laravel_auth;
 mod completion_laravel_higher_order_proxies;
+mod completion_laravel_storage;
 mod completion_magic_methods;
 mod completion_match_expression;
 mod completion_methods;

@@ -228,6 +228,12 @@ impl Backend {
         if matches!(loaded.name.as_str(), "Guard" | "Request" | "Auth") {
             loaded = crate::virtual_members::laravel::patch_auth_user_class(self, loaded);
         }
+        // Refine `disk()`/`drive()`/`cloud()`/`build()` from the abstract
+        // `Filesystem`/`Cloud` contract to the concrete `FilesystemAdapter`
+        // when no configured disk uses a custom `Storage::extend()` driver.
+        if matches!(loaded.name.as_str(), "FilesystemManager" | "Storage") {
+            loaded = crate::virtual_members::laravel::patch_storage_disk_type(self, loaded);
+        }
         // Add any Laravel macros registered on this class.  Gated on a cheap
         // atomic so the hot loader path is untouched when no macros exist.
         loaded = self.inject_laravel_macros(loaded);
