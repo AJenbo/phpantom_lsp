@@ -1146,17 +1146,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl19-shared-and-view-composer-variables-in-the-declaration-chain" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL19. Shared and view-composer variables in the declaration chain
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl10-cross-file-section-stack-name-intelligence" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2346,17 +2335,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl19-shared-and-view-composer-variables-in-the-declaration-chain" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL19. Shared and view-composer variables in the declaration chain
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl10-cross-file-section-stack-name-intelligence" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3030,24 +3008,6 @@ any other method body. <code>WRAPPER_FUNCTION</code> is looked up as a top-level
 function when hoisting a template's <code>@use</code> imports
 (<code>src/parser/ast_update.rs</code>), so that lookup has to learn the method
 form at the same time.</p>
-<h3 id="bl19-shared-and-view-composer-variables-in-the-declaration-chain">BL19. Shared and view-composer variables in the declaration chain<a class="headerlink" href="#bl19-shared-and-view-composer-variables-in-the-declaration-chain" title="Permanent link">&para;</a></h3>
-<p><code>View::share('key', $value)</code> puts a variable in <em>every</em> template's
-scope, and <code>View::composer('view.name', …)</code> (or a composer class's
-<code>compose(View $view)</code> body calling <code>$view-&gt;with(…)</code>) puts one in the
-scope of the views it targets. Neither is written in any template, so a
-template that reads a shared variable reports it undefined unless it
-declares the variable itself.</p>
-<p>Scan service providers for <code>View::share()</code> / <code>$this-&gt;app['view']
--&gt;share()</code> and for composer registrations (including
-<code>View::composer([...], Class::class)</code> and the <code>composers</code> array a
-provider builds), then feed the resulting names into
-<code>src/blade/signature.rs</code>'s chain: below the Blade-injected component
-scope (a shared variable named <code>slot</code> does not displace the real one)
-and above call-site inference. Types come from resolving the shared
-expression, or from the <code>with()</code> calls in the composer's body, through
-the shared resolution pipeline. Like the backing class's members, the
-values have to arrive via <code>Backend::blade_injected_vars</code> rather than
-being resolved inside the preprocessor.</p>
 <h3 id="bl10-cross-file-section-stack-name-intelligence">BL10. Cross-file <code>@section</code> / <code>@stack</code> name intelligence<a class="headerlink" href="#bl10-cross-file-section-stack-name-intelligence" title="Permanent link">&para;</a></h3>
 <p><code>@section</code>/<code>@hasSection</code>/<code>@sectionMissing</code>/<code>@yield</code> and
 <code>@push</code>/<code>@prepend</code>/<code>@stack</code> name arguments are cross-file string
