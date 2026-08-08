@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786201633014,
+  "lastUpdate": 1786201654379,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15843,6 +15843,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e5475eb6a52e26c013697fb0831726dccaf90625",
+          "message": "A command declared with the `#[Signature]` attribute is a known command\n\nCloses #331",
+          "timestamp": "2026-08-08T16:52:14+02:00",
+          "tree_id": "9b815b4c2da46f4f961f9bae2bc8767edb096ff4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e5475eb6a52e26c013697fb0831726dccaf90625"
+        },
+        "date": 1786201650246,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.3,
             "unit": "MiB"
           }
         ]
