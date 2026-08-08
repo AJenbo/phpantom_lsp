@@ -15,6 +15,33 @@ within the same impact tier.
 
 ---
 
+## P48. Analyse wall-clock regressed on the two largest Laravel samples
+
+**Impact: Medium · Effort: Medium**
+
+A timing sweep of the local sample projects (`projects/analyze-triage.md`)
+found the two largest Laravel codebases 35-40% slower than the previous
+refresh, while the other eight are unchanged:
+
+| Project    | Previous | Current |
+| ---------- | -------: | ------: |
+| Website    |     8.5s |   11.9s |
+| Backoffice |    11.6s |   15.7s |
+
+Both are Blade-heavy; the eight unchanged projects are not, which points
+at something in the Blade pipeline (the declaration chain, provider
+resource scanning, or the per-template refresh pass) rather than at the
+type engine. `view()` call-site validation is *not* the cause: the same
+build with it reverted measures 11.87s and 15.76s.
+
+Bisect the analyse wall-clock over the commits between the two refreshes
+rather than guessing which of the Blade features landed in that window
+is responsible. Backoffice is now the first sample over the 15-second
+line the triage doc calls healthy, so this is worth chasing before the
+next Blade feature adds to it.
+
+---
+
 ## P3. Parallel pre-filter in `find_implementors`
 
 **Impact: Medium · Effort: Medium**

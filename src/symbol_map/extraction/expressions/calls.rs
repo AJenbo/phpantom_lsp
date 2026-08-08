@@ -378,6 +378,20 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // `Route::view('/about', 'pages.about', [...])` binds a URI
+                // straight to a template, naming the view second.
+                if (clean_subject.eq_ignore_ascii_case("Route")
+                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Route"))
+                    && member_name.eq_ignore_ascii_case("view")
+                {
+                    try_emit_laravel_string_span_at(
+                        crate::symbol_map::LaravelStringKind::View,
+                        1,
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
                 if (clean_subject.eq_ignore_ascii_case("Lang")
                     || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Lang"))
                     && matches!(

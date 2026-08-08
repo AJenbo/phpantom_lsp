@@ -41,6 +41,34 @@ use crate::types::ClassInfo;
 /// `$`) and the expression's resolved type.
 type InferredVars = Vec<(String, PhpType)>;
 
+/// A byte range `[start, end)` in a caller file.
+pub(crate) type ByteRange = (u32, u32);
+
+/// One variable a `view()` call site passes, with the ranges that let a
+/// diagnostic point at the key and at the value independently.
+pub(crate) struct PassedVar {
+    pub(crate) name: String,
+    pub(crate) ty: PhpType,
+    /// The key that named the variable — an array key, a `compact()`
+    /// argument, or the `->withName()` method name.
+    pub(crate) key_range: ByteRange,
+    /// The expression that produced the value.
+    pub(crate) value_range: ByteRange,
+}
+
+/// One resolved `view()` / `View::make()` / `@include` call site.
+pub(crate) struct ResolvedViewCall {
+    /// The view-name string's contents, matching the offsets the symbol
+    /// map records for a Laravel view key.
+    pub(crate) name_range: ByteRange,
+    pub(crate) vars: Vec<PassedVar>,
+    /// Whether every data source at the site was readable, so [`Self::vars`]
+    /// is everything the caller hands the template. A `view($name, $data)`
+    /// whose data is a variable passes an unknown set, and neither a
+    /// missing nor an unwanted name can be concluded from it.
+    pub(crate) complete: bool,
+}
+
 /// The variables injected into one template's virtual-PHP prologue:
 /// (name without `$`, docblock type string).
 pub(crate) type InjectedVars = Vec<(String, String)>;
@@ -191,9 +219,9 @@ impl Backend {
             let Some(content) = self.get_file_content(file_uri) else {
                 continue;
             };
-            for vars in self.extract_call_site_vars(file_uri, &content, &offsets) {
-                for (name, ty) in vars {
-                    merged.entry(name).or_default().push(ty);
+            for site in self.extract_call_site_vars(file_uri, &content, &offsets) {
+                for var in site.vars {
+                    merged.entry(var.name).or_default().push(var.ty);
                 }
             }
         }
@@ -569,14 +597,18 @@ impl Backend {
     /// template at each `view('name', …)` span offset.
     ///
     /// `offsets` are the byte offsets of the view-name string contents
-    /// (as recorded in the symbol map); a call site matches when its
-    /// first argument's span contains one of them.
-    fn extract_call_site_vars(
+    /// (as recorded in the symbol map); a call site matches when the
+    /// span of one of its string arguments starts at one of them.
+    ///
+    /// Everything a single site passes lands in one [`ResolvedViewCall`],
+    /// including the entries a chained `->with(…)` adds, so a caller that
+    /// builds its data over several calls is still judged as one.
+    pub(crate) fn extract_call_site_vars(
         &self,
         uri: &str,
         content: &str,
         offsets: &[u32],
-    ) -> Vec<InferredVars> {
+    ) -> Vec<ResolvedViewCall> {
         let file_ctx = self.file_context(uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
@@ -588,7 +620,7 @@ impl Backend {
             // Collect the matching call expressions first, then resolve
             // types — both inside the closure so AST references never
             // outlive the arena.
-            let mut collected: Vec<(u32, Vec<SiteEntry<'_, '_>>)> = Vec::new();
+            let mut collected: Vec<SiteDraft<'_, '_>> = Vec::new();
             let walker = ViewCallWalker { offsets };
             let mut ctx = CollectCtx {
                 sites: &mut collected,
@@ -598,9 +630,9 @@ impl Backend {
             }
 
             let mut result = Vec::new();
-            for (site_offset, entries) in collected {
+            for site in collected {
                 let enclosing =
-                    crate::class_lookup::find_class_at_offset(&file_ctx.classes, site_offset);
+                    crate::class_lookup::find_class_at_offset(&file_ctx.classes, site.offset);
                 let current_class = enclosing.unwrap_or(&default_class);
                 let loaders = Loaders::with_function(Some(&function_loader_cl));
                 let var_ctx = VarResolutionCtx {
@@ -609,7 +641,7 @@ impl Backend {
                     current_class,
                     all_classes: &file_ctx.classes,
                     content,
-                    cursor_offset: site_offset,
+                    cursor_offset: site.offset,
                     class_loader: &class_loader,
                     backend: Some(self),
                     loaders,
@@ -620,22 +652,27 @@ impl Backend {
                     scope_var_resolver: None,
                 };
 
-                let mut vars: InferredVars = Vec::new();
-                for entry in entries {
-                    let (name, ty) = match entry {
-                        SiteEntry::Expr(name, expr) => {
+                let mut vars: Vec<PassedVar> = Vec::new();
+                for entry in site.entries {
+                    let (name, key_range, value_range, ty) = match entry {
+                        SiteEntry::Expr {
+                            name,
+                            key_range,
+                            expr,
+                        } => {
+                            let span = expr.span();
                             let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                                 expr, &var_ctx,
                             )
                             .unwrap_or_else(PhpType::mixed);
-                            (name, ty)
+                            (name, key_range, (span.start.offset, span.end.offset), ty)
                         }
-                        SiteEntry::Variable(name) => {
+                        SiteEntry::Variable { name, key_range } => {
                             let loaders = Loaders::with_function(Some(&function_loader_cl));
                             let ty = crate::type_engine::variable::resolution::resolve_variable_php_type(
                                 &name,
                                 content,
-                                site_offset,
+                                site.offset,
                                 Some(current_class),
                                 &file_ctx.classes,
                                 &class_loader,
@@ -643,7 +680,7 @@ impl Backend {
                                 loaders,
                             )
                             .unwrap_or_else(PhpType::mixed);
-                            (name, ty)
+                            (name, key_range, key_range, ty)
                         }
                     };
                     // Render FQNs so the injected `@var` resolves from the
@@ -655,11 +692,18 @@ impl Backend {
                             name.to_string()
                         }
                     });
-                    vars.push((name, ty));
+                    vars.push(PassedVar {
+                        name,
+                        ty,
+                        key_range,
+                        value_range,
+                    });
                 }
-                if !vars.is_empty() {
-                    result.push(vars);
-                }
+                result.push(ResolvedViewCall {
+                    name_range: site.name_range,
+                    vars,
+                    complete: site.complete,
+                });
             }
             result
         })
@@ -787,34 +831,82 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BladeDirectiveColle
 /// (array entry / `->with()` value) or, for `compact('name')`, the
 /// same-named variable to resolve at the call-site offset.
 enum SiteEntry<'ast, 'arena> {
-    Expr(String, &'ast Expression<'arena>),
-    Variable(String),
+    Expr {
+        name: String,
+        key_range: ByteRange,
+        expr: &'ast Expression<'arena>,
+    },
+    Variable {
+        name: String,
+        key_range: ByteRange,
+    },
+}
+
+/// One call site as the walker finds it, before its entries are resolved.
+struct SiteDraft<'ast, 'arena> {
+    /// The offset of the `view()` call itself, which every chained
+    /// `->with(…)` is folded into and which types resolve at.
+    offset: u32,
+    name_range: ByteRange,
+    entries: Vec<SiteEntry<'ast, 'arena>>,
+    complete: bool,
 }
 
 struct CollectCtx<'w, 'ast, 'arena> {
-    /// (call-site offset, entries passed at that site).
-    sites: &'w mut Vec<(u32, Vec<SiteEntry<'ast, 'arena>>)>,
+    sites: &'w mut Vec<SiteDraft<'ast, 'arena>>,
+}
+
+impl<'ast, 'arena> CollectCtx<'_, 'ast, 'arena> {
+    /// The draft for the view call at `offset`, created if the walker has
+    /// not reached it yet.
+    ///
+    /// A chained `->with(…)` is walked *before* the `view()` call it hangs
+    /// off (the method call is the outer node), so either end of the chain
+    /// may be the first to open the site.
+    fn site(&mut self, offset: u32, name_range: ByteRange) -> &mut SiteDraft<'ast, 'arena> {
+        if let Some(index) = self.sites.iter().position(|site| site.offset == offset) {
+            return &mut self.sites[index];
+        }
+        self.sites.push(SiteDraft {
+            offset,
+            name_range,
+            entries: Vec::new(),
+            complete: true,
+        });
+        self.sites.last_mut().expect("just pushed")
+    }
 }
 
 /// Walker that finds `view('name', …)` / `View::make('name', …)` calls
-/// whose first-argument string contents sit at one of the requested
-/// offsets, and collects the data entries they pass: the second-argument
-/// array literal / `compact()` call, plus any `->with(…)` chained onto
-/// the call.
+/// whose view-name string contents sit at one of the requested offsets,
+/// and collects the data entries they pass: the array literal /
+/// `compact()` call that follows the name, plus any `->with(…)` chained
+/// onto the call.
 struct ViewCallWalker<'a> {
     offsets: &'a [u32],
 }
 
-impl<'a> ViewCallWalker<'a> {
-    fn matches(&self, argument_list: &ArgumentList<'_>) -> bool {
-        let Some(first) = argument_list.arguments.iter().next() else {
-            return false;
-        };
-        let Expression::Literal(Literal::String(s)) = first.value() else {
-            return false;
-        };
-        let inner_start = s.span.start.offset + 1;
-        self.offsets.contains(&inner_start)
+impl ViewCallWalker<'_> {
+    /// The range of the view-name string in an argument list, along with
+    /// the index it sits at, when the list names one of the views asked
+    /// about.
+    ///
+    /// The name is looked for at any position rather than only the first:
+    /// `Route::view('/about', 'pages.about', …)` puts the URI first, and
+    /// the data argument is always the one after the name whatever the
+    /// helper's shape.
+    fn matches(&self, argument_list: &ArgumentList<'_>) -> Option<(usize, ByteRange)> {
+        argument_list
+            .arguments
+            .iter()
+            .enumerate()
+            .find_map(|(index, argument)| {
+                let Expression::Literal(Literal::String(s)) = argument.value() else {
+                    return None;
+                };
+                let inner = (s.span.start.offset + 1, s.span.end.offset - 1);
+                self.offsets.contains(&inner.0).then_some((index, inner))
+            })
     }
 }
 
@@ -830,12 +922,17 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
             return;
         };
         let name = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
-        if !name.eq_ignore_ascii_case("view") || !self.matches(&node.argument_list) {
+        if !is_view_render_function(name) {
             return;
         }
+        let Some((index, name_range)) = self.matches(&node.argument_list) else {
+            return;
+        };
         let mut entries = Vec::new();
-        collect_data_argument(&node.argument_list, 1, &mut entries);
-        ctx.sites.push((node.span().start.offset, entries));
+        let complete = collect_data_argument(&node.argument_list, index + 1, &mut entries);
+        let site = ctx.site(node.span().start.offset, name_range);
+        site.entries.extend(entries);
+        site.complete &= complete;
     }
 
     fn walk_in_static_method_call(
@@ -846,15 +943,17 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
         let ClassLikeMemberSelector::Identifier(method) = &node.method else {
             return;
         };
-        if !is_view_facade_class(node.class)
-            || !bytes_to_str(method.value).eq_ignore_ascii_case("make")
-            || !self.matches(&node.argument_list)
-        {
+        if !is_view_render_static_call(node.class, bytes_to_str(method.value)) {
             return;
         }
+        let Some((index, name_range)) = self.matches(&node.argument_list) else {
+            return;
+        };
         let mut entries = Vec::new();
-        collect_data_argument(&node.argument_list, 1, &mut entries);
-        ctx.sites.push((node.span().start.offset, entries));
+        let complete = collect_data_argument(&node.argument_list, index + 1, &mut entries);
+        let site = ctx.site(node.span().start.offset, name_range);
+        site.entries.extend(entries);
+        site.complete &= complete;
     }
 
     fn walk_in_method_call(
@@ -862,78 +961,142 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
         node: &'ast MethodCall<'arena>,
         ctx: &mut CollectCtx<'w, 'ast, 'arena>,
     ) {
-        // `->with('key', $value)` / `->with(['key' => $value])` chained
-        // onto a matching `view()` call.  The receiver chain may pass
-        // through other builder methods (`->layout(…)`), so scan the
-        // whole spine for the matching view call.
+        // `->with('key', $value)` / `->with(['key' => $value])` /
+        // `->withKey($value)` chained onto a matching `view()` call.  The
+        // receiver chain may pass through other builder methods
+        // (`->layout(…)`), so scan the whole spine for the matching view
+        // call.
         let ClassLikeMemberSelector::Identifier(method) = &node.method else {
             return;
         };
-        if !bytes_to_str(method.value).eq_ignore_ascii_case("with") {
+        let method_name = bytes_to_str(method.value);
+        if !method_name.starts_with("with") && !method_name.starts_with("With") {
             return;
         }
-        if !receiver_chain_has_matching_view_call(node.object, self) {
+        let Some((offset, name_range)) = matching_view_call_in_chain(node.object, self) else {
             return;
-        }
+        };
 
         let mut entries = Vec::new();
-        let mut args = node.argument_list.arguments.iter();
-        match (args.next(), args.next()) {
-            (Some(key_arg), Some(value_arg)) => {
-                // ->with('key', $value)
-                if let Expression::Literal(Literal::String(s)) = key_arg.value()
-                    && let Some(name) = string_literal_contents(s)
-                {
-                    entries.push(SiteEntry::Expr(name, value_arg.value()));
+        let mut complete = true;
+        // `->withUser($user)` is Laravel's magic setter for `$user`; the
+        // name is the method's own tail, so the method identifier is what
+        // a diagnostic points at.
+        if let Some(magic) = magic_with_name(method_name) {
+            match node.argument_list.arguments.iter().next() {
+                Some(value) => entries.push(SiteEntry::Expr {
+                    name: magic,
+                    key_range: (method.span.start.offset, method.span.end.offset),
+                    expr: value.value(),
+                }),
+                None => complete = false,
+            }
+        } else {
+            let mut args = node.argument_list.arguments.iter();
+            match (args.next(), args.next()) {
+                (Some(key_arg), Some(value_arg)) => {
+                    // ->with('key', $value)
+                    match key_arg.value() {
+                        Expression::Literal(Literal::String(s)) => {
+                            match string_literal_contents(s) {
+                                Some(name) => entries.push(SiteEntry::Expr {
+                                    name,
+                                    key_range: (s.span.start.offset + 1, s.span.end.offset - 1),
+                                    expr: value_arg.value(),
+                                }),
+                                None => complete = false,
+                            }
+                        }
+                        _ => complete = false,
+                    }
                 }
+                (Some(single), None) => {
+                    // ->with(['key' => $value, …]) or ->with(compact('key'))
+                    complete = collect_from_data_expr(single.value(), &mut entries);
+                }
+                _ => complete = false,
             }
-            (Some(single), None) => {
-                // ->with(['key' => $value, …]) or ->with(compact('key'))
-                collect_from_data_expr(single.value(), &mut entries);
-            }
-            _ => {}
         }
-        if !entries.is_empty() {
-            ctx.sites.push((node.span().start.offset, entries));
-        }
+
+        let site = ctx.site(offset, name_range);
+        site.entries.extend(entries);
+        site.complete &= complete;
     }
 }
 
-/// Whether a static call's class expression names the `View` facade.
-fn is_view_facade_class(class: &Expression<'_>) -> bool {
+/// Whether a helper function renders a view named by one of its string
+/// arguments.
+///
+/// `blade_view_directive` is what the preprocessor compiles Blade's own
+/// `@include` family, `@extends`, `@component`, and `@each` into, so a
+/// template rendering another template is judged by the same rules a
+/// controller is.
+fn is_view_render_function(name: &str) -> bool {
+    name.eq_ignore_ascii_case("view") || name.eq_ignore_ascii_case("blade_view_directive")
+}
+
+/// Whether a static call renders a view: `View::make()`, or the
+/// `Route::view()` shorthand that binds a URI straight to a template.
+fn is_view_render_static_call(class: &Expression<'_>, method: &str) -> bool {
     let Expression::Identifier(ident) = class else {
         return false;
     };
     let subject = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
-    subject.eq_ignore_ascii_case("View")
-        || subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
+    let is_facade = |short: &str, fqn: &str| {
+        subject.eq_ignore_ascii_case(short) || subject.eq_ignore_ascii_case(fqn)
+    };
+    (is_facade("View", "Illuminate\\Support\\Facades\\View") && method.eq_ignore_ascii_case("make"))
+        || (is_facade("Route", "Illuminate\\Support\\Facades\\Route")
+            && method.eq_ignore_ascii_case("view"))
 }
 
-/// Whether the receiver spine of a method call contains a `view()` /
-/// `View::make()` call whose first argument matches the requested
-/// offsets.  Walks through chained method calls (`view(…)->with(…)
-/// ->with(…)`) but not through variables — a `$view = view(…);
-/// $view->with(…)` split is out of scope for inference.
-fn receiver_chain_has_matching_view_call(
+/// The variable a `->withSomething()` magic setter names, following
+/// Laravel's `View::__call()` (`with` plus the camel-cased tail).
+///
+/// Plain `->with(…)` is not a magic setter, and neither is a method whose
+/// tail does not start a new word (`->within(…)`).
+fn magic_with_name(method: &str) -> Option<String> {
+    let rest = method
+        .strip_prefix("with")
+        .or_else(|| method.strip_prefix("With"))?;
+    let mut chars = rest.chars();
+    let first = chars.next().filter(|ch| ch.is_uppercase())?;
+    Some(first.to_lowercase().chain(chars).collect())
+}
+
+/// The offset and view-name range of the `view()` / `View::make()` call a
+/// method call's receiver spine ends in, when it names one of the views
+/// asked about.
+///
+/// Walks through chained method calls (`view(…)->with(…)->with(…)`) but
+/// not through variables — a `$view = view(…); $view->with(…)` split is
+/// out of scope.
+fn matching_view_call_in_chain(
     mut expr: &Expression<'_>,
     walker: &ViewCallWalker<'_>,
-) -> bool {
+) -> Option<(u32, ByteRange)> {
     loop {
         match expr {
             Expression::Call(Call::Function(fc)) => {
                 let Expression::Identifier(ident) = fc.function else {
-                    return false;
+                    return None;
                 };
                 let name = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
-                return name.eq_ignore_ascii_case("view") && walker.matches(&fc.argument_list);
+                if !is_view_render_function(name) {
+                    return None;
+                }
+                let (_, range) = walker.matches(&fc.argument_list)?;
+                return Some((fc.span().start.offset, range));
             }
             Expression::Call(Call::StaticMethod(sc)) => {
                 let ClassLikeMemberSelector::Identifier(method) = &sc.method else {
-                    return false;
+                    return None;
                 };
-                return is_view_facade_class(sc.class)
-                    && bytes_to_str(method.value).eq_ignore_ascii_case("make")
-                    && walker.matches(&sc.argument_list);
+                if !is_view_render_static_call(sc.class, bytes_to_str(method.value)) {
+                    return None;
+                }
+                let (_, range) = walker.matches(&sc.argument_list)?;
+                return Some((sc.span().start.offset, range));
             }
             Expression::Call(Call::Method(mc)) => {
                 expr = mc.object;
@@ -941,61 +1104,90 @@ fn receiver_chain_has_matching_view_call(
             Expression::Parenthesized(p) => {
                 expr = p.expression;
             }
-            _ => return false,
+            _ => return None,
         }
     }
 }
 
 /// Collect variable entries from the data argument at `index` of a
 /// `view()` / `View::make()` argument list.
+///
+/// Returns whether the argument was readable in full: an absent one
+/// passes nothing (readable), while one built from a variable or a
+/// non-literal key hides names the caller does pass.
 fn collect_data_argument<'ast, 'arena>(
     argument_list: &'ast ArgumentList<'arena>,
     index: usize,
     entries: &mut Vec<SiteEntry<'ast, 'arena>>,
-) {
-    if let Some(arg) = argument_list.arguments.iter().nth(index) {
-        collect_from_data_expr(arg.value(), entries);
+) -> bool {
+    match argument_list.arguments.iter().nth(index) {
+        Some(arg) => collect_from_data_expr(arg.value(), entries),
+        None => true,
     }
 }
 
 /// Collect entries from a data expression: an array literal with
 /// string keys, or a `compact('a', 'b')` call (whose values are the
 /// same-named variables at the call site).
+///
+/// Returns whether every entry of the expression was readable.
 fn collect_from_data_expr<'ast, 'arena>(
     expr: &'ast Expression<'arena>,
     entries: &mut Vec<SiteEntry<'ast, 'arena>>,
-) {
+) -> bool {
     let mut collect_array_elements =
         |elements: &'ast TokenSeparatedSequence<'arena, ArrayElement<'arena>>| {
+            let mut complete = true;
             for element in elements.iter() {
-                if let ArrayElement::KeyValue(kv) = element
-                    && let Expression::Literal(Literal::String(s)) = kv.key
-                    && let Some(name) = string_literal_contents(s)
-                {
-                    entries.push(SiteEntry::Expr(name, kv.value));
+                let ArrayElement::KeyValue(kv) = element else {
+                    // A spread, or a positional entry Blade's `extract()`
+                    // would drop: either way the key set is not the one
+                    // written here.
+                    complete = false;
+                    continue;
+                };
+                let Expression::Literal(Literal::String(s)) = kv.key else {
+                    complete = false;
+                    continue;
+                };
+                match string_literal_contents(s) {
+                    Some(name) => entries.push(SiteEntry::Expr {
+                        name,
+                        key_range: (s.span.start.offset + 1, s.span.end.offset - 1),
+                        expr: kv.value,
+                    }),
+                    None => complete = false,
                 }
             }
+            complete
         };
     match expr {
         Expression::Array(array) => collect_array_elements(&array.elements),
         Expression::LegacyArray(array) => collect_array_elements(&array.elements),
         Expression::Call(Call::Function(fc)) => {
             let Expression::Identifier(ident) = fc.function else {
-                return;
+                return false;
             };
             let name = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
             if !name.eq_ignore_ascii_case("compact") {
-                return;
+                return false;
             }
+            let mut complete = true;
             for arg in fc.argument_list.arguments.iter() {
-                if let Expression::Literal(Literal::String(s)) = arg.value()
-                    && let Some(name) = string_literal_contents(s)
-                {
-                    entries.push(SiteEntry::Variable(name));
+                match arg.value() {
+                    Expression::Literal(Literal::String(s)) => match string_literal_contents(s) {
+                        Some(name) => entries.push(SiteEntry::Variable {
+                            name,
+                            key_range: (s.span.start.offset + 1, s.span.end.offset - 1),
+                        }),
+                        None => complete = false,
+                    },
+                    _ => complete = false,
                 }
             }
+            complete
         }
-        _ => {}
+        _ => false,
     }
 }
 

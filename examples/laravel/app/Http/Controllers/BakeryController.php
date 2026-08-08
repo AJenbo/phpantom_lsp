@@ -10,7 +10,9 @@ class BakeryController
 {
     public function index(): View
     {
-        return view('welcome', [
+        // bakeries/index.blade.php declares `$bakeries` and nothing else, so
+        // this is the whole contract this call has to satisfy.
+        return view('bakeries.index', [
             'bakeries' => Bakery::where('open', true)->freshlyBaked()->get(),
         ]);
     }

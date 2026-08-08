@@ -203,6 +203,7 @@
 //! pass described in [`workspace`].
 
 mod argument_count;
+mod blade_call_site;
 pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
 pub(crate) mod cross_file;
@@ -452,6 +453,10 @@ impl Backend {
             step!(
                 "invalid_command_parameter",
                 self.collect_invalid_command_param_diagnostics(uri_str, content, out)
+            );
+            step!(
+                "blade_call_site",
+                self.collect_blade_call_site_diagnostics(uri_str, content, out)
             );
         }
     }

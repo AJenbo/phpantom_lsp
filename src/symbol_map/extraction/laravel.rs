@@ -66,7 +66,20 @@ pub(super) fn try_emit_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    emit_laravel_string_span(kind, false, argument_list, content, spans);
+    emit_laravel_string_span(kind, false, 0, argument_list, content, spans);
+}
+
+/// The [`try_emit_laravel_string_span`] variant for a helper that does not
+/// lead with its key: `Route::view('/about', 'pages.about')` names the URI
+/// first and the template second.
+pub(super) fn try_emit_laravel_string_span_at(
+    kind: crate::symbol_map::LaravelStringKind,
+    index: usize,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    emit_laravel_string_span(kind, false, index, argument_list, content, spans);
 }
 
 /// Emit the config-key span for a call on the config repository, marking
@@ -81,6 +94,7 @@ pub(super) fn try_emit_laravel_config_key_span(
     emit_laravel_string_span(
         crate::symbol_map::LaravelStringKind::Config,
         member_name.eq_ignore_ascii_case("set"),
+        0,
         argument_list,
         content,
         spans,
@@ -90,11 +104,12 @@ pub(super) fn try_emit_laravel_config_key_span(
 fn emit_laravel_string_span(
     kind: crate::symbol_map::LaravelStringKind,
     is_write: bool,
+    index: usize,
     argument_list: &ArgumentList<'_>,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some(first_arg) = argument_list.arguments.iter().next() else {
+    let Some(first_arg) = argument_list.arguments.iter().nth(index) else {
         return;
     };
     let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {

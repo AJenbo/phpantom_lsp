@@ -222,6 +222,62 @@ impl Backend {
             .unwrap_or_else(|| LIVEWIRE_DEFAULT_NAMESPACE.to_string())
     }
 
+    /// The names the class a `view()` call sits in contributes to the
+    /// template it renders, or `None` when that class is not a component.
+    ///
+    /// Laravel merges a Blade component's public members into its view's
+    /// data (`Component::data()`), and Livewire does the same for a
+    /// component's public properties plus the instance itself, so a
+    /// `render()` that passes nothing still hands the template everything
+    /// the class holds. A plain controller's properties never reach the
+    /// view, which is why this is keyed on the base class rather than
+    /// applied to any enclosing class.
+    ///
+    /// Unlike [`Self::class_member_vars`], which builds the declarations a
+    /// template body is typed from, this keeps the members the framework
+    /// base class also declares. A component that names one of them is
+    /// still naming its own property, and the answer here only ever
+    /// excuses a call site from passing something.
+    pub(crate) fn component_render_scope_names(&self, class: &ClassInfo) -> Option<Vec<String>> {
+        let fqn = class.fqn();
+        let loader = |name: &str| self.find_or_load_class(name);
+        let extends = |base: &str| {
+            crate::type_engine::variable::forward_walk::is_subclass_of(&fqn, base, &loader)
+        };
+        let is_livewire = extends(LIVEWIRE_BASE);
+        if !is_livewire && !extends(COMPONENT_BASE) {
+            return None;
+        }
+
+        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+            class,
+            &loader,
+            Some(&self.resolved_class_cache),
+        );
+        let mut names: Vec<String> = resolved
+            .properties
+            .iter()
+            .filter(|property| !property.is_static && property.visibility == Visibility::Public)
+            .map(|property| property.name.to_string())
+            .chain(
+                resolved
+                    .methods
+                    .iter()
+                    .filter(|method| !method.is_static && method.visibility == Visibility::Public)
+                    .map(|method| method.name.to_string()),
+            )
+            .collect();
+        if is_livewire {
+            names.extend(LIVEWIRE_INSTANCE_VARS.iter().map(|name| name.to_string()));
+            // Livewire renders the view with the component bound, so `$this`
+            // is the component inside the template.
+            names.push("this".to_string());
+        } else {
+            names.push("slot".to_string());
+        }
+        Some(names)
+    }
+
     /// A Blade component's scope: its public properties and its public
     /// argument-less methods.
     fn component_scope_vars(&self, class: &ClassInfo) -> InjectedVars {

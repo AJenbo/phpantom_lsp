@@ -134,7 +134,7 @@ pub(crate) fn extract_extends(content: &str) -> Option<String> {
 }
 
 /// The contents of the plain string literal an argument list starts with.
-fn leading_string_literal(args: &str) -> Option<String> {
+pub(crate) fn leading_string_literal(args: &str) -> Option<String> {
     let args = args.trim_start();
     let quote = args.chars().next().filter(|ch| *ch == '\'' || *ch == '"')?;
     let rest = &args[quote.len_utf8()..];
@@ -442,7 +442,7 @@ fn find_directive_args(masked: &str, directive: &str) -> Option<std::ops::Range<
 
 /// The offset of the `)` matching the `(` at `open`, or `None` when the
 /// argument list is unterminated.
-fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
+pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
     let mut depth = 0i32;
     let mut quote: Option<u8> = None;
     let mut i = open;

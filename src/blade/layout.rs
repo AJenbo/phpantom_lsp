@@ -46,7 +46,7 @@ impl Backend {
     /// that cannot be read, and at the first name it has already seen, so
     /// a chain that loops back on itself terminates with what it found
     /// rather than running forever.
-    fn blade_layout_chain(&self, content: &str) -> Vec<(String, String)> {
+    pub(crate) fn blade_layout_chain(&self, content: &str) -> Vec<(String, String)> {
         let mut chain: Vec<(String, String)> = Vec::new();
         let mut next = super::signature::extract_extends(content);
         while let Some(name) = next {
@@ -64,7 +64,7 @@ impl Backend {
 
     /// A view's source, read through an open buffer when there is one so
     /// an unsaved edit to a layout is what its children see.
-    fn blade_view_source(&self, view_name: &str) -> Option<String> {
+    pub(crate) fn blade_view_source(&self, view_name: &str) -> Option<String> {
         let path = self.blade_view_path(view_name)?;
         if let Ok(uri) = Url::from_file_path(&path)
             && let Some(content) = self.get_file_content(uri.as_str())

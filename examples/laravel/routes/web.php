@@ -1,8 +1,15 @@
 <?php
 use App\Http\Controllers\BakeryController;
+use App\Models\BlogAuthor;
+use App\Models\BlogPost;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', fn() => view('welcome'))->name('home');
+// welcome.blade.php declares $user and $posts, so a route closure rendering
+// it has to hand over both.  Drop one and the call site is flagged.
+Route::get('/', fn() => view('welcome', [
+    'user' => BlogAuthor::first(),
+    'posts' => BlogPost::all(),
+]))->name('home');
 Route::get('/bakeries', [BakeryController::class, 'index'])->name('bakeries.index');
 
 // A macro registered in RouteServiceProvider.  The routes its body declares
@@ -11,7 +18,14 @@ Route::get('/bakeries', [BakeryController::class, 'index'])->name('bakeries.inde
 Route::bakeryAuth();
 
 Route::prefix('admin')->group(function () {
-    Route::get('/users', fn() => view('admin.users.index'))->name('admin.users.index');
+    // admin/users/index.blade.php @extends('welcome'), and Laravel renders a
+    // layout from the same data array as its child, so the layout's $user and
+    // $posts belong to this call too.
+    Route::get('/users', fn() => view('admin.users.index', [
+        'users' => BlogAuthor::all(),
+        'user' => BlogAuthor::first(),
+        'posts' => BlogPost::all(),
+    ]))->name('admin.users.index');
 });
 
 Route::prefix('bakeries')

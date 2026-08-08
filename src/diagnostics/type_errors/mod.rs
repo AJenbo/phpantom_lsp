@@ -9,7 +9,7 @@
 //! `mixed`, complex generics), the diagnostic is suppressed to avoid
 //! false positives.
 
-mod compatibility;
+pub(super) mod compatibility;
 
 pub(super) use compatibility::is_type_compatible;
 

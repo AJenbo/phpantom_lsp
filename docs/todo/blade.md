@@ -17,7 +17,8 @@ For general architecture see `ARCHITECTURE.md`.
   component scope, the backing component class, and the layouts the
   template `@extends`. The template
   declares what it expects; call sites are then
-  *validated* against that contract (BL9), exactly as a function
+  *validated* against that contract (`src/blade/contract.rs` and
+  `src/diagnostics/blade_call_site.rs`), exactly as a function
   signature works. Inferring types *from* call sites inverts the contract and
   produces "true for one caller" types, so it is not the foundation —
   the shipped call-site inference fallback for unannotated projects
@@ -361,18 +362,43 @@ scanner — so that:
 - directive name completion (BL7) includes them;
 - registered component namespaces/paths extend the discovery index.
 
-### BL9. `view()` call-site validation
+### BL18. Mailable and view-method render sites
 
-The diagnostics counterpart of the declaration chain, matching Bladestan's
-call-site validation rule: where a template has a
-declared signature, a `view('name', [...])` call (and
-`View::make()`, mailable content, `Route::view()` data,
-`@include('name', [...])` inside templates) with a literal array
-argument is checked against the merged signature as an array shape —
-missing required variables, unknown extras, and type mismatches each
-get a diagnostic. Templates without a signature produce no call-site
-diagnostics. This gives the editor the same errors Bladestan reports
-in CI, live while typing, from one annotation.
+Call-site validation (`src/diagnostics/blade_call_site.rs`) reaches every
+render site the symbol map records a view name for: `view()`,
+`View::make()`, `Route::view()`, and the `blade_view_directive` the
+preprocessor compiles `@include`/`@extends`/`@component`/`@each` into.
+Two shapes Bladestan matches are missing, because nothing indexes their
+view name in the first place — which also costs them go-to-definition,
+hover, and the unknown-view diagnostic, so this is an indexing item
+rather than a diagnostics one:
+
+- `new Content(view: 'emails.orders.shipped', with: [...])` in a
+  mailable's `content()`, along with the `html:`, `text:`, and
+  `markdown:` arguments. The data argument is named (`with:`) rather
+  than positional, so `ViewCallWalker::matches` needs to pair a named
+  view argument with a named data argument instead of taking the next
+  positional one.
+- `->view('name', [...])` / `->render()` / `->first([...])` on a value
+  typed as the view factory or a mailable, which Bladestan's
+  `BladeViewMethodsMatcher` resolves by receiver type. Keying on the
+  method name alone would be far too broad, so this needs the receiver
+  resolved through the forward walker first.
+
+### BL19. Signature covariance diagnostic
+
+`blade_template_contract` (`src/blade/contract.rs`) merges a template's
+signature with the layouts it `@extends`, nearest declaration winning,
+which lets a child narrow a layout's declared type. It does not check
+the other direction: a child that *widens* what its layout declared
+(`string` → `string|int`), or declares something outright incompatible,
+merges silently. Bladestan reports both as `bladestan.signatureMerge`.
+
+The merge already has both types in hand, so the check itself is a
+subtype comparison. What it needs is a home: the error belongs on the
+child template's own docblock, not on every call site that renders it
+(which is where Bladestan puts it), so it wants a diagnostic pass over
+the Blade file rather than a hook in the call-site collector.
 
 ---
 
@@ -676,15 +702,17 @@ Implement go-to-definition for view names and component tags.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file.
 
-### Step 9: Template contracts (BL9, BL10, BL11)
+### Step 9: Template contracts (BL10, BL11, BL18, BL19)
 
-Call-site validation builds on the shipped declaration chain
-(`src/blade/signature.rs`). Section/stack intelligence and custom
-directive discovery are independent and can land in either order.
+Call-site validation is shipped. What is left widens it (BL18 for the
+render sites nothing indexes a view name for, BL19 for the covariance
+the merge does not check) and is independent of section/stack
+intelligence and custom directive discovery, so the four can land in
+any order.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
-gets typed completion for its declared variables, and a `view()`
-call missing a required variable gets a diagnostic.
+gets typed completion for its declared variables at every render site,
+and a signature that widens its layout's is flagged.
 
 ### Step 10: Editor tooling parity (BL13-BL16)
 

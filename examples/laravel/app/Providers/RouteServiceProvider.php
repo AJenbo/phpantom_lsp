@@ -25,8 +25,8 @@ class RouteServiceProvider extends ServiceProvider
         // as a `Router` method rather than being flagged as unknown on
         // `RouteServiceProvider`.
         Route::macro('bakeryAuth', function (): void {
-            $this->get('login', fn () => view('welcome'))->name('login');
-            $this->post('logout', fn () => view('welcome'))->name('logout');
+            $this->get('login', fn () => view('auth.login'))->name('login');
+            $this->post('logout', fn () => view('auth.login'))->name('logout');
 
             // A macro body may call another macro; both sets of names belong
             // to whichever route file called the outer one.
@@ -34,8 +34,8 @@ class RouteServiceProvider extends ServiceProvider
         });
 
         Route::macro('bakeryPasswordReset', function (): void {
-            $this->get('password/reset', fn () => view('welcome'))->name('password.request');
-            $this->post('password/reset', fn () => view('welcome'))->name('password.update');
+            $this->get('password/reset', fn () => view('auth.login'))->name('password.request');
+            $this->post('password/reset', fn () => view('auth.login'))->name('password.update');
         });
     }
 }

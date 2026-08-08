@@ -379,11 +379,28 @@ class Demo
      */
     public function laravelNavigation(): void
     {
-        // Blade Views — passing typed data for in-template completion
+        // Blade Views — passing typed data for in-template completion.
+        // welcome.blade.php declares a @bladestan-signature, so this call
+        // is checked against it the way a function call is checked against
+        // its parameters.
         $posts = BlogPost::where('published', true)->get();
-        view('welcome', compact('posts'));
-        View::make('admin.users.index', ['users' => BlogAuthor::all()]);
+        $user = BlogAuthor::first();
+        view('welcome', compact('posts', 'user'));
+
+        // admin/users/index.blade.php declares $users and @extends('welcome'),
+        // and a layout renders from the same data array as its child — so the
+        // layout's $user and $posts are this call's to supply too.
+        View::make('admin.users.index', [
+            'users' => BlogAuthor::all(),
+            'posts' => $posts,
+            'user' => $user,
+        ]);
         View::exists('emails.blog_published');
+
+        // A declared variable this call leaves out → `missing_view_variable`,
+        // and a key nothing in welcome.blade.php (or anything it @includes)
+        // reads → `unknown_view_variable`.  Both are intentional.
+        view('welcome', ['user' => $user, 'pots' => $posts]);
 
         // View under a custom path from config/view.php (resources/theme/views).
         // theme/dashboard.blade.php declares no @var signature, so the

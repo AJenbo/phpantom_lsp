@@ -70,11 +70,14 @@ phpantom_lsp analyze --project-root examples/laravel --no-colour
 ```
 
 All eight must pass with zero warnings and zero failures, except the
-final `analyze` run: `app/Demo.php` intentionally calls
-`Artisan::call('does:not-exist')` to demonstrate the
-`invalid_laravel_command` diagnostic, so it must report exactly
-`[ERROR] Found 1 error` on that line. Any other count, or an error on
-a different line, is a regression.
+final `analyze` run: `app/Demo.php` carries three deliberate mistakes,
+each demonstrating a diagnostic. `Artisan::call('does:not-exist')`
+demonstrates `invalid_laravel_command`, and one `view('welcome', …)`
+call both leaves out a variable the template declares and passes a
+misspelled key, demonstrating `missing_view_variable` and
+`unknown_view_variable`. So it must report exactly
+`[ERROR] Found 3 errors`, on those two lines. Any other count, or an
+error on a different line, is a regression.
 
 ### Manual LSP Testing
 

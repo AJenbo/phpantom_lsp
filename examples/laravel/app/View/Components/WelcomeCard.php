@@ -2,6 +2,7 @@
 
 namespace App\View\Components;
 
+use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use Illuminate\View\Component;
 use Illuminate\View\View;
@@ -25,6 +26,9 @@ class WelcomeCard extends Component
 {
     public function render(): View
     {
-        return view('welcome', ['posts' => BlogPost::all()]);
+        return view('welcome', [
+            'posts' => BlogPost::all(),
+            'user' => BlogAuthor::first(),
+        ]);
     }
 }
