@@ -438,8 +438,8 @@ class Demo
 
     /**
      * Command names declared by a command class's `$signature` / `$name` /
-     * `#[AsCommand]` are recoverable statically, so referencing them as a
-     * string completes, navigates, and validates.
+     * `#[Signature]` / `#[AsCommand]` are recoverable statically, so
+     * referencing them as a string completes, navigates, and validates.
      *
      * Try:
      *  1. Trigger completion inside `Artisan::call('|')` — offers `bakery:sync`
@@ -462,6 +462,11 @@ class Demo
 
         // Scheduled commands name the same declarations.
         Schedule::command('bakery:sync')->daily();
+
+        // A `#[Signature]` attribute declares a command just like the
+        // `$signature` property, and inline arguments after the name are
+        // fine: only the leading token is the command name.
+        Artisan::call('bakery:prune-stale --days=30');
 
         // Unknown command name → `invalid_laravel_command` diagnostic.
         Artisan::call('does:not-exist');

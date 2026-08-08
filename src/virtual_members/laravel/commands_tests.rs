@@ -128,6 +128,53 @@ class SyncCommand extends Command
 }
 
 #[test]
+fn scans_signature_attribute_command_class() {
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+
+#[Signature('app:search:sync {--limit=50000 : Maximum queue rows to process per run}')]
+class SearchSyncCommand extends Command
+{
+}
+"#;
+    let entries = scan_command_file(
+        content,
+        "file:///app/Console/Commands/SearchSyncCommand.php",
+    );
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry.name, "app:search:sync");
+    assert_eq!(opt_names(&entry.signature), vec!["limit"]);
+    let at = &content[entry.name_offset as usize..];
+    assert!(at.starts_with("app:search:sync"));
+}
+
+#[test]
+fn signature_attribute_wins_over_property() {
+    // Laravel's configureFromAttributes() assigns the attribute over the
+    // property, so the attribute is the effective signature.
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+
+#[Signature('app:new {user}')]
+class SyncCommand extends Command
+{
+    protected $signature = 'app:old {team}';
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Console/Commands/SyncCommand.php");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "app:new");
+    assert_eq!(arg_names(&entries[0].signature), vec!["user"]);
+}
+
+#[test]
 fn scans_name_only_command_class() {
     let content = r#"<?php
 namespace App\Console\Commands;

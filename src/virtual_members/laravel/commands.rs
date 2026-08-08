@@ -2,9 +2,10 @@
 //!
 //! Laravel encodes console commands as classes extending
 //! `Illuminate\Console\Command`.  Each command declares a name through one
-//! of three surfaces, all statically recoverable from source:
+//! of four surfaces, all statically recoverable from source:
 //!
 //! - `protected $signature = 'app:sync {user} {--queue}';`
+//! - `#[Signature('app:sync {user} {--queue}')]`
 //! - `protected $name = 'app:sync';`
 //! - `#[AsCommand(name: 'app:sync')]`
 //!
@@ -461,7 +462,7 @@ fn command_from_class(
 
     // 1. #[AsCommand(name: '...')] / #[AsCommand('...')].
     if let Some((name, offset)) = as_command_name(class, content) {
-        let signature = signature_property_value(class, content)
+        let signature = command_signature_value(class, content)
             .map(|(sig, _)| parse_signature(sig))
             .unwrap_or_else(|| CommandSignature {
                 name: name.clone(),
@@ -477,7 +478,7 @@ fn command_from_class(
     }
 
     // 2. $signature = '...'.
-    if let Some((sig, offset)) = signature_property_value(class, content) {
+    if let Some((sig, offset)) = command_signature_value(class, content) {
         let signature = parse_signature(sig);
         if signature.name.is_empty() {
             return None;
@@ -514,9 +515,19 @@ fn command_from_class(
 /// The first string argument of an `#[AsCommand]` attribute, with its inner
 /// byte offset.
 fn as_command_name(class: &Class<'_>, content: &str) -> Option<(String, u32)> {
+    attribute_first_string_arg(class, b"AsCommand", content).map(|(v, o)| (v.to_string(), o))
+}
+
+/// The first string argument of the named class attribute, with its inner
+/// byte offset.
+fn attribute_first_string_arg<'c>(
+    class: &Class<'_>,
+    attr_name: &[u8],
+    content: &'c str,
+) -> Option<(&'c str, u32)> {
     for list in class.attribute_lists.iter() {
         for attr in list.attributes.iter() {
-            if last_segment(attr.name.value()) != b"AsCommand" {
+            if last_segment(attr.name.value()) != attr_name {
                 continue;
             }
             let Some(arg_list) = attr.argument_list.as_ref() else {
@@ -529,17 +540,20 @@ fn as_command_name(class: &Class<'_>, content: &str) -> Option<(String, u32)> {
                 continue;
             };
             if let Some((value, start, _)) = extract_string_literal(expr, content) {
-                return Some((value.to_string(), start as u32));
+                return Some((value, start as u32));
             }
         }
     }
     None
 }
 
-/// The `$signature` property's string value and the inner byte offset of the
-/// literal.
-fn signature_property_value<'c>(class: &Class<'_>, content: &'c str) -> Option<(&'c str, u32)> {
-    string_property_value_ref(class, "signature", content)
+/// The command signature expression and the inner byte offset of its string
+/// literal: the `#[Signature('…')]` attribute when present, else the
+/// `$signature` property.  The attribute wins because Laravel's
+/// `configureFromAttributes()` assigns it over the property.
+fn command_signature_value<'c>(class: &Class<'_>, content: &'c str) -> Option<(&'c str, u32)> {
+    attribute_first_string_arg(class, b"Signature", content)
+        .or_else(|| string_property_value_ref(class, "signature", content))
 }
 
 /// The named string property's value (owned) plus its inner byte offset.
@@ -618,7 +632,7 @@ fn find_signature_at_offset(
             let end = class.right_brace.end.offset;
             if offset >= start
                 && offset <= end
-                && let Some((sig, _)) = signature_property_value(class, content)
+                && let Some((sig, _)) = command_signature_value(class, content)
             {
                 *out = Some(parse_signature(sig));
             }

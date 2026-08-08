@@ -51,6 +51,19 @@ fn detects_call_array_key_subsequent() {
     assert_eq!(d.prefix, "--qu");
 }
 
+/// The command string may carry inline arguments, which Symfony's
+/// `StringInput` parses at runtime.  Only the leading token names the
+/// command whose parameters the array keys belong to.
+#[test]
+fn detects_call_array_key_with_inline_arguments() {
+    let content = "<?php\nArtisan::call('app:sync --queue', ['us']);\n";
+    let d = ctx_at(content, "['us").expect("should detect");
+    match d.context {
+        ParamContext::CallArrayKey { command_name } => assert_eq!(command_name, "app:sync"),
+        _ => panic!("expected CallArrayKey"),
+    }
+}
+
 #[test]
 fn detects_this_call_array_key() {
     let content = "<?php\n$this->call('app:sync', ['us']);\n";

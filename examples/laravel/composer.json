@@ -16,7 +16,7 @@
         }
     },
     "require": {
-        "laravel/framework": "^12.0",
+        "laravel/framework": "^13.0",
         "demo/common": "@dev"
     }
 }

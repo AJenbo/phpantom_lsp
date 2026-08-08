@@ -45,7 +45,7 @@ function assertMethodReturnType(string $class, string $method, string $expected)
 {
     $ref = new ReflectionMethod($class, $method);
     $type = $ref->getReturnType();
-    $actual = $type ? $type->__toString() : 'mixed';
+    $actual = $type ? (string) $type : 'mixed';
     check("$class::$method() returns $expected (got $actual)", $actual === $expected);
 }
 
@@ -965,6 +965,20 @@ foreach (require __DIR__ . '/bootstrap/providers.php' as $provider) {
 check(
     'the provider registered last decides a key two providers bind',
     $providers->make('pastry.oven') instanceof \App\Support\BakeryService
+);
+
+// The `#[Signature]` attribute (Laravel 13) is read by the Command
+// constructor exactly like a `$signature` property, so the attribute is the
+// command's effective name and parameter list.
+$prune = new \App\Console\Commands\PruneStaleLoavesCommand();
+check(
+    '#[Signature] declares the command name',
+    $prune->getName() === 'bakery:prune-stale'
+);
+check(
+    '#[Signature] declares the command options',
+    $prune->getDefinition()->hasOption('days')
+        && $prune->getDefinition()->getOption('days')->getDefault() === '7'
 );
 
 // ─── Summary ────────────────────────────────────────────────────────────────

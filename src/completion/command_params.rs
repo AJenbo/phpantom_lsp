@@ -202,7 +202,18 @@ fn command_name_for_array_key(content: &str, code: &CodeContext<'_>) -> Option<S
         false
     };
 
-    recognised.then_some(call.name)
+    if !recognised {
+        return None;
+    }
+    // The string may carry inline arguments (`'app:sync --limit=50'`); only
+    // the first token is the command name.
+    let name = call
+        .name
+        .split_whitespace()
+        .next()
+        .unwrap_or(&call.name)
+        .to_string();
+    Some(name)
 }
 
 #[cfg(test)]

@@ -2089,7 +2089,9 @@ impl Backend {
                 continue;
             };
             let bytes = content.as_bytes();
-            let looks_like_command = memchr::memmem::find(bytes, b"signature").is_some()
+            // `ignature` matches both the `$signature` property and the
+            // `#[Signature]` attribute.
+            let looks_like_command = memchr::memmem::find(bytes, b"ignature").is_some()
                 || memchr::memmem::find(bytes, b"AsCommand").is_some()
                 || memchr::memmem::find(bytes, b"$name").is_some();
             if !looks_like_command {
@@ -2223,7 +2225,9 @@ impl Backend {
             .get_file_content(uri)
             .filter(|content| {
                 let bytes = content.as_bytes();
-                memchr::memmem::find(bytes, b"signature").is_some()
+                // `ignature` matches both the `$signature` property and the
+                // `#[Signature]` attribute.
+                memchr::memmem::find(bytes, b"ignature").is_some()
                     || memchr::memmem::find(bytes, b"AsCommand").is_some()
                     || memchr::memmem::find(bytes, b"$name").is_some()
             })

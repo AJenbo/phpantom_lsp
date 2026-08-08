@@ -101,11 +101,11 @@ fn emit_laravel_string_span(
         return;
     };
     let inner_start = s.span.start.offset + 1;
-    let inner_end = s.span.end.offset - 1;
+    let mut inner_end = s.span.end.offset - 1;
     if inner_start >= inner_end || inner_end as usize > content.len() {
         return;
     }
-    let key = &content[inner_start as usize..inner_end as usize];
+    let mut key = &content[inner_start as usize..inner_end as usize];
     if key.is_empty() {
         return;
     }
@@ -113,6 +113,16 @@ fn emit_laravel_string_span(
     if kind == crate::symbol_map::LaravelStringKind::Config && !key.contains('.') {
         // Require at least one dot: bare keys like 'app' are not valid config paths.
         return;
+    }
+
+    if kind == crate::symbol_map::LaravelStringKind::Command
+        && let Some(name_len) = command_name_length(key)
+    {
+        // The string may carry inline arguments (`'app:sync --limit=50'`,
+        // parsed by Symfony's `StringInput` at runtime); only the first
+        // token is the command name.
+        key = &key[..name_len];
+        inner_end = inner_start + name_len as u32;
     }
 
     spans.push(SymbolSpan {
@@ -124,6 +134,13 @@ fn emit_laravel_string_span(
             is_write,
         },
     });
+}
+
+/// Length of the leading command-name token when `key` carries trailing
+/// inline arguments; `None` when the whole string is the name.
+fn command_name_length(key: &str) -> Option<usize> {
+    let len = key.find(char::is_whitespace)?;
+    (len > 0).then_some(len)
 }
 
 /// A view name is stored in its canonical dotted spelling so that the

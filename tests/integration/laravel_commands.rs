@@ -243,6 +243,111 @@ class Runner {
 }
 
 #[tokio::test]
+async fn signature_attribute_command_is_known() {
+    let attribute_command = "\
+<?php
+namespace App\\Console\\Commands;
+use Illuminate\\Console\\Attributes\\Signature;
+use Illuminate\\Console\\Command;
+#[Signature('app:search:sync {--limit=50000 : Maximum queue rows to process per run}')]
+class SearchSyncCommand extends Command
+{
+    public function handle(): void {}
+}
+";
+    // The reference carries inline arguments; only the leading token is the
+    // command name and nothing should be flagged.
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('app:search:sync --limit=50000');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
+            (
+                "src/Console/Commands/SearchSyncCommand.php",
+                attribute_command,
+            ),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+
+    let command_diags: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_command")
+        })
+        .collect();
+    assert!(
+        command_diags.is_empty(),
+        "attribute-declared command should be known, got {command_diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn inline_arguments_do_not_hide_a_bad_name() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('does:not-exist --limit=5');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+
+    let command_diags: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_command")
+        })
+        .collect();
+    assert_eq!(
+        command_diags.len(),
+        1,
+        "the bad name should still be flagged, got {command_diags:?}"
+    );
+    assert!(
+        command_diags[0].message.contains("'does:not-exist'"),
+        "message should name only the command, got {:?}",
+        command_diags[0].message
+    );
+}
+
+#[tokio::test]
 async fn own_option_completes_against_signature() {
     let (backend, dir) = create_psr4_workspace(
         COMPOSER_JSON,
