@@ -838,17 +838,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B50. An array literal argument binds no element type through a union hint
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1327,17 +1316,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B50. An array literal argument binds no element type through a union hint
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1387,26 +1365,6 @@ resolved before its dependants sees different member types than one
 resolved after. Beyond the correctness problem, this makes it
 impossible to tell a real regression from noise when comparing two
 builds over a corpus.</p>
-<h4 id="b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint">B50. An array literal argument binds no element type through a union hint<a class="headerlink" href="#b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>A union parameter hint that offers "the element or a container of
-elements" binds the template one level deeper for a container argument,
-but an array <em>literal</em> resolves to a bare <code>array</code> with no element type,
-so nothing useful binds:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @template TWrapValue</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> * @param  iterable&lt;array-key, TWrapValue&gt;|TWrapValue  $value</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x"> * @return static&lt;array-key, TWrapValue&gt;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x"> */</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">public static function wrap($value) {}</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">$w = Wrapper::wrap([&#39;a&#39;, &#39;b&#39;]);</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">$w-&gt;push([1]);   // no diagnostic; TWrapValue should be string</span>
-</code></pre></div>
-<p>The same call with a variable or a call argument of type
-<code>array&lt;string&gt;</code> binds <code>TWrapValue</code> to <code>string</code> correctly. The generic
-wrapper binding path already unwraps array literals element by element;
-the union path needs the same treatment.</p>
 
 
 
