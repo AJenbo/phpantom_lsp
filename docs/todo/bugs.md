@@ -29,33 +29,3 @@ where it also decides which names the contract declares.
 `$` after `@var`. The annotated variable is the `$name` at paren depth 0
 and angle depth 0, so the scan has to track both while walking the type
 rather than stopping at the first `$`.
-
-#### B66. `#[AsCommand]` outranks the signature that actually names the command
-
-**Impact: Low-Medium · Effort: Low**
-
-`command_from_class` reads the command name from `#[AsCommand]` first
-and only falls back to `$signature` / `#[Signature]` / `$name`. At
-runtime the order is the reverse: `Command::__construct()` uses the
-signature whenever one is set and never reaches Symfony's
-`getDefaultName()`, and when there is no signature it passes `$this->name`
-to the parent, which again wins over the attribute. So a class that
-carries both is indexed under a name Artisan does not answer to:
-
-```php
-#[AsCommand(name: 'x:from-as-command')]
-class Sync extends Command
-{
-    protected $signature = 'x:from-property {user}';   // Artisan registers this one
-}
-```
-
-The command is then reported as unknown at every call site that spells
-it the way Artisan does, and go-to-definition on the spelling we did
-index lands on the attribute rather than the signature.
-
-**Where to look:** the three-branch chain in `command_from_class`
-(`src/virtual_members/laravel/commands.rs`). The branches need to run in
-the runtime order (signature, then `$name`, then `#[AsCommand]`), which
-also removes the case where `CommandEntry::name` comes from the
-attribute while `CommandEntry::signature.name` comes from the signature.

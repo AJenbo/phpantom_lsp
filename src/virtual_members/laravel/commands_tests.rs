@@ -212,6 +212,82 @@ class BuildReports extends Command
 }
 
 #[test]
+fn signature_wins_over_as_command_attribute() {
+    // Command::__construct() takes the signature branch whenever a signature
+    // is set and never reaches Symfony's getDefaultName(), so Artisan
+    // registers the signature's name.
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Symfony\Component\Console\Attribute\AsCommand;
+use Illuminate\Console\Command;
+
+#[AsCommand(name: 'x:from-as-command')]
+class Sync extends Command
+{
+    protected $signature = 'x:from-property {user}';
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Console/Commands/Sync.php");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "x:from-property");
+    assert_eq!(entries[0].signature.name, "x:from-property");
+    assert_eq!(arg_names(&entries[0].signature), vec!["user"]);
+    let at = &content[entries[0].name_offset as usize..];
+    assert!(at.starts_with("x:from-property"));
+}
+
+#[test]
+fn name_property_wins_over_as_command_attribute() {
+    // Without a signature the constructor passes $this->name to the parent,
+    // which short-circuits getDefaultName().
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Symfony\Component\Console\Attribute\AsCommand;
+use Illuminate\Console\Command;
+
+#[AsCommand(name: 'x:from-as-command')]
+class Sync extends Command
+{
+    protected $name = 'x:from-name';
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Console/Commands/Sync.php");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "x:from-name");
+    let at = &content[entries[0].name_offset as usize..];
+    assert!(at.starts_with("x:from-name"));
+}
+
+#[test]
+fn scans_command_class_without_command_suffix() {
+    // monicahq/laravel-cloudflare ships src/Commands/Reload.php: the class
+    // name carries no `Command` suffix and the directory is not
+    // `Console/Commands`.
+    let content = r#"<?php
+namespace Monicahq\Cloudflare\Commands;
+
+use Illuminate\Console\Command;
+
+final class Reload extends Command
+{
+    protected $signature = 'cloudflare:reload';
+    protected $description = 'Reload trust proxies IPs and store in cache.';
+}
+"#;
+    let uri = "file:///vendor/monicahq/laravel-cloudflare/src/Commands/Reload.php";
+    assert!(is_command_directory_uri(uri));
+    let entries = scan_command_file(content, uri);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "cloudflare:reload");
+    assert_eq!(
+        entries[0].fqn.as_deref(),
+        Some("Monicahq\\Cloudflare\\Commands\\Reload")
+    );
+}
+
+#[test]
 fn ignores_non_command_class() {
     let content = r#"<?php
 namespace App\Models;

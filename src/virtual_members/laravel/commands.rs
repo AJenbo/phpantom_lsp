@@ -88,7 +88,8 @@ pub(crate) struct CommandEntry {
     /// used for go-to-definition.
     pub name_offset: u32,
     /// The parsed `$signature`.  Arguments and options are empty when the
-    /// command declares only a `$name`/`#[AsCommand]` with no signature.
+    /// command declares only a `$name`/`#[AsCommand]` with no signature, in
+    /// which case `signature.name` mirrors [`Self::name`].
     pub signature: CommandSignature,
 }
 
@@ -387,13 +388,26 @@ fn split_default_array(token: &str) -> Option<(String, String)> {
 
 // ─── Source scanner ────────────────────────────────────────────────────────────
 
+/// Whether `uri` sits in a directory that conventionally holds console
+/// commands.
+///
+/// Command classes are usually named `*Command`, but plenty of packages drop
+/// the suffix and lean on the directory instead (`src/Commands/Reload.php` in
+/// `monicahq/laravel-cloudflare`), so the directory is the second signal for
+/// picking scan candidates.  It only widens the candidate set: a candidate
+/// still has to declare a command name and extend a `*Command` class before
+/// [`scan_command_file`] yields an entry.
+pub(crate) fn is_command_directory_uri(uri: &str) -> bool {
+    uri.contains("/Console/") || uri.contains("/Commands/") || uri.contains("/Command/")
+}
+
 /// Scan a PHP source file for Artisan command declarations.
 ///
 /// A class is treated as a command when it `extends` a class whose short
 /// name ends in `Command`, or carries an `#[AsCommand]` attribute.  For each
-/// such class the command name is recovered from (in priority order) the
-/// `#[AsCommand]` attribute, the `$signature` property, or the `$name`
-/// property.
+/// such class the command name is recovered from the signature
+/// (`#[Signature]` or `$signature`), then the `$name` property, then the
+/// `#[AsCommand]` attribute, matching Laravel's own precedence.
 pub(crate) fn scan_command_file(content: &str, uri: &str) -> Vec<CommandEntry> {
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
@@ -460,43 +474,43 @@ fn command_from_class(
         None => Some(bytes_to_string(class.name.value)),
     };
 
-    // 1. #[AsCommand(name: '...')] / #[AsCommand('...')].
-    if let Some((name, offset)) = as_command_name(class, content) {
-        let signature = command_signature_value(class, content)
-            .map(|(sig, _)| parse_signature(sig))
-            .unwrap_or_else(|| CommandSignature {
-                name: name.clone(),
-                ..Default::default()
-            });
-        return Some(CommandEntry {
-            name,
-            fqn,
-            uri: uri.to_string(),
-            name_offset: offset,
-            signature,
-        });
-    }
+    // The branches follow Laravel's own precedence: `Command::__construct()`
+    // takes the signature whenever one is set and never reaches Symfony's
+    // `getDefaultName()`; without a signature it passes `$this->name` to the
+    // parent, which again wins over `#[AsCommand]`.
 
-    // 2. $signature = '...'.
+    // 1. #[Signature('...')] / $signature = '...'.
     if let Some((sig, offset)) = command_signature_value(class, content) {
         let signature = parse_signature(sig);
-        if signature.name.is_empty() {
-            return None;
+        if !signature.name.is_empty() {
+            return Some(CommandEntry {
+                name: signature.name.clone(),
+                fqn,
+                uri: uri.to_string(),
+                name_offset: offset,
+                signature,
+            });
         }
+    }
+
+    // 2. $name = '...'.
+    if let Some((name, offset)) = string_property_value(class, "name", content)
+        && !name.is_empty()
+    {
         return Some(CommandEntry {
-            name: signature.name.clone(),
+            name: name.clone(),
             fqn,
             uri: uri.to_string(),
             name_offset: offset,
-            signature,
+            signature: CommandSignature {
+                name,
+                ..Default::default()
+            },
         });
     }
 
-    // 3. $name = '...'.
-    if let Some((name, offset)) = string_property_value(class, "name", content) {
-        if name.is_empty() {
-            return None;
-        }
+    // 3. #[AsCommand(name: '...')] / #[AsCommand('...')].
+    if let Some((name, offset)) = as_command_name(class, content) {
         return Some(CommandEntry {
             name: name.clone(),
             fqn,

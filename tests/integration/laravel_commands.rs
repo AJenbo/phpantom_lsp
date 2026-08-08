@@ -499,3 +499,62 @@ class SyncCommand extends Command
         param_diags[0].message
     );
 }
+
+/// A package that names its command classes after the action alone and groups
+/// them under `Commands/` rather than `Console/Commands/`, the way
+/// `monicahq/laravel-cloudflare` ships `src/Commands/Reload.php`.
+#[tokio::test]
+async fn command_class_without_command_suffix_is_known() {
+    let reload = "\
+<?php
+namespace App\\Commands;
+use Illuminate\\Console\\Command;
+final class Reload extends Command
+{
+    protected $signature = 'cloudflare:reload';
+    protected $description = 'Reload trust proxies IPs and store in cache.';
+    public function handle(): void {}
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('cloudflare:reload');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            // A conventionally-named command so the index is non-empty:
+            // command diagnostics are skipped wholesale when nothing was
+            // discovered.
+            ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
+            ("src/Commands/Reload.php", reload),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+
+    let command_diags: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_command")
+        })
+        .collect();
+    assert!(
+        command_diags.is_empty(),
+        "cloudflare:reload is declared, so it should not be flagged, got {command_diags:?}"
+    );
+}

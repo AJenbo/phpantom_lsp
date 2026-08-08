@@ -2065,8 +2065,9 @@ impl Backend {
     ///
     /// Candidate files are those declaring a class whose short name ends in
     /// `Command` (the near-universal Laravel/Symfony convention) or which
-    /// live under a `Console/Commands/` directory (so project commands with
-    /// unconventional names are still found).  Each candidate is read once,
+    /// live under a `Console/`, `Commands/` or `Command/` directory (so
+    /// commands with unconventional names are still found).  Each candidate is
+    /// read once,
     /// gated by a cheap byte pre-filter for a `signature`/`AsCommand`/`$name`
     /// declaration before parsing, then scanned by
     /// [`scan_command_file`](crate::virtual_members::laravel::scan_command_file).
@@ -2077,7 +2078,9 @@ impl Backend {
             let idx = self.symbols.fqn_uri_index.read();
             for (fqn, uri) in idx.iter() {
                 let short = fqn.rsplit('\\').next().unwrap_or(fqn);
-                if short.ends_with("Command") || uri.contains("/Console/Commands/") {
+                if short.ends_with("Command")
+                    || crate::virtual_members::laravel::is_command_directory_uri(uri)
+                {
                     candidate_uris.insert(uri.to_string());
                 }
             }
@@ -2216,7 +2219,8 @@ impl Backend {
             return;
         }
         let was_contributor = self.laravel_commands.read().has_uri(uri);
-        let looks_like_command_file = uri.ends_with("Command.php") || uri.contains("/Console/");
+        let looks_like_command_file = uri.ends_with("Command.php")
+            || crate::virtual_members::laravel::is_command_directory_uri(uri);
         if !was_contributor && !looks_like_command_file {
             return;
         }
