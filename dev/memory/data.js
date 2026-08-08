@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786228200637,
+  "lastUpdate": 1786229885149,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16455,6 +16455,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "729ff2e4abeb30c4731db77f3ae1db2bb4ff5a8e",
+          "message": "Renaming a class no longer writes into Blade templates that merely\nreceive it",
+          "timestamp": "2026-08-09T00:41:33+02:00",
+          "tree_id": "28db8fc47b8dc86849db15017a3c9915004945d9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/729ff2e4abeb30c4731db77f3ae1db2bb4ff5a8e"
+        },
+        "date": 1786229879149,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.2,
             "unit": "MiB"
           }
         ]
