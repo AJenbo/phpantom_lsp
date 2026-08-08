@@ -558,3 +558,66 @@ class Runner {
         "cloudflare:reload is declared, so it should not be flagged, got {command_diags:?}"
     );
 }
+
+/// Regression: a `#[Signature]` command registered via withCommands() from an
+/// arbitrary directory (here `src/Actions/`) is known. This is the real
+/// Laravel pattern `bootstrap/app.php` ->withCommands([...]) that stock
+/// phpantom 0.9.0 missed — the candidate filter in build_laravel_command_index
+/// only scanned `*Command`-named classes or `/Console/ /Commands/ /Command/`
+/// paths, so this file was never indexed and its call was falsely flagged.
+#[tokio::test]
+async fn signature_attribute_command_in_actions_folder_is_known() {
+    let action_command = "\
+<?php
+namespace App\\Actions;
+use Illuminate\\Console\\Attributes\\Signature;
+use Illuminate\\Console\\Command;
+#[Signature('app:sync-projects')]
+final class SyncProject extends Command
+{
+    protected $description = 'Wire the projects.';
+    public function handle(): void {}
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('app:sync-projects');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            // A conventionally-named command so the index is non-empty:
+            // command diagnostics are skipped wholesale when nothing was
+            // discovered.
+            ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
+            ("src/Actions/SyncProject.php", action_command),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+
+    let command_diags: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_command")
+        })
+        .collect();
+    assert!(
+        command_diags.is_empty(),
+        "app:sync-projects is registered via withCommands() in src/Actions/, so it must not be flagged, got {command_diags:?}"
+    );
+}
