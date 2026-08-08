@@ -619,9 +619,7 @@ fn command_aliases(class: &Class<'_>) -> Vec<String> {
                             }
                             PartialArgument::Positional(_) => {
                                 if positional == positional_index && found.is_none() {
-                                    found = arg
-                                        .value()
-                                        .and_then(|expr| string_array_literal(expr));
+                                    found = arg.value().and_then(|expr| string_array_literal(expr));
                                 }
                                 positional += 1;
                             }
