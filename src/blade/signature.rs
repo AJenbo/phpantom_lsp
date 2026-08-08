@@ -522,6 +522,15 @@ mod tests {
     }
 
     #[test]
+    fn a_closure_signatures_own_param_name_does_not_shadow_the_declared_var() {
+        // The closure type's own `$user` parameter name must not be
+        // mistaken for the variable the `@var` tag declares.
+        let blade = "@php\n/** @var \\Closure(\\App\\Models\\User $user): string $callback */\n@endphp\n{{ $callback() }}\n";
+        let signature = extract(blade);
+        assert_eq!(signature.vars, vec!["callback"]);
+    }
+
+    #[test]
     fn an_implicit_signature_may_follow_its_imports() {
         let blade =
             "@php\nuse App\\Models\\User;\n/** @var User $user */\n@endphp\n{{ $user->name }}\n";

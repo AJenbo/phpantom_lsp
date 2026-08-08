@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| B65 | [A `@var` whose type is a closure signature binds the wrong variable](todo/bugs.md#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable) | Low-Medium  | Low         |
 | BL18 | [Backed component class members in the template body](todo/blade.md#bl18-backed-component-class-members-in-the-template-body)                                              | High        | Medium      |
 | BL2  | [Template and component file discovery](todo/blade.md#bl2-template-and-component-file-discovery)                            | High       | Medium     |
 | BL19 | [Shared and view-composer variables in the declaration chain](todo/blade.md#bl19-shared-and-view-composer-variables-in-the-declaration-chain)                                | Medium      | Medium      |

@@ -5,6 +5,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::docblock::type_strings::split_type_token;
 use crate::parser::with_parsed_program;
 use crate::php_type::{LiteralValue, PhpType, TypeKind, keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -1126,26 +1127,24 @@ pub(crate) fn parse_var_docblock_pairs(doc_text: &str) -> Vec<(String, PhpType)>
     let mut search_from = 0;
     while let Some(pos) = inner[search_from..].find("@var") {
         let abs_pos = search_from + pos;
-        let after = inner[abs_pos + 4..].trim_start();
+        let tag_start = abs_pos + 4;
+        let after = inner[tag_start..].trim_start();
+        let leading_ws = inner[tag_start..].len() - after.len();
 
-        // Find the `$` that starts the variable name.  The type string
-        // may contain spaces (e.g. `array<string, int>`).
-        if let Some(dollar_pos) = after.find('$') {
-            if dollar_pos > 0
-                && let type_str = after[..dollar_pos].trim()
-                && !type_str.is_empty()
-                && let rest = &after[dollar_pos..]
-                && let Some(var_name) = rest.split_whitespace().next()
-                && !var_name.is_empty()
-            {
-                let php_type = PhpType::parse(type_str);
-                results.push((var_name.to_string(), php_type));
-            }
-            search_from = abs_pos + 4 + dollar_pos + 1;
-        } else {
-            // No `$` after this @var — skip it.
-            search_from = abs_pos + 4;
+        // Split off the type token, respecting `()`/`<>`/`{}` nesting, so a
+        // closure signature's own `$`-prefixed parameter names (e.g.
+        // `\Closure(\App\Models\User $user): string`) are not mistaken for
+        // the variable this `@var` annotates.
+        let (type_str, remainder) = split_type_token(after);
+        if !type_str.is_empty()
+            && let Some(var_name) = remainder.split_whitespace().next()
+            && var_name.starts_with('$')
+        {
+            let php_type = PhpType::parse(type_str);
+            results.push((var_name.to_string(), php_type));
         }
+
+        search_from = tag_start + leading_ws + type_str.len();
     }
 
     results
@@ -2884,6 +2883,21 @@ mod tests {
         // Nothing but comments: the scan bottoms out at an empty string.
         assert_eq!(trim_trailing_line_comments("// only\n"), "");
         assert_eq!(trim_trailing_line_comments(""), "");
+    }
+
+    #[test]
+    fn var_docblock_with_closure_signature_binds_the_trailing_variable() {
+        // A closure type's own `$`-prefixed parameter name must not be
+        // mistaken for the variable the `@var` tag annotates.
+        let pairs = parse_var_docblock_pairs(
+            "/** @var \\Closure(\\App\\Models\\User $user): string $callback */",
+        );
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0, "$callback");
+        assert_eq!(
+            pairs[0].1.to_string(),
+            "\\Closure(\\App\\Models\\User): string"
+        );
     }
 
     #[test]
