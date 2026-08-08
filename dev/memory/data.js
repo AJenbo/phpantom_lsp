@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786205620730,
+  "lastUpdate": 1786210320884,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15945,6 +15945,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c8ecad28f9ca5115d6324e7f51f7a95448cbb29f",
+          "message": "A component's own class supplies the variables its view reads",
+          "timestamp": "2026-08-08T19:16:38+02:00",
+          "tree_id": "5e13fc6ec581ee7826dc8bd856a3240d6f3ea86a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c8ecad28f9ca5115d6324e7f51f7a95448cbb29f"
+        },
+        "date": 1786210316062,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.7,
             "unit": "MiB"
           }
         ]
