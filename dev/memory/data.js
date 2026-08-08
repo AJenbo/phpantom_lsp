@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786152514787,
+  "lastUpdate": 1786153378038,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15401,6 +15401,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6a7a6b19b17c05c95e45543587550b56fb81359d",
+          "message": "A static factory's method-level template survives into a directly\nchained call",
+          "timestamp": "2026-08-08T03:26:47+02:00",
+          "tree_id": "719d61580e3c0a4bc3391718cc2549d842c93e6b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6a7a6b19b17c05c95e45543587550b56fb81359d"
+        },
+        "date": 1786153373020,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.9,
             "unit": "MiB"
           }
         ]
