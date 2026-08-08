@@ -323,7 +323,7 @@ impl Backend {
 
     /// A member's type as a docblock string, with class names fully
     /// qualified so it resolves from the template's namespace-less scope.
-    fn docblock_type(&self, ty: Option<&PhpType>) -> String {
+    pub(crate) fn docblock_type(&self, ty: Option<&PhpType>) -> String {
         let Some(ty) = ty else {
             return "mixed".to_string();
         };

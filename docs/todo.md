@@ -25,8 +25,7 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |
-| BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures, depends on BL6)                                                       | Medium-High | Medium-High |
+| BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
 | L46 | [Facade member completion from the concrete class](todo/laravel.md#l46-facade-member-completion-from-the-concrete-class)                                        | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |

@@ -101,9 +101,10 @@ fn docblock_safe_type(type_string: &str) -> &str {
 /// prologue, following the priority chain in [`super::signature`]: the
 /// template's own signature docblock wins, then `@props`/`@aware`, then the
 /// variables Blade injects into a component body, then the externally
-/// resolved variables the caller passes in (a backing class's members
-/// ahead of call-site inference, in the order given).  A name declared by
-/// a higher source is not re-declared by a lower one.
+/// resolved variables the caller passes in (a backing class's members and
+/// the layouts the template extends ahead of call-site inference, in the
+/// order given).  A name declared by a higher source is not re-declared by
+/// a lower one.
 ///
 /// A signature-declared name is deliberately left out: its docblock stays
 /// in the template body, where the forward walker reads it and carries the

@@ -11,6 +11,15 @@
 @section('content')
     <h1>{{ __('messages.welcome') }} - Admin</h1>
 
+    {{-- $posts is declared nowhere in this file and no `view()` call passes
+         it. It comes from welcome.blade.php, the layout this view extends:
+         Laravel renders a layout from the same data array as its child, so
+         whatever the layout declares the child receives too. The whole
+         chain contributes, and this view's own signature wins for a name
+         both declare.
+         Try: hover $posts, or type $posts-> for completion. --}}
+    <p>{{ $posts->published()->count() }} posts in total</p>
+
     <table>
         <thead>
             <tr>

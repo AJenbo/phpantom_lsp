@@ -15,9 +15,11 @@
 //!    (`$attributes`, `$slot`, `$componentName`);
 //! 5. the members of the class backing a component view, which Blade
 //!    merges into the view's data (see [`super::backing_class`]);
-//! 6. the variables a service provider shares into every template or a view
+//! 6. the signatures of the layouts the template `@extends`, which it
+//!    renders from the same data as (see [`super::layout`]);
+//! 7. the variables a service provider shares into every template or a view
 //!    composer adds to the ones it targets (see [`super::shared_vars`]);
-//! 7. types inferred from `view()` call sites (see
+//! 8. types inferred from `view()` call sites (see
 //!    [`super::call_site_inference`]), the lowest-priority fallback.
 //!
 //! Everything here works on the raw Blade source with byte-offset-stable
@@ -28,6 +30,8 @@ use std::borrow::Cow;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
+
+use crate::php_type::PhpType;
 
 use super::call_site_inference::string_literal_contents;
 
@@ -74,29 +78,72 @@ pub(crate) struct PropDecl {
 /// An explicit `@bladestan-signature` wins over the first-docblock
 /// fallback; a docblock that carries no `@var` tag is not a signature.
 pub(crate) fn extract(content: &str) -> TemplateSignature {
+    let Some((range, explicit)) = signature_docblock(content) else {
+        return TemplateSignature::default();
+    };
+    let vars = parse_var_declarations(&content[range])
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
+    // A leading docblock carrying no `@var` tag is prose about the file,
+    // not a contract.
+    if !explicit && vars.is_empty() {
+        return TemplateSignature::default();
+    }
+    TemplateSignature { vars, explicit }
+}
+
+/// The signature's `@var` declarations, as (name without `$`, declared
+/// type) pairs in source order and deduplicated.
+///
+/// [`extract`] deliberately keeps only the names: a template's own
+/// signature docblock stays in its body, where the forward walker reads
+/// the types straight from it. A *layout's* docblock sits in another file,
+/// so the types have to be carried across into the child that extends it
+/// (see [`super::layout`]).
+pub(crate) fn declarations(content: &str) -> Vec<(String, PhpType)> {
+    match signature_docblock(content) {
+        Some((range, _)) => parse_var_declarations(&content[range]),
+        None => Vec::new(),
+    }
+}
+
+/// The byte range of the docblock a template writes its signature in, and
+/// whether it is the explicit `@bladestan-signature` form.
+fn signature_docblock(content: &str) -> Option<(std::ops::Range<usize>, bool)> {
     // Scan with comments and `@verbatim` blanked so a signature parked in
     // either is invisible, exactly as it is to Blade. `@php` blocks stay
     // visible: that is where a signature docblock lives.
     let masked = mask_inert_regions(content, false);
 
     if let Some(range) = find_explicit_signature_docblock(&masked) {
-        return TemplateSignature {
-            vars: parse_var_tags(&content[range]),
-            explicit: true,
-        };
+        return Some((range, true));
     }
+    find_leading_docblock(&masked).map(|range| (range, false))
+}
 
-    if let Some(range) = find_leading_docblock(&masked) {
-        let vars = parse_var_tags(&content[range]);
-        if !vars.is_empty() {
-            return TemplateSignature {
-                vars,
-                explicit: false,
-            };
-        }
+/// The view name of the layout the template `@extends`.
+///
+/// A dynamic argument (`@extends($layout)`, or a name interpolated into a
+/// double-quoted string) names no template that can be read, so it yields
+/// nothing rather than a guess.
+pub(crate) fn extract_extends(content: &str) -> Option<String> {
+    let masked = mask_inert_regions(content, true);
+    let args = find_directive_args(&masked, "extends")?;
+    leading_string_literal(&content[args])
+}
+
+/// The contents of the plain string literal an argument list starts with.
+fn leading_string_literal(args: &str) -> Option<String> {
+    let args = args.trim_start();
+    let quote = args.chars().next().filter(|ch| *ch == '\'' || *ch == '"')?;
+    let rest = &args[quote.len_utf8()..];
+    let value = &rest[..rest.find(quote)?];
+    // A double-quoted argument that interpolates is a dynamic name.
+    if quote == '"' && value.contains(['$', '{']) {
+        return None;
     }
-
-    TemplateSignature::default()
+    Some(value.to_string())
 }
 
 /// Whether the template declares its own contract, and so manages its own
@@ -299,7 +346,8 @@ fn find_explicit_signature_docblock(masked: &str) -> Option<std::ops::Range<usiz
 /// A docblock that appears *after* template code is a local annotation
 /// about one statement, not the template's contract, so it does not become
 /// an implicit signature. Imports are allowed to precede it because a
-/// signature written with short class names needs them.
+/// signature written with short class names needs them, and so is
+/// `@extends`, which a child template writes on its first line.
 fn find_leading_docblock(masked: &str) -> Option<std::ops::Range<usize>> {
     let mut rest = masked;
     let mut offset = 0;
@@ -313,14 +361,22 @@ fn find_leading_docblock(masked: &str) -> Option<std::ops::Range<usize>> {
             return Some(range);
         }
 
-        // Skip the delimiters a signature block is wrapped in, plus any
-        // `use` imports its type names rely on.
+        // Skip the delimiters a signature block is wrapped in, the `use`
+        // imports its type names rely on, and the `@extends` a child
+        // template opens with.
         let skipped = ["@php", "@endphp", "<?php", "?>"]
             .iter()
             .find_map(|token| rest.strip_prefix(token).map(|_| token.len()))
             .or_else(|| {
                 rest.strip_prefix("use ")
                     .and_then(|after| after.find(';').map(|end| 4 + end + 1))
+            })
+            .or_else(|| {
+                const EXTENDS: &str = "@extends(";
+                rest.starts_with(EXTENDS)
+                    .then(|| matching_paren(rest.as_bytes(), EXTENDS.len() - 1))
+                    .flatten()
+                    .map(|end| end + 1)
             })?;
         offset += skipped;
         rest = &rest[skipped..];
@@ -337,17 +393,17 @@ fn next_docblock(content: &str, from: usize) -> Option<std::ops::Range<usize>> {
     Some(start..end)
 }
 
-/// The name of every `@var Type $name` tag in a docblock (without `$`), in
-/// source order and deduplicated.
-fn parse_var_tags(docblock: &str) -> Vec<String> {
-    let mut vars: Vec<String> = Vec::new();
-    for (name, _) in crate::type_engine::variable::forward_walk::parse_var_docblock_pairs(docblock)
+/// Every `@var Type $name` tag in a docblock as a (name without `$`, type)
+/// pair, in source order and deduplicated.
+fn parse_var_declarations(docblock: &str) -> Vec<(String, PhpType)> {
+    let mut vars: Vec<(String, PhpType)> = Vec::new();
+    for (name, ty) in crate::type_engine::variable::forward_walk::parse_var_docblock_pairs(docblock)
     {
         let name = name.trim_start_matches('$').to_string();
-        if name.is_empty() || vars.contains(&name) {
+        if name.is_empty() || vars.iter().any(|(existing, _)| existing == &name) {
             continue;
         }
-        vars.push(name);
+        vars.push((name, ty));
     }
     vars
 }
@@ -541,6 +597,14 @@ mod tests {
         assert!(extract(blade).declares("user"));
     }
 
+    /// A child template opens with `@extends`, so a signature written
+    /// after it is still the template's contract.
+    #[test]
+    fn an_implicit_signature_may_follow_an_extends() {
+        let blade = "@extends('layouts.app')\n@php\n/** @var string $title */\n@endphp\n";
+        assert!(extract(blade).declares("title"));
+    }
+
     #[test]
     fn a_docblock_after_template_code_is_not_a_signature() {
         let blade = "<h1>Hello</h1>\n@php\n/** @var string $name */\n@endphp\n";
@@ -688,6 +752,74 @@ mod tests {
         assert_eq!(
             props("{{-- @props(['stale' => 1]) --}}\n@props(['type' => 'info'])"),
             vec![("type".to_string(), Some("'info'".to_string()))]
+        );
+    }
+
+    #[test]
+    fn declarations_carry_the_declared_type() {
+        let blade = "@php\n/**\n * @bladestan-signature\n * @var string $title\n * @var \\App\\Models\\User $user\n */\n@endphp\n";
+        let declared: Vec<(String, String)> = declarations(blade)
+            .into_iter()
+            .map(|(name, ty)| (name, ty.to_string()))
+            .collect();
+        assert_eq!(
+            declared,
+            vec![
+                ("title".to_string(), "string".to_string()),
+                ("user".to_string(), "\\App\\Models\\User".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_leading_docblock_declares_types_without_the_marker() {
+        assert_eq!(
+            declarations("@php\n/** @var int $count */\n@endphp\n")
+                .into_iter()
+                .map(|(name, ty)| (name, ty.to_string()))
+                .collect::<Vec<_>>(),
+            vec![("count".to_string(), "int".to_string())]
+        );
+    }
+
+    #[test]
+    fn extends_reads_the_layout_name() {
+        assert_eq!(
+            extract_extends("@extends('layouts.app')\n@section('body')\n").as_deref(),
+            Some("layouts.app")
+        );
+        assert_eq!(
+            extract_extends("@extends(\"admin::layouts.app\")\n").as_deref(),
+            Some("admin::layouts.app")
+        );
+        // A second argument (the data array Blade allows) is not the name.
+        assert_eq!(
+            extract_extends("@extends('layouts.app', ['title' => 'Hi'])\n").as_deref(),
+            Some("layouts.app")
+        );
+    }
+
+    #[test]
+    fn a_dynamic_extends_names_no_layout() {
+        assert!(extract_extends("@extends($layout)\n").is_none());
+        assert!(extract_extends("@extends(\"layouts.$theme\")\n").is_none());
+        assert!(extract_extends("@extends(\"layouts.{$theme}\")\n").is_none());
+    }
+
+    #[test]
+    fn an_inert_extends_names_no_layout() {
+        assert!(extract_extends("{{-- @extends('layouts.app') --}}\n").is_none());
+        assert!(extract_extends("@verbatim\n@extends('layouts.app')\n@endverbatim\n").is_none());
+        assert!(extract_extends("@php\n$x = \"@extends('layouts.app')\";\n@endphp\n").is_none());
+        assert!(extract_extends("<p>no directive here</p>\n").is_none());
+    }
+
+    #[test]
+    fn the_real_extends_wins_over_a_commented_one() {
+        assert_eq!(
+            extract_extends("{{-- @extends('layouts.stale') --}}\n@extends('layouts.app')\n")
+                .as_deref(),
+            Some("layouts.app")
         );
     }
 

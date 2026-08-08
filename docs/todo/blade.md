@@ -14,7 +14,8 @@ For general architecture see `ARCHITECTURE.md`.
   come from its declared contract: the Bladestan-compatible chain in
   `src/blade/signature.rs` — `@bladestan-signature` docblock, first
   docblock before template code, `@props`/`@aware`, Blade's own
-  component scope, and the backing component class. The template
+  component scope, the backing component class, and the layouts the
+  template `@extends`. The template
   declares what it expects; call sites are then
   *validated* against that contract (BL9), exactly as a function
   signature works. Inferring types *from* call sites inverts the contract and
@@ -251,23 +252,6 @@ On `<livewire:counter>`:
 
 1. Same pattern using the Livewire index.
 
-### BL6. Signature merging for `@extends`
-
-When template A contains `@extends('layouts.app')`:
-
-1. Resolve `layouts.app` via the view index to a file path.
-2. Read or preprocess that file.
-3. Extract `@var` declarations from its `@php` blocks.
-4. Merge those declarations into template A's virtual PHP prologue,
-   following the Bladestan covariance model:
-   - Variables only in child: use child type.
-   - Variables only in parent: use parent type.
-   - Variables in both: child may narrow but not widen.
-   - Walk the chain recursively if the parent also `@extends`.
-
-This gives child templates access to the parent's declared
-variables without the user redeclaring them.
-
 ### 18. Tests
 
 Create `tests/definition_blade.rs`:
@@ -276,11 +260,6 @@ Create `tests/definition_blade.rs`:
 - Go-to-definition on `@extends('layouts.app')` → layout file
 - Go-to-definition on `<x-alert>` → component class
 - Go-to-definition on `<livewire:counter>` → Livewire class
-
-Extend `tests/completion_blade.rs`:
-
-- Variables from parent layout available in child via `@extends`
-- Component class constructor types available in template
 
 ---
 
@@ -690,13 +669,12 @@ Implement `@` directive name completion with snippets.
 **Deliverable:** Typing `@` in a Blade file shows all known
 directives with snippet templates.
 
-### Step 8: Cross-file intelligence (BL5, BL6)
+### Step 8: Cross-file intelligence (BL5)
 
 Implement go-to-definition for view names and component tags.
-Implement `@extends` signature merging.
 
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
-the file. Parent layout variables are available in child templates.
+the file.
 
 ### Step 9: Template contracts (BL9, BL10, BL11)
 

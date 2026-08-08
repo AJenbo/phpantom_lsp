@@ -74,10 +74,22 @@ pub(crate) type ViewCallerSnapshot = Vec<(String, Arc<SymbolMap>)>;
 /// O(templates × templates).
 pub(crate) type BladeCallerSnapshot = Vec<(String, Arc<String>)>;
 
+/// Append the entries whose names nothing has declared yet, so the
+/// highest-priority source to carry a name is the one that keeps it.
+fn push_undeclared(declared: &mut InjectedVars, vars: InjectedVars) {
+    for (name, ty) in vars {
+        if declared.iter().any(|(existing, _)| existing == &name) {
+            continue;
+        }
+        declared.push((name, ty));
+    }
+}
+
 impl Backend {
     /// Compute the variables to inject into a Blade template's virtual
     /// PHP: the members of the class backing a component view (see
-    /// [`super::backing_class`]), the variables a service provider shares
+    /// [`super::backing_class`]), what the layouts it `@extends` declare
+    /// (see [`super::layout`]), the variables a service provider shares
     /// or composes into its scope (see [`super::shared_vars`]), then the
     /// variables its `view()` call sites and, for a component, its `<x-…>`
     /// tag call sites pass.
@@ -86,8 +98,9 @@ impl Backend {
     /// string), highest-priority source first — the prologue declares
     /// the first entry for a name and skips the rest — alongside the
     /// class the template's `$this` is bound to.  Empty when the
-    /// template has no backing class and no call site references it, or
-    /// when the template's view name cannot be derived from its path.
+    /// template has no backing class, extends nothing, and no call site
+    /// references it, or when the template's view name cannot be derived
+    /// from its path.
     pub(crate) fn compute_blade_injected_vars(
         &self,
         uri: &str,
@@ -105,16 +118,16 @@ impl Backend {
         // declares win over it (the preprocessor applies that).
         let (mut declared, this_class) = self.blade_backing_class_vars(&view_names);
 
+        // The layout the template `@extends` is rendered from the same data
+        // the template is, so what it declares the template receives too
+        // (see [`super::layout`]).
+        push_undeclared(&mut declared, self.blade_layout_vars(blade_content));
+
         // What a service provider shares or composes into this template's
         // scope: no template declares it and no caller passes it, but it is
         // still written down somewhere, so it beats inference (see
         // [`super::shared_vars`]).
-        for (name, ty) in self.blade_provider_vars(&view_names) {
-            if declared.iter().any(|(existing, _)| existing == &name) {
-                continue;
-            }
-            declared.push((name, ty));
-        }
+        push_undeclared(&mut declared, self.blade_provider_vars(&view_names));
 
         // A template that declares a signature manages its own contract;
         // inferring on top would fight the declared types.
@@ -378,6 +391,7 @@ impl Backend {
     pub(crate) fn refresh_blade_inference_for_caller(&self, caller_uri: &str) {
         if self.is_blade_file(caller_uri) {
             self.refresh_blade_component_inference_for_caller(caller_uri);
+            self.refresh_blade_layout_children(caller_uri);
             return;
         }
         let Some(map) = self.symbol_maps.read().get(caller_uri).cloned() else {
@@ -460,6 +474,46 @@ impl Backend {
                 };
                 if self.reinfer_and_reparse_blade(&template_uri, &template_content) {
                     self.schedule_diagnostics(template_uri);
+                }
+            }
+        }
+    }
+
+    /// Re-run inference for the templates whose layout chain runs through
+    /// a Blade file, after it was edited or saved, so a `@var` added to a
+    /// layout reaches its children without waiting for each child's own
+    /// next parse.
+    ///
+    /// The walk goes *down* the chain rather than reading every template's
+    /// ancestors: each template's own `@extends` target is read once, then
+    /// the set of affected view names grows a level per round until no
+    /// template joins it. A template that extends a template that extends
+    /// the edited layout inherits from it too.
+    fn refresh_blade_layout_children(&self, layout_uri: &str) {
+        let mut frontier = self.view_names_for_blade_uri(layout_uri);
+        if frontier.is_empty() {
+            return;
+        }
+        let mut pending: Vec<(String, Arc<String>, String)> = self
+            .blade_caller_snapshot()
+            .into_iter()
+            .filter(|(uri, _)| uri != layout_uri)
+            .filter_map(|(uri, content)| {
+                let extends = crate::blade::signature::extract_extends(&content)?;
+                Some((uri, content, extends))
+            })
+            .collect();
+
+        while !frontier.is_empty() && !pending.is_empty() {
+            let (children, rest): (Vec<_>, Vec<_>) = pending
+                .into_iter()
+                .partition(|(_, _, extends)| frontier.iter().any(|name| name == extends));
+            pending = rest;
+            frontier = Vec::new();
+            for (uri, content, _) in children {
+                frontier.extend(self.view_names_for_blade_uri(&uri));
+                if self.reinfer_and_reparse_blade(&uri, &content) {
+                    self.schedule_diagnostics(uri);
                 }
             }
         }

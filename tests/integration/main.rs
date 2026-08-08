@@ -6,6 +6,7 @@ mod blade_call_site_inference;
 pub mod blade_debug;
 pub mod blade_error;
 mod blade_imports;
+mod blade_layout;
 pub mod blade_regression;
 mod blade_shared_vars;
 mod classmap_scanner;
