@@ -9,6 +9,7 @@
 namespace App;
 
 use App\Facades\Oven;
+use App\Facades\PastryOven;
 use App\Http\Controllers\BakeryController;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
@@ -828,6 +829,13 @@ class Demo
         // are all there.
         Oven::bake('sourdough');                                // → string
         Oven::heatedTo('hot')->bake('rye');                     // → string
+
+        // `App\Facades\PastryOven` names a container binding rather than a
+        // class, the shape Laravel's own facades use.  The key is bound in
+        // DemoServiceProvider, so the members come from what the container
+        // resolves it to rather than from anything the facade writes.
+        PastryOven::bake('brioche');                            // → string
+        PastryOven::heatedTo('warm')->bake('baguette');         // → string
     }
 
 

@@ -135,7 +135,7 @@ mod view_data;
 mod view_names;
 pub(crate) mod where_property;
 
-pub(crate) use aliases::LaravelAliases;
+pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{
     LaravelCommandIndex, command_signature_at_offset, is_command_directory_uri, scan_command_file,

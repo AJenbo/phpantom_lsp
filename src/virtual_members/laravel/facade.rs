@@ -13,11 +13,17 @@
 //! concrete instance (`static`, `$this`, `self`) become the concrete class
 //! so a fluent chain continues on it rather than on the facade.
 //!
+//! The accessor names the concrete class either directly
+//! (`return Container::class;`) or through a container binding
+//! (`return 'sentry';`), which the alias table on the resolved-class cache
+//! maps to the class the framework or a service provider bound it to.
+//!
 //! The provider runs after the PHPDoc provider, so a facade that *does*
 //! carry `@method static` tags keeps them: the generated tags flatten
 //! argument-dependent returns deliberately, and matching Laravel's own
 //! published signatures beats second-guessing them here.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -44,7 +50,7 @@ impl VirtualMemberProvider for LaravelFacadeProvider {
         // The accessor check comes first: it is a field read, and it is
         // `None` for every class in the project bar the facades, so the
         // parent-chain walk below only runs for those.
-        accessor_class(class).is_some() && walks_parent_chain(class, class_loader, is_facade)
+        has_accessor(class) && walks_parent_chain(class, class_loader, is_facade)
     }
 
     fn provide(
@@ -65,16 +71,32 @@ fn is_facade(class_name: &str) -> bool {
     class_name == FACADE_FQN
 }
 
-/// The concrete class a facade's `getFacadeAccessor()` names, when it
-/// names one directly.
+/// Whether the class declares a `getFacadeAccessor()` we could read at
+/// parse time, in either of its two shapes.
+fn has_accessor(class: &ClassInfo) -> bool {
+    class
+        .laravel()
+        .is_some_and(|laravel| laravel.facade_accessor.is_some())
+}
+
+/// The concrete class a facade's `getFacadeAccessor()` names.
 ///
-/// A container-binding string (`return 'view';`) needs the container alias
-/// table to reach its concrete class, which a provider cannot see; those
-/// facades keep whatever their `@method static` tags declare.
-fn accessor_class(class: &ClassInfo) -> Option<&str> {
+/// An accessor that names a class (`return Container::class;`) is the name
+/// itself.  One that names a container binding (`return 'view';`) is
+/// whatever that key is bound to, which the alias table in the
+/// resolved-class cache knows: the framework's own
+/// `registerCoreContainerAliases()` plus every key the project's service
+/// providers bind.  A key bound only at runtime, or a cache with no alias
+/// table, leaves the facade with whatever its `@method static` tags declare.
+fn accessor_class(
+    class: &ClassInfo,
+    cache: Option<&ResolvedClassCache>,
+) -> Option<Cow<'static, str>> {
     match class.laravel()?.facade_accessor? {
-        FacadeAccessor::Class(fqn) => Some(fqn.as_str()),
-        FacadeAccessor::Alias(_) => None,
+        FacadeAccessor::Class(fqn) => Some(Cow::Borrowed(fqn.as_str())),
+        FacadeAccessor::Alias(key) => cache
+            .and_then(|cache| cache.read().container_alias_concrete_fqn(key.as_str()))
+            .map(Cow::Owned),
     }
 }
 
@@ -85,10 +107,10 @@ fn build_forwarded_methods(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<Arc<MethodInfo>> {
-    let Some(concrete_fqn) = accessor_class(class) else {
+    let Some(concrete_fqn) = accessor_class(class, cache) else {
         return Vec::new();
     };
-    let Some(concrete) = class_loader(concrete_fqn) else {
+    let Some(concrete) = class_loader(&concrete_fqn) else {
         return Vec::new();
     };
     // A facade that names itself has nothing to forward, and resolving it

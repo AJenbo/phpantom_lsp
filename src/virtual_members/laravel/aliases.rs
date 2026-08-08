@@ -28,6 +28,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use parking_lot::RwLock;
+
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
@@ -67,6 +69,18 @@ impl LaravelAliases {
     }
 }
 
+/// The slot the built [`LaravelAliases`] live in, shared by handle between the
+/// [`Backend`] that builds them and the resolved-class cache, so a virtual
+/// member provider (which sees the cache but not the `Backend`) can read the
+/// container table. `None` until something first asks for it.
+pub(crate) type LaravelAliasSlot = Arc<RwLock<Option<Arc<LaravelAliases>>>>;
+
+/// An empty alias slot, shared into the resolved-class cache at
+/// [`Backend`] construction.
+pub(crate) fn new_alias_slot() -> LaravelAliasSlot {
+    Arc::new(RwLock::new(None))
+}
+
 impl Backend {
     /// Resolve a name through Laravel's alias tables, loading the target class.
     ///
@@ -96,6 +110,20 @@ impl Backend {
     /// than the loaded `ClassInfo` (e.g. to feed a caller-supplied loader).
     pub(crate) fn container_alias_concrete_fqn(&self, key: &str) -> Option<String> {
         self.laravel_aliases().container.get(key).cloned()
+    }
+
+    /// Build the alias tables if they are not built yet, so a consumer that
+    /// reads the shared slot directly rather than through the `Backend` finds
+    /// them populated.
+    ///
+    /// The facade virtual member provider is the one such consumer: it maps a
+    /// `getFacadeAccessor()` binding key to its concrete class through the
+    /// container table, and reaches that table through the resolved-class
+    /// cache because a provider never sees the `Backend`.  The class loader
+    /// calls this when it hands out a facade of that shape, which is always
+    /// before the provider runs for it.
+    pub(crate) fn ensure_laravel_aliases(&self) {
+        self.laravel_aliases();
     }
 
     /// Expand a file's macro registrations so a macro registered through a

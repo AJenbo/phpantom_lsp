@@ -1020,6 +1020,15 @@ check(
     'a `static` return on the concrete class hands back the concrete instance',
     \App\Facades\Oven::heatedTo('hot') instanceof \App\Support\BakeryService
 );
+// An accessor that returns a container binding key forwards exactly the same
+// way: `__callStatic()` asks the container for the key and calls the instance
+// it hands back.  Nothing in the facade names the class, which is why PHPantom
+// has to go through the binding to know what its members are.
+\App\Facades\PastryOven::swap(new \App\Support\BakeryService());
+check(
+    'a facade whose accessor is a container binding key forwards to the bound instance',
+    \App\Facades\PastryOven::bake('brioche') === 'a fresh brioche'
+);
 \Illuminate\Support\Facades\Facade::clearResolvedInstances();
 
 // ─── Component class members reaching the view ──────────────────────────────

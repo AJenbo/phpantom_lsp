@@ -71,6 +71,21 @@ pub struct ResolvedCacheInner {
     /// per-edit cache contents.
     is_laravel: bool,
     schema_index: SchemaIndex,
+    /// Laravel's alias tables, shared by handle with the [`Backend`] that
+    /// builds them (see
+    /// [`LaravelAliasSlot`](crate::virtual_members::laravel::LaravelAliasSlot)).
+    ///
+    /// A virtual member provider receives this cache but never the
+    /// `Backend`, and a facade whose `getFacadeAccessor()` names a container
+    /// binding (`return 'sentry';`) needs the container table to reach the
+    /// class it forwards to.  Sharing the slot rather than a snapshot means
+    /// the provider always reads the table the `Backend` most recently
+    /// built, including after a rebuild.  A cache created without a
+    /// `Backend` (tests, the throwaway cache a cache-less resolution falls
+    /// back to) holds an empty slot and simply forwards nothing.
+    ///
+    /// [`Backend`]: crate::Backend
+    laravel_aliases: crate::virtual_members::laravel::LaravelAliasSlot,
     /// Classes currently being resolved by `resolve_class_fully_inner`,
     /// keyed per thread so one thread's in-progress resolution never
     /// degrades another thread's independent resolution of the same
@@ -146,6 +161,7 @@ impl Default for ResolvedCacheInner {
             reverse_deps: HashMap::new(),
             is_laravel: true,
             schema_index: SchemaIndex::default(),
+            laravel_aliases: crate::virtual_members::laravel::new_alias_slot(),
             in_flight: HashSet::new(),
             substituted_methods: HashMap::new(),
             substituted_properties: HashMap::new(),
@@ -224,6 +240,28 @@ impl ResolvedCacheInner {
 
     pub fn schema_index(&self) -> &SchemaIndex {
         &self.schema_index
+    }
+
+    /// The concrete class FQN a Laravel container binding key is bound to,
+    /// or `None` when the alias tables are not built or the key is bound
+    /// only at runtime.
+    ///
+    /// The slot lock is only ever held for the length of a read or a
+    /// single assignment (never across the build itself), so taking it
+    /// under the cache lock cannot deadlock.
+    pub(crate) fn container_alias_concrete_fqn(&self, key: &str) -> Option<String> {
+        let aliases = self.laravel_aliases.read();
+        aliases.as_ref()?.container.get(key).cloned()
+    }
+
+    /// Share the `Backend`'s alias slot into this cache.  Called once at
+    /// construction; the slot's contents are then always the tables the
+    /// `Backend` most recently built.
+    pub(crate) fn set_laravel_aliases(
+        &mut self,
+        slot: crate::virtual_members::laravel::LaravelAliasSlot,
+    ) {
+        self.laravel_aliases = slot;
     }
 
     pub fn set_schema_index(&mut self, schema_index: SchemaIndex) {

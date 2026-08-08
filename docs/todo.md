@@ -27,7 +27,6 @@ within the same impact tier.
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | BL19 | [Signature covariance diagnostic](todo/blade.md#bl19-signature-covariance-diagnostic)                                                                         | Low-Medium  | Low         |
 | BL18 | [Mailable and view-method render sites](todo/blade.md#bl18-mailable-and-view-method-render-sites)                                                             | Medium      | Medium      |
-| L47 | [Facade members for a container-binding accessor](todo/laravel.md#l47-facade-members-for-a-container-binding-accessor)                                        | Low-Medium  | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |

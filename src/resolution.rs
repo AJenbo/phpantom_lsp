@@ -42,7 +42,7 @@ use crate::Backend;
 use crate::class_loader_memo;
 use crate::composer;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
-use crate::types::{ClassInfo, FileContext, FunctionInfo, PhpVersion};
+use crate::types::{ClassInfo, FacadeAccessor, FileContext, FunctionInfo, PhpVersion};
 use crate::util::short_name;
 
 /// Deduplicates concurrent parses of the same file.
@@ -233,6 +233,19 @@ impl Backend {
         // when no configured disk uses a custom `Storage::extend()` driver.
         if matches!(loaded.name.as_str(), "FilesystemManager" | "Storage") {
             loaded = crate::virtual_members::laravel::patch_storage_disk_type(self, loaded);
+        }
+        // A facade whose `getFacadeAccessor()` names a container binding
+        // needs the alias table to reach the class it forwards to, and the
+        // virtual member provider that does the forwarding reads that table
+        // from the resolved-class cache rather than from here.  Building it
+        // now, while the `Backend` is in hand, is what puts it there: this
+        // runs before the facade is ever fully resolved, because full
+        // resolution reloads the class through this loader first.
+        if loaded
+            .laravel()
+            .is_some_and(|l| matches!(l.facade_accessor, Some(FacadeAccessor::Alias(_))))
+        {
+            self.ensure_laravel_aliases();
         }
         // Add any Laravel macros registered on this class.  Gated on a cheap
         // atomic so the hot loader path is untouched when no macros exist.

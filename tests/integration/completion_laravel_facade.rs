@@ -5,7 +5,9 @@
 //! instance named by `getFacadeAccessor()`. Laravel's own facades spell
 //! that out in a generated `@method static` docblock, but an app-defined
 //! facade that never ran `facade-documenter` has nothing to list, so the
-//! members have to come from the class the accessor names.
+//! members have to come from the class the accessor names, whether it names
+//! it directly (`Container::class`) or through a container binding key
+//! (`'thing.container'`) the alias table resolves.
 
 use crate::common::create_psr4_workspace;
 use tower_lsp::LanguageServer;
@@ -16,6 +18,7 @@ const COMPOSER_JSON: &str = r#"{
     "autoload": {
         "psr-4": {
             "App\\": "src/",
+            "Illuminate\\Foundation\\": "vendor/illuminate/Foundation/",
             "Illuminate\\Support\\Facades\\": "vendor/illuminate/Support/Facades/"
         }
     }
@@ -76,12 +79,65 @@ class DocumentedFacade extends Facade
 }
 "#;
 
+/// `registerCoreContainerAliases()` in the shape Laravel declares it: the
+/// string key a facade's accessor returns, mapped to the concrete class the
+/// container binds it to.
+const APPLICATION_PHP: &str = r#"<?php
+namespace Illuminate\Foundation;
+class Application
+{
+    public function registerCoreContainerAliases()
+    {
+        foreach ([
+            'thing.container' => [\App\Services\Container::class],
+        ] as $key => $aliases) {
+            foreach ($aliases as $alias) {
+                $this->alias($key, $alias);
+            }
+        }
+    }
+}
+"#;
+
+/// An app-defined facade that names a container binding rather than a class,
+/// which is the shape Laravel's own facades use.
+const BOUND_FACADE_PHP: &str = r#"<?php
+namespace App\Facades;
+use Illuminate\Support\Facades\Facade;
+class BoundFacade extends Facade
+{
+    protected static function getFacadeAccessor()
+    {
+        return 'thing.container';
+    }
+}
+"#;
+
+/// A facade naming a key nothing binds statically (registered at runtime).
+const UNBOUND_FACADE_PHP: &str = r#"<?php
+namespace App\Facades;
+use Illuminate\Support\Facades\Facade;
+class UnboundFacade extends Facade
+{
+    protected static function getFacadeAccessor()
+    {
+        return 'nothing.binds.this';
+    }
+}
+"#;
+
 fn base_files() -> Vec<(&'static str, &'static str)> {
     vec![
         ("vendor/illuminate/Support/Facades/Facade.php", FACADE_PHP),
+        (
+            "vendor/illuminate/Foundation/Application.php",
+            APPLICATION_PHP,
+        ),
         ("src/Services/Container.php", CONTAINER_PHP),
         ("src/Facades/MyFacade.php", MY_FACADE_PHP),
         ("src/Facades/DocumentedFacade.php", DOCUMENTED_FACADE_PHP),
+        ("src/Facades/BoundFacade.php", BOUND_FACADE_PHP),
+        ("src/Facades/UnboundFacade.php", UNBOUND_FACADE_PHP),
     ]
 }
 
@@ -205,5 +261,67 @@ class Consumer {
     assert!(
         labels.iter().any(|l| l.starts_with("resolveThing")),
         "a `static` return should chain on the concrete class, got: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_container_binding_accessor_offers_the_bound_class_methods() {
+    let consumer = "\
+<?php
+namespace App;
+use App\\Facades\\BoundFacade;
+class Consumer {
+    public function go(): void {
+        BoundFacade::
+    }
+}
+";
+    let labels = complete_labels(consumer, 5, 21).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("resolveThing")),
+        "expected the bound Container::resolveThing on the facade, got: {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("internals")),
+        "a protected method is not reachable through __callStatic, got: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_call_through_a_container_binding_accessor_types_to_the_concrete_return() {
+    let consumer = "\
+<?php
+namespace App;
+use App\\Facades\\BoundFacade;
+class Consumer {
+    public function go(): void {
+        $x = BoundFacade::configure([]);
+        $x->
+    }
+}
+";
+    let labels = complete_labels(consumer, 6, 12).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("resolveThing")),
+        "a `static` return should chain on the bound class, got: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_runtime_only_binding_key_offers_nothing_to_forward() {
+    let consumer = "\
+<?php
+namespace App;
+use App\\Facades\\UnboundFacade;
+class Consumer {
+    public function go(): void {
+        UnboundFacade::
+    }
+}
+";
+    let labels = complete_labels(consumer, 5, 23).await;
+    assert!(
+        !labels.iter().any(|l| l.starts_with("resolveThing")),
+        "an unbound key must not forward another class's members, got: {labels:?}"
     );
 }

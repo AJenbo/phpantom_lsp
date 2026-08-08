@@ -191,41 +191,6 @@ So split the upstream work:
 
 ---
 
-## L47. Facade members for a container-binding accessor
-
-`LaravelFacadeProvider` forwards the concrete class's members onto a
-facade whose `getFacadeAccessor()` names a class directly
-(`return Container::class;`). A facade that names a container binding
-instead gets nothing:
-
-```php
-class Sentry extends \Illuminate\Support\Facades\Facade {
-    protected static function getFacadeAccessor() { return 'sentry'; }
-}
-
-Sentry::         // completion offers nothing the HubAdapter binding has
-```
-
-Laravel's own facades all take this shape, but they carry generated
-`@method static` tags that already list everything, so the gap is
-confined to app and package facades that bind a string in a service
-provider.
-
-Mapping the binding key to its class needs the container alias table,
-which lives on the `Backend`; a virtual member provider receives only a
-`ClassInfo`, a class loader, and the resolved-class cache. Going through
-the class loader is not a substitute: `find_or_load_class` consults the
-alias table only after every ordinary lookup phase has missed, so a key
-like `'view'` would first match an unrelated class of that short name
-and forward the wrong members. So the fix is the plumbing: give
-providers a project-context handle, or put the container table
-somewhere all of them can already see. `facade_owner.rs` reaches the
-`Backend` at call sites and shows what the lookup should be.
-
-**Impact: Low-Medium · Effort: Medium**
-
----
-
 ## Model property source gaps
 
 The `LaravelModelProvider` synthesizes virtual properties from several

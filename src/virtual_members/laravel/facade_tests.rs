@@ -119,14 +119,75 @@ fn a_class_that_does_not_extend_facade_is_skipped() {
     assert!(!LaravelFacadeProvider.applies_to(&class, &loader));
 }
 
-#[test]
-fn a_container_binding_string_accessor_forwards_nothing() {
-    let mut facade = make_class("ViewFacade");
+/// A facade whose `getFacadeAccessor()` returns the container binding
+/// key `key`.
+fn make_binding_facade(name: &str, key: &str) -> ClassInfo {
+    let mut facade = make_class(name);
     facade.parent_class = Some(atom(FACADE_FQN));
-    facade.laravel_mut().facade_accessor = Some(FacadeAccessor::Alias(atom("view")));
+    facade.laravel_mut().facade_accessor = Some(FacadeAccessor::Alias(atom(key)));
+    facade
+}
 
-    let loader = loader_for(vec![make_class("view")]);
-    assert!(!LaravelFacadeProvider.applies_to(&facade, &loader));
+/// A resolved-class cache whose alias table binds `key` to `concrete`,
+/// standing in for what the `Backend` parses out of the installed
+/// framework and the project's service providers.
+fn cache_binding(key: &str, concrete: &str) -> crate::virtual_members::ResolvedClassCache {
+    let mut aliases = crate::virtual_members::laravel::aliases::LaravelAliases::default();
+    aliases
+        .container
+        .insert(key.to_string(), concrete.to_string());
+    let slot = crate::virtual_members::laravel::new_alias_slot();
+    *slot.write() = Some(Arc::new(aliases));
+
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().set_laravel_aliases(slot);
+    cache
+}
+
+#[test]
+fn a_container_binding_accessor_forwards_the_bound_class() {
+    let mut factory = make_class("ViewFactory");
+    factory
+        .methods
+        .push(Arc::new(make_method("render", Some("string"))));
+
+    let facade = make_binding_facade("ViewFacade", "view");
+    let loader = loader_for(vec![factory]);
+    let cache = cache_binding("view", "ViewFactory");
+
+    assert!(LaravelFacadeProvider.applies_to(&facade, &loader));
+    let members = LaravelFacadeProvider.provide(&facade, &loader, Some(&cache));
+    assert_eq!(forwarded_names(&members.methods), vec!["render"]);
+    assert!(members.methods[0].is_static);
+}
+
+#[test]
+fn a_container_key_bound_only_at_runtime_forwards_nothing() {
+    let mut factory = make_class("ViewFactory");
+    factory
+        .methods
+        .push(Arc::new(make_method("render", Some("string"))));
+
+    let facade = make_binding_facade("SentryFacade", "sentry");
+    let loader = loader_for(vec![factory]);
+    let cache = cache_binding("view", "ViewFactory");
+
+    let members = LaravelFacadeProvider.provide(&facade, &loader, Some(&cache));
+    assert!(members.methods.is_empty());
+}
+
+#[test]
+fn a_container_binding_accessor_forwards_nothing_without_the_alias_table() {
+    let mut factory = make_class("ViewFactory");
+    factory
+        .methods
+        .push(Arc::new(make_method("render", Some("string"))));
+
+    let facade = make_binding_facade("ViewFacade", "view");
+    let loader = loader_for(vec![factory]);
+
+    let members = LaravelFacadeProvider.provide(&facade, &loader, None);
+    assert!(members.methods.is_empty());
 }
 
 #[test]

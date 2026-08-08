@@ -593,7 +593,11 @@ pub struct Backend {
     /// this project has no such aliases" (e.g. a non-Laravel project). Cleared
     /// whenever files are re-parsed so edits to `config/app.php` take effect
     /// without a restart.
-    pub(crate) laravel_aliases: Arc<RwLock<Option<Arc<virtual_members::laravel::LaravelAliases>>>>,
+    ///
+    /// The same slot is shared into [`resolved_class_cache`](Self::resolved_class_cache)
+    /// so the facade virtual member provider, which sees the cache but never
+    /// the `Backend`, can map a container-binding accessor to its class.
+    pub(crate) laravel_aliases: virtual_members::laravel::LaravelAliasSlot,
     /// Laravel `Target::macro('name', closure)` registrations discovered from
     /// project source, keyed by the FQN of the class each macro attaches to.
     ///
@@ -887,6 +891,22 @@ impl WholeFileCoalesce {
     }
 }
 
+/// The Laravel alias slot and the resolved-class cache that reads it.
+///
+/// The cache holds a handle to the same slot the `Backend` builds the alias
+/// tables into, which is how the facade virtual member provider maps a
+/// container-binding accessor to its concrete class: a provider is handed
+/// the cache but never the `Backend`.
+fn new_alias_slot_and_cache() -> (
+    virtual_members::laravel::LaravelAliasSlot,
+    virtual_members::ResolvedClassCache,
+) {
+    let slot = virtual_members::laravel::new_alias_slot();
+    let cache = virtual_members::new_resolved_class_cache();
+    cache.write().set_laravel_aliases(Arc::clone(&slot));
+    (slot, cache)
+}
+
 impl Backend {
     /// Shared defaults for all Backend constructors.
     ///
@@ -898,6 +918,7 @@ impl Backend {
     /// 5,023 functions, 8,119 constants).  Test code should use
     /// [`test_defaults`] instead, which leaves stubs empty.
     fn defaults() -> Self {
+        let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
             name: "PHPantom".to_string(),
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
@@ -923,11 +944,11 @@ impl Backend {
                 stubs::build_stub_function_index(),
             ))),
             stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
-            resolved_class_cache: virtual_members::new_resolved_class_cache(),
+            resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             storage_disk_type_cache: Arc::new(RwLock::new(None)),
             laravel_storage_drivers: Arc::new(RwLock::new(Default::default())),
-            laravel_aliases: Arc::new(RwLock::new(None)),
+            laravel_aliases,
             laravel_macros: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMacroIndex::default(),
             )),
@@ -992,6 +1013,7 @@ impl Backend {
     /// that most tests never consult.  Tests that need specific stubs
     /// override the relevant fields after construction.
     fn test_defaults() -> Self {
+        let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
             name: "PHPantom".to_string(),
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
@@ -1015,11 +1037,11 @@ impl Backend {
             stub_index: Arc::new(RwLock::new(CiMap::new())),
             stub_function_index: Arc::new(RwLock::new(CiMap::new())),
             stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
-            resolved_class_cache: virtual_members::new_resolved_class_cache(),
+            resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             storage_disk_type_cache: Arc::new(RwLock::new(None)),
             laravel_storage_drivers: Arc::new(RwLock::new(Default::default())),
-            laravel_aliases: Arc::new(RwLock::new(None)),
+            laravel_aliases,
             laravel_macros: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMacroIndex::default(),
             )),
