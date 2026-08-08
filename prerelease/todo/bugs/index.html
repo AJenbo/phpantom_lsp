@@ -872,17 +872,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b61-an-array_map-callback-parameter-is-not-bound-when-the-array-argument-is-an-inline-array-function-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B61. An <code>array_map()</code> callback parameter is not bound when the array argument is an inline array-function call
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1416,17 +1405,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b61-an-array_map-callback-parameter-is-not-bound-when-the-array-argument-is-an-inline-array-function-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B61. An <code>array_map()</code> callback parameter is not bound when the array argument is an inline array-function call
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1560,46 +1538,20 @@ reported.</p>
 <code>src/diagnostics/deprecated.rs</code>. The "since" version is parsed for the
 message but never compared against <code>self.php_version()</code>. Deprecations
 with no recorded version keep firing, as today.</p>
-<h4 id="b61-an-array_map-callback-parameter-is-not-bound-when-the-array-argument-is-an-inline-array-function-call">B61. An <code>array_map()</code> callback parameter is not bound when the array argument is an inline array-function call<a class="headerlink" href="#b61-an-array_map-callback-parameter-is-not-bound-when-the-array-argument-is-an-inline-array-function-call" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @return iterable&lt;array{DiscountType, ?CartLabel}&gt; */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">private static function cases(): iterable { … }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$names = array_map(</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    static fn (array $case): string =&gt; $case[0]-&gt;name,   // &quot;type of &#39;$case[0]&#39; could not be resolved&quot;</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    iterator_to_array(self::cases()),</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">);</span>
-</code></pre></div>
-<p>Assigning <code>iterator_to_array(self::cases())</code> to a variable first and
-passing the variable resolves correctly, and so does passing a call
-whose return type needs no substitution. It is specifically a nested
-call to a generic array function — <code>iterator_to_array()</code>,
-<code>array_values()</code>, <code>array_filter()</code> — that loses the element type on the
-way into the callback's parameter.</p>
-<p>Two rules that each work alone fail to compose here: the array
-functions keep their element type when the call is used inline, and a
-callback parameter declared as plain <code>array</code> narrows to what the call
-site passes. The second does not see what the first produced.</p>
-<p><strong>Where to look:</strong> the callback-parameter binding in
-<code>type_engine/call_resolution/arg_type_resolution.rs</code> resolves the array
-argument through a path that does not run the array-function element
-rules in <code>type_engine/variable/array_func_rules.rs</code>. Both should go
-through the shared expression resolution so any array-producing
-expression works, not an enumerated set of argument shapes.</p>
 <h4 id="b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key">B62. An application's container binding loses to the framework default for the same key<a class="headerlink" href="#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>An application that replaces a framework binding still resolves to the
 framework's class:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// config/app.php registers Acme\Translation\TranslationServiceProvider,</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">// which extends Illuminate&#39;s and re-binds &#39;translator&#39;:</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;translator&#39;, function (Application $app) {</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    return new DatabaseTranslator($loader, $locale);</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">});</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">// …but:</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">return $this-&gt;app-&gt;make(&#39;translator&#39;);</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">// &quot;Return type Illuminate\Translation\Translator is incompatible with</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">//  declared return type Acme\Translation\DatabaseTranslator&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// config/app.php registers Acme\Translation\TranslationServiceProvider,</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">// which extends Illuminate&#39;s and re-binds &#39;translator&#39;:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;translator&#39;, function (Application $app) {</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    return new DatabaseTranslator($loader, $locale);</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">});</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">// …but:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">return $this-&gt;app-&gt;make(&#39;translator&#39;);</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">// &quot;Return type Illuminate\Translation\Translator is incompatible with</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">//  declared return type Acme\Translation\DatabaseTranslator&quot;</span>
 </code></pre></div>
 <p>Both providers are indexed and the framework's wins. Overriding a
 framework binding from an application provider is the normal way to swap
@@ -1617,13 +1569,13 @@ classes beats picking one arbitrarily.</p>
 <p><code>singleton()</code>, <code>bind()</code>, and <code>instance()</code> are indexed; <code>alias()</code> is not,
 and a key that is not a string literal is not evaluated. Sentry's
 provider uses both at once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class BaseServiceProvider extends ServiceProvider</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">{</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    public static $abstract = &#39;sentry&#39;;</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">}</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">// in the subclass:</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">$this-&gt;app-&gt;alias(HubInterface::class, static::$abstract);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class BaseServiceProvider extends ServiceProvider</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    public static $abstract = &#39;sentry&#39;;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">// in the subclass:</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">$this-&gt;app-&gt;alias(HubInterface::class, static::$abstract);</span>
 </code></pre></div>
 <p>so every <code>app()-&gt;make('sentry')</code>, <code>app('sentry')</code>, and
 <code>App::make('sentry')</code> is unresolved, including through a variable.</p>
