@@ -1,4 +1,5 @@
 pub(crate) mod call_site_inference;
+pub(crate) mod component_tags;
 pub mod directives;
 pub mod preprocessor;
 pub(crate) mod signature;

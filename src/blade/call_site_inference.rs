@@ -2,9 +2,11 @@
 //!
 //! For templates without a declared signature (`@bladestan-signature`
 //! or plain `@var` docblocks), infer the variables a template receives
-//! from the `view()` call sites that reference it: literal array keys,
-//! `compact()` arguments, and `->with()` chains.  The inferred set is
-//! injected into the template's virtual-PHP prologue as `@var`
+//! from the call sites that reference it: `view()`/`View::make()` calls
+//! (literal array keys, `compact()` arguments, `->with()` chains — see
+//! [`extract_call_site_vars`]) and, for a component, the attributes each
+//! `<x-…>` tag passes (see [`super::component_tags`]). The inferred set
+//! is injected into the template's virtual-PHP prologue as `@var`
 //! docblock declarations (see `preprocess_with_vars`), so every
 //! consumer — completion, hover, go-to-definition, and the
 //! undefined-variable diagnostic — sees them through the ordinary
@@ -12,9 +14,10 @@
 //!
 //! This is deliberately the lowest-priority source: an in-template
 //! `@var` annotation shadows an injected one (it sits closer to every
-//! use site in the backward docblock scan), and templates that declare
-//! a signature are skipped entirely.  Types are "true for the callers
-//! we found": multiple call sites union per variable, and dynamic view
+//! use site in the backward docblock scan), `@props`/`@aware` win over it
+//! per name (see `super::signature`), and templates that declare a
+//! signature are skipped entirely. Types are "true for the callers we
+//! found": multiple call sites union per variable, and dynamic view
 //! names contribute nothing.
 
 use std::collections::HashMap;
@@ -46,9 +49,20 @@ pub(crate) type InjectedVars = Vec<(String, String)>;
 /// per template.
 pub(crate) type ViewCallerSnapshot = Vec<(String, Arc<SymbolMap>)>;
 
+/// Every Blade file's raw source, snapshotted once per refresh pass.
+///
+/// Unlike [`ViewCallerSnapshot`], there is no pre-built index of `<x-…>`
+/// tag usages to filter by first (component tags are HTML, not something
+/// the symbol map extracts), so finding a component's callers means
+/// scanning every Blade file's content. Sharing this list across a whole
+/// refresh pass keeps that scan at O(templates) rather than
+/// O(templates × templates).
+pub(crate) type BladeCallerSnapshot = Vec<(String, Arc<String>)>;
+
 impl Backend {
     /// Compute the variables to inject into a Blade template's virtual
-    /// PHP, by scanning `view()` call sites across the workspace.
+    /// PHP, by scanning `view()` call sites and, for a component,
+    /// `<x-…>` tag call sites across the workspace.
     ///
     /// Returns pairs of (variable name without `$`, docblock type
     /// string).  Empty when the template declares its own signature,
@@ -59,6 +73,7 @@ impl Backend {
         uri: &str,
         blade_content: &str,
         shared: Option<&ViewCallerSnapshot>,
+        shared_blade: Option<&BladeCallerSnapshot>,
     ) -> InjectedVars {
         // A template that declares a signature manages its own contract;
         // injecting on top would fight the declared types.
@@ -130,6 +145,42 @@ impl Backend {
             }
         }
 
+        // The attributes each `<x-…>` tag passes, for a template
+        // addressable as a component tag (`components.*` or a namespaced
+        // view name — see `component_tags::component_tag_names`).
+        let tag_names = crate::blade::component_tags::component_tag_names(&view_names);
+        if !tag_names.is_empty() {
+            let own_blade_snapshot;
+            let blade_snapshot = match shared_blade {
+                Some(shared) => shared.as_slice(),
+                None => {
+                    own_blade_snapshot = self.blade_caller_snapshot();
+                    own_blade_snapshot.as_slice()
+                }
+            };
+            for (file_uri, content) in blade_snapshot {
+                if file_uri == uri {
+                    continue;
+                }
+                let occurrences =
+                    crate::blade::component_tags::scan_component_tag_calls(content, &tag_names);
+                if occurrences.is_empty() {
+                    continue;
+                }
+                let Some(virtual_php) = self.blade_virtual_content.read().get(file_uri).cloned()
+                else {
+                    continue;
+                };
+                for vars in
+                    self.extract_component_call_site_vars(file_uri, &virtual_php, occurrences)
+                {
+                    for (name, ty) in vars {
+                        merged.entry(name).or_default().push(ty);
+                    }
+                }
+            }
+        }
+
         if merged.is_empty() {
             return Vec::new();
         }
@@ -173,15 +224,17 @@ impl Backend {
             return;
         }
         // Snapshot the caller files once for the whole pass.  Letting each
-        // template take its own snapshot walks every symbol map in the
-        // workspace per template, which is quadratic in a project with
-        // hundreds of templates.
+        // template take its own snapshot walks every symbol map (and, for
+        // component tags, every Blade file) in the workspace per
+        // template, which is quadratic in a project with hundreds of
+        // templates.
         let shared = self.view_caller_snapshot();
+        let shared_blade = self.blade_caller_snapshot();
         for uri in blade_uris {
             let Some(content) = self.get_file_content(&uri) else {
                 continue;
             };
-            self.reinfer_and_reparse_blade_with(&uri, &content, Some(&shared));
+            self.reinfer_and_reparse_blade_with(&uri, &content, Some(&shared), Some(&shared_blade));
         }
     }
 
@@ -212,11 +265,28 @@ impl Backend {
             .collect()
     }
 
+    /// Every known Blade file's raw source, for the component-tag scan in
+    /// [`Self::infer_blade_call_site_vars`]. Unlike [`Self::view_caller_snapshot`]
+    /// this cannot pre-filter by symbol-map spans (component tags are HTML,
+    /// not something the symbol map extracts), so it just snapshots every
+    /// Blade file once per refresh pass.
+    fn blade_caller_snapshot(&self) -> BladeCallerSnapshot {
+        let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
+        let uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
+        uris.into_iter()
+            .filter(|uri| !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str())))
+            .filter_map(|uri| {
+                let content = self.get_file_content_arc(&uri)?;
+                Some((uri, content))
+            })
+            .collect()
+    }
+
     /// Re-infer one template on its own, taking its own caller snapshot.
     /// For the single-template triggers (opening a Blade file, saving a
     /// controller) rather than a bulk refresh pass.
     pub(crate) fn reinfer_and_reparse_blade(&self, uri: &str, content: &str) -> bool {
-        self.reinfer_and_reparse_blade_with(uri, content, None)
+        self.reinfer_and_reparse_blade_with(uri, content, None, None)
     }
 
     /// Recompute one template's inferred variable set; when it differs
@@ -229,8 +299,9 @@ impl Backend {
         uri: &str,
         content: &str,
         shared: Option<&ViewCallerSnapshot>,
+        shared_blade: Option<&BladeCallerSnapshot>,
     ) -> bool {
-        let fresh = self.infer_blade_call_site_vars(uri, content, shared);
+        let fresh = self.infer_blade_call_site_vars(uri, content, shared, shared_blade);
         let unchanged = match self.blade_injected_vars.read().get(uri) {
             Some(prev) => *prev == fresh,
             None => fresh.is_empty(),
@@ -254,6 +325,7 @@ impl Backend {
     /// template parsed for the first time later runs inference itself.
     pub(crate) fn refresh_blade_inference_for_caller(&self, caller_uri: &str) {
         if self.is_blade_file(caller_uri) {
+            self.refresh_blade_component_inference_for_caller(caller_uri);
             return;
         }
         let Some(map) = self.symbol_maps.read().get(caller_uri).cloned() else {
@@ -295,6 +367,46 @@ impl Backend {
                     continue;
                 };
                 if self.reinfer_and_reparse_blade(&template_uri, &content) {
+                    self.schedule_diagnostics(template_uri);
+                }
+            }
+        }
+    }
+
+    /// The Blade-caller equivalent of [`Self::refresh_blade_inference_for_caller`]:
+    /// re-run component-tag inference for the templates a *Blade* file's own
+    /// `<x-…>` tags reference, after it was edited or saved, so an updated
+    /// attribute is reflected without waiting for the referenced
+    /// component's own next parse.
+    fn refresh_blade_component_inference_for_caller(&self, caller_uri: &str) {
+        let Some(content) = self.get_file_content(caller_uri) else {
+            return;
+        };
+        let tags = crate::blade::component_tags::referenced_component_tags(&content);
+        if tags.is_empty() {
+            return;
+        }
+
+        for tag in tags {
+            let view_name = crate::blade::component_tags::view_name_for_component_tag(&tag);
+            for location in crate::virtual_members::laravel::resolve_laravel_string_key(
+                self,
+                &LaravelStringKind::View,
+                &view_name,
+            ) {
+                let template_uri = location.uri.to_string();
+                if template_uri == caller_uri
+                    || !self
+                        .blade_virtual_content
+                        .read()
+                        .contains_key(&template_uri)
+                {
+                    continue;
+                }
+                let Some(template_content) = self.get_file_content(&template_uri) else {
+                    continue;
+                };
+                if self.reinfer_and_reparse_blade(&template_uri, &template_content) {
                     self.schedule_diagnostics(template_uri);
                 }
             }
@@ -446,9 +558,124 @@ impl Backend {
             result
         })
     }
+
+    /// Extract the variables one Blade caller passes to component tags,
+    /// given the tag occurrences [`super::component_tags::scan_component_tag_calls`]
+    /// already found in its raw source.
+    ///
+    /// `virtual_php` is the caller's own preprocessed content: a bound
+    /// attribute on *any* HTML tag compiles down to a `blade_directive(EXPR)`
+    /// call, in document order, so an occurrence's
+    /// [`super::component_tags::ComponentTagCall::bound`] indices index
+    /// directly into that call sequence — no Blade-to-PHP offset
+    /// translation needed.
+    fn extract_component_call_site_vars(
+        &self,
+        uri: &str,
+        virtual_php: &str,
+        occurrences: Vec<crate::blade::component_tags::ComponentTagCall>,
+    ) -> Vec<InferredVars> {
+        let file_ctx = self.file_context(uri);
+        let class_loader = self.class_loader(&file_ctx);
+        let function_loader = self.function_loader(&file_ctx);
+        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+
+        with_parsed_program(
+            virtual_php,
+            "blade_component_call_site",
+            |program, content| {
+                let default_class = ClassInfo::default();
+
+                let mut ctx = BladeDirectiveCollectCtx { calls: Vec::new() };
+                let walker = BladeDirectiveWalker;
+                for stmt in program.statements.iter() {
+                    mago_syntax::walker::Walker::walk_statement(&walker, stmt, &mut ctx);
+                }
+                let calls = ctx.calls;
+
+                let mut result = Vec::new();
+                for occurrence in occurrences {
+                    let mut vars: InferredVars = occurrence.literal;
+                    for (name, index) in occurrence.bound {
+                        let Some(expr) = calls.get(index).copied() else {
+                            continue;
+                        };
+                        let offset = expr.span().start.offset;
+                        let enclosing =
+                            crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset);
+                        let current_class = enclosing.unwrap_or(&default_class);
+                        let loaders = Loaders::with_function(Some(&function_loader_cl));
+                        let var_ctx = VarResolutionCtx {
+                            var_name: "",
+                            top_level_scope: None,
+                            current_class,
+                            all_classes: &file_ctx.classes,
+                            content,
+                            cursor_offset: offset,
+                            class_loader: &class_loader,
+                            backend: Some(self),
+                            loaders,
+                            resolved_class_cache: Some(&self.resolved_class_cache),
+                            enclosing_return_type: None,
+                            branch_aware: false,
+                            match_arm_narrowing: HashMap::new(),
+                            scope_var_resolver: None,
+                        };
+                        let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                        expr, &var_ctx,
+                    )
+                    .unwrap_or_else(PhpType::mixed);
+                        let ty = ty.resolve_names(&|name: &str| {
+                            if let Some(cls) = class_loader(name) {
+                                format!("\\{}", cls.fqn())
+                            } else {
+                                name.to_string()
+                            }
+                        });
+                        vars.push((name, ty));
+                    }
+                    if !vars.is_empty() {
+                        result.push(vars);
+                    }
+                }
+                result
+            },
+        )
+    }
 }
 
 // ─── AST walking ────────────────────────────────────────────────────────────
+
+/// Collects every `blade_directive(EXPR)` call in a Blade file's virtual
+/// PHP, in document order. The preprocessor emits exactly one such call
+/// per bound HTML attribute (see `super::preprocessor`), so this order
+/// matches the order `super::component_tags::scan_component_tag_calls`
+/// counts bound attributes in.
+struct BladeDirectiveCollectCtx<'ast, 'arena> {
+    calls: Vec<&'ast Expression<'arena>>,
+}
+
+struct BladeDirectiveWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BladeDirectiveCollectCtx<'ast, 'arena>>
+    for BladeDirectiveWalker
+{
+    fn walk_in_function_call(
+        &self,
+        node: &'ast FunctionCall<'arena>,
+        ctx: &mut BladeDirectiveCollectCtx<'ast, 'arena>,
+    ) {
+        let Expression::Identifier(ident) = node.function else {
+            return;
+        };
+        if bytes_to_str(ident.value()) != "blade_directive" {
+            return;
+        }
+        if let Some(arg) = node.argument_list.arguments.iter().next() {
+            ctx.calls.push(arg.value());
+        }
+    }
+}
 
 /// One variable passed at a call site: either the value expression
 /// (array entry / `->with()` value) or, for `compact('name')`, the

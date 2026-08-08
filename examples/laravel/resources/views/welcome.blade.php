@@ -78,7 +78,12 @@
 
     {{-- A bound attribute whose expression is wrapped over several lines
          (what a formatter does to a long array) is still read as one PHP
-         expression. Try: Ctrl+Click __ and hover $posts on the last line. --}}
+         expression. Try: Ctrl+Click __ and hover $posts on the last line.
+
+         alert.blade.php declares no @props at all, yet reads $messages
+         from this very attribute — every attribute a tag passes becomes
+         a variable inside the component, whether @props names it or
+         not. See components/alert.blade.php. --}}
     <x-alert class="mt-4"
         :messages="[
             __('messages.welcome'),

@@ -919,6 +919,17 @@ check(
     (new \Illuminate\View\ComponentSlot('<b>hi</b>'))->toHtml() === '<b>hi</b>'
 );
 
+// `AnonymousComponent::data()` merges every tag attribute into the view
+// data, whether or not `@props` names it — this is the runtime fact the
+// LSP's call-site inference for `<x-…>` tags relies on: a component with
+// no `@props` at all still receives every attribute as a variable.
+$anonymous = new \Illuminate\View\AnonymousComponent('components.alert', ['messages' => ['hi']]);
+$anonymous->withAttributes(['class' => 'mt-4']);
+check(
+    'AnonymousComponent::data() exposes every attribute, @props or not',
+    array_key_exists('class', $anonymous->data()) && array_key_exists('messages', $anonymous->data())
+);
+
 // A provider that keeps its container key in a static property on the base
 // class it extends reads that key through late static binding, so the value
 // the subclass registers under is the one declared up the parent chain.

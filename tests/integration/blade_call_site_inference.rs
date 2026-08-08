@@ -339,4 +339,161 @@ mod tests {
             undefined
         );
     }
+
+    /// A bound attribute on an `<x-…>` component tag types the variable
+    /// inside the component's own template, even though the component
+    /// declares no `@props` for it.
+    #[tokio::test]
+    async fn bound_component_attribute_types_the_component_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes :hairAnalysis=\"$model\" />\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $hairAnalysis->name }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        // The caller must declare `$model`'s type for inference to pick
+        // it up; a `@php` block is the simplest way to do that in a plain
+        // view.
+        let page_source = "@php\n/** @var \\App\\Item $model */\n@endphp\n<x-brand.boxes :hairAnalysis=\"$model\" />\n";
+        open(&backend, &page_uri, "blade", page_source).await;
+        open(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("Item"),
+            "$hairAnalysis should be typed Item from the tag's bound attribute, got: {}",
+            hover
+        );
+    }
+
+    /// A plain string attribute on an `<x-…>` tag still declares the
+    /// variable (as `string`), so the component body does not report it
+    /// as undefined.
+    #[tokio::test]
+    async fn literal_component_attribute_is_not_reported_undefined() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "resources/views/page.blade.php",
+                    "<x-alert type=\"danger\" />\n",
+                ),
+                (
+                    "resources/views/components/alert.blade.php",
+                    "{{ $type }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/alert.blade.php")).unwrap();
+
+        open(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+        open(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/alert.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let virtual_php = backend
+            .blade_virtual_php(component_uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_undefined_variable_diagnostics(
+            component_uri.as_str(),
+            &virtual_php,
+            &mut diags,
+        );
+        let undefined: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Undefined variable"))
+            .collect();
+        assert!(
+            undefined.is_empty(),
+            "$type should be declared from the tag's literal attribute: {:?}",
+            undefined
+        );
+    }
+
+    /// `@props` wins over the call-site-inferred type for the same name,
+    /// per the declaration priority chain.
+    #[tokio::test]
+    async fn props_default_wins_over_component_tag_inference() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "resources/views/page.blade.php",
+                    "<x-alert type=\"danger\" />\n",
+                ),
+                (
+                    "resources/views/components/alert.blade.php",
+                    "@props(['type' => 1])\n{{ $type }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/alert.blade.php")).unwrap();
+
+        open(
+            &backend,
+            &page_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/page.blade.php")).unwrap(),
+        )
+        .await;
+        open(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/alert.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        // `@props` types `$type` from its default `1`; the page's literal
+        // `"danger"` string attribute must not override it.
+        let hover = hover_type(&backend, &component_uri, 1, 4).await;
+        assert!(
+            hover.contains('1') && !hover.contains("danger"),
+            "@props default should win over the tag's literal attribute, got: {}",
+            hover
+        );
+    }
 }

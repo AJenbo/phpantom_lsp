@@ -7,8 +7,9 @@
         with a default is typed from that default; a bare entry is a
         *required* prop, so its type is whatever the caller passes.
      3. Blade's own component scope: $attributes, $slot, $componentName.
-     4. types inferred from view() call sites, for templates that declare
-        nothing at all.
+     4. types inferred from view() call sites and from the attributes
+        <x-…> tags pass, for names the sources above leave undeclared
+        (see components/alert.blade.php for the tag-attribute case).
 
      Try: hover each variable below and check what type it resolved to. --}}
 @php
