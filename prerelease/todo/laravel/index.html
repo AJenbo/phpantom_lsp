@@ -1444,17 +1444,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l42-keyby-and-friends-do-not-rebind-a-collections-key-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L42. <code>keyBy()</code> and friends do not rebind a collection's key template
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l44-sibling-resource-registrations-and-degenerate-resource-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2174,17 +2163,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L41. Conditional return types on <code>url()</code> and its sibling helpers
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l42-keyby-and-friends-do-not-rebind-a-collections-key-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L42. <code>keyBy()</code> and friends do not rebind a collection's key template
       </span>
     </span>
   </a>
@@ -3143,48 +3121,15 @@ Application : mixed)</code>).</p>
 <p><strong>Where to look:</strong> the helper interception next to <code>view()</code> in
 <code>type_engine/call_resolution/return_types.rs</code> and the matching branch in
 <code>type_engine/variable/rhs_resolution/calls.rs</code>.</p>
-<h4 id="l42-keyby-and-friends-do-not-rebind-a-collections-key-template">L42. <code>keyBy()</code> and friends do not rebind a collection's key template<a class="headerlink" href="#l42-keyby-and-friends-do-not-rebind-a-collections-key-template" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>Rebinding now works on a plain <code>Collection</code>, and <code>groupBy()</code>, <code>flip()</code>,
-<code>pluck()</code> with a key argument, and the <code>keyBy('column')</code> form are all
-correct. Two cases are still wrong.</p>
-<p>A collection class that fixes its key type through <code>@extends</code> keeps that
-key type across the re-keying call, so the rebind is dropped exactly
-where a project is most likely to hit it — Eloquent hands back the
-model's own collection class, not a plain one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @extends Collection&lt;int, ProductPrice&gt; */</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">final class ProductPriceCollection extends Collection {}</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">$byMarket = ProductPrice::where(...)-&gt;get()</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">$byMarket-&gt;get($someString);</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">// false positive: Argument 1 ($key) expects int|null, got string</span>
-</code></pre></div>
-<p><code>static&lt;TNewKey, TValue&gt;</code> is being resolved against a subclass whose
-<code>@extends</code> already bound <code>TKey</code>, and the binding wins over the rebind.
-The <code>keyBy('id')</code> form on a subclass has the same problem from the other
-direction: the declared <code>int</code> is kept where the new key is really
-unknown, so an <code>array-key</code> handed in from <code>groupBy()</code> is then rejected.
-A key the call cannot determine must widen to <code>array-key</code>, never fall
-back to the declared binding.</p>
-<p><code>mapWithKeys()</code> rebinds to the wrong thing entirely — it takes the
-callback's <em>return type</em> as the new key rather than that array's key
-type:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$c-&gt;mapWithKeys(fn (Order $o): array =&gt; [&#39;x&#39; =&gt; $o])-&gt;get(&#39;dk&#39;);</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">// false positive: Argument 1 ($key) expects array|null, got &#39;dk&#39;</span>
-</code></pre></div>
-<p><strong>Where to look:</strong> the collection method modelling in
-<code>virtual_members/laravel/</code>, alongside the custom-collection rewrite.</p>
 <h4 id="l44-sibling-resource-registrations-and-degenerate-resource-names">L44. Sibling resource registrations and degenerate resource names<a class="headerlink" href="#l44-sibling-resource-registrations-and-degenerate-resource-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
 <p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
 registrations that generate route names the same way are not, so every
 <code>route()</code> call naming one is reported as an unknown route:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
 </code></pre></div>
 <p><code>resources()</code> / <code>apiResources()</code> expand to the same seven (or five)
 conventional names per entry. <code>singleton()</code> generates <code>show</code>, <code>edit</code>, and
