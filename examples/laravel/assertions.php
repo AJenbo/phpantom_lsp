@@ -939,6 +939,23 @@ check(
     $container->make('pastry.oven.alias') instanceof \App\Support\BakeryService
 );
 
+// Two providers binding one key: each `register()` replaces what the key held,
+// so the key ends up with whatever the provider registered last put there.
+// That is how an application swaps a default implementation out, and it is the
+// answer PHPantom has to give for `app('pastry.oven')`.
+$providers = new \Illuminate\Container\Container();
+foreach (require __DIR__ . '/bootstrap/providers.php' as $provider) {
+    if (is_subclass_of($provider, \App\Providers\BaseDemoServiceProvider::class)
+        || $provider === \App\Providers\BaseDemoServiceProvider::class
+    ) {
+        (new $provider($providers))->register();
+    }
+}
+check(
+    'the provider registered last decides a key two providers bind',
+    $providers->make('pastry.oven') instanceof \App\Support\BakeryService
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

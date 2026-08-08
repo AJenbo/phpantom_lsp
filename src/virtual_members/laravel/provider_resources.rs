@@ -1,6 +1,9 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
@@ -18,24 +21,90 @@ pub(crate) struct ProviderResource {
     pub namespace: String,
 }
 
+/// How a service provider came to be registered, which decides whose binding
+/// the container ends up with when two providers bind the same string key.
+///
+/// The order mirrors `Application::registerConfiguredProviders()`, which
+/// registers the `Illuminate\*` entries of the configured list first, then the
+/// providers vendor packages auto-discover, then everything else the
+/// application lists.  Each registration replaces the one before it, so a
+/// higher variant wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub(crate) enum ProviderOrigin {
+    /// An `Illuminate\*` provider: a framework default.
+    #[default]
+    Framework,
+    /// Auto-discovered from a vendor package's `extra.laravel.providers`.
+    Package,
+    /// Listed by the application in `bootstrap/providers.php` or the
+    /// `providers` key of `config/app.php`.
+    Application,
+}
+
+/// The provider a scan is reading, as far as binding precedence goes.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProviderIdentity {
+    /// The provider class's FQN.
+    pub fqn: String,
+    /// The provider classes it extends.  Subclassing a provider and re-binding
+    /// one of its keys is how a replacement is written, so the parent must not
+    /// win the key back merely by being scanned later.
+    pub ancestors: Vec<String>,
+    pub origin: ProviderOrigin,
+}
+
+impl ProviderIdentity {
+    /// Whether a binding this provider made survives one `other` makes for the
+    /// same key.
+    ///
+    /// Providers are scanned in registration order and each registration
+    /// replaces the one before it, so the tie goes to `other` unless this
+    /// provider is registered later (a higher [`ProviderOrigin`]) or extends
+    /// it.
+    fn outranks(&self, other: &ProviderIdentity) -> bool {
+        match self.origin.cmp(&other.origin) {
+            Ordering::Greater => true,
+            Ordering::Less => false,
+            Ordering::Equal => self.ancestors.iter().any(|parent| parent == &other.fqn),
+        }
+    }
+}
+
+/// The concrete class behind a container key, with the provider that put it
+/// there so a provider scanned later is weighed against it rather than
+/// overwriting it outright.
+#[derive(Debug, Clone)]
+pub(crate) struct Binding {
+    pub class: String,
+    provider: Arc<ProviderIdentity>,
+}
+
+/// An `alias('other-key', 'key')` entry: the key it stands for, and the
+/// provider that named it, so precedence applies to aliases too.
+#[derive(Debug, Clone)]
+pub(crate) struct Alias {
+    target: String,
+    provider: Arc<ProviderIdentity>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProviderResources {
     pub config_files: Vec<ProviderResource>,
     pub view_dirs: Vec<ProviderResource>,
     pub trans_dirs: Vec<ProviderResource>,
     pub route_files: Vec<PathBuf>,
-    /// Container binding key → concrete class FQN, for the bindings a
+    /// Container binding key → the class bound to it, for the bindings a
     /// provider makes under a *string* abstract
     /// (`$this->app->singleton('sentry', fn () => new HubAdapter())`).  A
     /// binding keyed by `Contract::class` needs no table: the written name
     /// already resolves.
-    pub bindings: HashMap<String, String>,
+    pub bindings: HashMap<String, Binding>,
     /// `alias('other-key', 'key')` entries, as key → the key they stand for.
     /// These name a binding by another *string* key rather than by a class,
     /// so they are folded into `bindings` by [`Self::resolve_aliases`] once
     /// every provider has been scanned: the key an alias points at may well
     /// be bound by a provider that comes later.
-    pub aliases: HashMap<String, String>,
+    pub aliases: HashMap<String, Alias>,
     /// A provider rebound `translator` or `translation.loader` to something
     /// other than Laravel's own file-based pair, so the strings come from a
     /// source we cannot enumerate (a database table, say) and the set of
@@ -49,9 +118,41 @@ impl ProviderResources {
         self.view_dirs.extend(other.view_dirs);
         self.trans_dirs.extend(other.trans_dirs);
         self.route_files.extend(other.route_files);
-        self.bindings.extend(other.bindings);
-        self.aliases.extend(other.aliases);
+        for (key, binding) in other.bindings {
+            self.record_binding(key, binding);
+        }
+        for (key, alias) in other.aliases {
+            match self.aliases.entry(key) {
+                Entry::Occupied(mut slot) => {
+                    if !slot.get().provider.outranks(&alias.provider) {
+                        slot.insert(alias);
+                    }
+                }
+                Entry::Vacant(slot) => {
+                    slot.insert(alias);
+                }
+            }
+        }
         self.custom_translation_loader |= other.custom_translation_loader;
+    }
+
+    /// Bind `key`, unless a provider that outranks this one already claimed it.
+    ///
+    /// Two providers binding the same key is the normal way an application
+    /// swaps a framework or package implementation out, so the key has to end
+    /// up with the class the container would hold once every provider has
+    /// registered.
+    fn record_binding(&mut self, key: String, binding: Binding) {
+        match self.bindings.entry(key) {
+            Entry::Occupied(mut slot) => {
+                if !slot.get().provider.outranks(&binding.provider) {
+                    slot.insert(binding);
+                }
+            }
+            Entry::Vacant(slot) => {
+                slot.insert(binding);
+            }
+        }
     }
 
     /// Give every alias the concrete class of the key it stands for.
@@ -62,24 +163,33 @@ impl ProviderResources {
     /// leaves a cycle unresolved instead of looping forever.
     pub fn resolve_aliases(&mut self) {
         let limit = self.aliases.len();
-        let resolved: Vec<(String, String)> = self
+        let resolved: Vec<(String, Binding)> = self
             .aliases
             .iter()
-            .filter_map(|(key, target)| {
-                let mut target = target;
+            .filter_map(|(key, alias)| {
+                let mut target = &alias.target;
                 for _ in 0..limit {
                     match self.aliases.get(target) {
-                        Some(next) => target = next,
+                        Some(next) => target = &next.target,
                         None => break,
                     }
                 }
                 let concrete = self.bindings.get(target)?;
-                Some((key.clone(), concrete.clone()))
+                Some((
+                    key.clone(),
+                    Binding {
+                        class: concrete.class.clone(),
+                        provider: Arc::clone(&alias.provider),
+                    },
+                ))
             })
             .collect();
         // The container consults its alias table before its bindings, so an
-        // alias decides the key it covers.
-        self.bindings.extend(resolved);
+        // alias decides the key it covers, subject to the same precedence as
+        // any other registration.
+        for (key, binding) in resolved {
+            self.record_binding(key, binding);
+        }
     }
 }
 
@@ -107,12 +217,15 @@ const BINDING_METHODS: &[&[u8]] = &[
 ///
 /// `class_context` carries the provider class's own constants and static
 /// property defaults, merged over its parent chain, so a binding key written
-/// as `static::$abstract` folds to the string it holds.
+/// as `static::$abstract` folds to the string it holds.  `provider` records
+/// which provider this is, so a key two providers bind ends up with the class
+/// the container would hold.
 pub(crate) fn extract_provider_resources(
     content: &str,
     file_path: &Path,
     workspace_root: &Path,
     class_context: ClassContext,
+    provider: Arc<ProviderIdentity>,
 ) -> ProviderResources {
     let mut resources = ProviderResources::default();
     let scope = Scope::for_class(class_context);
@@ -192,13 +305,25 @@ pub(crate) fn extract_provider_resources(
         {
             match binding_concrete(Some(target.value()), &resolved) {
                 Some(concrete) => {
-                    resources.bindings.insert(key, concrete);
+                    resources.bindings.insert(
+                        key,
+                        Binding {
+                            class: concrete,
+                            provider: Arc::clone(&provider),
+                        },
+                    );
                 }
                 // The target is another string key, whose own binding may not
                 // have been scanned yet.
                 None => {
                     if let Some(aliased) = const_string(target.value(), content, &scope) {
-                        resources.aliases.insert(key, aliased);
+                        resources.aliases.insert(
+                            key,
+                            Alias {
+                                target: aliased,
+                                provider: Arc::clone(&provider),
+                            },
+                        );
                     }
                 }
             }
@@ -216,14 +341,15 @@ pub(crate) fn extract_provider_resources(
         {
             let factory = mc.argument_list.arguments.iter().nth(1).map(|a| a.value());
 
-            if TRANSLATION_BINDINGS.contains(&key.as_str()) {
-                // `extend` decorates whatever is already bound, so even a
-                // file-based wrapper adds lines from somewhere else.
-                if method_lower != b"extend" && builds_file_translator(factory) {
-                    return ControlFlow::Continue(());
-                }
+            // A translation binding decides where the strings come from, on top
+            // of naming a class: anything but Laravel's own file-based pair
+            // reads its lines from a source we cannot enumerate.  `extend`
+            // decorates whatever is already bound, so even a file-based wrapper
+            // adds lines from somewhere else.
+            if TRANSLATION_BINDINGS.contains(&key.as_str())
+                && (method_lower == b"extend" || !builds_file_translator(factory))
+            {
                 resources.custom_translation_loader = true;
-                return ControlFlow::Continue(());
             }
 
             // `extend` wraps whatever the key already holds; which class comes
@@ -232,7 +358,13 @@ pub(crate) fn extract_provider_resources(
             if method_lower != b"extend"
                 && let Some(concrete) = binding_concrete(factory, &resolved)
             {
-                resources.bindings.insert(key, concrete);
+                resources.bindings.insert(
+                    key,
+                    Binding {
+                        class: concrete,
+                        provider: Arc::clone(&provider),
+                    },
+                );
             }
             return ControlFlow::Continue(());
         }
@@ -610,6 +742,7 @@ mod tests {
             file_path,
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert_eq!(
             resources.route_files,
@@ -632,6 +765,7 @@ mod tests {
             file_path,
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert_eq!(resources.route_files, vec![file_path.to_path_buf()]);
     }
@@ -652,6 +786,7 @@ mod tests {
             file_path,
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert_eq!(
             resources.route_files,
@@ -671,6 +806,7 @@ mod tests {
             Path::new("/ws/Provider.php"),
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert!(resources.route_files.is_empty());
     }
@@ -693,6 +829,7 @@ mod tests {
             file_path,
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert_eq!(resources.config_files.len(), 1);
         assert_eq!(
@@ -721,6 +858,7 @@ mod tests {
             Path::new("/ws/src/TranslationServiceProvider.php"),
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert!(resources.custom_translation_loader);
     }
@@ -741,6 +879,7 @@ mod tests {
             Path::new("/ws/src/TranslationServiceProvider.php"),
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert!(resources.custom_translation_loader);
     }
@@ -775,6 +914,7 @@ mod tests {
             ),
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert!(!resources.custom_translation_loader);
     }
@@ -794,6 +934,7 @@ mod tests {
             Path::new("/ws/src/CacheTranslationServiceProvider.php"),
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert!(resources.custom_translation_loader);
     }
@@ -812,6 +953,7 @@ mod tests {
             Path::new("/ws/src/AppServiceProvider.php"),
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert!(!resources.custom_translation_loader);
     }
@@ -837,6 +979,7 @@ mod tests {
             file_path,
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         assert_eq!(resources.config_files.len(), 1);
         assert!(
@@ -870,6 +1013,7 @@ mod tests {
             Path::new("/ws/vendor/sentry/sentry-laravel/src/Sentry/Laravel/ServiceProvider.php"),
             Path::new("/ws"),
             sentry_context(),
+            Default::default(),
         );
         resources.resolve_aliases();
         resources
@@ -889,7 +1033,7 @@ mod tests {
             }\n";
         let resources = scan_sentry_provider(content);
         assert_eq!(
-            resources.bindings.get("sentry").map(String::as_str),
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
             Some("Sentry\\Laravel\\HubAdapter")
         );
     }
@@ -905,7 +1049,7 @@ mod tests {
             }\n";
         let resources = scan_sentry_provider(content);
         assert_eq!(
-            resources.bindings.get("4.0.hub").map(String::as_str),
+            resources.bindings.get("4.0.hub").map(|b| b.class.as_str()),
             Some("Sentry\\Laravel\\HubAdapter")
         );
     }
@@ -937,7 +1081,7 @@ mod tests {
             }\n";
         let resources = scan_sentry_provider(content);
         assert_eq!(
-            resources.bindings.get("sentry").map(String::as_str),
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
             Some("Sentry\\State\\HubInterface")
         );
     }
@@ -960,7 +1104,7 @@ mod tests {
             resources
                 .bindings
                 .get("Sentry\\State\\HubInterface")
-                .map(String::as_str),
+                .map(|b| b.class.as_str()),
             Some("Sentry\\Laravel\\HubAdapter"),
             "the contract name has to reach the class the aliased key is bound to"
         );
@@ -980,8 +1124,190 @@ mod tests {
             Path::new("/ws/src/AppServiceProvider.php"),
             Path::new("/ws"),
             ClassContext::default(),
+            Default::default(),
         );
         resources.resolve_aliases();
         assert!(resources.bindings.is_empty());
+    }
+
+    /// Scan a provider under the registration origin and parent chain that
+    /// decide the keys it shares with another provider.
+    fn scan_as(
+        content: &str,
+        fqn: &str,
+        ancestors: &[&str],
+        origin: ProviderOrigin,
+    ) -> ProviderResources {
+        extract_provider_resources(
+            content,
+            Path::new("/ws/src/Provider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Arc::new(ProviderIdentity {
+                fqn: fqn.to_string(),
+                ancestors: ancestors.iter().map(|a| a.to_string()).collect(),
+                origin,
+            }),
+        )
+    }
+
+    const FRAMEWORK_TRANSLATION_PROVIDER: &str = "<?php\n\
+        namespace Illuminate\\Translation;\n\
+        class TranslationServiceProvider {\n\
+            public function register(): void {\n\
+                $this->app->singleton('translator', fn ($app) => new Translator($app));\n\
+            }\n\
+        }\n";
+
+    const APP_TRANSLATION_PROVIDER: &str = "<?php\n\
+        namespace Acme\\Translation;\n\
+        class TranslationServiceProvider extends \\Illuminate\\Translation\\TranslationServiceProvider {\n\
+            public function register(): void {\n\
+                $this->app->singleton('translator', fn ($app) => new DatabaseTranslator($app));\n\
+            }\n\
+        }\n";
+
+    #[test]
+    fn an_application_binding_beats_a_framework_default() {
+        // Replacing a framework binding from an application provider is the
+        // normal way to swap an implementation, and the two providers may be
+        // scanned in either order, so neither order may hand the key back to
+        // the framework.
+        let framework = || {
+            scan_as(
+                FRAMEWORK_TRANSLATION_PROVIDER,
+                "Illuminate\\Translation\\TranslationServiceProvider",
+                &[],
+                ProviderOrigin::Framework,
+            )
+        };
+        let application = || {
+            scan_as(
+                APP_TRANSLATION_PROVIDER,
+                "Acme\\Translation\\TranslationServiceProvider",
+                &["Illuminate\\Translation\\TranslationServiceProvider"],
+                ProviderOrigin::Application,
+            )
+        };
+
+        let mut framework_first = ProviderResources::default();
+        framework_first.merge(framework());
+        framework_first.merge(application());
+
+        let mut application_first = ProviderResources::default();
+        application_first.merge(application());
+        application_first.merge(framework());
+
+        for resources in [framework_first, application_first] {
+            assert_eq!(
+                resources
+                    .bindings
+                    .get("translator")
+                    .map(|b| b.class.as_str()),
+                Some("Acme\\Translation\\DatabaseTranslator"),
+                "the application's registration decides the key"
+            );
+        }
+    }
+
+    #[test]
+    fn a_subclass_provider_beats_the_parent_it_extends() {
+        let parent = "<?php\n\
+            namespace Acme;\n\
+            class ServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('acme.client', fn () => new Client());\n\
+                }\n\
+            }\n";
+        let child = "<?php\n\
+            namespace App\\Providers;\n\
+            class AcmeServiceProvider extends \\Acme\\ServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('acme.client', fn () => new TracingClient());\n\
+                }\n\
+            }\n";
+
+        // Both are registered the same way, and the subclass is scanned first,
+        // so only its parent chain marks it as the later registration.
+        let mut resources = ProviderResources::default();
+        resources.merge(scan_as(
+            child,
+            "App\\Providers\\AcmeServiceProvider",
+            &["Acme\\ServiceProvider"],
+            ProviderOrigin::Application,
+        ));
+        resources.merge(scan_as(
+            parent,
+            "Acme\\ServiceProvider",
+            &[],
+            ProviderOrigin::Application,
+        ));
+
+        assert_eq!(
+            resources
+                .bindings
+                .get("acme.client")
+                .map(|b| b.class.as_str()),
+            Some("App\\Providers\\TracingClient")
+        );
+    }
+
+    #[test]
+    fn two_unrelated_providers_leave_the_key_to_the_later_one() {
+        // Nothing ranks one above the other, and the container keeps whichever
+        // registered last, which is the order they are scanned in.
+        let first = "<?php\n\
+            namespace A;\n\
+            class ServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('shared', fn () => new First());\n\
+                }\n\
+            }\n";
+        let second = "<?php\n\
+            namespace B;\n\
+            class ServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('shared', fn () => new Second());\n\
+                }\n\
+            }\n";
+
+        let mut resources = ProviderResources::default();
+        resources.merge(scan_as(
+            first,
+            "A\\ServiceProvider",
+            &[],
+            ProviderOrigin::Application,
+        ));
+        resources.merge(scan_as(
+            second,
+            "B\\ServiceProvider",
+            &[],
+            ProviderOrigin::Application,
+        ));
+
+        assert_eq!(
+            resources.bindings.get("shared").map(|b| b.class.as_str()),
+            Some("B\\Second")
+        );
+    }
+
+    #[test]
+    fn a_replaced_translator_binds_the_key_to_the_replacement() {
+        // Rebinding `translator` says both that the strings come from a source
+        // we cannot enumerate *and* which class `app('translator')` hands back.
+        let resources = scan_as(
+            APP_TRANSLATION_PROVIDER,
+            "Acme\\Translation\\TranslationServiceProvider",
+            &["Illuminate\\Translation\\TranslationServiceProvider"],
+            ProviderOrigin::Application,
+        );
+        assert!(resources.custom_translation_loader);
+        assert_eq!(
+            resources
+                .bindings
+                .get("translator")
+                .map(|b| b.class.as_str()),
+            Some("Acme\\Translation\\DatabaseTranslator")
+        );
     }
 }

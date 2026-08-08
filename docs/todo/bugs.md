@@ -62,39 +62,6 @@ reported.
 message but never compared against `self.php_version()`. Deprecations
 with no recorded version keep firing, as today.
 
-#### B62. An application's container binding loses to the framework default for the same key
-
-**Impact: Medium · Effort: Medium**
-
-An application that replaces a framework binding still resolves to the
-framework's class:
-
-```php
-// config/app.php registers Acme\Translation\TranslationServiceProvider,
-// which extends Illuminate's and re-binds 'translator':
-$this->app->singleton('translator', function (Application $app) {
-    return new DatabaseTranslator($loader, $locale);
-});
-
-// …but:
-return $this->app->make('translator');
-// "Return type Illuminate\Translation\Translator is incompatible with
-//  declared return type Acme\Translation\DatabaseTranslator"
-```
-
-Both providers are indexed and the framework's wins. Overriding a
-framework binding from an application provider is the normal way to swap
-an implementation, so the application's registration has to take
-precedence.
-
-**Where to look:** the binding index built by
-`virtual_members/laravel/provider_resources.rs` keeps one entry per key
-with no notion of precedence. A provider the application registers
-explicitly (`config/app.php` `providers`, `bootstrap/providers.php`)
-outranks a framework default, and a provider that `extends` another
-outranks its parent. Where two bindings genuinely tie, the union of both
-classes beats picking one arbitrarily.
-
 #### B64. A dotted container key resolves to a class named after its first segment
 
 **Impact: Medium · Effort: Low-Medium**

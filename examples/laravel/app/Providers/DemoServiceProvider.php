@@ -20,7 +20,12 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         // in a static property on the base provider, so `static::$abstract`
         // is all the subclass writes.  PHPantom folds the property against
         // this concrete provider class, which is where the parent chain is
-        // known, so `app('demo.bakery')` resolves to BakeryService.
+        // known, so `app('pastry.oven')` resolves to BakeryService.
+        //
+        // The provider this one extends binds the same key to PlainOven.  Two
+        // providers binding one key is how an implementation gets swapped out,
+        // and PHPantom follows the container: the registration that replaces
+        // the other is the one the key resolves to.
         $this->app->singleton(static::$abstract, fn () => new BakeryService());
 
         // `alias()` takes its arguments the other way round from `bind()`:

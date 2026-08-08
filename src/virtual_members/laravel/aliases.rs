@@ -179,8 +179,8 @@ fn build_laravel_aliases(backend: &Backend) -> LaravelAliases {
     // (`$this->app->singleton('sentry', fn () => new HubAdapter())`).  These
     // are registered after the core aliases at runtime, so a provider that
     // rebinds a core key wins here too.
-    for (key, fqn) in backend.laravel_provider_resources.read().bindings.iter() {
-        container.insert(key.clone(), fqn.clone());
+    for (key, binding) in backend.laravel_provider_resources.read().bindings.iter() {
+        container.insert(key.clone(), binding.class.clone());
     }
 
     // Facade aliases: the framework defaults, then the project's config

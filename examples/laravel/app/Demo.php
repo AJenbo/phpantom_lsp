@@ -768,6 +768,9 @@ class Demo
         // A key a project's own provider registers resolves the same way.
         // DemoServiceProvider writes neither key as a literal: both are built
         // from `static::$abstract`, declared on the base provider it extends.
+        // That base provider binds `pastry.oven` to PlainOven, and
+        // DemoServiceProvider replaces it, so the key resolves to the
+        // replacement rather than the default it swapped out.
         app('pastry.oven')->bake('croissant');                  // → BakeryService
         app('pastry.oven.supplier')->supply(12);                // → CroissantSupplier
     }

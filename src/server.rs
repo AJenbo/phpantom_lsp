@@ -2297,19 +2297,37 @@ impl Backend {
     /// `extra.laravel.providers` in each vendor's `installed.json`) plus those
     /// the app lists in `bootstrap/providers.php` / `config/app.php`.
     fn laravel_provider_fqns(&self) -> Vec<String> {
-        let mut fqns: Vec<String> = Vec::new();
+        self.laravel_providers_with_origin()
+            .into_iter()
+            .map(|(fqn, _)| fqn)
+            .collect()
+    }
+
+    /// The same providers, each tagged with how it was registered so a
+    /// container key two of them bind can be settled the way the container
+    /// settles it.
+    ///
+    /// A provider reached both ways keeps the origin it was first found under:
+    /// the container registers it once, at the first point it is named.
+    fn laravel_providers_with_origin(
+        &self,
+    ) -> Vec<(String, crate::virtual_members::laravel::ProviderOrigin)> {
+        use crate::virtual_members::laravel::ProviderOrigin;
+
+        let mut providers: Vec<(String, ProviderOrigin)> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut push = |fqns: &mut Vec<String>, fqn: String| {
-            if seen.insert(fqn.clone()) {
-                fqns.push(fqn);
-            }
-        };
+        let mut push =
+            |providers: &mut Vec<(String, ProviderOrigin)>, fqn: String, origin: ProviderOrigin| {
+                if seen.insert(fqn.clone()) {
+                    providers.push((fqn, origin));
+                }
+            };
 
         for vendor_dir in self.workspace.vendor_dir_paths.lock().iter() {
             let installed = vendor_dir.join("composer").join("installed.json");
             if let Ok(content) = std::fs::read_to_string(&installed) {
                 for fqn in crate::virtual_members::laravel::parse_installed_providers(&content) {
-                    push(&mut fqns, fqn);
+                    push(&mut providers, fqn, ProviderOrigin::Package);
                 }
             }
         }
@@ -2324,13 +2342,22 @@ impl Backend {
                 if let Some(content) = content {
                     for fqn in crate::virtual_members::laravel::parse_provider_class_list(&content)
                     {
-                        push(&mut fqns, fqn);
+                        // The configured list is registered `Illuminate\*`
+                        // first, then the auto-discovered packages, then the
+                        // rest, which is the order
+                        // `registerConfiguredProviders()` partitions it into.
+                        let origin = if fqn.starts_with("Illuminate\\") {
+                            ProviderOrigin::Framework
+                        } else {
+                            ProviderOrigin::Application
+                        };
+                        push(&mut providers, fqn, origin);
                     }
                 }
             }
         }
 
-        fqns
+        providers
     }
 
     /// Resolve a class FQN to the URI of the file that declares it, loading the
@@ -2494,7 +2521,7 @@ impl Backend {
             .clone()
             .unwrap_or_default();
 
-        for fqn in self.laravel_provider_fqns() {
+        for (fqn, origin) in self.laravel_providers_with_origin() {
             let Some(uri) = self.resolve_class_uri(&fqn) else {
                 continue;
             };
@@ -2511,11 +2538,17 @@ impl Backend {
                 continue;
             };
 
+            let identity = std::sync::Arc::new(crate::virtual_members::laravel::ProviderIdentity {
+                ancestors: self.provider_ancestors(&fqn),
+                fqn,
+                origin,
+            });
             resources.merge(crate::virtual_members::laravel::extract_provider_resources(
                 &content,
                 &file_path,
                 &workspace_root,
-                self.provider_class_context(&fqn),
+                self.provider_class_context(&identity.fqn),
+                identity,
             ));
         }
 
@@ -2565,6 +2598,29 @@ impl Backend {
     /// registers.  Only the base resolution is used: the virtual member
     /// providers add nothing a declared constant is read from, and one of them
     /// is the very table being built here.
+    /// The provider classes `fqn` extends, nearest first.
+    ///
+    /// Subclassing a provider and re-binding one of its keys is how a
+    /// replacement is written, and the two providers can be registered in
+    /// either order, so the subclass has to be recognizable as the later
+    /// registration regardless of which one is scanned first.
+    fn provider_ancestors(&self, fqn: &str) -> Vec<String> {
+        let mut ancestors: Vec<String> = Vec::new();
+        let mut current = self.find_or_load_class(fqn);
+        while let Some(class) = current {
+            let Some(parent) = class.parent_class.as_ref() else {
+                break;
+            };
+            let parent = parent.trim_start_matches('\\').to_string();
+            if ancestors.contains(&parent) {
+                break;
+            }
+            current = self.find_or_load_class(&parent);
+            ancestors.push(parent);
+        }
+        ancestors
+    }
+
     fn provider_class_context(&self, fqn: &str) -> crate::virtual_members::laravel::ClassContext {
         let Some(class) = self.find_or_load_class(fqn) else {
             return Default::default();

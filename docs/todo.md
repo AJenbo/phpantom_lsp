@@ -115,7 +115,6 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B56 | [Attributes passed to an anonymous component are undefined unless `@props` lists them](todo/bugs.md#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them) | Medium-High | Low-Medium  |
 | B58 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b58-deprecation-diagnostics-ignore-the-projects-target-php-version)                          | Medium      | Low-Medium  |
-| B62 | [An application's container binding loses to the framework default for the same key](todo/bugs.md#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key) | Medium      | Medium      |
 | B64 | [A dotted container key resolves to a class named after its first segment](todo/bugs.md#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment)       | Medium      | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
