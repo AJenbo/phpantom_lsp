@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786230967937,
+  "lastUpdate": 1786231300416,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16557,6 +16557,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e6329b3248108d3fc5822c697f69186f2a2b186d",
+          "message": "A layout chosen with `@extendsFirst` is no longer invisible",
+          "timestamp": "2026-08-09T01:04:47+02:00",
+          "tree_id": "0330f94239a55d028fa4b5ff7af5e0b7ecaa7145",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e6329b3248108d3fc5822c697f69186f2a2b186d"
+        },
+        "date": 1786231295595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.2,
             "unit": "MiB"
           }
         ]
