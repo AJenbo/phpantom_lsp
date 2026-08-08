@@ -487,11 +487,18 @@ fn resolve_target_classes_expr_inner(
                 ctx,
                 Some(&mut hint),
             );
-            // Use the raw return type hint only when at least one
-            // resolved class has template parameters — non-generic
-            // classes don't benefit from it.
+            // Use the raw return type hint only when it actually carries
+            // generic args a resolved class can benefit from: either the
+            // class declares its own `@template` params, or (a `static<...>`
+            // rebind on a class that only fixes its generics via
+            // `@extends`) the hint's generic base names one of the
+            // resolved classes directly, so the args are its own rebind
+            // rather than a leftover from an unrelated wrapper type.
             if let Some(h) = hint {
-                if classes.iter().any(|c| !c.template_params.is_empty()) {
+                let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
+                    .iter()
+                    .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
+                if classes.iter().any(|c| !c.template_params.is_empty()) || hint_names_a_class {
                     return ResolvedType::from_classes_with_hint(classes, h);
                 }
                 // `object`/`?object` is the "any object" escape hatch: no

@@ -7027,6 +7027,9 @@ class Item {
     public string $slug = '';
 
     public function getSlug(): string { return $this->slug; }
+
+    /** @return array<string, Item> */
+    public function toPair(): array { return ['x' => $this]; }
 }
 
 /**
@@ -7043,9 +7046,21 @@ class Coll
      */
     public function keyBy($keyBy) {}
 
+    /**
+     * @template TMapWithKeysKey of array-key
+     * @template TMapWithKeysValue
+     *
+     * @param callable(TValue, TKey): array<TMapWithKeysKey, TMapWithKeysValue> $callback
+     * @return static<TMapWithKeysKey, TMapWithKeysValue>
+     */
+    public function mapWithKeys(callable $callback) {}
+
     /** @param TKey|null $key */
     public function get($key) {}
 }
+
+/** @extends Coll<int, Item> */
+final class ItemCollection extends Coll {}
 "#;
 
 /// Build a source file that re-keys a `Coll<int, Item>` with `$callback` and
@@ -7312,5 +7327,78 @@ fn a_static_factory_binds_its_template_through_a_variable() {
         type_error_messages(&collect(&php))
             .concat()
             .contains("expects string")
+    );
+}
+
+/// A collection subclass that fixes its key/value templates purely
+/// through `@extends` (no `@template` of its own — `ItemCollection` from
+/// `REKEYING_COLLECTION`) still has its key template rebound by
+/// `keyBy()`. Before the fix, the rebind was silently dropped and the
+/// subclass kept whatever `@extends` had baked in (`int`), so `get()`
+/// was checked against the stale key type.
+#[test]
+fn keyby_rebinds_the_key_template_on_an_extends_fixed_subclass() {
+    for chained in [false, true] {
+        let call = if chained {
+            "$c->keyBy(fn (Item $i): string => $i->slug)->get([1]);".to_string()
+        } else {
+            "$keyed = $c->keyBy(fn (Item $i): string => $i->slug);\n$keyed->get([1]);".to_string()
+        };
+        let php = format!("{REKEYING_COLLECTION}\n$c = new ItemCollection();\n{call}\n");
+        let messages = type_error_messages(&collect(&php));
+        assert_eq!(messages.len(), 1, "chained={chained}, got {messages:?}");
+        assert!(
+            messages[0].contains("expects string|null"),
+            "chained={chained}: {messages:?}"
+        );
+    }
+}
+
+/// `keyBy('column')` on the same `@extends`-fixed subclass widens the key
+/// to `array-key` (the conditional's `array|string` branch), same as on a
+/// plain `Coll` — the rebind must not keep the subclass's stale `int`
+/// binding just because the new key type happens to be a string literal.
+#[test]
+fn keyby_with_literal_key_still_correct_on_an_extends_fixed_subclass() {
+    let php = format!(
+        "{REKEYING_COLLECTION}\n$c = new ItemCollection();\n$keyed = $c->keyBy('slug');\n$keyed->get('x');\n"
+    );
+    let messages = type_error_messages(&collect(&php));
+    assert!(
+        messages.is_empty(),
+        "expected no type error, got {messages:?}"
+    );
+}
+
+// ─── mapWithKeys() binds the callback's array key/value, not its whole return type ───
+
+/// `mapWithKeys()`'s callback returns `array<TMapWithKeysKey,
+/// TMapWithKeysValue>`; the new collection's key template must come from
+/// the array's *key*, not the callback's whole return type. The
+/// callback's bare `: array` annotation carries no key/value info, so
+/// the binding falls through to the body expression — here a call whose
+/// own declared return type does.
+#[test]
+fn mapwithkeys_binds_the_key_from_the_callback_body_when_the_annotation_is_bare() {
+    let php = format!(
+        "{REKEYING_COLLECTION}\n$c = new Coll();\n$keyed = $c->mapWithKeys(fn (Item $i): array => $i->toPair());\n$keyed->get([1]);\n"
+    );
+    let messages = type_error_messages(&collect(&php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("expects string|null"), "{messages:?}");
+}
+
+/// Regression guard for the exact false positive reported in the
+/// backlog: before the fix, `TMapWithKeysKey` bound to the callback's
+/// whole return type (`array`), so a string key argument was rejected.
+#[test]
+fn mapwithkeys_does_not_bind_the_key_to_the_whole_return_type() {
+    let php = format!(
+        "{REKEYING_COLLECTION}\n$c = new Coll();\n$keyed = $c->mapWithKeys(fn (Item $i): array => ['x' => $i]);\n$keyed->get('dk');\n"
+    );
+    let messages = type_error_messages(&collect(&php));
+    assert!(
+        messages.is_empty(),
+        "expected no type error, got {messages:?}"
     );
 }

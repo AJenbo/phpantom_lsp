@@ -929,50 +929,6 @@ Application : mixed)`).
 `type_engine/call_resolution/return_types.rs` and the matching branch in
 `type_engine/variable/rhs_resolution/calls.rs`.
 
-#### L42. `keyBy()` and friends do not rebind a collection's key template
-
-**Impact: Medium · Effort: Low-Medium**
-
-Rebinding now works on a plain `Collection`, and `groupBy()`, `flip()`,
-`pluck()` with a key argument, and the `keyBy('column')` form are all
-correct. Two cases are still wrong.
-
-A collection class that fixes its key type through `@extends` keeps that
-key type across the re-keying call, so the rebind is dropped exactly
-where a project is most likely to hit it — Eloquent hands back the
-model's own collection class, not a plain one:
-
-```php
-/** @extends Collection<int, ProductPrice> */
-final class ProductPriceCollection extends Collection {}
-
-$byMarket = ProductPrice::where(...)->get()
-    ->keyBy(fn (ProductPrice $pp): string => $pp->market->value);
-
-$byMarket->get($someString);
-// false positive: Argument 1 ($key) expects int|null, got string
-```
-
-`static<TNewKey, TValue>` is being resolved against a subclass whose
-`@extends` already bound `TKey`, and the binding wins over the rebind.
-The `keyBy('id')` form on a subclass has the same problem from the other
-direction: the declared `int` is kept where the new key is really
-unknown, so an `array-key` handed in from `groupBy()` is then rejected.
-A key the call cannot determine must widen to `array-key`, never fall
-back to the declared binding.
-
-`mapWithKeys()` rebinds to the wrong thing entirely — it takes the
-callback's *return type* as the new key rather than that array's key
-type:
-
-```php
-$c->mapWithKeys(fn (Order $o): array => ['x' => $o])->get('dk');
-// false positive: Argument 1 ($key) expects array|null, got 'dk'
-```
-
-**Where to look:** the collection method modelling in
-`virtual_members/laravel/`, alongside the custom-collection rewrite.
-
 #### L44. Sibling resource registrations and degenerate resource names
 
 **Impact: Low-Medium · Effort: Low-Medium**

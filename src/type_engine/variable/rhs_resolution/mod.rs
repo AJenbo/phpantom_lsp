@@ -65,7 +65,8 @@ pub(crate) use calls::{
     resolve_arg_variable_raw_type,
 };
 pub(crate) use instantiation::{
-    TemplateBindingMode, classify_template_binding, remap_inherited_ctor_subs, type_contains_name,
+    TemplateBindingMode, classify_template_binding, extract_array_position,
+    remap_inherited_ctor_subs, type_contains_name,
 };
 
 /// Apply unary `+` or `-` to an already-resolved numeric type.

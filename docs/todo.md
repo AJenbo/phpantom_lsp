@@ -30,7 +30,6 @@ within the same impact tier.
 | L46 | [Facade member completion from the concrete class](todo/laravel.md#l46-facade-member-completion-from-the-concrete-class)                                        | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
-| L42 | [`keyBy()` and friends do not rebind a collection's key template](todo/laravel.md#l42-keyby-and-friends-do-not-rebind-a-collections-key-template)                           | Medium      | Low-Medium  |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 
 ## Sprint 7 — 1.0 release & IDE extensions

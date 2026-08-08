@@ -21,7 +21,8 @@ use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
 use super::array_access::{class_string_inner_binding, insert_or_union};
 use super::instantiation::{
-    TemplateBindingMode, classify_template_binding, extract_generic_arg_from_ancestor,
+    TemplateBindingMode, classify_template_binding, extract_array_position,
+    extract_generic_arg_from_ancestor,
 };
 use super::{
     extract_closure_or_arrow_return_type, infer_if_this_is_subs, resolve_rhs_expression,
@@ -105,6 +106,16 @@ pub(crate) fn build_function_template_subs(
                 // unannotated closures) its resolved body expression.
                 if let Some(ret_type) = Backend::infer_closure_return_type(arg_text, rctx) {
                     insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
+                }
+            }
+            TemplateBindingMode::CallableReturnArrayPosition(position) => {
+                // `@param callable(...): array<TKey, TValue> $cb` — bind
+                // from the key/value of the callback's array-shaped
+                // return, not the whole return type.
+                if let Some(extracted) = Backend::infer_closure_return_type(arg_text, rctx)
+                    .and_then(|ret_type| extract_array_position(&ret_type, position))
+                {
+                    insert_or_union(&mut subs, tpl_name.to_string(), extracted);
                 }
             }
             TemplateBindingMode::CallableParamType(position) => {

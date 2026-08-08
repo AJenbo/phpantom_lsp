@@ -8,7 +8,7 @@ use crate::atom::{Atom, AtomSet, atom};
 use crate::class_lookup::is_self_or_static;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::variable::rhs_resolution::{
-    TemplateBindingMode, classify_template_binding,
+    TemplateBindingMode, classify_template_binding, extract_array_position,
 };
 use crate::types::*;
 
@@ -444,6 +444,33 @@ impl Backend {
                             &mut subs,
                             tpl_name.to_string(),
                             ret_type,
+                        );
+                    }
+                }
+                TemplateBindingMode::CallableReturnArrayPosition(position) => {
+                    // `@param callable(...): array<TKey, TValue> $cb`
+                    // (`mapWithKeys()`, `mapToGroups()`) — bind from the
+                    // key (0) or value (1) of the callback's array-shaped
+                    // return, not the whole return type. A bare `: array`
+                    // annotation carries no key/value information, so
+                    // fall back to the literal array the body returns
+                    // (e.g. `fn ($o): array => ['x' => $o]`).
+                    let extracted = Self::infer_closure_return_type(arg_text, ctx)
+                        .and_then(|ret_type| extract_array_position(&ret_type, position))
+                        .or_else(|| {
+                            let body =
+                                crate::completion::source::helpers::extract_closure_body_expr_text(
+                                    arg_text,
+                                )?;
+                            let resolved =
+                                Self::resolve_closure_body_type(arg_text, body, None, ctx)?;
+                            extract_array_position(&resolved, position)
+                        });
+                    if let Some(extracted) = extracted {
+                        crate::type_engine::variable::rhs_resolution::insert_or_union(
+                            &mut subs,
+                            tpl_name.to_string(),
+                            extracted,
                         );
                     }
                 }

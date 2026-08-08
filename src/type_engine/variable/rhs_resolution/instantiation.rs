@@ -584,6 +584,16 @@ pub(super) fn build_constructor_template_subs(
                     subs.insert(tpl_name.to_string(), ret_type);
                 }
             }
+            TemplateBindingMode::CallableReturnArrayPosition(position) => {
+                // `@param callable(...): array<TKey, TValue> $cb` — bind
+                // from the key/value of the callback's array-shaped
+                // return, not the whole return type.
+                if let Some(extracted) = Backend::infer_closure_return_type(arg_text, rctx)
+                    .and_then(|ret_type| extract_array_position(&ret_type, position))
+                {
+                    subs.insert(tpl_name.to_string(), extracted);
+                }
+            }
             TemplateBindingMode::CallableParamType(position) => {
                 if let Some(param_type) =
                     crate::completion::source::helpers::extract_closure_param_type_from_text(
@@ -692,6 +702,15 @@ pub(crate) enum TemplateBindingMode {
     /// callable's return type.  The binding is resolved by extracting the
     /// return type annotation from the closure/arrow-function argument.
     CallableReturnType,
+    /// `@param callable(...): array<TKey, TValue> $cb` — the template
+    /// param appears at a specific position (0 = key, 1 = value) of the
+    /// callable's array-shaped return type, e.g. `mapWithKeys()`'s
+    /// `callable(TValue, TKey): array<TMapWithKeysKey, TMapWithKeysValue>`.
+    /// The binding is resolved from that position of the callback's
+    /// inferred return type, rather than the whole return type the way
+    /// `CallableReturnType` would (which would bind two distinct template
+    /// params to the same, wrong, whole-array value).
+    CallableReturnArrayPosition(usize),
     /// `@param Closure(T): void $cb` — the template param appears in the
     /// callable's parameter list at the given position (0-based).  The
     /// binding is resolved by extracting the closure's parameter type
@@ -815,10 +834,13 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             TemplateBindingMode::Direct
         }
         TypeKind::Callable(c) => {
-            if let Some(rt) = &c.return_type
-                && type_contains_name(rt, tpl_name)
-            {
-                return TemplateBindingMode::CallableReturnType;
+            if let Some(rt) = &c.return_type {
+                if let Some(position) = array_key_value_position(rt, tpl_name) {
+                    return TemplateBindingMode::CallableReturnArrayPosition(position);
+                }
+                if type_contains_name(rt, tpl_name) {
+                    return TemplateBindingMode::CallableReturnType;
+                }
             }
             for (i, p) in c.params.iter().enumerate() {
                 if type_contains_name(&p.type_hint, tpl_name) {
@@ -835,6 +857,43 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
         }
         _ => TemplateBindingMode::Direct,
     }
+}
+
+/// Extract the key (position 0) or value (position 1) type of an
+/// array-like return type, for [`TemplateBindingMode::CallableReturnArrayPosition`].
+///
+/// Delegates to [`PhpType::iterable_key_type`] / [`PhpType::iterable_element_type`]
+/// rather than [`PhpType::extract_key_type`] / [`PhpType::extract_value_type`]
+/// so an array *literal*'s inferred shape (`array{x: Order}`, from a
+/// closure body like `['x' => $o]`) is destructured the same as an
+/// explicit `array<K, V>` annotation.
+pub(crate) fn extract_array_position(ty: &PhpType, position: usize) -> Option<PhpType> {
+    match position {
+        0 => ty.iterable_key_type(),
+        1 => ty.iterable_element_type(),
+        _ => None,
+    }
+}
+
+/// Whether `ty` is a two-argument `array<K, V>`/`non-empty-array<K, V>`
+/// type with `tpl_name` at position 0 (key) or 1 (value).
+///
+/// Restricted to the exact two-argument form: `list<T>`/`T[]` have no key
+/// slot of their own, so a template param there is a plain array element
+/// (handled by the `ArrayElement`/`GenericWrapper` modes), not this
+/// key/value destructuring.
+fn array_key_value_position(ty: &PhpType, tpl_name: &str) -> Option<usize> {
+    let TypeKind::Generic(g) = ty.kind() else {
+        return None;
+    };
+    let is_array_like = matches!(
+        g.name.to_ascii_lowercase().as_str(),
+        "array" | "non-empty-array"
+    );
+    if !is_array_like || g.args.len() != 2 {
+        return None;
+    }
+    g.args.iter().position(|a| a.is_named(tpl_name))
 }
 
 /// Check whether a [`PhpType`] tree contains a [`TypeKind::Named`] with the

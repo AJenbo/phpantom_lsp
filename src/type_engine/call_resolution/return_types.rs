@@ -1152,6 +1152,16 @@ impl Backend {
                                         crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
                                     }
                                 }
+                                TemplateBindingMode::CallableReturnArrayPosition(position) => {
+                                    // `@param callable(...): array<TKey, TValue> $cb` —
+                                    // bind from the key/value of the callback's
+                                    // array-shaped return, not the whole return type.
+                                    if let Some(extracted) = Backend::infer_closure_return_type(arg_text, ctx)
+                                        .and_then(|ret_type| crate::type_engine::variable::rhs_resolution::extract_array_position(&ret_type, position))
+                                    {
+                                        crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), extracted);
+                                    }
+                                }
                                 TemplateBindingMode::CallableParamType(position) => {
                                     if let Some(param_type) =
                                         crate::completion::source::helpers::extract_closure_param_type_from_text(

@@ -377,6 +377,10 @@ pub fn resolve_class_fully_with_generics(
 
     let mut result = if !base.template_params.is_empty() {
         Arc::new(crate::inheritance::apply_generic_args(&base, generic_args))
+    } else if let Some(rebound) =
+        crate::inheritance::rebind_extends_only_generics(class, class_loader, generic_args)
+    {
+        Arc::new(rebound)
     } else {
         base
     };

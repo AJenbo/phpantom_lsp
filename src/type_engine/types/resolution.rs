@@ -337,9 +337,18 @@ fn resolve_named_type(
                 class_loader,
             );
 
-            // Apply generic substitution if the type hint carried
-            // generic arguments and the class has template parameters.
-            if !generic_args.is_empty() && !cls.template_params.is_empty() {
+            // Apply generic substitution if the type hint carried generic
+            // arguments and the class has template parameters of its own
+            // to substitute, or (a `static<TNewKey, TValue>` rebind on a
+            // concrete collection subclass) fixes a single ancestor's
+            // generics via `@extends` instead.
+            if !generic_args.is_empty()
+                && (!cls.template_params.is_empty()
+                    || crate::inheritance::is_extends_only_generic_rebindable(
+                        &cls,
+                        generic_args.len(),
+                    ))
+            {
                 let generic_arg_strings: Vec<String> =
                     generic_args.iter().map(|a| a.to_string()).collect();
                 // Threaded through the same entry point with or without an

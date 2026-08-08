@@ -524,6 +524,64 @@ pub(crate) fn resolve_class_with_inheritance(
     merged
 }
 
+/// Whether `class` declares no `@template` of its own but fixes exactly
+/// one ancestor's generics via `@extends`, with an arg count matching
+/// `new_arg_count` — the shape [`rebind_extends_only_generics`] needs.
+pub(crate) fn is_extends_only_generic_rebindable(class: &ClassInfo, new_arg_count: usize) -> bool {
+    class.template_params.is_empty()
+        && matches!(class.extends_generics.as_slice(), [(_, args)] if args.len() == new_arg_count)
+}
+
+/// Re-derive `class` with its single `@extends` generic binding replaced
+/// by `new_args`, baking the override into every inherited member the
+/// same way the original binding was baked.
+///
+/// A `static<TNewKey, TValue>` return type rebind (Laravel's
+/// `Collection::keyBy()`/`groupBy()`/`mapWithKeys()` and friends) names
+/// the calling class, but a concrete collection subclass that only fixes
+/// its key/value types through `@extends` (`final class Sub extends
+/// Collection {}` with `@extends Collection<int, Item>`) has no
+/// `@template` of its own for [`apply_generic_args`] to substitute
+/// against. Overriding the `@extends` binding and re-running the parent
+/// chain merge reproduces the same baking the original binding went
+/// through, just with the rebind's args in place of the old ones.
+///
+/// Returns `None` when `class` is not shaped like [`is_extends_only_generic_rebindable`]
+/// describes.
+///
+/// Only base inheritance merge runs (traits + parent chain) — no virtual
+/// member providers, interface merging, or Laravel patches, the same
+/// trade-off [`crate::virtual_members::resolve_class_base_cached`] makes.
+/// This covers a rebind through real declared methods; a macro registered
+/// on the base collection class after the rebind will not be visible on
+/// the result (see `docs/todo/laravel.md`).
+///
+/// `class` may be a raw (unmerged) or already fully-resolved `ClassInfo`
+/// — `extends_generics` passes through inheritance merge unchanged either
+/// way. The merge base always starts from the raw class reloaded through
+/// `class_loader` (the same reload the fully-resolved cache does before
+/// merging), so a merged `class` (whose inherited members already bear
+/// the *old* binding) is never used as the starting point — that would
+/// fold the old members in as if they were the class's own and enrich
+/// them from the parent instead of the override replacing them outright.
+pub(crate) fn rebind_extends_only_generics(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    new_args: &[PhpType],
+) -> Option<ClassInfo> {
+    let [(parent_name, parent_args)] = class.extends_generics.as_slice() else {
+        return None;
+    };
+    if parent_args.len() != new_args.len() {
+        return None;
+    }
+    let fqn = class.fqn();
+    let raw = class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
+    let mut overridden = raw.as_deref().unwrap_or(class).clone();
+    overridden.extends_generics = vec![(*parent_name, new_args.to_vec())];
+    Some(resolve_class_with_inheritance(&overridden, class_loader))
+}
+
 /// Look up a method's return type through the inheritance chain.
 ///
 /// Resolves inheritance for `class`, finds the method named
