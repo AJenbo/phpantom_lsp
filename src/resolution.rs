@@ -438,8 +438,7 @@ impl Backend {
             // differently-cased lookups share one cache entry.
             let stub_uri = format!("phpantom-stub://{}", canonical_name);
             let ver = Some(self.php_version());
-            if let Some(classes) =
-                self.parse_and_cache_content_versioned(stub_content, &stub_uri, ver)
+            if let Some(classes) = self.parse_and_cache_stub(stub_content, &stub_uri, ver)
                 && let Some(cls) = classes
                     .iter()
                     .find(|c| c.name.eq_ignore_ascii_case(last_segment))
@@ -502,7 +501,7 @@ impl Backend {
         if let Some((canonical_name, &content)) = stub_lookup {
             let stub_uri = format!("phpantom-stub://{}", canonical_name);
             let ver = Some(self.php_version());
-            if let Some(classes) = self.parse_and_cache_content_versioned(content, &stub_uri, ver)
+            if let Some(classes) = self.parse_and_cache_stub(content, &stub_uri, ver)
                 && let Some(cls) = classes
                     .iter()
                     .find(|c| c.name.eq_ignore_ascii_case(last_segment))
@@ -574,6 +573,35 @@ impl Backend {
         };
         let content = std::fs::read_to_string(file_path).ok();
         content.and_then(|c| self.parse_and_cache_content(&c, &uri))
+    }
+
+    /// Parse an embedded stub under its `phpantom-stub://` URI, sharing
+    /// the work with any thread that is already parsing the same stub.
+    ///
+    /// Stubs bypass [`parse_and_cache_file`] (they have no on-disk path),
+    /// so they need their own claim on `parse_inflight`.  Without one, two
+    /// workers that both miss the same stub parse it twice, and whichever
+    /// finishes second sees the URI already in `parsed_uris` and takes the
+    /// re-parse branch: it evicts every resolved class that depends on the
+    /// stub's classes, discarding work the other workers had already
+    /// finished.  Which dependants survived then came down to thread
+    /// timing, and the discarded ones were re-resolved later against a
+    /// different cache state, so the same file could report different
+    /// diagnostics from one run to the next.
+    fn parse_and_cache_stub(
+        &self,
+        content: &'static str,
+        uri: &str,
+        php_version: Option<PhpVersion>,
+    ) -> Option<Vec<Arc<ClassInfo>>> {
+        if !self.parse_inflight.try_claim(uri) {
+            return self.wait_for_cached_result(uri);
+        }
+        let _guard = InflightGuard {
+            inflight: &self.parse_inflight,
+            uri: uri.to_owned(),
+        };
+        self.parse_and_cache_content_versioned(content, uri, php_version)
     }
 
     /// Block until another thread finishes parsing a file, then return
