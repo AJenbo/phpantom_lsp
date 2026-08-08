@@ -122,15 +122,28 @@ fn signature_docblock(content: &str) -> Option<(std::ops::Range<usize>, bool)> {
     find_leading_docblock(&masked).map(|range| (range, false))
 }
 
-/// The view name of the layout the template `@extends`.
+/// The view names of the layout the template extends, in the order Blade
+/// would try them.
+///
+/// `@extends` names exactly one layout. `@extendsFirst(['a', 'b'])` names
+/// candidates and renders whichever exists, so the caller decides which of
+/// them it can read.
 ///
 /// A dynamic argument (`@extends($layout)`, or a name interpolated into a
 /// double-quoted string) names no template that can be read, so it yields
 /// nothing rather than a guess.
-pub(crate) fn extract_extends(content: &str) -> Option<String> {
+pub(crate) fn extract_extends(content: &str) -> Vec<String> {
     let masked = mask_inert_regions(content, true);
-    let args = find_directive_args(&masked, "extends")?;
-    leading_string_literal(&content[args])
+    if let Some(args) = find_directive_args(&masked, "extends") {
+        return leading_string_literal(&content[args]).into_iter().collect();
+    }
+    extends_first_candidates(&masked, content).unwrap_or_default()
+}
+
+/// The candidate layout names of an `@extendsFirst` directive.
+fn extends_first_candidates(masked: &str, content: &str) -> Option<Vec<String>> {
+    let args = &content[find_directive_args(masked, "extendsFirst")?];
+    array_string_literals(split_top_level_args(args).into_iter().next()?)
 }
 
 /// The contents of the plain string literal an argument list starts with.
@@ -475,6 +488,69 @@ pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
     None
 }
 
+/// Split a directive's argument text at its top-level commas, ignoring the
+/// ones inside nested calls, arrays, and string literals.
+pub(crate) fn split_top_level_args(args: &str) -> Vec<&str> {
+    let bytes = args.as_bytes();
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut quote: Option<u8> = None;
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        match quote {
+            Some(q) => {
+                if byte == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if byte == q {
+                    quote = None;
+                }
+            }
+            None => match byte {
+                b'\'' | b'"' => quote = Some(byte),
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth -= 1,
+                b',' if depth == 0 => {
+                    parts.push(&args[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    parts.push(&args[start..]);
+    parts
+}
+
+/// The string literals of an array-literal argument, or `None` when the
+/// argument is not one.
+pub(crate) fn array_string_literals(argument: &str) -> Option<Vec<String>> {
+    let inner = argument
+        .trim()
+        .strip_prefix('[')?
+        .strip_suffix(']')
+        .unwrap_or_default();
+    let mut names = Vec::new();
+    for entry in split_top_level_args(inner) {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let literal = leading_string_literal(trimmed)?;
+        // An entry has to be the whole literal to name a view: `'themes.'
+        // . $theme` names one that cannot be read, not `themes.`.
+        if trimmed.len() != literal.len() + 2 {
+            return None;
+        }
+        names.push(literal);
+    }
+    Some(names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -785,41 +861,56 @@ mod tests {
     #[test]
     fn extends_reads_the_layout_name() {
         assert_eq!(
-            extract_extends("@extends('layouts.app')\n@section('body')\n").as_deref(),
-            Some("layouts.app")
+            extract_extends("@extends('layouts.app')\n@section('body')\n"),
+            ["layouts.app"]
         );
         assert_eq!(
-            extract_extends("@extends(\"admin::layouts.app\")\n").as_deref(),
-            Some("admin::layouts.app")
+            extract_extends("@extends(\"admin::layouts.app\")\n"),
+            ["admin::layouts.app"]
         );
         // A second argument (the data array Blade allows) is not the name.
         assert_eq!(
-            extract_extends("@extends('layouts.app', ['title' => 'Hi'])\n").as_deref(),
-            Some("layouts.app")
+            extract_extends("@extends('layouts.app', ['title' => 'Hi'])\n"),
+            ["layouts.app"]
+        );
+    }
+
+    #[test]
+    fn extends_first_reads_every_candidate_layout() {
+        assert_eq!(
+            extract_extends("@extendsFirst(['themes.dark', 'layouts.app'])\n"),
+            ["themes.dark", "layouts.app"]
+        );
+        // The data array Blade allows as a second argument is not a
+        // candidate.
+        assert_eq!(
+            extract_extends("@extendsFirst(['themes.dark', 'layouts.app'], ['title' => 'Hi'])\n"),
+            ["themes.dark", "layouts.app"]
         );
     }
 
     #[test]
     fn a_dynamic_extends_names_no_layout() {
-        assert!(extract_extends("@extends($layout)\n").is_none());
-        assert!(extract_extends("@extends(\"layouts.$theme\")\n").is_none());
-        assert!(extract_extends("@extends(\"layouts.{$theme}\")\n").is_none());
+        assert!(extract_extends("@extends($layout)\n").is_empty());
+        assert!(extract_extends("@extends(\"layouts.$theme\")\n").is_empty());
+        assert!(extract_extends("@extends(\"layouts.{$theme}\")\n").is_empty());
+        assert!(extract_extends("@extendsFirst($candidates)\n").is_empty());
+        assert!(extract_extends("@extendsFirst(['themes.' . $theme])\n").is_empty());
     }
 
     #[test]
     fn an_inert_extends_names_no_layout() {
-        assert!(extract_extends("{{-- @extends('layouts.app') --}}\n").is_none());
-        assert!(extract_extends("@verbatim\n@extends('layouts.app')\n@endverbatim\n").is_none());
-        assert!(extract_extends("@php\n$x = \"@extends('layouts.app')\";\n@endphp\n").is_none());
-        assert!(extract_extends("<p>no directive here</p>\n").is_none());
+        assert!(extract_extends("{{-- @extends('layouts.app') --}}\n").is_empty());
+        assert!(extract_extends("@verbatim\n@extends('layouts.app')\n@endverbatim\n").is_empty());
+        assert!(extract_extends("@php\n$x = \"@extends('layouts.app')\";\n@endphp\n").is_empty());
+        assert!(extract_extends("<p>no directive here</p>\n").is_empty());
     }
 
     #[test]
     fn the_real_extends_wins_over_a_commented_one() {
         assert_eq!(
-            extract_extends("{{-- @extends('layouts.stale') --}}\n@extends('layouts.app')\n")
-                .as_deref(),
-            Some("layouts.app")
+            extract_extends("{{-- @extends('layouts.stale') --}}\n@extends('layouts.app')\n"),
+            ["layouts.app"]
         );
     }
 

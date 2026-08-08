@@ -181,8 +181,8 @@ from the Livewire index.
 
 When the cursor is inside the string argument to `@include`,
 `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`,
-`@extends`, `@each`, or a `view()` function call, offer completions
-from the view index (dot-notation view names).
+`@extends`, `@extendsFirst`, `@each`, or a `view()` function call,
+offer completions from the view index (dot-notation view names).
 
 Detection: look for `@include('`, `@extends('`, or `view('` before
 the cursor and check that the cursor is inside the quotes. The
@@ -385,6 +385,22 @@ rather than a diagnostics one:
   method name alone would be far too broad, so this needs the receiver
   resolved through the forward walker first.
 
+Two more sit lower down the same slope and are cheap by comparison:
+
+- `Response::view('pages.about', [...])`, which Bladestan matches
+  alongside `View::make()`. It is a plain facade static call, so it
+  belongs next to the `View`/`Route` arms in
+  `symbol_map/extraction/expressions/calls.rs` and in
+  `is_view_render_static_call`.
+- `@includeFirst(['custom.header', 'partials.header'])`,
+  `@componentFirst`, and `@extendsFirst`, whose view names sit inside an
+  array literal rather than at an argument position, so
+  `emit_laravel_string_span` records nothing for them.
+  `signature::array_string_literals` already reads that shape for the
+  accepted-name walk and the layout chain; the indexer needs the same,
+  and `ViewCallWalker::matches` needs to pair each candidate with the
+  data argument that follows the array.
+
 ### BL19. Signature covariance diagnostic
 
 `blade_template_contract` (`src/blade/contract.rs`) merges a template's
@@ -399,6 +415,56 @@ subtype comparison. What it needs is a home: the error belongs on the
 child template's own docblock, not on every call site that renders it
 (which is where Bladestan puts it), so it wants a diagnostic pass over
 the Blade file rather than a hook in the call-site collector.
+
+### BL20. Call-site data the checks stand down on
+
+`ResolvedViewCall::complete` is false whenever a call site's data cannot
+be read entry by entry, and the missing and unknown checks then skip the
+site entirely. That is the right default, but two shapes Bladestan still
+checks fall into it today:
+
+- **A data argument that is not a literal.** `view('page', $data)`,
+  `->with($extra)`, `array_merge($a, $b)`, and a method call returning an
+  array all collect nothing, so the site is not just exempt from the
+  missing check: its variables are never type-checked either. Bladestan
+  resolves any expression through `$scope->getType()` and reads a single
+  constant array shape off it, dropping optional keys (`array{user?:
+  User}`) so they stay reportable as missing while the guaranteed keys
+  are still validated. `PhpType::ArrayShape` carries the same
+  information, so this is a matter of running the data argument through
+  `resolve_expression_type` and reading the entries off the result when
+  it resolves to one shape. An `Arrayable` receiver resolves through its
+  `toArray()` return type the same way.
+- **The types a scope-forwarded `@include` inherits.** `blade_rendering_scope`
+  answers with names only, so a variable the surrounding template already
+  holds satisfies the partial's contract whatever its type. Bladestan
+  type-checks it against the signature and reports "but %s given by the
+  surrounding scope". Getting there means the rendering scope carrying
+  types rather than a `HashSet<String>`, which the forward walker can
+  answer for the template's virtual PHP at the include's offset.
+
+### BL21. `@each` item and key variables
+
+`@each('partials.row', $rows, 'row')` renders `partials.row` once per
+entry with `$row` bound to the entry and `$key` to its key, and nothing
+else in scope. The preprocessor compiles it to `blade_view_directive`
+with the collection as the data argument, so `collect_from_data_expr`
+reads a collection where it expects a data array, finds no literal
+entries, and marks the site incomplete. Two consequences:
+
+- `partials/row.blade.php` never learns about `$row` from its `@each`
+  call sites, so an unannotated partial rendered only that way gets no
+  completion or hover for the variable it exists to display.
+- an `@each` site is never validated against the partial's contract,
+  because it is permanently incomplete.
+
+Bladestan's `getEachVariables` derives both names from the call: `$key`
+from the collection's key type, and the item under the name the third
+argument spells, falling back to `mixed` when the collection's type is
+not a constant array. Our foreach machinery already answers "what is one
+entry of this expression", so the same derivation belongs in
+`collect_data_argument` as an `@each`-shaped special case, keyed off the
+directive rather than off `blade_view_directive` generally.
 
 ---
 
@@ -702,13 +768,13 @@ Implement go-to-definition for view names and component tags.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file.
 
-### Step 9: Template contracts (BL10, BL11, BL18, BL19)
+### Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)
 
 Call-site validation is shipped. What is left widens it (BL18 for the
 render sites nothing indexes a view name for, BL19 for the covariance
-the merge does not check) and is independent of section/stack
-intelligence and custom directive discovery, so the four can land in
-any order.
+the merge does not check, BL20 for the data shapes the checks stand down
+on, BL21 for `@each`) and is independent of section/stack intelligence
+and custom directive discovery, so the six can land in any order.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
 gets typed completion for its declared variables at every render site,

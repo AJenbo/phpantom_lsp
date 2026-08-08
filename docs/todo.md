@@ -26,7 +26,9 @@ within the same impact tier.
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | BL19 | [Signature covariance diagnostic](todo/blade.md#bl19-signature-covariance-diagnostic)                                                                         | Low-Medium  | Low         |
+| BL21 | [`@each` item and key variables](todo/blade.md#bl21-each-item-and-key-variables)                                                                              | Medium      | Low-Medium  |
 | BL18 | [Mailable and view-method render sites](todo/blade.md#bl18-mailable-and-view-method-render-sites)                                                             | Medium      | Medium      |
+| BL20 | [Call-site data the checks stand down on](todo/blade.md#bl20-call-site-data-the-checks-stand-down-on)                                                         | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
@@ -107,6 +109,8 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
+| B2  | [A layout's contract is enforced without the layout's own suppliers](todo/bugs.md#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers)                       | Medium-High | Low-Medium  |
+| B3  | [A component's render scope over-supplies and hides missing variables](todo/bugs.md#b3-a-components-render-scope-over-supplies-and-hides-missing-variables)                   | Low-Medium  | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

@@ -37,6 +37,7 @@ pub fn match_directive(s: &str) -> Option<&'static str> {
         "json",
         "dump",
         "extends",
+        "extendsFirst",
         "section",
         "endsection",
         "yield",
@@ -51,7 +52,9 @@ pub fn match_directive(s: &str) -> Option<&'static str> {
         "prepend",
         "endprepend",
         "component",
+        "componentFirst",
         "endcomponent",
+        "endcomponentFirst",
         "slot",
         "endslot",
         "props",
@@ -139,13 +142,15 @@ pub fn translate_directive(directive: &str) -> String {
         "empty" => "if(empty".to_string(),
         "break" => "break;".to_string(),
         "default" => "default:".to_string(),
-        "extends" | "include" | "includeIf" | "includeWhen" | "includeUnless" | "includeFirst"
-        | "component" | "each" => "blade_view_directive".to_string(),
+        "extends" | "extendsFirst" | "include" | "includeIf" | "includeWhen" | "includeUnless"
+        | "includeFirst" | "component" | "componentFirst" | "each" => {
+            "blade_view_directive".to_string()
+        }
         "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" | "class"
         | "style" | "checked" | "selected" | "disabled" | "readonly" | "required" | "stack"
         | "json" | "dump" => "blade_directive".to_string(),
-        "endsection" | "endpush" | "endprepend" | "endcomponent" | "endslot" | "stop" | "show"
-        | "append" | "overwrite" => "".to_string(),
+        "endsection" | "endpush" | "endprepend" | "endcomponent" | "endcomponentFirst"
+        | "endslot" | "stop" | "show" | "append" | "overwrite" => "".to_string(),
         _ => format!("/* @{directive} */"),
     }
 }

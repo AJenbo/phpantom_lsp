@@ -44,22 +44,35 @@ pub(crate) fn is_framework_var(name: &str) -> bool {
     AMBIENT_VARS.contains(&name)
 }
 
+/// Whether a directive's view argument is one name or a list of
+/// candidates, of which Blade renders the first that exists.
+#[derive(Clone, Copy, PartialEq)]
+enum ViewArg {
+    Name,
+    Candidates,
+}
+
 /// The directives that render another view from the calling template's own
-/// data, paired with the argument index the view name sits at.
+/// data, paired with the argument index the view name sits at and the shape
+/// that argument takes.
 ///
 /// `@extends` is included: Laravel compiles it into a render of the layout
 /// with the child's data, so the layout's declarations are the child's to
-/// satisfy.
-const RENDER_DIRECTIVES: [(&str, usize); 9] = [
-    ("extends", 0),
-    ("include", 0),
-    ("includeIf", 0),
-    ("includeIsolated", 0),
-    ("includeFirst", 0),
-    ("includeWhen", 1),
-    ("includeUnless", 1),
-    ("component", 0),
-    ("each", 0),
+/// satisfy. Only one of a `…First` directive's candidates is rendered, but
+/// which one depends on what exists on disk, so every one of them is
+/// reachable and all are collected.
+const RENDER_DIRECTIVES: [(&str, usize, ViewArg); 11] = [
+    ("extends", 0, ViewArg::Name),
+    ("extendsFirst", 0, ViewArg::Candidates),
+    ("include", 0, ViewArg::Name),
+    ("includeIf", 0, ViewArg::Name),
+    ("includeIsolated", 0, ViewArg::Name),
+    ("includeFirst", 0, ViewArg::Candidates),
+    ("includeWhen", 1, ViewArg::Name),
+    ("includeUnless", 1, ViewArg::Name),
+    ("component", 0, ViewArg::Name),
+    ("componentFirst", 0, ViewArg::Candidates),
+    ("each", 0, ViewArg::Name),
 ];
 
 /// What a template promises its callers.
@@ -108,7 +121,7 @@ impl Backend {
         let declarations = signature::declarations(&source);
         // Reading the layout chain means reading files, so skip it for the
         // templates that can contribute nothing either way.
-        if declarations.is_empty() && signature::extract_extends(&source).is_none() {
+        if declarations.is_empty() && signature::extract_extends(&source).is_empty() {
             return None;
         }
 
@@ -331,10 +344,12 @@ fn rendered_view_names(content: &str) -> RenderedViews {
             continue;
         }
         let rest = &masked[at + 1..];
-        let Some(&(directive, index)) = RENDER_DIRECTIVES.iter().find(|(directive, _)| {
-            rest.strip_prefix(directive)
-                .is_some_and(|after| !after.starts_with(|ch: char| ch.is_alphanumeric()))
-        }) else {
+        let Some(&(directive, index, shape)) =
+            RENDER_DIRECTIVES.iter().find(|(directive, _, _)| {
+                rest.strip_prefix(directive)
+                    .is_some_and(|after| !after.starts_with(|ch: char| ch.is_alphanumeric()))
+            })
+        else {
             continue;
         };
         let mut open = at + 1 + directive.len();
@@ -351,16 +366,15 @@ fn rendered_view_names(content: &str) -> RenderedViews {
         };
         i = end;
         let args = &content[open + 1..end];
-        let Some(argument) = split_top_level_args(args).into_iter().nth(index) else {
+        let Some(argument) = signature::split_top_level_args(args).into_iter().nth(index) else {
             closed = false;
             continue;
         };
-        // `@includeFirst` takes a list of candidates and renders the first
-        // that exists, so every entry is reachable.
-        let literals = if directive == "includeFirst" {
-            array_string_literals(argument)
-        } else {
-            signature::leading_string_literal(argument).map(|name| vec![name])
+        // A `…First` directive takes a list of candidates and renders the
+        // first that exists, so every entry is reachable.
+        let literals = match shape {
+            ViewArg::Candidates => signature::array_string_literals(argument),
+            ViewArg::Name => signature::leading_string_literal(argument).map(|name| vec![name]),
         };
         match literals {
             Some(found) => names.extend(found),
@@ -369,62 +383,6 @@ fn rendered_view_names(content: &str) -> RenderedViews {
     }
 
     RenderedViews { names, closed }
-}
-
-/// Split a directive's argument text at its top-level commas, ignoring the
-/// ones inside nested calls, arrays, and string literals.
-fn split_top_level_args(args: &str) -> Vec<&str> {
-    let bytes = args.as_bytes();
-    let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut quote: Option<u8> = None;
-    let mut start = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        match quote {
-            Some(q) => {
-                if byte == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if byte == q {
-                    quote = None;
-                }
-            }
-            None => match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' => depth -= 1,
-                b',' if depth == 0 => {
-                    parts.push(&args[start..i]);
-                    start = i + 1;
-                }
-                _ => {}
-            },
-        }
-        i += 1;
-    }
-    parts.push(&args[start..]);
-    parts
-}
-
-/// The string literals of an array-literal argument, or `None` when the
-/// argument is not one.
-fn array_string_literals(argument: &str) -> Option<Vec<String>> {
-    let inner = argument
-        .trim()
-        .strip_prefix('[')?
-        .strip_suffix(']')
-        .unwrap_or_default();
-    let mut names = Vec::new();
-    for entry in split_top_level_args(inner) {
-        if entry.trim().is_empty() {
-            continue;
-        }
-        names.push(signature::leading_string_literal(entry)?);
-    }
-    Some(names)
 }
 
 /// Add every `$name` the source mentions to `names`.
@@ -481,6 +439,25 @@ mod tests {
         let (names, closed) = rendered("@includeFirst(['custom.header', 'partials.header'])\n");
         assert_eq!(names, vec!["custom.header", "partials.header"]);
         assert!(closed);
+    }
+
+    #[test]
+    fn the_first_family_names_every_candidate_layout_and_component() {
+        let (names, closed) = rendered(
+            "@extendsFirst(['themes.dark', 'layouts.app'])\n@componentFirst(['custom.alert', 'alert'], ['level' => 'warn'])\n",
+        );
+        assert_eq!(
+            names,
+            vec!["themes.dark", "layouts.app", "custom.alert", "alert"]
+        );
+        assert!(closed);
+    }
+
+    #[test]
+    fn a_dynamic_candidate_list_leaves_the_walk_open() {
+        let (names, closed) = rendered("@extendsFirst($candidates)\n");
+        assert!(names.is_empty(), "{names:?}");
+        assert!(!closed);
     }
 
     #[test]

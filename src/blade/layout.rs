@@ -39,8 +39,12 @@ impl Backend {
         vars
     }
 
-    /// The layouts above a template, nearest first: each `@extends`
-    /// target's view name and source.
+    /// The layouts above a template, nearest first: each extended layout's
+    /// view name and source.
+    ///
+    /// `@extendsFirst` offers several candidates and Blade renders the
+    /// first that exists, so the walk follows the first one a view root
+    /// actually holds.
     ///
     /// The walk stops at a name the view index does not know, at a file
     /// that cannot be read, and at the first name it has already seen, so
@@ -49,13 +53,13 @@ impl Backend {
     pub(crate) fn blade_layout_chain(&self, content: &str) -> Vec<(String, String)> {
         let mut chain: Vec<(String, String)> = Vec::new();
         let mut next = super::signature::extract_extends(content);
-        while let Some(name) = next {
+        while let Some((name, source)) = next.into_iter().find_map(|name| {
+            let source = self.blade_view_source(&name)?;
+            Some((name, source))
+        }) {
             if chain.iter().any(|(seen, _)| seen == &name) {
                 break;
             }
-            let Some(source) = self.blade_view_source(&name) else {
-                break;
-            };
             next = super::signature::extract_extends(&source);
             chain.push((name, source));
         }

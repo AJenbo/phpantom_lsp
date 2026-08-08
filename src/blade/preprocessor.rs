@@ -469,6 +469,7 @@ pub fn preprocess_with_vars(
                         } else if matches!(
                             directive,
                             "extends"
+                                | "extendsFirst"
                                 | "section"
                                 | "yield"
                                 | "include"
@@ -479,6 +480,7 @@ pub fn preprocess_with_vars(
                                 | "push"
                                 | "prepend"
                                 | "component"
+                                | "componentFirst"
                                 | "slot"
                                 | "props"
                                 | "aware"
@@ -521,6 +523,7 @@ pub fn preprocess_with_vars(
                                 | "endpush"
                                 | "endprepend"
                                 | "endcomponent"
+                                | "endcomponentFirst"
                                 | "endslot"
                                 | "stop"
                                 | "show"

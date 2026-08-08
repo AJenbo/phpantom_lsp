@@ -522,20 +522,23 @@ impl Backend {
         if frontier.is_empty() {
             return;
         }
-        let mut pending: Vec<(String, Arc<String>, String)> = self
+        let mut pending: Vec<(String, Arc<String>, Vec<String>)> = self
             .blade_caller_snapshot()
             .into_iter()
             .filter(|(uri, _)| uri != layout_uri)
             .filter_map(|(uri, content)| {
-                let extends = crate::blade::signature::extract_extends(&content)?;
-                Some((uri, content, extends))
+                let extends = crate::blade::signature::extract_extends(&content);
+                (!extends.is_empty()).then_some((uri, content, extends))
             })
             .collect();
 
         while !frontier.is_empty() && !pending.is_empty() {
-            let (children, rest): (Vec<_>, Vec<_>) = pending
-                .into_iter()
-                .partition(|(_, _, extends)| frontier.iter().any(|name| name == extends));
+            let (children, rest): (Vec<_>, Vec<_>) =
+                pending.into_iter().partition(|(_, _, extends)| {
+                    extends
+                        .iter()
+                        .any(|extends| frontier.iter().any(|name| name == extends))
+                });
             pending = rest;
             frontier = Vec::new();
             for (uri, content, _) in children {

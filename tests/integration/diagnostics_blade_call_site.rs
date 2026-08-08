@@ -441,4 +441,67 @@ mod tests {
             call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
         assert!(diags.is_empty(), "expected no report, got {diags:?}");
     }
+
+    /// `@extendsFirst` picks the first candidate layout that exists, and
+    /// that layout renders from the child's data exactly as `@extends`
+    /// would, so what it declares the caller has to supply.
+    #[tokio::test]
+    async fn a_layout_chosen_with_extends_first_is_part_of_the_childs_contract() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/layouts/app.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $siteName\n */\n@endphp\n<title>{{ $siteName }}</title>\n@yield('body')\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@extendsFirst(['themes.dark', 'layouts.app'])\n@php\n/**\n * @bladestan-signature\n * @var string $title\n */\n@endphp\n@section('body'){{ $title }}@endsection\n",
+            ),
+            (
+                "app/PageController.php",
+                "<?php\nnamespace App;\nclass PageController {\n    public function show(): mixed {\n        return view('page', ['title' => 'Hi']);\n    }\n}\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$siteName"),
+            "message should name the layout's variable, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// Blade renders whichever candidate exists, so a variable *any* of
+    /// them reads is one the call site may pass. The walk still closes
+    /// over the candidates it could read, so a name none of them mentions
+    /// is reported.
+    #[tokio::test]
+    async fn a_variable_a_candidate_layout_reads_is_accepted() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/themes/dark.blade.php",
+                "<title>{{ $siteName }}</title>\n@yield('body')\n",
+            ),
+            (
+                "resources/views/layouts/app.blade.php",
+                "<h1>{{ $brand }}</h1>\n@yield('body')\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@extendsFirst(['themes.dark', 'layouts.app'])\n@php\n/**\n * @bladestan-signature\n * @var string $title\n */\n@endphp\n@section('body'){{ $title }}@endsection\n",
+            ),
+            (
+                "app/PageController.php",
+                "<?php\nnamespace App;\nclass PageController {\n    public function show(): mixed {\n        return view('page', ['title' => 'Hi', 'siteName' => 'Acme', 'brand' => 'Acme', 'nope' => 1]);\n    }\n}\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "unknown_view_variable");
+        assert!(
+            diags[0].1.contains("$nope"),
+            "only the name no candidate reads is unknown, got {:?}",
+            diags[0].1
+        );
+    }
 }
