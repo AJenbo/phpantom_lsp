@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786231300416,
+  "lastUpdate": 1786231472625,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16591,6 +16591,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "185585ab3387204b123808eb38be54f140c44266",
+          "message": "String concatenation can be rewritten as an interpolated string",
+          "timestamp": "2026-08-09T01:09:22+02:00",
+          "tree_id": "4b2c47d9aba1d76b8ea9ba8bf40b9652a9d9a218",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/185585ab3387204b123808eb38be54f140c44266"
+        },
+        "date": 1786231468214,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.2,
             "unit": "MiB"
           }
         ]
