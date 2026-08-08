@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B65. A <code>@var</code> whose type is a closure signature binds the wrong variable
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B65. A <code>@var</code> whose type is a closure signature binds the wrong variable
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,22 +1274,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable">B65. A <code>@var</code> whose type is a closure signature binds the wrong variable<a class="headerlink" href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p>A closure type writes <code>$</code>-prefixed names for its own parameters, and the
-<code>@var</code> scan takes the first <code>$</code> it finds after the tag as the annotated
-variable:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var \Closure(\App\Models\User $user): string $callback */</span>
-</code></pre></div>
-<p>is read as declaring <code>$user</code> of type <code>\Closure(\App\Models\User</code>, so
-<code>$callback</code> stays untyped and a bogus <code>$user</code> enters the scope. The same
-shape appears in <code>@param</code> and in a Blade template's signature docblock,
-where it also decides which names the contract declares.</p>
-<p><strong>Where to look:</strong> <code>parse_var_docblock_pairs</code> in
-<code>type_engine/variable/forward_walk/assignment.rs</code> scans for the first
-<code>$</code> after <code>@var</code>. The annotated variable is the <code>$name</code> at paren depth 0
-and angle depth 0, so the scan has to track both while walking the type
-rather than stopping at the first <code>$</code>.</p>
 
 
 
