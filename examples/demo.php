@@ -1035,6 +1035,13 @@ class ClosureReturnTemplateDemo
         $cache->remember('static-marker', static function () {
             return new Marker('cached');
         })->highlight();                                                // static block-closure → Marker
+
+        // A body that is a *call* binds the template from the call's return
+        // type, the same way a `new` expression or a literal body does.
+        $cache->remember('made', fn() => Pen::make('blue'))->write();   // static call → Pen
+        $marker = new Marker('yellow');
+        $cache->remember('renamed', fn() => $marker->rename('bold'))
+            ->highlight();                                              // method call → Marker
     }
 }
 
@@ -6972,6 +6979,11 @@ function runDemoAssertions(): void
         return new Marker('cached');
     });
     assert($staticMarker instanceof Marker, 'remember(static function () { return new Marker(); }) must return Marker (T from static closure body)');
+    $madePen = $cache->remember('made', fn() => Pen::make('blue'));
+    assert($madePen instanceof Pen, 'remember(fn() => Pen::make(...)) must return Pen (T from a static-call body)');
+    $renamedMarker = new Marker('yellow');
+    $cachedRenamed = $cache->remember('renamed', fn() => $renamedMarker->rename('bold'));
+    assert($cachedRenamed instanceof Marker, 'remember(fn() => $marker->rename(...)) must return Marker (T from a method-call body)');
 
     // ── ScaffoldingEventBus::listen() — closure param type binding ──────
     $bus = new ScaffoldingEventBus();

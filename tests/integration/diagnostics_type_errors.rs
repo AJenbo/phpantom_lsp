@@ -7025,6 +7025,8 @@ takesResults([1, 2]);
 const REKEYING_COLLECTION: &str = r#"<?php
 class Item {
     public string $slug = '';
+
+    public function getSlug(): string { return $this->slug; }
 }
 
 /**
@@ -7113,6 +7115,23 @@ fn keyby_with_unannotated_callback_binds_the_key_from_the_body() {
     }
 }
 
+/// A body that is a *call* has to bind the template from the callee's return
+/// type, just like a body that is a property read or a literal.
+#[test]
+fn keyby_with_unannotated_call_body_binds_the_key_from_the_return_type() {
+    for callback in [
+        "fn (Item $i) => $i->getSlug()",
+        "function (Item $i) { return $i->getSlug(); }",
+    ] {
+        for chained in [false, true] {
+            assert!(
+                rekeyed_lookup_message(callback, chained).contains("expects string|null"),
+                "callback={callback} chained={chained}"
+            );
+        }
+    }
+}
+
 // ─── A standalone `@var` docblock narrows a non-Expression statement ───────
 
 /// A generic collection with a `get()` whose parameter type comes from the
@@ -7158,4 +7177,57 @@ fn standalone_var_docblock_narrows_echo_statement() {
         msgs.iter().any(|m| m.contains("expects string|null")),
         "expected TKey to narrow to string, got {msgs:?}"
     );
+}
+
+// ─── A union parameter hint binds through the alternative that matches ──────
+
+/// `Collection::wrap()`'s shape: the argument is either the element itself or
+/// a container of elements, so the template binds one level deeper for a
+/// container argument and directly for a scalar one.
+const UNION_WRAP_COLLECTION: &str = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Wrapper
+{
+    /**
+     * @template TWrapValue
+     *
+     * @param  iterable<array-key, TWrapValue>|TWrapValue  $value
+     * @return static<array-key, TWrapValue>
+     */
+    public static function wrap($value) {}
+
+    /** @param TValue $value */
+    public function push($value) {}
+}
+
+/** @return array<string> */
+function names(): array { return []; }
+"#;
+
+/// Report the type error `push()` raises for `Wrapper::wrap($arg)`, which
+/// spells out what `TWrapValue` bound to.
+fn wrapped_push_message(arg: &str) -> String {
+    let php = format!("{UNION_WRAP_COLLECTION}\n$w = Wrapper::wrap({arg});\n$w->push([1]);\n");
+    let messages = type_error_messages(&collect(&php));
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected exactly one type error for `{arg}`, got {messages:?}"
+    );
+    messages.into_iter().next().unwrap()
+}
+
+#[test]
+fn a_container_argument_binds_the_template_through_the_iterable_alternative() {
+    assert!(wrapped_push_message("names()").contains("expects string"));
+}
+
+/// The bare `TWrapValue` alternative matches anything, so it must still win
+/// when the argument is not a container.
+#[test]
+fn a_scalar_argument_binds_the_template_through_the_bare_alternative() {
+    assert!(wrapped_push_message("'solo'").contains("expects string"));
 }

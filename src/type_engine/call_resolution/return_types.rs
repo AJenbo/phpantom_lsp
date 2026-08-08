@@ -1643,6 +1643,27 @@ pub(super) fn resolve_expression_to_type(text: &str, ctx: &ResolutionCtx<'_>) ->
     Some(crate::types::ResolvedType::types_joined(&results))
 }
 
+/// Resolve a call expression to the return type the shared call-resolution
+/// path computes for it, whether or not that type is backed by a class.
+///
+/// [`resolve_expression_to_type`] reports only class-backed results, so a
+/// call returning a scalar or an array shape (`getRating(): int`) comes
+/// back empty even though the call resolved fine. This reads the same
+/// path's return-type hint, which already has class-level and method-level
+/// template substitution applied.
+///
+/// Returns `None` when the text is not a call expression, or when the call
+/// resolves to no return type at all.
+pub(super) fn resolve_call_return_hint(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let expr = SubjectExpr::parse(text);
+    let SubjectExpr::CallExpr { callee, args_text } = &expr else {
+        return None;
+    };
+    let mut hint = None;
+    Backend::resolve_call_return_types_on_receiver(callee, args_text, None, ctx, Some(&mut hint));
+    hint
+}
+
 /// Resolve a method chain by looking up the *declared* return type of the
 /// last method call, rather than flattening the whole chain to a bare class
 /// name.
