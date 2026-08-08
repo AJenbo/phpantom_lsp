@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B56. Attributes passed to an anonymous component are undefined unless <code>@props</code> lists them
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1317,17 +1306,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B56. Attributes passed to an anonymous component are undefined unless <code>@props</code> lists them
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1368,37 +1346,12 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them">B56. Attributes passed to an anonymous component are undefined unless <code>@props</code> lists them<a class="headerlink" href="#b56-attributes-passed-to-an-anonymous-component-are-undefined-unless-props-lists-them" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
-<p><code>Illuminate\View\AnonymousComponent::data()</code> merges
-<code>$this-&gt;attributes-&gt;getAttributes()</code> into the view data, so <em>every</em>
-attribute written on an <code>&lt;x-…&gt;</code> tag becomes a variable inside the
-template — <code>@props</code> only adds defaults and removes the key from
-<code>$attributes</code>. PHPantom only creates the variable when <code>@props</code> names
-it, so a component that reads an attribute directly is reported
-<code>unknown_variable</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>{{-- caller --}}
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>&lt;x-brand.boxes :hairAnalysis=&quot;$model-&gt;hairAnalysis&quot; /&gt;
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>{{-- components/brand/boxes.blade.php, no @props --}}
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>&lt;x-promo-box :href=&quot;$hairAnalysis&quot; /&gt;   {{-- &quot;Undefined variable &#39;$hairAnalysis&#39;&quot; --}}
-</code></pre></div>
-<p>Adding <code>@props(['hairAnalysis'])</code> silences it, which is the tell: the
-call-site attributes are already parsed, they just are not turned into
-variables unless the directive declares them.</p>
-<p><strong>Where to look:</strong> the declaration chain in <code>src/blade/signature.rs</code>
-needs a source below <code>@props</code>: the union of the attributes each <code>&lt;x-…&gt;</code>
-call site passes, the way template variables are already inferred from
-<code>view()</code> call sites. <code>call_site_inference.rs</code> skips Blade files
-entirely, so component tags are never read as call sites — that is the
-gap. The two sources should merge, with <code>@props</code> winning per name rather
-than gating the other.</p>
 <h4 id="b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable">B65. A <code>@var</code> whose type is a closure signature binds the wrong variable<a class="headerlink" href="#b65-a-var-whose-type-is-a-closure-signature-binds-the-wrong-variable" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>
 <p>A closure type writes <code>$</code>-prefixed names for its own parameters, and the
 <code>@var</code> scan takes the first <code>$</code> it finds after the tag as the annotated
 variable:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var \Closure(\App\Models\User $user): string $callback */</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var \Closure(\App\Models\User $user): string $callback */</span>
 </code></pre></div>
 <p>is read as declaring <code>$user</code> of type <code>\Closure(\App\Models\User</code>, so
 <code>$callback</code> stays untyped and a bogus <code>$user</code> enters the scope. The same
