@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,48 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. A layout's contract is enforced without the layout's own suppliers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b3-a-components-render-scope-over-supplies-and-hides-missing-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. A component's render scope over-supplies and hides missing variables
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1293,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1309,36 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. A layout's contract is enforced without the layout's own suppliers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b3-a-components-render-scope-over-supplies-and-hides-missing-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. A component's render scope over-supplies and hides missing variables
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1274,7 +1368,56 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>No outstanding items.</p>
+<h3 id="b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers">B2. A layout's contract is enforced without the layout's own suppliers<a class="headerlink" href="#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers" title="Permanent link">&para;</a></h3>
+<p><code>blade_template_contract</code> (<code>src/blade/contract.rs</code>) merges the layouts a
+template <code>@extends</code> into the contract call sites are judged against, so a
+variable only <code>layouts/app.blade.php</code> declares is one every caller of
+<code>pages.home</code> has to pass. The <code>supplied</code> set that exempts a variable from
+the missing check is built from the <em>child</em> alone:
+<code>declares_component_directive</code>, <code>extract_props</code>, <code>extract_aware</code>,
+<code>blade_backing_class_vars</code>, and <code>blade_provider_vars</code> all run against the
+child's source and the child's view names.</p>
+<p>A view composer is normally registered on the template that reads the
+variable, which is the layout. <code>View::composer('layouts.app', …)</code> sharing
+<code>$title</code> types the layout's <code>$title</code> correctly, because
+<code>blade_provider_vars</code> matches the registered pattern against
+<code>layouts.app</code>, but nothing matches it against <code>pages.home</code>, so every page
+extending that layout reports "View 'pages.home' expects $title of type
+string, which is not passed" at every one of its call sites. Nothing the
+caller can write clears it. The same hole drops a layout's own <code>@props</code>
+defaults and, for a layout that is itself a component, its backing class
+members.</p>
+<p>Fix: build <code>supplied</code> over the whole chain the way <code>vars</code> already is. For
+each level the layout walk yields, add that template's props and aware
+defaults, its component scope, its backing class members, and its
+provider vars. <code>blade_layout_chain</code> returns the view name alongside the
+source, so the names each level needs are already in hand.
+<code>blade_rendering_scope</code> has the same shape and needs the same fix.</p>
+<h3 id="b3-a-components-render-scope-over-supplies-and-hides-missing-variables">B3. A component's render scope over-supplies and hides missing variables<a class="headerlink" href="#b3-a-components-render-scope-over-supplies-and-hides-missing-variables" title="Permanent link">&para;</a></h3>
+<p><code>component_render_scope_names</code> (<code>src/blade/backing_class.rs</code>) answers
+"what does the class enclosing this <code>view()</code> call put in the rendered
+template's scope", and the call-site missing check treats every name it
+returns as supplied. It collects every public non-static property and
+every public non-static method of the fully resolved class and stops
+there. Its sibling <code>class_member_vars</code>, which feeds the same members into
+the template's own prologue, filters three things it does not: members
+declared on the framework base class, <code>__</code>-prefixed names, and methods
+that require an argument. It also gates methods behind <code>include_methods</code>,
+false for Livewire, because a Livewire public method is an action rather
+than view data.</p>
+<p>So a <code>view()</code> call inside a Blade component treats <code>data</code>, <code>render</code>,
+<code>withAttributes</code>, <code>shouldRender</code>, and the rest of
+<code>Illuminate\View\Component</code>'s public surface as supplied, and one inside a
+Livewire component treats every action the component defines as supplied.
+A template declaring <code>@var array $data</code> is then never reported as missing
+it. Bladestan's <code>ClassPropertiesResolver</code> reads public properties only
+(plus <code>slot</code> for a component and the instance variables for Livewire), so
+it has no such hole.</p>
+<p>Fix: take the names from <code>class_member_vars</code>, which already computes
+exactly this member set under the right rules, rather than walking the
+resolved members a second time under different ones. One member list, one
+set of rules, so the prologue and the diagnostic cannot disagree about
+what a component hands its view.</p>
 
 
 

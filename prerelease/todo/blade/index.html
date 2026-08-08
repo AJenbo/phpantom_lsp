@@ -1167,6 +1167,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#bl20-call-site-data-the-checks-stand-down-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL20. Call-site data the checks stand down on
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bl21-each-item-and-key-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL21. <code>@each</code> item and key variables
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1408,10 +1430,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL18, BL19)
+        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)
       </span>
     </span>
   </a>
@@ -2345,6 +2367,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#bl20-call-site-data-the-checks-stand-down-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL20. Call-site data the checks stand down on
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bl21-each-item-and-key-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL21. <code>@each</code> item and key variables
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2586,10 +2630,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL18, BL19)
+        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)
       </span>
     </span>
   </a>
@@ -2834,8 +2878,8 @@ from the Livewire index.</p>
 <h4 id="bl4c-include-and-extends-view-name-completion">BL4c. <code>@include('</code> and <code>@extends('</code> view name completion<a class="headerlink" href="#bl4c-include-and-extends-view-name-completion" title="Permanent link">&para;</a></h4>
 <p>When the cursor is inside the string argument to <code>@include</code>,
 <code>@includeIf</code>, <code>@includeWhen</code>, <code>@includeUnless</code>, <code>@includeFirst</code>,
-<code>@extends</code>, <code>@each</code>, or a <code>view()</code> function call, offer completions
-from the view index (dot-notation view names).</p>
+<code>@extends</code>, <code>@extendsFirst</code>, <code>@each</code>, or a <code>view()</code> function call,
+offer completions from the view index (dot-notation view names).</p>
 <p>Detection: look for <code>@include('</code>, <code>@extends('</code>, or <code>view('</code> before
 the cursor and check that the cursor is inside the quotes. The
 trigger characters <code>'</code> and <code>"</code> are already registered.</p>
@@ -3000,6 +3044,22 @@ rather than a diagnostics one:</p>
   method name alone would be far too broad, so this needs the receiver
   resolved through the forward walker first.</li>
 </ul>
+<p>Two more sit lower down the same slope and are cheap by comparison:</p>
+<ul>
+<li><code>Response::view('pages.about', [...])</code>, which Bladestan matches
+  alongside <code>View::make()</code>. It is a plain facade static call, so it
+  belongs next to the <code>View</code>/<code>Route</code> arms in
+  <code>symbol_map/extraction/expressions/calls.rs</code> and in
+  <code>is_view_render_static_call</code>.</li>
+<li><code>@includeFirst(['custom.header', 'partials.header'])</code>,
+  <code>@componentFirst</code>, and <code>@extendsFirst</code>, whose view names sit inside an
+  array literal rather than at an argument position, so
+  <code>emit_laravel_string_span</code> records nothing for them.
+  <code>signature::array_string_literals</code> already reads that shape for the
+  accepted-name walk and the layout chain; the indexer needs the same,
+  and <code>ViewCallWalker::matches</code> needs to pair each candidate with the
+  data argument that follows the array.</li>
+</ul>
 <h3 id="bl19-signature-covariance-diagnostic">BL19. Signature covariance diagnostic<a class="headerlink" href="#bl19-signature-covariance-diagnostic" title="Permanent link">&para;</a></h3>
 <p><code>blade_template_contract</code> (<code>src/blade/contract.rs</code>) merges a template's
 signature with the layouts it <code>@extends</code>, nearest declaration winning,
@@ -3012,6 +3072,53 @@ subtype comparison. What it needs is a home: the error belongs on the
 child template's own docblock, not on every call site that renders it
 (which is where Bladestan puts it), so it wants a diagnostic pass over
 the Blade file rather than a hook in the call-site collector.</p>
+<h3 id="bl20-call-site-data-the-checks-stand-down-on">BL20. Call-site data the checks stand down on<a class="headerlink" href="#bl20-call-site-data-the-checks-stand-down-on" title="Permanent link">&para;</a></h3>
+<p><code>ResolvedViewCall::complete</code> is false whenever a call site's data cannot
+be read entry by entry, and the missing and unknown checks then skip the
+site entirely. That is the right default, but two shapes Bladestan still
+checks fall into it today:</p>
+<ul>
+<li><strong>A data argument that is not a literal.</strong> <code>view('page', $data)</code>,
+  <code>-&gt;with($extra)</code>, <code>array_merge($a, $b)</code>, and a method call returning an
+  array all collect nothing, so the site is not just exempt from the
+  missing check: its variables are never type-checked either. Bladestan
+  resolves any expression through <code>$scope-&gt;getType()</code> and reads a single
+  constant array shape off it, dropping optional keys (<code>array{user?:
+  User}</code>) so they stay reportable as missing while the guaranteed keys
+  are still validated. <code>PhpType::ArrayShape</code> carries the same
+  information, so this is a matter of running the data argument through
+  <code>resolve_expression_type</code> and reading the entries off the result when
+  it resolves to one shape. An <code>Arrayable</code> receiver resolves through its
+  <code>toArray()</code> return type the same way.</li>
+<li><strong>The types a scope-forwarded <code>@include</code> inherits.</strong> <code>blade_rendering_scope</code>
+  answers with names only, so a variable the surrounding template already
+  holds satisfies the partial's contract whatever its type. Bladestan
+  type-checks it against the signature and reports "but %s given by the
+  surrounding scope". Getting there means the rendering scope carrying
+  types rather than a <code>HashSet&lt;String&gt;</code>, which the forward walker can
+  answer for the template's virtual PHP at the include's offset.</li>
+</ul>
+<h3 id="bl21-each-item-and-key-variables">BL21. <code>@each</code> item and key variables<a class="headerlink" href="#bl21-each-item-and-key-variables" title="Permanent link">&para;</a></h3>
+<p><code>@each('partials.row', $rows, 'row')</code> renders <code>partials.row</code> once per
+entry with <code>$row</code> bound to the entry and <code>$key</code> to its key, and nothing
+else in scope. The preprocessor compiles it to <code>blade_view_directive</code>
+with the collection as the data argument, so <code>collect_from_data_expr</code>
+reads a collection where it expects a data array, finds no literal
+entries, and marks the site incomplete. Two consequences:</p>
+<ul>
+<li><code>partials/row.blade.php</code> never learns about <code>$row</code> from its <code>@each</code>
+  call sites, so an unannotated partial rendered only that way gets no
+  completion or hover for the variable it exists to display.</li>
+<li>an <code>@each</code> site is never validated against the partial's contract,
+  because it is permanently incomplete.</li>
+</ul>
+<p>Bladestan's <code>getEachVariables</code> derives both names from the call: <code>$key</code>
+from the collection's key type, and the item under the name the third
+argument spells, falling back to <code>mixed</code> when the collection's type is
+not a constant array. Our foreach machinery already answers "what is one
+entry of this expression", so the same derivation belongs in
+<code>collect_data_argument</code> as an <code>@each</code>-shaped special case, keyed off the
+directive rather than off <code>blade_view_directive</code> generally.</p>
 <hr />
 <h2 id="phase-6-editor-tooling-parity">Phase 6: Editor Tooling Parity<a class="headerlink" href="#phase-6-editor-tooling-parity" title="Permanent link">&para;</a></h2>
 <p>Other Blade-aware editors ship a full structure view, folding builder,
@@ -3273,12 +3380,12 @@ directives with snippet templates.</p>
 <p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file.</p>
-<h3 id="step-9-template-contracts-bl10-bl11-bl18-bl19">Step 9: Template contracts (BL10, BL11, BL18, BL19)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl18-bl19" title="Permanent link">&para;</a></h3>
+<h3 id="step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21">Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21" title="Permanent link">&para;</a></h3>
 <p>Call-site validation is shipped. What is left widens it (BL18 for the
 render sites nothing indexes a view name for, BL19 for the covariance
-the merge does not check) and is independent of section/stack
-intelligence and custom directive discovery, so the four can land in
-any order.</p>
+the merge does not check, BL20 for the data shapes the checks stand down
+on, BL21 for <code>@each</code>) and is independent of section/stack intelligence
+and custom directive discovery, so the six can land in any order.</p>
 <p><strong>Deliverable:</strong> A template with a <code>@bladestan-signature</code> docblock
 gets typed completion for its declared variables at every render site,
 and a signature that widens its layout's is flagged.</p>
