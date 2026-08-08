@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786198292473,
+  "lastUpdate": 1786199347976,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15770,6 +15770,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 33.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "721c00ad5c05550a419a7490c9b15e13fd0dbc95",
+          "message": "A dotted container key no longer resolves to a class named after its\nfirst segment",
+          "timestamp": "2026-08-08T16:10:55+02:00",
+          "tree_id": "961d7eb9120b77adc0e1522c13ceab14e943d5b6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/721c00ad5c05550a419a7490c9b15e13fd0dbc95"
+        },
+        "date": 1786199344030,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.6,
             "unit": "MiB"
           },
           {
