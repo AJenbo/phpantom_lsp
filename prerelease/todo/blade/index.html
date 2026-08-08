@@ -857,67 +857,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl2-template-and-component-file-discovery" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2. Template and component file discovery
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL2. Template and component file discovery">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#bl2a-view-name-map" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2a. View name map
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bl2b-class-based-component-map" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2b. Class-based component map
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bl2c-livewire-component-map" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2c. Livewire component map
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bl2d-workspace-root-dependency" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2d. Workspace root dependency
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl3-x-component-tag-parsing-in-preprocessor" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1436,10 +1375,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#step-4-discovery-bl1-bl2" class="md-nav__link">
+  <a href="#step-4-blade-aware-code-actions-bl1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 4: Discovery (BL1, BL2)
+        Step 4: Blade-aware code actions (BL1)
       </span>
     </span>
   </a>
@@ -2118,67 +2057,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl2-template-and-component-file-discovery" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2. Template and component file discovery
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL2. Template and component file discovery">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#bl2a-view-name-map" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2a. View name map
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bl2b-class-based-component-map" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2b. Class-based component map
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bl2c-livewire-component-map" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2c. Livewire component map
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#bl2d-workspace-root-dependency" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL2d. Workspace root dependency
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl3-x-component-tag-parsing-in-preprocessor" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2697,10 +2575,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#step-4-discovery-bl1-bl2" class="md-nav__link">
+  <a href="#step-4-blade-aware-code-actions-bl1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 4: Discovery (BL1, BL2)
+        Step 4: Blade-aware code actions (BL1)
       </span>
     </span>
   </a>
@@ -2874,14 +2752,19 @@ For general architecture see <code>ARCHITECTURE.md</code>.</p>
   Bladestan (a PHPStan extension for Blade template analysis) get the
   full contract model in both the editor and CI from the same
   annotations.</li>
-<li><strong>Discovery is just directory walks.</strong> Scanning <code>resources/views/</code>
-  and <code>app/View/Components/</code> (plus <code>app/Livewire/</code>) at init time is
-  the full extent of external Blade file discovery. Paths are converted
-  to view names and component names via string transforms.</li>
-<li><strong>PSR-4 is for class source lookup, not discovery.</strong> Once we know an
-  FQN (e.g. <code>App\View\Components\Alert</code>), we use the existing
-  <code>find_or_load_class</code> pipeline to read its source. We do not use
-  PSR-4 to discover component names.</li>
+<li><strong>Discovery is just directory walks.</strong> Walking the configured view
+  roots and the directories the component namespaces live in
+  (<code>src/blade/discovery.rs</code>) is the full extent of external Blade file
+  discovery. Paths are converted to view names and component names via
+  string transforms. A namespace no PSR-4 mapping of the project's own
+  <code>composer.json</code> covers (a vendor package that registered a component
+  namespace) is read off the class index instead, since there is no
+  directory to walk for it.</li>
+<li><strong>PSR-4 says where a namespace lives, not what a component is
+  called.</strong> A mapping resolves <code>App\View\Components</code> to the directory
+  to walk, and once we know an FQN (e.g. <code>App\View\Components\Alert</code>)
+  the existing <code>find_or_load_class</code> pipeline reads its source. The
+  names themselves always come from the file paths.</li>
 <li><strong>Graceful degradation.</strong> Unknown directives become comments. Failed
   component resolution produces comments. The user always gets partial
   completions rather than a broken file. The preprocessor must never
@@ -2917,57 +2800,6 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 <li>Blade-aware code generation (e.g. insert <code>use</code> inside <code>@php</code>).</li>
 <li>Filtering out actions that don't make sense in Blade context.</li>
 </ul>
-<h3 id="bl2-template-and-component-file-discovery">BL2. Template and component file discovery<a class="headerlink" href="#bl2-template-and-component-file-discovery" title="Permanent link">&para;</a></h3>
-<p>At <code>initialized</code> time (alongside PSR-4 and classmap loading), scan
-the filesystem to build three maps.</p>
-<p>New file: <code>src/blade/discovery.rs</code></p>
-<h4 id="bl2a-view-name-map">BL2a. View name map<a class="headerlink" href="#bl2a-view-name-map" title="Permanent link">&para;</a></h4>
-<p>Recursively scan <code>resources/views/</code> for <code>*.blade.php</code> files. Build
-a map of dot-notation view names to file paths:</p>
-<ul>
-<li><code>resources/views/users/index.blade.php</code> → <code>"users.index"</code></li>
-<li><code>resources/views/components/alert.blade.php</code> → <code>"components.alert"</code></li>
-</ul>
-<p>Store as:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="sd">/// View dot-name -&gt; file path.</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">blade_views</span><span class="p">:</span><span class="w"> </span><span class="nc">Arc</span><span class="o">&lt;</span><span class="n">Mutex</span><span class="o">&lt;</span><span class="n">HashMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="n">PathBuf</span><span class="o">&gt;&gt;&gt;</span><span class="p">,</span>
-</code></pre></div>
-<h4 id="bl2b-class-based-component-map">BL2b. Class-based component map<a class="headerlink" href="#bl2b-class-based-component-map" title="Permanent link">&para;</a></h4>
-<p>Recursively scan <code>app/View/Components/</code> for <code>*.php</code> files. Convert
-file paths to kebab-case component names and FQNs:</p>
-<ul>
-<li><code>app/View/Components/Alert.php</code> → name <code>"alert"</code>,
-  FQN <code>"App\\View\\Components\\Alert"</code></li>
-<li><code>app/View/Components/Forms/Input.php</code> → name <code>"forms.input"</code>,
-  FQN <code>"App\\View\\Components\\Forms\\Input"</code></li>
-</ul>
-<p>Index components (where directory name matches file name) should be
-registered both ways:</p>
-<ul>
-<li><code>app/View/Components/Card/Card.php</code> → name <code>"card"</code> (index) and
-  <code>"card.card"</code> (explicit)</li>
-</ul>
-<p>Store as:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="sd">/// Component kebab-name -&gt; FQN.</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">blade_components</span><span class="p">:</span><span class="w"> </span><span class="nc">Arc</span><span class="o">&lt;</span><span class="n">Mutex</span><span class="o">&lt;</span><span class="n">HashMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="nb">String</span><span class="o">&gt;&gt;&gt;</span><span class="p">,</span>
-</code></pre></div>
-<h4 id="bl2c-livewire-component-map">BL2c. Livewire component map<a class="headerlink" href="#bl2c-livewire-component-map" title="Permanent link">&para;</a></h4>
-<p>Recursively scan <code>app/Livewire/</code> for <code>*.php</code> files. Convert file
-paths to dot-notation component names and FQNs:</p>
-<ul>
-<li><code>app/Livewire/Counter.php</code> → name <code>"counter"</code>,
-  FQN <code>"App\\Livewire\\Counter"</code></li>
-<li><code>app/Livewire/Admin/Users.php</code> → name <code>"admin.users"</code>,
-  FQN <code>"App\\Livewire\\Admin\\Users"</code></li>
-</ul>
-<p>Store as:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="sd">/// Livewire component name -&gt; FQN.</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">livewire_components</span><span class="p">:</span><span class="w"> </span><span class="nc">Arc</span><span class="o">&lt;</span><span class="n">Mutex</span><span class="o">&lt;</span><span class="n">HashMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="nb">String</span><span class="o">&gt;&gt;&gt;</span><span class="p">,</span>
-</code></pre></div>
-<h4 id="bl2d-workspace-root-dependency">BL2d. Workspace root dependency<a class="headerlink" href="#bl2d-workspace-root-dependency" title="Permanent link">&para;</a></h4>
-<p>All three scans depend on <code>workspace_root</code>. Run them in <code>initialized</code>
-after the existing Composer parsing, gated on
-<code>workspace_root.is_some()</code>.</p>
 <h3 id="bl3-x-component-tag-parsing-in-preprocessor">BL3. <code>&lt;x-component&gt;</code> tag parsing in preprocessor<a class="headerlink" href="#bl3-x-component-tag-parsing-in-preprocessor" title="Permanent link">&para;</a></h3>
 <p>New file: <code>src/blade/components.rs</code></p>
 <p>The preprocessor detects <code>&lt;x-name ...&gt;</code> and <code>&lt;/x-name&gt;</code> tags and
@@ -2978,7 +2810,8 @@ converts them to PHP.</p>
 <ol>
 <li>Extract the component name (everything between <code>&lt;x-</code> and the first
    whitespace or <code>&gt;</code>/<code>/&gt;</code>).</li>
-<li>Look up the name in <code>blade_components</code>. If found, resolve the FQN.</li>
+<li>Look up the name in the component index (<code>blade_component_fqn</code>). If
+   found, resolve the FQN.</li>
 <li>Extract attributes:</li>
 <li><code>attr="literal"</code> → named arg with string value</li>
 <li><code>:attr="$expr"</code> → named arg with PHP expression value</li>
@@ -2989,10 +2822,10 @@ converts them to PHP.</p>
    constructor call.</li>
 <li>Emit <code>$component = new \FQN(camelAttr: value, ...);</code></li>
 </ol>
-<p>If the component is not found in <code>blade_components</code>, check if it's an
-anonymous component (exists in <code>blade_views</code> under <code>components.</code>
-prefix). For anonymous components, emit a comment but still expose
-<code>$attributes</code> and <code>$slot</code>.</p>
+<p>If the component is not in the component index, check if it's an
+anonymous component (a view under the <code>components.</code> prefix). For
+anonymous components, emit a comment but still expose <code>$attributes</code>
+and <code>$slot</code>.</p>
 <p>For <code>&lt;x-dynamic-component :component="$name" ...&gt;</code>, emit
 <code>echo $name;</code> so the expression gets parsed, but do not try to
 resolve a target component.</p>
@@ -3004,10 +2837,10 @@ resolve a target component.</p>
 <h4 id="bl3d-implicit-component-variables">BL3d. Implicit component variables<a class="headerlink" href="#bl3d-implicit-component-variables" title="Permanent link">&para;</a></h4>
 <p>When inside a component tag region (between opening and closing tags),
 inject:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @var \Illuminate\View\ComponentAttributeBag $attributes */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$attributes = new \Illuminate\View\ComponentAttributeBag([]);</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">/** @var \Illuminate\Support\HtmlString $slot */</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$slot = new \Illuminate\Support\HtmlString(&#39;&#39;);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var \Illuminate\View\ComponentAttributeBag $attributes */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$attributes = new \Illuminate\View\ComponentAttributeBag([]);</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">/** @var \Illuminate\Support\HtmlString $slot */</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$slot = new \Illuminate\Support\HtmlString(&#39;&#39;);</span>
 </code></pre></div>
 <h3 id="11-livewirecomponent-tag-parsing">11. <code>&lt;livewire:component&gt;</code> tag parsing<a class="headerlink" href="#11-livewirecomponent-tag-parsing" title="Permanent link">&para;</a></h3>
 <p>Parse <code>&lt;livewire:name :attr="$expr" ...&gt;</code> or
@@ -3015,7 +2848,8 @@ inject:</p>
 <ol>
 <li>Extract the component name (everything between <code>&lt;livewire:</code> and
    the first whitespace or <code>&gt;</code>/<code>/&gt;</code>).</li>
-<li>Look up in <code>livewire_components</code>. If found, resolve the FQN.</li>
+<li>Look up in the Livewire index (<code>livewire_component_fqn</code>). If found,
+   resolve the FQN.</li>
 <li>Extract attributes (same rules as <code>&lt;x-...&gt;</code>).</li>
 <li>Emit <code>$component = new \FQN();</code> followed by property assignments
    for each attribute: <code>$component-&gt;attrName = $expr;</code>.</li>
@@ -3026,8 +2860,8 @@ same kebab-to-camelCase conversion.</p>
 <h4 id="bl4a-x-completion">BL4a. <code>&lt;x-</code> completion<a class="headerlink" href="#bl4a-x-completion" title="Permanent link">&para;</a></h4>
 <p>When the user types <code>&lt;x-</code> in a Blade file, offer completions from:</p>
 <ul>
-<li><code>blade_components</code> map (class-based components, kebab-case names)</li>
-<li>Anonymous component templates: entries in <code>blade_views</code> whose key
+<li>the component index (class-based components, kebab-case names)</li>
+<li>Anonymous component templates: view names whose key
   starts with <code>"components."</code>, with the prefix stripped and dots
   preserved (e.g. <code>"components.forms.input"</code> → <code>"forms.input"</code>)</li>
 </ul>
@@ -3038,12 +2872,12 @@ context check done before the normal PHP completion pipeline.</p>
 on whether they're anonymous or class-backed.</p>
 <h4 id="bl4b-livewire-completion">BL4b. <code>&lt;livewire:</code> completion<a class="headerlink" href="#bl4b-livewire-completion" title="Permanent link">&para;</a></h4>
 <p>Same pattern. When the user types <code>&lt;livewire:</code>, offer completions
-from the <code>livewire_components</code> map.</p>
+from the Livewire index.</p>
 <h4 id="bl4c-include-and-extends-view-name-completion">BL4c. <code>@include('</code> and <code>@extends('</code> view name completion<a class="headerlink" href="#bl4c-include-and-extends-view-name-completion" title="Permanent link">&para;</a></h4>
 <p>When the cursor is inside the string argument to <code>@include</code>,
 <code>@includeIf</code>, <code>@includeWhen</code>, <code>@includeUnless</code>, <code>@includeFirst</code>,
 <code>@extends</code>, <code>@each</code>, or a <code>view()</code> function call, offer completions
-from the <code>blade_views</code> map (dot-notation view names).</p>
+from the view index (dot-notation view names).</p>
 <p>Detection: look for <code>@include('</code>, <code>@extends('</code>, or <code>view('</code> before
 the cursor and check that the cursor is inside the quotes. The
 trigger characters <code>'</code> and <code>"</code> are already registered.</p>
@@ -3086,26 +2920,26 @@ attribute completions.</p>
 <code>view('welcome')</code>:</p>
 <ol>
 <li>Extract the view name string at the cursor position.</li>
-<li>Look up in <code>blade_views</code>.</li>
+<li>Look up in the view index (<code>blade_view_path</code>).</li>
 <li>Return a <code>Location</code> pointing to the resolved file.</li>
 </ol>
 <h4 id="bl5b-component-tag-go-to-definition">BL5b. Component tag go-to-definition<a class="headerlink" href="#bl5b-component-tag-go-to-definition" title="Permanent link">&para;</a></h4>
 <p>On <code>&lt;x-alert&gt;</code>:</p>
 <ol>
 <li>Extract the component name.</li>
-<li>Look up in <code>blade_components</code> to get the FQN.</li>
+<li>Look up in the component index to get the FQN.</li>
 <li>Use <code>find_or_load_class</code> + <code>fqn_uri_index</code> to find the
    source file.</li>
 <li>Return a <code>Location</code> pointing to the class definition.</li>
 </ol>
 <p>On <code>&lt;livewire:counter&gt;</code>:</p>
 <ol>
-<li>Same pattern using <code>livewire_components</code>.</li>
+<li>Same pattern using the Livewire index.</li>
 </ol>
 <h3 id="bl6-signature-merging-for-extends">BL6. Signature merging for <code>@extends</code><a class="headerlink" href="#bl6-signature-merging-for-extends" title="Permanent link">&para;</a></h3>
 <p>When template A contains <code>@extends('layouts.app')</code>:</p>
 <ol>
-<li>Resolve <code>layouts.app</code> via <code>blade_views</code> to a file path.</li>
+<li>Resolve <code>layouts.app</code> via the view index to a file path.</li>
 <li>Read or preprocess that file.</li>
 <li>Extract <code>@var</code> declarations from its <code>@php</code> blocks.</li>
 <li>Merge those declarations into template A's virtual PHP prologue,
@@ -3137,23 +2971,23 @@ variables without the user redeclaring them.</p>
 blocks, and string literals), offer completions for all known Blade
 directives with snippet templates.</p>
 <p>Each completion inserts a snippet with tab stops:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>@if ($1)
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    $0
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>@endif
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>@if ($1)
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    $0
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>@endif
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>@foreach ($1 as $2)
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    $0
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>@endforeach
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>@foreach ($1 as $2)
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    $0
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>@endforeach
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>@include(&#39;$1&#39;)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>@include(&#39;$1&#39;)
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>@props([$1])
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>@props([$1])
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>@inject(&#39;$1&#39;, &#39;$2&#39;)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>@inject(&#39;$1&#39;, &#39;$2&#39;)
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>@php
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>$0
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>@endphp
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>@php
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>$0
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>@endphp
 </code></pre></div>
 <p>Detection: The <code>@</code> trigger character is already registered. In
 <code>handle_completion</code>, check <code>is_blade_file</code> and that the cursor is in
@@ -3219,7 +3053,8 @@ being resolved inside the preprocessor.</p>
 <code>@push</code>/<code>@prepend</code>/<code>@stack</code> name arguments are cross-file string
 keys: yields and stacks are declared in layouts, filled in children.
 Index section and stack names per template (alongside the discovery
-maps of BL2, recording the <code>@extends</code> target), then provide:</p>
+index in <code>src/blade/discovery.rs</code>, recording the <code>@extends</code> target),
+then provide:</p>
 <ul>
 <li>completion of section/stack names inside child templates from the
   resolved layout chain, and vice versa in layouts from known
@@ -3242,8 +3077,7 @@ scanner — so that:</p>
 <li><code>Blade::if('admin')</code> synthesizes the full family (<code>@admin</code>,
   <code>@elseadmin</code>, <code>@endadmin</code>, <code>@unlessadmin</code>);</li>
 <li>directive name completion (BL7) includes them;</li>
-<li>registered component namespaces/paths extend the discovery maps of
-  BL2.</li>
+<li>registered component namespaces/paths extend the discovery index.</li>
 </ul>
 <h3 id="bl9-view-call-site-validation">BL9. <code>view()</code> call-site validation<a class="headerlink" href="#bl9-view-call-site-validation" title="Permanent link">&para;</a></h3>
 <p>The diagnostics counterpart of the declaration chain, matching Bladestan's
@@ -3283,8 +3117,7 @@ currently translates silently instead of producing a diagnostic.</p>
 <li>Matches the mismatched-closing-directive inspection other Blade-aware
   editors already ship.</li>
 </ul>
-<p>No dependency on discovery (BL2) or component parsing (BL3) —
-this operates on the raw directive token stream and can land
+<p>No dependency on component parsing (BL3) — this operates on the raw directive token stream and can land
 independently.</p>
 <h4 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h4>
 <p>New file <code>tests/diagnostics_blade.rs</code>:
@@ -3321,8 +3154,7 @@ translates through the source map.</p>
 <li>Build a Blade-native symbol tree on top of the translated PHP
   symbols: <code>@section</code>s and <code>@push</code>/<code>@stack</code> blocks as top-level
   symbols, <code>&lt;x-component&gt;</code> tags as child symbols showing the resolved
-  component FQN once discovery (BL2) and component parsing
-  (BL3) land — degrade to the bare tag name if the component
+  component FQN once component parsing (BL3) lands — degrade to the bare tag name if the component
   doesn't resolve.</li>
 <li>Matches the structure-view behaviour other Blade-aware editors
   already provide.</li>
@@ -3331,7 +3163,7 @@ translates through the source map.</p>
 <p>New file <code>tests/document_symbols_blade.rs</code>:
 - <code>@section('content')</code> appears as an outline entry
 - <code>&lt;x-alert&gt;</code> appears as an outline entry with the resolved FQN once
-  discovery (BL2) is in place</p>
+  component parsing (BL3) is in place</p>
 <h3 id="bl16-blade-aware-formatting">BL16. Blade-aware formatting<a class="headerlink" href="#bl16-blade-aware-formatting" title="Permanent link">&para;</a></h3>
 <p><code>formatting.rs</code> has no Blade awareness. <code>mago</code>'s formatter runs against
 the virtual PHP buffer generated for <code>.blade.php</code> files, and its output
@@ -3494,11 +3326,11 @@ integration, source mapping, <code>$loop</code>/<code>@session</code>/<code>@err
 implicit variables, stub directives, verbatim regions, <code>languageId</code>
 check, and code action suppression are all shipped.</p>
 <p>The remaining steps build on the existing preprocessor:</p>
-<h3 id="step-4-discovery-bl1-bl2">Step 4: Discovery (BL1, BL2)<a class="headerlink" href="#step-4-discovery-bl1-bl2" title="Permanent link">&para;</a></h3>
-<p>Implement <code>src/blade/discovery.rs</code>. Scan <code>resources/views/</code>,
-<code>app/View/Components/</code>, <code>app/Livewire/</code> at init time. Add the three
-new maps to <code>Backend</code>.</p>
-<p><strong>Deliverable:</strong> Maps are populated and logged at startup.</p>
+<h3 id="step-4-blade-aware-code-actions-bl1">Step 4: Blade-aware code actions (BL1)<a class="headerlink" href="#step-4-blade-aware-code-actions-bl1" title="Permanent link">&para;</a></h3>
+<p>Translate every text edit back to Blade coordinates, generate
+Blade-shaped code (a <code>use</code> statement belongs inside <code>@php</code>), and drop
+the actions that make no sense in a template.</p>
+<p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
 <h3 id="step-5-component-tag-parsing-bl3-items-11-12">Step 5: Component tag parsing (BL3, items 11-12)<a class="headerlink" href="#step-5-component-tag-parsing-bl3-items-11-12" title="Permanent link">&para;</a></h3>
 <p>Implement <code>src/blade/components.rs</code>. Parse <code>&lt;x-...&gt;</code> and
 <code>&lt;livewire:...&gt;</code> tags. Handle <code>@props</code>, <code>@aware</code>, named slots.</p>
