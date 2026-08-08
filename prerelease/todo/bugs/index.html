@@ -849,17 +849,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b51-a-chained-static-factory-call-loses-its-method-level-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B51. A chained static factory call loses its method-level template
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1349,17 +1338,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b51-a-chained-static-factory-call-loses-its-method-level-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B51. A chained static factory call loses its method-level template
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1429,17 +1407,6 @@ so nothing useful binds:</p>
 <code>array&lt;string&gt;</code> binds <code>TWrapValue</code> to <code>string</code> correctly. The generic
 wrapper binding path already unwraps array literals element by element;
 the union path needs the same treatment.</p>
-<h4 id="b51-a-chained-static-factory-call-loses-its-method-level-template">B51. A chained static factory call loses its method-level template<a class="headerlink" href="#b51-a-chained-static-factory-call-loses-its-method-level-template" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>A method-level <code>@template</code> bound on a <em>static</em> factory survives into a
-variable but not into a directly chained call:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$w = Wrapper::make(names());</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$w-&gt;push([1]);              // Argument 1 ($value) expects string — correct</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">Wrapper::make(names())-&gt;push([1]);   // no diagnostic at all</span>
-</code></pre></div>
-<p>The instance-method equivalent (<code>$w-&gt;rewrap(names())-&gt;push([1])</code>)
-reports correctly, so this is specific to the static-call receiver.</p>
 
 
 
