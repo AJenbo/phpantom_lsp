@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786217100325,
+  "lastUpdate": 1786218079214,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16183,6 +16183,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2e43a487d3c4e62560627377d4420aa50a4eac20",
+          "message": "Update plan regarding facades",
+          "timestamp": "2026-08-08T21:25:26+02:00",
+          "tree_id": "180d2be1eeae479b177121da227b80add2ad29f3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2e43a487d3c4e62560627377d4420aa50a4eac20"
+        },
+        "date": 1786218075473,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.8,
             "unit": "MiB"
           }
         ]
