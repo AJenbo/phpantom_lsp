@@ -103,6 +103,13 @@
          passes: resources/views/components/post-summary.blade.php --}}
     <x-post-summary :post="$posts->first()" heading="Latest post" />
 
+    {{-- <x-card> names a directory, not a class: Blade falls back to the
+         class inside it that repeats its name, App\View\Components\Card\Card.
+         Its view reads that class's members:
+         resources/views/components/card.blade.php --}}
+    @php($bakery = \App\Models\Bakery::firstOrFail())
+    <x-card :bakery="$bakery" footer="Baked today" />
+
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim
         <p>This {{ $blade }} syntax is not processed</p>

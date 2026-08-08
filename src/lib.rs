@@ -327,6 +327,11 @@ pub(crate) struct LaravelStringKeyCache {
     pub config_keys: Option<Vec<String>>,
     pub view_names: Option<Vec<String>>,
     pub trans_keys: Option<Vec<String>>,
+    /// The Blade templates and component classes the project ships, keyed
+    /// by the names Laravel addresses them under.  Shared behind an `Arc`
+    /// because consumers look up a single name in one of its three maps and
+    /// cloning the whole index per lookup would be waste.
+    pub blade_discovery: Option<std::sync::Arc<crate::blade::discovery::BladeDiscovery>>,
     pub config_trees: Option<
         Vec<(
             String,
@@ -355,6 +360,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub view_names: parking_lot::Mutex<()>,
     pub trans_keys: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
+    pub blade_discovery: parking_lot::Mutex<()>,
 }
 
 impl LaravelStringKeyCache {

@@ -1448,6 +1448,16 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 laravel_keys.add(k.capacity());
             }
         }
+        if let Some(discovery) = &c.blade_discovery {
+            for (name, path) in &discovery.views {
+                laravel_keys.add(name.capacity() + path.as_os_str().len() + 48);
+            }
+            for map in [&discovery.components, &discovery.livewire] {
+                for (name, fqn) in map {
+                    laravel_keys.add(name.capacity() + fqn.capacity() + 48);
+                }
+            }
+        }
     }
     let mut blade = Sz::default();
     let n_blade;

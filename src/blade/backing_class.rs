@@ -78,6 +78,17 @@ impl Backend {
     /// registered class-component namespaces and then the default
     /// `App\View\Components` convention.
     fn blade_component_class(&self, view_name: &str) -> Option<Arc<ClassInfo>> {
+        // The discovery index knows the class each tag name is backed by,
+        // including the ones no name transform predicts — an index
+        // component (`components.card` → `App\View\Components\Card\Card`)
+        // is only findable by having seen the file.
+        if let Some(tag) = super::component_tags::component_tag_for_view_name(view_name)
+            && let Some(fqn) = self.blade_component_fqn(&tag)
+            && let Some(class) = self.component_class_named(&fqn, COMPONENT_BASE)
+        {
+            return Some(class);
+        }
+
         let namespaces = self
             .laravel_provider_resources
             .read()
@@ -110,6 +121,11 @@ impl Backend {
     /// The Livewire component class a `livewire.…` view name belongs to.
     fn livewire_component_class(&self, view_name: &str) -> Option<Arc<ClassInfo>> {
         let rest = view_name.strip_prefix("livewire.")?;
+        if let Some(fqn) = self.livewire_component_fqn(rest)
+            && let Some(class) = self.component_class_named(&fqn, LIVEWIRE_BASE)
+        {
+            return Some(class);
+        }
         let namespace = self.livewire_class_namespace();
         self.component_class_at(&namespace, rest, LIVEWIRE_BASE)
     }
@@ -127,14 +143,20 @@ impl Backend {
             namespace.trim_matches('\\'),
             class_name_for_view_tail(dotted)?
         );
-        let class = self.find_or_load_class(&fqn)?;
+        self.component_class_named(&fqn, base)
+    }
+
+    /// Load `fqn`, provided it exists and really is a component.
+    fn component_class_named(&self, fqn: &str, base: &str) -> Option<Arc<ClassInfo>> {
+        let fqn = fqn.trim_matches('\\');
+        let class = self.find_or_load_class(fqn)?;
         // A miss can still land on a class of the same short name, which
         // would put a stranger's members in the template's scope.
-        if !class.fqn().eq_ignore_ascii_case(&fqn) {
+        if !class.fqn().eq_ignore_ascii_case(fqn) {
             return None;
         }
         let loader = |name: &str| self.find_or_load_class(name);
-        if !crate::type_engine::variable::forward_walk::is_subclass_of(&fqn, base, &loader) {
+        if !crate::type_engine::variable::forward_walk::is_subclass_of(fqn, base, &loader) {
             return None;
         }
         Some(class)
@@ -143,7 +165,7 @@ impl Backend {
     /// The application's root namespace, ending with `\` — the PSR-4 prefix
     /// mapped to `app/`, as Laravel's own `Application::getNamespace()`
     /// reads it from `composer.json`.
-    fn application_namespace(&self) -> String {
+    pub(crate) fn application_namespace(&self) -> String {
         self.psr4_mappings()
             .read()
             .iter()
@@ -165,7 +187,7 @@ impl Backend {
     /// config trees: this runs while a template is being opened, and that
     /// cache is built from the workspace index, which a keystroke must
     /// never wait on.
-    fn livewire_class_namespace(&self) -> String {
+    pub(crate) fn livewire_class_namespace(&self) -> String {
         use crate::virtual_members::laravel::config_values::{ConfigValue, parse_config_tree};
 
         let Some(root) = self.workspace_root().read().clone() else {

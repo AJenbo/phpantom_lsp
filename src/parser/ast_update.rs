@@ -136,6 +136,7 @@ impl Backend {
         self.laravel_string_key_cache
             .write()
             .invalidate_for_uri(uri);
+        self.refresh_blade_discovery(uri);
 
         // The mago-syntax parser contains `unreachable!()` and `.expect()`
         // calls that can panic on malformed PHP (e.g. partially-written

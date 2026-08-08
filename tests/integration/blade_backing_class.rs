@@ -369,4 +369,46 @@ mod tests {
             "a Livewire action is not a view variable: {undefined:?}"
         );
     }
+
+    /// An index component is addressed by its directory alone
+    /// (`<x-card>` → `App\View\Components\Card\Card`), a name no
+    /// transform of the view name predicts. Only having seen the file
+    /// finds it.
+    #[tokio::test]
+    async fn an_index_component_backs_its_view() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                ("app/Models/Order.php", ORDER_CLASS),
+                (
+                    "app/View/Components/Card/Card.php",
+                    "<?php\nnamespace App\\View\\Components\\Card;\n\
+                     use App\\Models\\Order;\n\
+                     use Illuminate\\View\\Component;\n\
+                     class Card extends Component {\n\
+                         public function __construct(public Order $order) {}\n\
+                         public function render() {}\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/components/card.blade.php",
+                    "{{ $order->reference }}\n",
+                ),
+            ],
+        );
+        let root = backend.workspace_root().read().clone().unwrap();
+        let uri = open_template(&backend, &root, "resources/views/components/card.blade.php").await;
+
+        let hover = hover_text(&backend, &uri, 0, 7).await;
+        assert!(
+            hover.contains("App\\Models") && hover.contains("Order"),
+            "$order should be typed from the index component class, got: {hover}"
+        );
+        assert!(
+            undefined_variables(&backend, &uri).is_empty(),
+            "the index component declares $order: {:?}",
+            undefined_variables(&backend, &uri)
+        );
+    }
 }

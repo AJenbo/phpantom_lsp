@@ -55,6 +55,22 @@ pub(crate) fn component_tag_names(view_names: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The tag name a view makes a component addressable by, or `None` for a
+/// view outside the `components.` namespace, which no `<x-…>` tag names.
+///
+/// A namespaced view keeps its namespace (`nightshade::calendar`), and
+/// drops a `components.` segment a package puts its component views under,
+/// since the class behind them sits directly in the registered namespace.
+pub(crate) fn component_tag_for_view_name(view_name: &str) -> Option<String> {
+    match view_name.split_once("::") {
+        Some((namespace, rest)) => {
+            let bare = rest.strip_prefix("components.").unwrap_or(rest);
+            Some(format!("{namespace}::{bare}"))
+        }
+        None => view_name.strip_prefix("components.").map(str::to_string),
+    }
+}
+
 /// The inverse of [`component_tag_names`]: the view name a tag written as
 /// `<x-{tag}>` resolves to.
 pub(crate) fn view_name_for_component_tag(tag: &str) -> String {

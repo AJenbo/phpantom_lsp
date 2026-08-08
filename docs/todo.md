@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL2  | [Template and component file discovery](todo/blade.md#bl2-template-and-component-file-discovery)                            | High       | Medium     |
 | BL19 | [Shared and view-composer variables in the declaration chain](todo/blade.md#bl19-shared-and-view-composer-variables-in-the-declaration-chain)                                | Medium      | Medium      |
 | BL20 | [`$this` in a Livewire view resolves to nothing](todo/blade.md#bl20-this-in-a-livewire-view-resolves-to-nothing)                                                             | Medium      | Medium      |
 | BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |

@@ -2,6 +2,7 @@ pub(crate) mod backing_class;
 pub(crate) mod call_site_inference;
 pub(crate) mod component_tags;
 pub mod directives;
+pub(crate) mod discovery;
 pub mod preprocessor;
 pub(crate) mod signature;
 pub mod source_map;

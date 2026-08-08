@@ -273,28 +273,6 @@ impl Backend {
         }
     }
 
-    /// Enumerate all view names by scanning the configured view roots on
-    /// disk, plus namespaced views registered by service providers.
-    ///
-    /// Scanning the filesystem (rather than the parsed-file index) means
-    /// Blade templates in custom directories are found even before they
-    /// are opened or indexed.
-    fn enumerate_all_view_names(&self) -> Vec<String> {
-        let mut names = Vec::new();
-
-        for root in self.laravel_view_roots() {
-            collect_namespaced_view_names(&root, "", &mut names);
-        }
-
-        for res in &self.laravel_provider_resources.read().view_dirs {
-            collect_namespaced_view_names(&res.path, &res.namespace, &mut names);
-        }
-
-        names.sort();
-        names.dedup();
-        names
-    }
-
     /// Enumerate all config keys by scanning `config/` files and
     /// package config files discovered from service providers.
     fn enumerate_all_config_keys(&self) -> Vec<String> {
@@ -458,7 +436,7 @@ impl Backend {
             &self.laravel_string_key_build_locks.view_names,
             |cache| cache.view_names.clone(),
             |cache, names| cache.view_names = Some(names),
-            || self.enumerate_all_view_names(),
+            || self.blade_view_names(),
         )
     }
 
@@ -511,44 +489,6 @@ fn collect_json_trans_keys(backend: &crate::Backend, out: &mut Vec<String>) {
             {
                 for k in map.keys() {
                     out.push(k.clone());
-                }
-            }
-        }
-    }
-}
-
-/// Recursively scan a package view directory and collect view names
-/// in `namespace::dot.notation` format.
-fn collect_namespaced_view_names(dir: &std::path::Path, namespace: &str, out: &mut Vec<String>) {
-    collect_view_names_recursive(dir, dir, namespace, out);
-}
-
-fn collect_view_names_recursive(
-    base: &std::path::Path,
-    dir: &std::path::Path,
-    namespace: &str,
-    out: &mut Vec<String>,
-) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_view_names_recursive(base, &path, namespace, out);
-        } else if let Some(rel) = path.strip_prefix(base).ok().and_then(|r| r.to_str()) {
-            let name = rel
-                .strip_suffix(".blade.php")
-                .or_else(|| rel.strip_suffix(".php"));
-            if let Some(name) = name {
-                let dotted = name.replace([std::path::MAIN_SEPARATOR, '/'], ".");
-                // An empty namespace means the app's own view roots, where
-                // names are used bare (`admin.permissions.index`). Package
-                // views use the `namespace::name` form.
-                if namespace.is_empty() {
-                    out.push(dotted);
-                } else {
-                    out.push(format!("{namespace}::{dotted}"));
                 }
             }
         }
@@ -853,34 +793,6 @@ mod tests {
         let col = line_text.find("bar").unwrap() as u32 + 1;
         let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
         assert!(ctx.is_none(), "Non-Laravel function should not match");
-    }
-
-    #[test]
-    fn view_names_scanned_from_custom_and_default_roots() {
-        // Enumeration scans view root directories on disk (as configured
-        // in `config/view.php`), so templates in custom directories are
-        // discovered with bare (non-namespaced) names.
-        let dir = tempfile::tempdir().unwrap();
-        let backoffice = dir
-            .path()
-            .join("resources/backoffice/views/admin/permissions");
-        std::fs::create_dir_all(&backoffice).unwrap();
-        std::fs::write(backoffice.join("index.blade.php"), "").unwrap();
-        let default = dir.path().join("resources/views");
-        std::fs::create_dir_all(&default).unwrap();
-        std::fs::write(default.join("welcome.blade.php"), "").unwrap();
-
-        let mut names = Vec::new();
-        collect_namespaced_view_names(
-            &dir.path().join("resources/backoffice/views"),
-            "",
-            &mut names,
-        );
-        collect_namespaced_view_names(&default, "", &mut names);
-        names.sort();
-
-        assert!(names.contains(&"admin.permissions.index".to_string()));
-        assert!(names.contains(&"welcome".to_string()));
     }
 
     #[test]

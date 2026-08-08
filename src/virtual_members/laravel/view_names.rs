@@ -34,6 +34,17 @@ pub(crate) fn resolve_view_definitions(backend: &Backend, name: &str) -> Vec<Loc
     let mut results = Vec::new();
     let name = &*canonical_view_name(name);
 
+    // The discovery index already holds the file each name renders, so the
+    // common case answers without touching the filesystem.  A miss still
+    // probes below: a template created outside the editor is on disk before
+    // any edit invalidates the index.
+    if let Some(path) = backend.blade_view_path(name)
+        && path.is_file()
+        && let Ok(uri) = Url::from_file_path(&path)
+    {
+        return vec![crate::definition::point_location(uri, Position::new(0, 0))];
+    }
+
     if let Some((namespace, view_name)) = name.split_once("::") {
         let rel = view_name.replace('.', "/");
         for res in &backend.laravel_provider_resources.read().view_dirs {

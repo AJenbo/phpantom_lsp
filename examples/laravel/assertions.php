@@ -1033,6 +1033,34 @@ check(
     !array_key_exists('render', $viewData) && !array_key_exists('data', $viewData)
 );
 
+// ─── Index components ───────────────────────────────────────────────────────
+
+// `<x-card>` names a directory rather than a class. Blade's tag compiler
+// falls back to the class inside that directory which repeats its name, so
+// the tag reaches App\View\Components\Card\Card. Nothing in the tag name
+// says so, which is why the component namespaces have to be indexed from
+// the filesystem rather than guessed from the name.
+// `componentClass()` itself needs a booted application, so the rule is
+// checked one piece at a time: the class name the tag formats to, the fact
+// that it names nothing, and the `$class . '\' . class_basename($class)`
+// fallback the compiler tries next.
+$compiler = new \Illuminate\View\Compilers\ComponentTagCompiler();
+check(
+    'a tag name formats to a studly class path',
+    $compiler->formatClassName('card') === 'Card'
+        && $compiler->formatClassName('forms.date-picker') === 'Forms\\DatePicker'
+);
+$guessed = 'App\\View\\Components\\' . $compiler->formatClassName('card');
+check(
+    'a bare directory name is not itself a component class',
+    !class_exists($guessed)
+);
+check(
+    'the class repeating its directory name is what the tag reaches',
+    class_exists($guessed . '\\' . \Illuminate\Support\Str::afterLast($guessed, '\\'))
+        && $guessed . '\\Card' === \App\View\Components\Card\Card::class
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

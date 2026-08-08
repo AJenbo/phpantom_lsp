@@ -534,6 +534,17 @@ impl LanguageServer for Backend {
             self.build_provider_resources();
             self.build_laravel_command_index();
             self.build_laravel_morph_map_index();
+
+            // Build the Blade index now that the view roots and component
+            // namespaces providers register are known, so the first view-name
+            // completion in a template does not pay for the walk.
+            let discovery = self.blade_discovery();
+            tracing::info!(
+                "PHPantom: discovered {} Blade templates, {} component classes, {} Livewire components",
+                discovery.views.len(),
+                discovery.components.len(),
+                discovery.livewire.len(),
+            );
         }
 
         // Mark initialization as complete so that diagnostic workers
@@ -2595,15 +2606,17 @@ impl Backend {
         let trans_count = resources.trans_dirs.len();
         let route_count = resources.route_files.len();
         let binding_count = resources.bindings.len();
+        let component_namespace_count = resources.class_component_namespaces.len();
         *self.laravel_provider_resources.write() = resources;
 
-        if config_count + view_count + trans_count + route_count > 0 {
+        if config_count + view_count + trans_count + route_count + component_namespace_count > 0 {
             let mut cache = self.laravel_string_key_cache.write();
             cache.config_keys = None;
             cache.config_trees = None;
             cache.view_names = None;
             cache.trans_keys = None;
             cache.routes = None;
+            cache.blade_discovery = None;
         }
 
         // The provider bindings overlay the core container alias table, which

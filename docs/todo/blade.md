@@ -24,14 +24,19 @@ For general architecture see `ARCHITECTURE.md`.
   Bladestan (a PHPStan extension for Blade template analysis) get the
   full contract model in both the editor and CI from the same
   annotations.
-- **Discovery is just directory walks.** Scanning `resources/views/`
-  and `app/View/Components/` (plus `app/Livewire/`) at init time is
-  the full extent of external Blade file discovery. Paths are converted
-  to view names and component names via string transforms.
-- **PSR-4 is for class source lookup, not discovery.** Once we know an
-  FQN (e.g. `App\View\Components\Alert`), we use the existing
-  `find_or_load_class` pipeline to read its source. We do not use
-  PSR-4 to discover component names.
+- **Discovery is just directory walks.** Walking the configured view
+  roots and the directories the component namespaces live in
+  (`src/blade/discovery.rs`) is the full extent of external Blade file
+  discovery. Paths are converted to view names and component names via
+  string transforms. A namespace no PSR-4 mapping of the project's own
+  `composer.json` covers (a vendor package that registered a component
+  namespace) is read off the class index instead, since there is no
+  directory to walk for it.
+- **PSR-4 says where a namespace lives, not what a component is
+  called.** A mapping resolves `App\View\Components` to the directory
+  to walk, and once we know an FQN (e.g. `App\View\Components\Alert`)
+  the existing `find_or_load_class` pipeline reads its source. The
+  names themselves always come from the file paths.
 - **Graceful degradation.** Unknown directives become comments. Failed
   component resolution produces comments. The user always gets partial
   completions rather than a broken file. The preprocessor must never
@@ -75,74 +80,6 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 - Blade-aware code generation (e.g. insert `use` inside `@php`).
 - Filtering out actions that don't make sense in Blade context.
 
-### BL2. Template and component file discovery
-
-At `initialized` time (alongside PSR-4 and classmap loading), scan
-the filesystem to build three maps.
-
-New file: `src/blade/discovery.rs`
-
-#### BL2a. View name map
-
-Recursively scan `resources/views/` for `*.blade.php` files. Build
-a map of dot-notation view names to file paths:
-
-- `resources/views/users/index.blade.php` → `"users.index"`
-- `resources/views/components/alert.blade.php` → `"components.alert"`
-
-Store as:
-
-```rust
-/// View dot-name -> file path.
-pub(crate) blade_views: Arc<Mutex<HashMap<String, PathBuf>>>,
-```
-
-#### BL2b. Class-based component map
-
-Recursively scan `app/View/Components/` for `*.php` files. Convert
-file paths to kebab-case component names and FQNs:
-
-- `app/View/Components/Alert.php` → name `"alert"`,
-  FQN `"App\\View\\Components\\Alert"`
-- `app/View/Components/Forms/Input.php` → name `"forms.input"`,
-  FQN `"App\\View\\Components\\Forms\\Input"`
-
-Index components (where directory name matches file name) should be
-registered both ways:
-
-- `app/View/Components/Card/Card.php` → name `"card"` (index) and
-  `"card.card"` (explicit)
-
-Store as:
-
-```rust
-/// Component kebab-name -> FQN.
-pub(crate) blade_components: Arc<Mutex<HashMap<String, String>>>,
-```
-
-#### BL2c. Livewire component map
-
-Recursively scan `app/Livewire/` for `*.php` files. Convert file
-paths to dot-notation component names and FQNs:
-
-- `app/Livewire/Counter.php` → name `"counter"`,
-  FQN `"App\\Livewire\\Counter"`
-- `app/Livewire/Admin/Users.php` → name `"admin.users"`,
-  FQN `"App\\Livewire\\Admin\\Users"`
-
-Store as:
-
-```rust
-/// Livewire component name -> FQN.
-pub(crate) livewire_components: Arc<Mutex<HashMap<String, String>>>,
-```
-
-#### BL2d. Workspace root dependency
-
-All three scans depend on `workspace_root`. Run them in `initialized`
-after the existing Composer parsing, gated on
-`workspace_root.is_some()`.
-
 ### BL3. `<x-component>` tag parsing in preprocessor
 
 New file: `src/blade/components.rs`
@@ -157,7 +94,8 @@ Parse `<x-component-name attr="val" :attr="$expr" ...>` or
 
 1. Extract the component name (everything between `<x-` and the first
    whitespace or `>`/`/>`).
-2. Look up the name in `blade_components`. If found, resolve the FQN.
+2. Look up the name in the component index (`blade_component_fqn`). If
+   found, resolve the FQN.
 3. Extract attributes:
    - `attr="literal"` → named arg with string value
    - `:attr="$expr"` → named arg with PHP expression value
@@ -168,10 +106,10 @@ Parse `<x-component-name attr="val" :attr="$expr" ...>` or
    constructor call.
 5. Emit `$component = new \FQN(camelAttr: value, ...);`
 
-If the component is not found in `blade_components`, check if it's an
-anonymous component (exists in `blade_views` under `components.`
-prefix). For anonymous components, emit a comment but still expose
-`$attributes` and `$slot`.
+If the component is not in the component index, check if it's an
+anonymous component (a view under the `components.` prefix). For
+anonymous components, emit a comment but still expose `$attributes`
+and `$slot`.
 
 For `<x-dynamic-component :component="$name" ...>`, emit
 `echo $name;` so the expression gets parsed, but do not try to
@@ -205,7 +143,8 @@ Parse `<livewire:name :attr="$expr" ...>` or
 
 1. Extract the component name (everything between `<livewire:` and
    the first whitespace or `>`/`/>`).
-2. Look up in `livewire_components`. If found, resolve the FQN.
+2. Look up in the Livewire index (`livewire_component_fqn`). If found,
+   resolve the FQN.
 3. Extract attributes (same rules as `<x-...>`).
 4. Emit `$component = new \FQN();` followed by property assignments
    for each attribute: `$component->attrName = $expr;`.
@@ -219,8 +158,8 @@ same kebab-to-camelCase conversion.
 
 When the user types `<x-` in a Blade file, offer completions from:
 
-- `blade_components` map (class-based components, kebab-case names)
-- Anonymous component templates: entries in `blade_views` whose key
+- the component index (class-based components, kebab-case names)
+- Anonymous component templates: view names whose key
   starts with `"components."`, with the prefix stripped and dots
   preserved (e.g. `"components.forms.input"` → `"forms.input"`)
 
@@ -234,14 +173,14 @@ on whether they're anonymous or class-backed.
 #### BL4b. `<livewire:` completion
 
 Same pattern. When the user types `<livewire:`, offer completions
-from the `livewire_components` map.
+from the Livewire index.
 
 #### BL4c. `@include('` and `@extends('` view name completion
 
 When the cursor is inside the string argument to `@include`,
 `@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`,
 `@extends`, `@each`, or a `view()` function call, offer completions
-from the `blade_views` map (dot-notation view names).
+from the view index (dot-notation view names).
 
 Detection: look for `@include('`, `@extends('`, or `view('` before
 the cursor and check that the cursor is inside the quotes. The
@@ -295,7 +234,7 @@ Inside `@include('users.index')`, `@extends('layouts.app')`, or
 `view('welcome')`:
 
 1. Extract the view name string at the cursor position.
-2. Look up in `blade_views`.
+2. Look up in the view index (`blade_view_path`).
 3. Return a `Location` pointing to the resolved file.
 
 #### BL5b. Component tag go-to-definition
@@ -303,20 +242,20 @@ Inside `@include('users.index')`, `@extends('layouts.app')`, or
 On `<x-alert>`:
 
 1. Extract the component name.
-2. Look up in `blade_components` to get the FQN.
+2. Look up in the component index to get the FQN.
 3. Use `find_or_load_class` + `fqn_uri_index` to find the
    source file.
 4. Return a `Location` pointing to the class definition.
 
 On `<livewire:counter>`:
 
-1. Same pattern using `livewire_components`.
+1. Same pattern using the Livewire index.
 
 ### BL6. Signature merging for `@extends`
 
 When template A contains `@extends('layouts.app')`:
 
-1. Resolve `layouts.app` via `blade_views` to a file path.
+1. Resolve `layouts.app` via the view index to a file path.
 2. Read or preprocess that file.
 3. Extract `@var` declarations from its `@php` blocks.
 4. Merge those declarations into template A's virtual PHP prologue,
@@ -461,7 +400,8 @@ being resolved inside the preprocessor.
 `@push`/`@prepend`/`@stack` name arguments are cross-file string
 keys: yields and stacks are declared in layouts, filled in children.
 Index section and stack names per template (alongside the discovery
-maps of BL2, recording the `@extends` target), then provide:
+index in `src/blade/discovery.rs`, recording the `@extends` target),
+then provide:
 
 - completion of section/stack names inside child templates from the
   resolved layout chain, and vice versa in layouts from known
@@ -485,8 +425,7 @@ scanner — so that:
 - `Blade::if('admin')` synthesizes the full family (`@admin`,
   `@elseadmin`, `@endadmin`, `@unlessadmin`);
 - directive name completion (BL7) includes them;
-- registered component namespaces/paths extend the discovery maps of
-  BL2.
+- registered component namespaces/paths extend the discovery index.
 
 ### BL9. `view()` call-site validation
 
@@ -532,8 +471,7 @@ currently translates silently instead of producing a diagnostic.
 - Matches the mismatched-closing-directive inspection other Blade-aware
   editors already ship.
 
-No dependency on discovery (BL2) or component parsing (BL3) —
-this operates on the raw directive token stream and can land
+No dependency on component parsing (BL3) — this operates on the raw directive token stream and can land
 independently.
 
 #### Tests
@@ -577,8 +515,7 @@ translates through the source map.
 - Build a Blade-native symbol tree on top of the translated PHP
   symbols: `@section`s and `@push`/`@stack` blocks as top-level
   symbols, `<x-component>` tags as child symbols showing the resolved
-  component FQN once discovery (BL2) and component parsing
-  (BL3) land — degrade to the bare tag name if the component
+  component FQN once component parsing (BL3) lands — degrade to the bare tag name if the component
   doesn't resolve.
 - Matches the structure-view behaviour other Blade-aware editors
   already provide.
@@ -588,7 +525,7 @@ translates through the source map.
 New file `tests/document_symbols_blade.rs`:
 - `@section('content')` appears as an outline entry
 - `<x-alert>` appears as an outline entry with the resolved FQN once
-  discovery (BL2) is in place
+  component parsing (BL3) is in place
 
 ### BL16. Blade-aware formatting
 
@@ -765,13 +702,13 @@ check, and code action suppression are all shipped.
 
 The remaining steps build on the existing preprocessor:
 
-### Step 4: Discovery (BL1, BL2)
+### Step 4: Blade-aware code actions (BL1)
 
-Implement `src/blade/discovery.rs`. Scan `resources/views/`,
-`app/View/Components/`, `app/Livewire/` at init time. Add the three
-new maps to `Backend`.
+Translate every text edit back to Blade coordinates, generate
+Blade-shaped code (a `use` statement belongs inside `@php`), and drop
+the actions that make no sense in a template.
 
-**Deliverable:** Maps are populated and logged at startup.
+**Deliverable:** Code actions are re-enabled for `.blade.php` files.
 
 ### Step 5: Component tag parsing (BL3, items 11-12)
 
