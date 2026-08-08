@@ -143,36 +143,6 @@ assignment right-hand side. The chain resolver in
 facade call is the subject of a `->` link, which it already does for
 the `app()` helper.
 
-#### B60. `keyBy()` does not rebind the key template on a collection subclass
-
-**Impact: Medium · Effort: Medium**
-
-A collection class that fixes its key type through `@extends` keeps that
-key type after a re-keying call, so every later `get()` is judged
-against the wrong parameter type:
-
-```php
-/** @extends Collection<int, ProductPrice> */
-final class ProductPriceCollection extends Collection {}
-
-$byMarket = $prices->keyBy(fn (ProductPrice $p): string => $p->market->value);
-$byMarket->get('dk');   // "Argument 1 ($key) expects int|null, got string"
-```
-
-The same call on a plain `Collection<int, ProductPrice>` rebinds
-correctly, so the rule exists but does not survive `static<TNewKey,
-TValue>` being resolved against a subclass whose `@extends` already
-bound `TKey`. The string-column form (`keyBy('id')`) has the same
-problem: the declared `int` is kept where the key is really unknown, so
-an `array-key` from `groupBy()` is then rejected.
-
-**Where to look:** the re-keying rule that rebinds a callback's return
-type onto `TKey`. When the receiver is a subclass, `TKey` comes from the
-`@extends` binding rather than from the receiver's own arguments, and
-the rebind is dropped instead of overriding it. A key the call cannot
-determine must widen to `array-key`, not fall back to the declared
-binding.
-
 #### B61. An `array_map()` callback parameter is not bound when the array argument is an inline array-function call
 
 **Impact: Medium · Effort: Medium**

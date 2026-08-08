@@ -28,6 +28,8 @@ within the same impact tier.
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
+| L42 | [`keyBy()` and friends do not rebind a collection's key template](todo/laravel.md#l42-keyby-and-friends-do-not-rebind-a-collections-key-template)                           | Medium      | Low-Medium  |
+| L46 | [`Storage::disk()` returns the contract instead of the configured adapter](todo/laravel.md#l46-storagedisk-returns-the-contract-instead-of-the-configured-adapter) | Medium      | Low         |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -112,7 +114,6 @@ unlikely to move the needle for most users.
 | B59 | [`App::make()` and `App::makeWith()` do not resolve when chained directly](todo/bugs.md#b59-appmake-and-appmakewith-do-not-resolve-when-chained-directly)                    | Medium      | Low         |
 | B57 | [A `@props`-declared key is reported as an unused variable](todo/bugs.md#b57-a-props-declared-key-is-reported-as-an-unused-variable)                                        | Medium      | Low         |
 | B58 | [Deprecation diagnostics ignore the project's target PHP version](todo/bugs.md#b58-deprecation-diagnostics-ignore-the-projects-target-php-version)                          | Medium      | Low-Medium  |
-| B60 | [`keyBy()` does not rebind the key template on a collection subclass](todo/bugs.md#b60-keyby-does-not-rebind-the-key-template-on-a-collection-subclass)                     | Medium      | Medium      |
 | B61 | [An `array_map()` callback parameter is not bound when the array argument is an inline array-function call](todo/bugs.md#b61-an-array_map-callback-parameter-is-not-bound-when-the-array-argument-is-an-inline-array-function-call) | Medium      | Medium      |
 | B62 | [An application's container binding loses to the framework default for the same key](todo/bugs.md#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key) | Medium      | Medium      |
 | B63 | [`Container::alias()` bindings and non-literal binding keys do not resolve](todo/bugs.md#b63-containeralias-bindings-and-non-literal-binding-keys-do-not-resolve)           | Low-Medium  | Medium      |
@@ -176,9 +177,7 @@ unlikely to move the needle for most users.
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Low-Medium  |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Low-Medium  |
 | L41 | [Conditional return types on `url()` and its sibling helpers](todo/laravel.md#l41-conditional-return-types-on-url-and-its-sibling-helpers)                                  | Medium      | Low         |
-| L42 | [`keyBy()` and friends do not rebind a collection's key template](todo/laravel.md#l42-keyby-and-friends-do-not-rebind-a-collections-key-template)                           | Medium      | Low-Medium  |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium      |
-| L43 | [`$this->mock()` should return an intersection with the mocked class](todo/laravel.md#l43-thismock-should-return-an-intersection-with-the-mocked-class)                     | Low-Medium  | Low         |
 | L36 | [Container binding registrations from service providers](todo/laravel.md#l36-container-binding-registrations-from-service-providers)                                        | Medium      | Medium      |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |
