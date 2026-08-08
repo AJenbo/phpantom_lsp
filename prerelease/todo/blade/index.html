@@ -1196,10 +1196,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#bl18-backed-component-class-members-in-the-template-body" class="md-nav__link">
+  <a href="#bl20-this-in-a-livewire-view-resolves-to-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL18. Backed component class members in the template body
+        BL20. <code>$this</code> in a Livewire view resolves to nothing
       </span>
     </span>
   </a>
@@ -1480,10 +1480,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-8-cross-file-intelligence-bl5-bl6-bl18" class="md-nav__link">
+  <a href="#step-8-cross-file-intelligence-bl5-bl6" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 8: Cross-file intelligence (BL5, BL6, BL18)
+        Step 8: Cross-file intelligence (BL5, BL6)
       </span>
     </span>
   </a>
@@ -2457,10 +2457,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#bl18-backed-component-class-members-in-the-template-body" class="md-nav__link">
+  <a href="#bl20-this-in-a-livewire-view-resolves-to-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL18. Backed component class members in the template body
+        BL20. <code>$this</code> in a Livewire view resolves to nothing
       </span>
     </span>
   </a>
@@ -2741,10 +2741,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-8-cross-file-intelligence-bl5-bl6-bl18" class="md-nav__link">
+  <a href="#step-8-cross-file-intelligence-bl5-bl6" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 8: Cross-file intelligence (BL5, BL6, BL18)
+        Step 8: Cross-file intelligence (BL5, BL6)
       </span>
     </span>
   </a>
@@ -2864,8 +2864,8 @@ For general architecture see <code>ARCHITECTURE.md</code>.</p>
   come from its declared contract: the Bladestan-compatible chain in
   <code>src/blade/signature.rs</code> — <code>@bladestan-signature</code> docblock, first
   docblock before template code, <code>@props</code>/<code>@aware</code>, Blade's own
-  component scope, and (still to come) the backing component class
-  (BL18). The template declares what it expects; call sites are then
+  component scope, and the backing component class. The template
+  declares what it expects; call sites are then
   <em>validated</em> against that contract (BL9), exactly as a function
   signature works. Inferring types <em>from</em> call sites inverts the contract and
   produces "true for one caller" types, so it is not the foundation —
@@ -3175,27 +3175,27 @@ and hover in the editor (PHPantom) and type checking in CI (Bladestan).
 Where Bladestan defines a concept (signature chain, covariant merging,
 call-site validation), we implement the same semantics so the
 ecosystem converges on one way to type a template.</p>
-<h3 id="bl18-backed-component-class-members-in-the-template-body">BL18. Backed component class members in the template body<a class="headerlink" href="#bl18-backed-component-class-members-in-the-template-body" title="Permanent link">&para;</a></h3>
-<p><code>src/blade/signature.rs</code> resolves a template's declared contract and the
-<code>@props</code>/<code>@aware</code> and Blade-injected sources below it, but the class
-backing a component view contributes nothing yet. Blade merges a class
-component's public properties and its zero-argument public methods into
-the view's data, and Livewire additionally gives its view <code>$this</code>,
-<code>$_instance</code>, and <code>$__livewire</code> (all the component instance) plus the
-component's public properties. A class component with no hand-written
-signature therefore reports every member it reads as undefined.</p>
-<p>Resolve the backing class the way Laravel does — the registered class
-component namespaces and the default <code>App\View\Components</code> convention
-for <code>components.alert</code> → <code>App\View\Components\Alert</code>, and Livewire's
-<code>livewire.create-refund</code> → <code>App\Livewire\CreateRefund</code> under the
-configured <code>livewire.class_namespace</code> — then feed its members into the
-declaration chain below <code>@props</code> and above call-site inference. Skip
-members declared on the framework base class and any method that
-requires an argument, since Blade does not expose those.</p>
-<p>The preprocessor is a pure function of the template text, so the members
-have to arrive through the same channel the call-site-inferred variables
-already use (<code>Backend::blade_injected_vars</code>, populated by a refresh
-pass), not by resolving classes inside the preprocessor.</p>
+<h3 id="bl20-this-in-a-livewire-view-resolves-to-nothing">BL20. <code>$this</code> in a Livewire view resolves to nothing<a class="headerlink" href="#bl20-this-in-a-livewire-view-resolves-to-nothing" title="Permanent link">&para;</a></h3>
+<p>A Livewire template is rendered with the component instance bound, so
+<code>{{ $this-&gt;orders }}</code> and <code>wire:click</code>-driven bodies read members off
+<code>$this</code>. The rest of the Livewire scope now arrives through
+<code>Backend::blade_injected_vars</code> (<code>$_instance</code> and <code>$__livewire</code> are the
+component, and its public properties are declared), but <code>$this</code> cannot:
+the injection channel declares a variable by assigning it in the
+prologue and pulling it into the wrapper function with <code>global</code>, and
+both <code>$this = …</code> and <code>global $this</code> are compile errors in PHP. The type
+engine also resolves <code>$this</code> from the enclosing class rather than from
+the variable scope, so a declaration would not be read even if it
+parsed. Hover, completion, and go-to-definition on <code>$this</code> therefore
+return nothing inside a Livewire view (nothing is <em>wrongly</em> reported —
+the undefined-variable diagnostic leaves <code>$this</code> alone).</p>
+<p>The fix is on the preprocessor side: when a template's backing class is
+known, wrap the body in a method of a synthesized subclass of that class
+rather than in a plain function, so <code>$this</code> resolves the way it does in
+any other method body. <code>WRAPPER_FUNCTION</code> is looked up as a top-level
+function when hoisting a template's <code>@use</code> imports
+(<code>src/parser/ast_update.rs</code>), so that lookup has to learn the method
+form at the same time.</p>
 <h3 id="bl19-shared-and-view-composer-variables-in-the-declaration-chain">BL19. Shared and view-composer variables in the declaration chain<a class="headerlink" href="#bl19-shared-and-view-composer-variables-in-the-declaration-chain" title="Permanent link">&para;</a></h3>
 <p><code>View::share('key', $value)</code> puts a variable in <em>every</em> template's
 scope, and <code>View::composer('view.name', …)</code> (or a composer class's
@@ -3211,9 +3211,9 @@ provider builds), then feed the resulting names into
 scope (a shared variable named <code>slot</code> does not displace the real one)
 and above call-site inference. Types come from resolving the shared
 expression, or from the <code>with()</code> calls in the composer's body, through
-the shared resolution pipeline. Like BL18, the values have to arrive
-via <code>Backend::blade_injected_vars</code> rather than being resolved inside the
-preprocessor.</p>
+the shared resolution pipeline. Like the backing class's members, the
+values have to arrive via <code>Backend::blade_injected_vars</code> rather than
+being resolved inside the preprocessor.</p>
 <h3 id="bl10-cross-file-section-stack-name-intelligence">BL10. Cross-file <code>@section</code> / <code>@stack</code> name intelligence<a class="headerlink" href="#bl10-cross-file-section-stack-name-intelligence" title="Permanent link">&para;</a></h3>
 <p><code>@section</code>/<code>@hasSection</code>/<code>@sectionMissing</code>/<code>@yield</code> and
 <code>@push</code>/<code>@prepend</code>/<code>@stack</code> name arguments are cross-file string
@@ -3515,10 +3515,9 @@ completions.</p>
 <p>Implement <code>@</code> directive name completion with snippets.</p>
 <p><strong>Deliverable:</strong> Typing <code>@</code> in a Blade file shows all known
 directives with snippet templates.</p>
-<h3 id="step-8-cross-file-intelligence-bl5-bl6-bl18">Step 8: Cross-file intelligence (BL5, BL6, BL18)<a class="headerlink" href="#step-8-cross-file-intelligence-bl5-bl6-bl18" title="Permanent link">&para;</a></h3>
+<h3 id="step-8-cross-file-intelligence-bl5-bl6">Step 8: Cross-file intelligence (BL5, BL6)<a class="headerlink" href="#step-8-cross-file-intelligence-bl5-bl6" title="Permanent link">&para;</a></h3>
 <p>Implement go-to-definition for view names and component tags.
-Implement <code>@extends</code> signature merging. Implement component class to
-template variable typing.</p>
+Implement <code>@extends</code> signature merging.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file. Parent layout variables are available in child templates.</p>
 <h3 id="step-9-template-contracts-bl9-bl10-bl11">Step 9: Template contracts (BL9, BL10, BL11)<a class="headerlink" href="#step-9-template-contracts-bl9-bl10-bl11" title="Permanent link">&para;</a></h3>
