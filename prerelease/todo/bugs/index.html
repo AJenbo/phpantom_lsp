@@ -883,10 +883,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b63-containeralias-bindings-and-non-literal-binding-keys-do-not-resolve" class="md-nav__link">
+  <a href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B63. <code>Container::alias()</code> bindings and non-literal binding keys do not resolve
+        B64. A dotted container key resolves to a class named after its first segment
       </span>
     </span>
   </a>
@@ -1416,10 +1416,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b63-containeralias-bindings-and-non-literal-binding-keys-do-not-resolve" class="md-nav__link">
+  <a href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B63. <code>Container::alias()</code> bindings and non-literal binding keys do not resolve
+        B64. A dotted container key resolves to a class named after its first segment
       </span>
     </span>
   </a>
@@ -1564,27 +1564,27 @@ explicitly (<code>config/app.php</code> <code>providers</code>, <code>bootstrap/
 outranks a framework default, and a provider that <code>extends</code> another
 outranks its parent. Where two bindings genuinely tie, the union of both
 classes beats picking one arbitrarily.</p>
-<h4 id="b63-containeralias-bindings-and-non-literal-binding-keys-do-not-resolve">B63. <code>Container::alias()</code> bindings and non-literal binding keys do not resolve<a class="headerlink" href="#b63-containeralias-bindings-and-non-literal-binding-keys-do-not-resolve" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p><code>singleton()</code>, <code>bind()</code>, and <code>instance()</code> are indexed; <code>alias()</code> is not,
-and a key that is not a string literal is not evaluated. Sentry's
-provider uses both at once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class BaseServiceProvider extends ServiceProvider</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">{</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    public static $abstract = &#39;sentry&#39;;</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">// in the subclass:</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">$this-&gt;app-&gt;alias(HubInterface::class, static::$abstract);</span>
+<h4 id="b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment">B64. A dotted container key resolves to a class named after its first segment<a class="headerlink" href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><code>find_or_load_class</code> normalises through <code>PhpType::parse</code>, whose
+<code>base_name()</code> stops at the first character a PHP identifier cannot
+contain. A container key is handed to it verbatim, so <code>'demo.bakery'</code>
+becomes <code>demo</code> and matches any class of that short name before the
+binding table is ever consulted:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// app/Demo.php declares class App\Demo</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;demo.bakery&#39;, fn () =&gt; new BakeryService());</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">app(&#39;demo.bakery&#39;)-&gt;bake(&#39;croissant&#39;);   // resolves to App\Demo, not BakeryService</span>
 </code></pre></div>
-<p>so every <code>app()-&gt;make('sentry')</code>, <code>app('sentry')</code>, and
-<code>App::make('sentry')</code> is unresolved, including through a variable.</p>
-<p><strong>Where to look:</strong> <code>virtual_members/laravel/provider_resources.rs</code>.
-<code>alias(Concrete::class, 'key')</code> binds <code>'key'</code> to the class in the first
-argument — note the argument order is the reverse of <code>bind()</code>. The key
-needs the same constant folding the route-name collector does for
-<code>static::$prop</code> and <code>self::CONST</code>, resolved against the concrete
-provider class so a property declared on a parent is found.</p>
+<p>The bound class is indexed correctly; it is simply never reached,
+because the ordinary class-lookup phases claim the key first and the
+Laravel alias table is only a fallback. Framework keys hit this too
+wherever the leading segment collides (<code>view.engine.resolver</code> against a
+project class named <code>View</code>).</p>
+<p><strong>Where to look:</strong> <code>resolution.rs</code>, <code>Backend::find_or_load_class</code>. A name
+holding a character no PHP identifier can contain is not a class name at
+all, so the ordinary phases have nothing to say about it and the alias
+tables should be consulted first (or exclusively) for it.</p>
 
 
 
