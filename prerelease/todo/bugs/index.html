@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b49-analysis-reports-a-different-set-of-diagnostics-on-each-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B49. Analysis reports a different set of diagnostics on each run
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b49-analysis-reports-a-different-set-of-diagnostics-on-each-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B49. Analysis reports a different set of diagnostics on each run
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,25 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b49-analysis-reports-a-different-set-of-diagnostics-on-each-run">B49. Analysis reports a different set of diagnostics on each run<a class="headerlink" href="#b49-analysis-reports-a-different-set-of-diagnostics-on-each-run" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p>Running <code>analyze</code> twice over the same unchanged directory reports
-different diagnostics. On Laravel's <code>vendor/</code> the count moves by around
-30 between consecutive runs, with a stable core and a flapping tail
-(the <code>Redis::eval()</code> argument checks in <code>Illuminate\Queue\RedisQueue</code>
-and <code>Illuminate\Redis\Limiters</code> are the most reliable flappers):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>$ phpantom_lsp analyze vendor --format json | jq &#39;[.files[].messages[]] | length&#39;
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>6577
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>$ phpantom_lsp analyze vendor --format json | jq &#39;[.files[].messages[]] | length&#39;
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>6606
-</code></pre></div>
-<p>A file's diagnostics must not depend on what the workers happened to
-resolve first. The likely cause is that a shared resolution cache is
-populated in whatever order the parallel workers reach it, so a class
-resolved before its dependants sees different member types than one
-resolved after. Beyond the correctness problem, this makes it
-impossible to tell a real regression from noise when comparing two
-builds over a corpus.</p>
+<p>No outstanding items.</p>
 
 
 
