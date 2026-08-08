@@ -1323,6 +1323,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l46-storagedisk-returns-the-contract-instead-of-the-configured-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. <code>Storage::disk()</code> returns the contract instead of the configured adapter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l26-gate-ability-and-policy-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1437,17 +1448,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L42. <code>keyBy()</code> and friends do not rebind a collection's key template
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l43-this-mock-should-return-an-intersection-with-the-mocked-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L43. <code>$this-&gt;mock()</code> should return an intersection with the mocked class
       </span>
     </span>
   </a>
@@ -2060,6 +2060,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l46-storagedisk-returns-the-contract-instead-of-the-configured-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. <code>Storage::disk()</code> returns the contract instead of the configured adapter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l26-gate-ability-and-policy-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2174,17 +2185,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L42. <code>keyBy()</code> and friends do not rebind a collection's key template
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l43-this-mock-should-return-an-intersection-with-the-mocked-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L43. <code>$this-&gt;mock()</code> should return an intersection with the mocked class
       </span>
     </span>
   </a>
@@ -2928,6 +2928,74 @@ declared under <code>filesystems.disks.*</code>. The config scanner already pars
 <code>config/*.php</code>; expose the children of <code>filesystems.disks</code> as the
 candidate set for completion, go-to-definition (jump to the disk's entry
 in <code>config/filesystems.php</code>), and an unknown-disk diagnostic.</p>
+<h4 id="l46-storagedisk-returns-the-contract-instead-of-the-configured-adapter">L46. <code>Storage::disk()</code> returns the contract instead of the configured adapter<a class="headerlink" href="#l46-storagedisk-returns-the-contract-instead-of-the-configured-adapter" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><code>FilesystemManager::disk()</code>, <code>get()</code>, and <code>build()</code> all declare
+<code>@return \Illuminate\Contracts\Filesystem\Filesystem</code>, but every driver
+the framework ships builds a <code>FilesystemAdapter</code> or a subclass of one:</p>
+<table>
+<thead>
+<tr>
+<th><code>filesystems.disks.*.driver</code></th>
+<th>built at runtime</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>local</code></td>
+<td><code>LocalFilesystemAdapter extends FilesystemAdapter</code></td>
+</tr>
+<tr>
+<td><code>ftp</code>, <code>sftp</code></td>
+<td><code>FilesystemAdapter</code></td>
+</tr>
+<tr>
+<td><code>s3</code></td>
+<td><code>AwsS3V3Adapter extends FilesystemAdapter</code></td>
+</tr>
+<tr>
+<td><code>scoped</code></td>
+<td>delegates to <code>build()</code> → the parent disk's driver</td>
+</tr>
+<tr>
+<td>custom, via <code>Storage::extend()</code></td>
+<td>whatever the registered closure returns</td>
+</tr>
+</tbody>
+</table>
+<p>So <code>Storage::disk('cdn')-&gt;assertExists(…)</code> in a test, and
+<code>-&gt;download(…)</code> in a controller, report the assertion and adapter
+methods as missing even though they are always there. This is the same
+declared-type correction <code>patch_storage_fake_return_types</code> already makes
+for <code>Storage::fake()</code> / <code>persistentFake()</code>, and it is far more common:
+<code>fake()</code> is one call in a <code>setUp()</code>, <code>disk()</code> is every call after it.</p>
+<p>The correction is only unconditional in the absence of custom drivers.
+A project that calls <code>Storage::extend('name', …)</code> can bind a disk to
+anything, and the closure's declared return is the bare contract, so a
+blanket rewrite would be unsound there. That is exactly the shape
+<code>patch_auth_user_class</code> already handles for <code>config/auth.php</code>: read the
+config, map each candidate, union the results, and never widen to
+<code>mixed</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>filesystems.disks.&lt;name&gt;.driver  →  concrete adapter class
+</code></pre></div>
+<p>Read <code>config/filesystems.php</code> with <code>parse_config_tree</code>, map each built-in
+driver to its concrete class, resolve any driver matched by a
+<code>Storage::extend()</code> registration to that closure's return type (or leave
+it as the contract when the closure is unreadable), and patch the
+manager methods and the <code>Storage</code> facade's <code>@method</code> tags to the union.
+<code>cloud()</code> wants the same treatment against the <code>Cloud</code> contract, which
+<code>AwsS3V3Adapter</code> implements.</p>
+<p>Note this inherits the limitation <code>patch_auth_user_class</code> has: the patch
+is per method, not per argument, so <code>disk('cdn')</code> and <code>disk('s3')</code> both
+receive the union rather than their own disk's type — the same way
+<code>auth('admin')-&gt;user()</code> currently receives the default guard's model.
+That is harmless while the union is a single class, and the fix for both
+is the same argument-aware work, not something to solve here.</p>
+<p><strong>Where to look:</strong> <code>patch_storage_fake_return_types</code> in
+<code>virtual_members/laravel/patches.rs</code> for the rewrite, and
+<code>virtual_members/laravel/auth.rs</code> for the config traversal and fan-out
+to copy. L25 exposes the same <code>filesystems.disks</code> children as a string
+candidate set, so the two share a config read.</p>
 <h4 id="l26-gate-ability-and-policy-strings">L26. Gate ability and policy strings<a class="headerlink" href="#l26-gate-ability-and-policy-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
 <p>The Laravel LSP covers auth strings (completion, hover, diagnostics,
@@ -3086,8 +3154,8 @@ reference found," never as an error.</p>
 <p><strong>Impact: Medium · Effort: Low</strong></p>
 <p><code>url()</code> returns the generator or a string depending on whether it got a
 path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
 </code></pre></div>
 <p>We resolve the call to the contract regardless of the argument, so a
 string result is typed as <code>UrlGenerator</code>. Real-world fallout is
@@ -3103,46 +3171,46 @@ Application : mixed)</code>).</p>
 <code>type_engine/variable/rhs_resolution/calls.rs</code>.</p>
 <h4 id="l42-keyby-and-friends-do-not-rebind-a-collections-key-template">L42. <code>keyBy()</code> and friends do not rebind a collection's key template<a class="headerlink" href="#l42-keyby-and-friends-do-not-rebind-a-collections-key-template" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p><code>keyBy()</code> re-keys a collection, but we keep the original <code>TKey</code>, so
-looking the result up by its new key is reported as a mismatch:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$byMarket = ProductPrice::where(...)-&gt;get()</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">$byMarket-&gt;get($someString);</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">// false positive: Argument 1 ($key) expects int|null, got string</span>
+<p>Rebinding now works on a plain <code>Collection</code>, and <code>groupBy()</code>, <code>flip()</code>,
+<code>pluck()</code> with a key argument, and the <code>keyBy('column')</code> form are all
+correct. Two cases are still wrong.</p>
+<p>A collection class that fixes its key type through <code>@extends</code> keeps that
+key type across the re-keying call, so the rebind is dropped exactly
+where a project is most likely to hit it — Eloquent hands back the
+model's own collection class, not a plain one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @extends Collection&lt;int, ProductPrice&gt; */</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">final class ProductPriceCollection extends Collection {}</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">$byMarket = ProductPrice::where(...)-&gt;get()</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    -&gt;keyBy(fn (ProductPrice $pp): string =&gt; $pp-&gt;market-&gt;value);</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">$byMarket-&gt;get($someString);</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">// false positive: Argument 1 ($key) expects int|null, got string</span>
 </code></pre></div>
-<p>The callback's return type (or the string column name in the
-<code>keyBy('id')</code> form) is the new <code>TKey</code>. <code>mapWithKeys()</code>, <code>groupBy()</code>,
-<code>flip()</code>, and <code>pluck()</code> with a key argument reshape keys the same way
-and should be checked together.</p>
+<p><code>static&lt;TNewKey, TValue&gt;</code> is being resolved against a subclass whose
+<code>@extends</code> already bound <code>TKey</code>, and the binding wins over the rebind.
+The <code>keyBy('id')</code> form on a subclass has the same problem from the other
+direction: the declared <code>int</code> is kept where the new key is really
+unknown, so an <code>array-key</code> handed in from <code>groupBy()</code> is then rejected.
+A key the call cannot determine must widen to <code>array-key</code>, never fall
+back to the declared binding.</p>
+<p><code>mapWithKeys()</code> rebinds to the wrong thing entirely — it takes the
+callback's <em>return type</em> as the new key rather than that array's key
+type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$c-&gt;mapWithKeys(fn (Order $o): array =&gt; [&#39;x&#39; =&gt; $o])-&gt;get(&#39;dk&#39;);</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">// false positive: Argument 1 ($key) expects array|null, got &#39;dk&#39;</span>
+</code></pre></div>
 <p><strong>Where to look:</strong> the collection method modelling in
 <code>virtual_members/laravel/</code>, alongside the custom-collection rewrite.</p>
-<h4 id="l43-this-mock-should-return-an-intersection-with-the-mocked-class">L43. <code>$this-&gt;mock()</code> should return an intersection with the mocked class<a class="headerlink" href="#l43-this-mock-should-return-an-intersection-with-the-mocked-class" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p>Laravel's <code>InteractsWithContainer::mock()</code> is typed as returning
-<code>MockInterface</code>, but it always returns a mock <em>of</em> the given class, and
-test helpers routinely declare the intersection:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">private function mockHelloRetailClient(): Client&amp;MockInterface</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">{</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    $mock = $this-&gt;mock(Client::class);</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    // ...</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    return $mock;  // false positive: MockInterface is not Client&amp;MockInterface</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>Typing <code>mock()</code>/<code>partialMock()</code>/<code>spy()</code> as <code>T&amp;MockInterface</code> for a
-<code>class-string&lt;T&gt;</code> argument fixes the return, and also makes completion
-on the mock offer the mocked class's own members.</p>
-<p><strong>Where to look:</strong> the Laravel method return-type modelling in
-<code>virtual_members/laravel/</code>.</p>
 <h4 id="l44-sibling-resource-registrations-and-degenerate-resource-names">L44. Sibling resource registrations and degenerate resource names<a class="headerlink" href="#l44-sibling-resource-registrations-and-degenerate-resource-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
 <p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
 registrations that generate route names the same way are not, so every
 <code>route()</code> call naming one is reported as an unknown route:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
 </code></pre></div>
 <p><code>resources()</code> / <code>apiResources()</code> expand to the same seven (or five)
 conventional names per entry. <code>singleton()</code> generates <code>show</code>, <code>edit</code>, and
