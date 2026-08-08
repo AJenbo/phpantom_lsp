@@ -1,6 +1,8 @@
 //! Integration tests for resolving `Storage::disk()` / `FilesystemManager`'s
 //! disk-returning methods from the declared `Filesystem`/`Cloud` contract to
-//! the concrete `FilesystemAdapter`, based on `config/filesystems.php`.
+//! what the disks in `config/filesystems.php` are actually built from: the
+//! concrete `FilesystemAdapter` for a driver the framework ships, and the
+//! registered closure's own return type for a `Storage::extend()` driver.
 
 use crate::common::create_psr4_workspace;
 use tower_lsp::LanguageServer;
@@ -104,18 +106,39 @@ async fn complete_labels(
     line: u32,
     character: u32,
 ) -> Vec<String> {
+    complete_labels_with_provider(files, None, open_path, content, line, character).await
+}
+
+/// Like [`complete_labels`] but opens a service provider first, which is what
+/// registers its `Storage::extend()` drivers in the index.
+async fn complete_labels_with_provider(
+    files: &[(&str, &str)],
+    provider: Option<(&str, &str)>,
+    open_path: &str,
+    content: &str,
+    line: u32,
+    character: u32,
+) -> Vec<String> {
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, files);
-    let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
+    let open = |path: &str, text: &str| {
+        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let params = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: uri.clone(),
                 language_id: "php".to_string(),
                 version: 1,
-                text: content.to_string(),
+                text: text.to_string(),
             },
-        })
-        .await;
+        };
+        (uri, params)
+    };
+
+    if let Some((path, text)) = provider {
+        let (_, params) = open(path, text);
+        backend.did_open(params).await;
+    }
+    let (uri, params) = open(open_path, content);
+    backend.did_open(params).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -172,12 +195,11 @@ async fn disk_with_only_builtin_drivers_resolves_to_adapter() {
     );
 }
 
-/// When a disk is built by a driver not shipped by the framework (registered
-/// via `Storage::extend()`, whose return type cannot be read statically),
-/// the correction does not fire and `disk()` keeps returning the bare
-/// contract.
+/// When a disk is built by a driver the framework does not ship and no
+/// `Storage::extend()` registration for it can be found, the correction does
+/// not fire and `disk()` keeps returning the bare contract.
 #[tokio::test]
-async fn disk_with_custom_driver_keeps_contract() {
+async fn disk_with_unregistered_custom_driver_keeps_contract() {
     let mut files = base_files();
     files.push((
         "config/filesystems.php",
@@ -197,6 +219,124 @@ async fn disk_with_custom_driver_keeps_contract() {
     assert!(
         labels.iter().any(|l| l.starts_with("read")),
         "the declared Filesystem contract's own members should still complete, got: {labels:?}"
+    );
+}
+
+const EXTEND_ADAPTER_PROVIDER_PHP: &str = "\
+<?php
+namespace App\\Providers;
+use Illuminate\\Filesystem\\FilesystemAdapter;
+use Illuminate\\Support\\Facades\\Storage;
+class AppServiceProvider {
+    public function boot(): void {
+        Storage::extend('dropbox', function ($app, $config) {
+            return new FilesystemAdapter();
+        });
+    }
+}
+";
+
+const MEMORY_DISK_PHP: &str = "\
+<?php
+namespace App\\Filesystem;
+class MemoryDisk {
+    public function read(string $path) { return null; }
+    public function flushMemory(): void {}
+}
+";
+
+const EXTEND_MEMORY_PROVIDER_PHP: &str = "\
+<?php
+namespace App\\Providers;
+use App\\Filesystem\\MemoryDisk;
+use Illuminate\\Support\\Facades\\Storage;
+class AppServiceProvider {
+    public function boot(): void {
+        Storage::extend('memory', function ($app, $config) {
+            return new MemoryDisk();
+        });
+    }
+}
+";
+
+/// The documented `Storage::extend()` shape returns an unannotated
+/// `FilesystemAdapter`, so reading the closure body folds the custom driver
+/// into the same concrete type the built-in disks resolve to.
+#[tokio::test]
+async fn disk_with_extend_returning_adapter_resolves_to_adapter() {
+    let mut files = base_files();
+    files.push((
+        "config/filesystems.php",
+        "<?php return [
+            'disks' => [
+                'local' => ['driver' => 'local'],
+                'dropbox' => ['driver' => 'dropbox'],
+            ],
+        ];",
+    ));
+    files.push((
+        "src/Providers/AppServiceProvider.php",
+        EXTEND_ADAPTER_PROVIDER_PHP,
+    ));
+
+    let labels = complete_labels_with_provider(
+        &files,
+        Some((
+            "src/Providers/AppServiceProvider.php",
+            EXTEND_ADAPTER_PROVIDER_PHP,
+        )),
+        "src/C.php",
+        CONTROLLER_PHP,
+        5,
+        29,
+    )
+    .await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("assertExists")),
+        "a custom driver that builds a FilesystemAdapter should not hold the \
+         built-in disks back, got: {labels:?}"
+    );
+}
+
+/// A custom driver that builds something else widens the disk type to a union
+/// of both, rather than dropping the correction for every disk in the project.
+#[tokio::test]
+async fn disk_with_extend_returning_other_type_offers_both() {
+    let mut files = base_files();
+    files.push((
+        "config/filesystems.php",
+        "<?php return [
+            'disks' => [
+                'local' => ['driver' => 'local'],
+                'memory' => ['driver' => 'memory'],
+            ],
+        ];",
+    ));
+    files.push(("src/Filesystem/MemoryDisk.php", MEMORY_DISK_PHP));
+    files.push((
+        "src/Providers/AppServiceProvider.php",
+        EXTEND_MEMORY_PROVIDER_PHP,
+    ));
+
+    let labels = complete_labels_with_provider(
+        &files,
+        Some((
+            "src/Providers/AppServiceProvider.php",
+            EXTEND_MEMORY_PROVIDER_PHP,
+        )),
+        "src/C.php",
+        CONTROLLER_PHP,
+        5,
+        29,
+    )
+    .await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("assertExists")),
+        "the built-in disks' adapter members should complete, got: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("flushMemory")),
+        "the custom driver's own members should complete, got: {labels:?}"
     );
 }
 

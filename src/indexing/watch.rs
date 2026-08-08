@@ -118,6 +118,7 @@ impl Backend {
             self.clear_class_not_found_cache();
             self.resolved_class_cache.write().clear();
             self.auth_user_type_cache.write().clear();
+            *self.storage_disk_type_cache.write() = None;
             *self.laravel_aliases.write() = None;
             self.member_completion_cache.lock().clear();
         }

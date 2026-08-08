@@ -10,7 +10,11 @@ use App\Support\CollectionMixin;
 use App\Support\CroissantSupplier;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
+use League\Flysystem\Filesystem;
+use League\Flysystem\Local\LocalFilesystemAdapter;
 
 class DemoServiceProvider extends BaseDemoServiceProvider
 {
@@ -70,5 +74,15 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         // each public method of the trait becomes a method on the target,
         // using the trait method's own signature directly.
         CarbonImmutable::mixin(CarbonMixin::class);
+
+        // A custom disk driver is bound here rather than in the framework, so
+        // the type it builds is only knowable from this closure.  PHPantom
+        // reads it and folds the 'pantry' disk in config/filesystems.php into
+        // the type Storage::disk() resolves to.
+        Storage::extend('pantry', function ($app, array $config) {
+            $adapter = new LocalFilesystemAdapter($config['root']);
+
+            return new FilesystemAdapter(new Filesystem($adapter), $adapter, $config);
+        });
     }
 }

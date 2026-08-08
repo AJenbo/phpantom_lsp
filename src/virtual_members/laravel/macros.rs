@@ -980,7 +980,10 @@ fn typed_parameter_targets(
     out
 }
 
-fn resolve_hint_target_fqn(hint: &Hint<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
+pub(super) fn resolve_hint_target_fqn(
+    hint: &Hint<'_>,
+    resolved: &OwnedResolvedNames,
+) -> Option<String> {
     match hint {
         Hint::Identifier(ident) => {
             let raw = bytes_to_str(ident.value());
@@ -1072,7 +1075,7 @@ fn build_registration(
     })
 }
 
-fn expr_source_text(expr: Option<&Expression<'_>>, content: &str) -> Option<String> {
+pub(super) fn expr_source_text(expr: Option<&Expression<'_>>, content: &str) -> Option<String> {
     let expr = expr?;
     let span = expr.span();
     let start = span.start.offset as usize;
@@ -1083,7 +1086,10 @@ fn expr_source_text(expr: Option<&Expression<'_>>, content: &str) -> Option<Stri
 /// Resolve a class-name identifier expression to a fully-qualified name via
 /// the file's resolved `use` statements.  `self`/`static`/`parent` are
 /// skipped (a relative target carries no concrete FQN here).
-fn resolve_target_fqn(class: &Expression<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
+pub(super) fn resolve_target_fqn(
+    class: &Expression<'_>,
+    resolved: &OwnedResolvedNames,
+) -> Option<String> {
     let Expression::Identifier(ident) = class else {
         return None;
     };
@@ -1101,20 +1107,26 @@ fn resolve_target_fqn(class: &Expression<'_>, resolved: &OwnedResolvedNames) -> 
     (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string())
 }
 
+/// The text of a plain single- or double-quoted string literal, or `None`
+/// when the expression is anything else (an interpolated or dynamic string,
+/// a variable, a constant).
+pub(super) fn string_literal_value<'arena>(expr: &Expression<'arena>) -> Option<&'arena str> {
+    match expr {
+        Expression::Literal(Literal::String(s)) => s.value.map(bytes_to_str),
+        _ => None,
+    }
+}
+
 /// Extract the string value of the macro-name argument.
 fn macro_name(expr: &Expression<'_>) -> Option<String> {
-    if let Expression::Literal(Literal::String(s)) = expr
-        && let Some(v) = s.value
+    let name = string_literal_value(expr)?;
+    // Macro names are valid PHP identifiers; reject anything else
+    // (interpolated or dynamic strings) so we never synthesize garbage.
+    if !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !name.chars().next().is_some_and(|c| c.is_ascii_digit())
     {
-        let name = bytes_to_str(v);
-        // Macro names are valid PHP identifiers; reject anything else
-        // (interpolated or dynamic strings) so we never synthesize garbage.
-        if !name.is_empty()
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-            && !name.chars().next().is_some_and(|c| c.is_ascii_digit())
-        {
-            return Some(name.to_string());
-        }
+        return Some(name.to_string());
     }
     None
 }
@@ -1365,7 +1377,7 @@ fn collect_class_consts(node: Node<'_, '_>, resolved: &OwnedResolvedNames, out: 
 
 /// Extract the parameter list and return-type hint of the closure/arrow-fn
 /// argument to `macro()`.
-fn closure_signature<'ast, 'arena>(
+pub(super) fn closure_signature<'ast, 'arena>(
     expr: &'ast Expression<'arena>,
 ) -> Option<(
     &'ast FunctionLikeParameterList<'arena>,

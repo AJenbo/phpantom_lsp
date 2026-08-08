@@ -240,7 +240,8 @@ check(
 // disk()/cloud() declare the Filesystem/Cloud contract, but every driver
 // config/filesystems.php configures ('local', 's3') builds a
 // FilesystemAdapter. The analyzer only corrects the return type when it can
-// confirm every configured disk uses a framework-shipped driver.
+// confirm what every configured disk is built from: a framework-shipped
+// driver, or a Storage::extend() closure whose return type it can read.
 check(
     'FilesystemAdapter::download() exists',
     method_exists(\Illuminate\Filesystem\FilesystemAdapter::class, 'download')

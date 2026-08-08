@@ -157,6 +157,10 @@ impl Backend {
         // register macros.  Cheap no-op for files without a `macro(` call.
         self.refresh_laravel_macros(uri, content);
 
+        // Keep the filesystem disk type coherent with edits to `config/` and
+        // to files that register a `Storage::extend()` driver.
+        self.refresh_laravel_storage_drivers(uri, content);
+
         // Keep the reverse pivot index coherent with edits to files that
         // declare (or previously declared) a many-to-many relationship.
         self.refresh_laravel_pivots(uri, content);

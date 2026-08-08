@@ -758,6 +758,12 @@ class Demo
         // resolve on every configured disk, not just a faked one.
         Storage::disk('s3')->download('report.pdf');
         Storage::cloud()->assertExists('logo.png');
+
+        // The 'pantry' disk uses a driver the framework does not ship.  Its
+        // Storage::extend() closure in DemoServiceProvider builds a
+        // FilesystemAdapter too, so a custom driver does not cost the rest of
+        // the project its precise disk type.
+        Storage::disk('pantry')->download('sourdough.pdf');
     }
 
 

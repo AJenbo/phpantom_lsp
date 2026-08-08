@@ -552,17 +552,26 @@ pub struct Backend {
     /// whenever files are re-parsed, so edits to `config/auth.php` take
     /// effect without a restart.
     pub(crate) auth_user_type_cache: Arc<RwLock<HashMap<String, Option<crate::php_type::PhpType>>>>,
-    /// Memoized "every configured filesystem disk uses a driver the framework
-    /// ships" flag, derived from `config/filesystems.php`.
+    /// Memoized concrete type every configured filesystem disk resolves to,
+    /// derived from `config/filesystems.php` and
+    /// [`laravel_storage_drivers`](Self::laravel_storage_drivers).
     ///
     /// `Storage`/`FilesystemManager`'s `drive()`/`disk()`/`cloud()`/`build()`
-    /// are only safe to refine from the `Filesystem`/`Cloud` contract to the
-    /// concrete `FilesystemAdapter` when no disk uses a custom
-    /// `Storage::extend()` driver, whose return type cannot be read
-    /// statically. `None` means "not yet computed"; cleared whenever files are
-    /// re-parsed so edits to `config/filesystems.php` take effect without a
-    /// restart.
-    pub(crate) storage_disk_safe_cache: Arc<RwLock<Option<bool>>>,
+    /// declare only the `Filesystem`/`Cloud` contract; this is what they are
+    /// refined to. The outer option is `None` until first computed, the inner
+    /// one when at least one disk could not be classified (a dynamic driver
+    /// name, or a custom driver with no discoverable registration). Cleared
+    /// when a `config/` file or a `Storage::extend()` registration changes, so
+    /// an edit takes effect without a restart.
+    pub(crate) storage_disk_type_cache: Arc<RwLock<Option<Option<crate::php_type::PhpType>>>>,
+    /// `Storage::extend('driver', closure)` registrations discovered from
+    /// project and vendor service-provider source, keyed by driver name.
+    ///
+    /// Built alongside [`laravel_macros`](Self::laravel_macros) (both come
+    /// from the same provider scan) and refreshed when a contributing file
+    /// changes. Empty for non-Laravel projects.
+    pub(crate) laravel_storage_drivers:
+        Arc<RwLock<virtual_members::laravel::LaravelStorageDriverIndex>>,
     /// Memoized Laravel alias tables, parsed from the installed framework
     /// source (`registerCoreContainerAliases()`, `Facade::defaultAliases()`)
     /// and the project's `config/app.php`.
@@ -903,7 +912,8 @@ impl Backend {
             stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
-            storage_disk_safe_cache: Arc::new(RwLock::new(None)),
+            storage_disk_type_cache: Arc::new(RwLock::new(None)),
+            laravel_storage_drivers: Arc::new(RwLock::new(Default::default())),
             laravel_aliases: Arc::new(RwLock::new(None)),
             laravel_macros: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMacroIndex::default(),
@@ -994,7 +1004,8 @@ impl Backend {
             stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
-            storage_disk_safe_cache: Arc::new(RwLock::new(None)),
+            storage_disk_type_cache: Arc::new(RwLock::new(None)),
+            laravel_storage_drivers: Arc::new(RwLock::new(Default::default())),
             laravel_aliases: Arc::new(RwLock::new(None)),
             laravel_macros: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelMacroIndex::default(),
@@ -1629,7 +1640,8 @@ impl Backend {
             stub_index: Arc::clone(&self.stub_index),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
             auth_user_type_cache: Arc::clone(&self.auth_user_type_cache),
-            storage_disk_safe_cache: Arc::clone(&self.storage_disk_safe_cache),
+            storage_disk_type_cache: Arc::clone(&self.storage_disk_type_cache),
+            laravel_storage_drivers: Arc::clone(&self.laravel_storage_drivers),
             laravel_aliases: Arc::clone(&self.laravel_aliases),
             laravel_macros: Arc::clone(&self.laravel_macros),
             laravel_has_macros: Arc::clone(&self.laravel_has_macros),

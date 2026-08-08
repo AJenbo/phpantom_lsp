@@ -156,12 +156,16 @@ pub(crate) use model_extraction::{
     extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
 };
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
+pub(crate) use patches::STORAGE_FACADE_FQN;
 pub(crate) use provider_resources::{
     ProviderIdentity, ProviderOrigin, ProviderResources, extract_provider_resources,
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{RouteEntry, enumerate_all_routes, route_uri_parameters};
-pub(crate) use storage::patch_storage_disk_type;
+pub(crate) use storage::{
+    FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
+    extract_storage_driver_registrations, patch_storage_disk_type,
+};
 pub(crate) use trans_keys::collect_trans_declarations;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_names::canonical_view_name;

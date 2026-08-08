@@ -521,7 +521,7 @@ impl LanguageServer for Backend {
         // the now-complete index rebuild every merge correctly.
         self.resolved_class_cache.write().clear();
         self.auth_user_type_cache.write().clear();
-        *self.storage_disk_safe_cache.write() = None;
+        *self.storage_disk_type_cache.write() = None;
         *self.laravel_aliases.write() = None;
 
         // Scan project source for Laravel macro registrations so macro
@@ -1925,10 +1925,15 @@ impl Backend {
     /// each imported class is scanned as a one-level helper candidate. Called
     /// once after indexing for Laravel projects. Files are byte-prefiltered for
     /// `macro(` so only candidates are parsed.
+    ///
+    /// `Storage::extend('driver', closure)` registrations are collected in the
+    /// same pass: they live in exactly these files, and reading each one twice
+    /// to build two indexes would double the scan for no gain.
     pub(crate) fn build_laravel_macro_index(&self) {
         let php_version = Some(*self.workspace.php_version.lock());
 
         let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();
+        let mut drivers = crate::virtual_members::laravel::LaravelStorageDriverIndex::default();
         let mut candidate_uris: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         let mut provider_uris: Vec<String> = Vec::new();
@@ -1991,6 +1996,21 @@ impl Backend {
             index.set_file(uri, regs);
         };
 
+        // Scan a single file's `Storage::extend()` registrations into the
+        // driver index, keyed by its URI.
+        let scan_storage_drivers =
+            |drivers: &mut crate::virtual_members::laravel::LaravelStorageDriverIndex,
+             uri: &str,
+             content: &str| {
+                let mut regs =
+                    crate::virtual_members::laravel::extract_storage_driver_registrations(content);
+                if regs.is_empty() {
+                    return;
+                }
+                self.infer_storage_driver_return_types(&mut regs, uri, content);
+                drivers.set_file(uri.to_string(), regs);
+            };
+
         // Vendor- and app-registered service providers seed macro discovery.
         for fqn in self.laravel_provider_fqns() {
             let Some(uri) = self.resolve_class_uri(&fqn) else {
@@ -2007,6 +2027,7 @@ impl Backend {
                 continue;
             };
             scan_content(&mut index, &mut mixin_uris, uri.clone(), &content);
+            scan_storage_drivers(&mut drivers, uri, &content);
 
             let referenced =
                 crate::virtual_members::laravel::parse_provider_referenced_classes(&content);
@@ -2029,7 +2050,11 @@ impl Backend {
                 continue;
             };
             scan_content(&mut index, &mut mixin_uris, uri.clone(), &content);
+            scan_storage_drivers(&mut drivers, uri, &content);
         }
+
+        drivers.rebuild();
+        self.store_laravel_storage_drivers(drivers);
 
         index.rebuild();
         let has_macros = !index.is_empty();
@@ -2687,6 +2712,110 @@ impl Backend {
                 reg.method.return_type = Some(ty);
                 reg.method.is_inferred_return = true;
             }
+        }
+    }
+
+    /// Publish a freshly built storage-driver index, invalidating the memoized
+    /// disk type when the set of custom drivers is (or was) non-empty.
+    ///
+    /// A build resolves classes as it goes, which can compute and cache the
+    /// disk type against the previous index; dropping it here means the first
+    /// read after the build sees the drivers this scan found.
+    fn store_laravel_storage_drivers(
+        &self,
+        drivers: crate::virtual_members::laravel::LaravelStorageDriverIndex,
+    ) {
+        let stale = !self.laravel_storage_drivers.read().is_empty() || !drivers.is_empty();
+        *self.laravel_storage_drivers.write() = drivers;
+        if stale {
+            self.invalidate_storage_disk_type();
+        }
+    }
+
+    /// Drop the memoized filesystem disk type and evict the two classes it was
+    /// baked into, so the next load of either recomputes it.
+    fn invalidate_storage_disk_type(&self) {
+        *self.storage_disk_type_cache.write() = None;
+        let mut cache = self.resolved_class_cache.write();
+        for fqn in [
+            crate::virtual_members::laravel::FILESYSTEM_MANAGER_FQN,
+            crate::virtual_members::laravel::STORAGE_FACADE_FQN,
+        ] {
+            crate::virtual_members::evict_fqn(&mut cache, fqn);
+        }
+    }
+
+    /// Keep the storage-driver index and the memoized disk type coherent with
+    /// an edit.
+    ///
+    /// Two kinds of edit matter: a `config/` file (which decides what the disks
+    /// name, and whose parsed tree the string-key cache drops on the same
+    /// condition), and a file that registers — or used to register — a
+    /// `Storage::extend()` driver.  Every other file is a byte-prefiltered
+    /// no-op.
+    pub(crate) fn refresh_laravel_storage_drivers(&self, uri: &str, content: &str) {
+        if !self.resolved_class_cache.read().is_laravel() {
+            return;
+        }
+        let config_changed = uri.contains("/config/");
+        let had = self.laravel_storage_drivers.read().has_uri(uri);
+        let mut regs =
+            crate::virtual_members::laravel::extract_storage_driver_registrations(content);
+        if !config_changed && !had && regs.is_empty() {
+            return;
+        }
+        if had || !regs.is_empty() {
+            self.infer_storage_driver_return_types(&mut regs, uri, content);
+            let mut index = self.laravel_storage_drivers.write();
+            index.set_file(uri.to_string(), regs);
+            index.rebuild();
+        }
+        self.invalidate_storage_disk_type();
+    }
+
+    /// Fill in the type each `Storage::extend()` closure builds when it does
+    /// not annotate one.
+    ///
+    /// The documented registration shape ends in an unannotated `return new
+    /// FilesystemAdapter(...)`, so the body is the ordinary source of a custom
+    /// driver's type rather than a fallback for sloppy code.
+    fn infer_storage_driver_return_types(
+        &self,
+        regs: &mut [crate::virtual_members::laravel::StorageDriverRegistration],
+        uri: &str,
+        content: &str,
+    ) {
+        if regs.iter().all(|reg| reg.return_type.is_some()) {
+            return;
+        }
+        let file_ctx = self.file_context(uri);
+        let class_loader = self.class_loader(&file_ctx);
+        let function_loader = self.function_loader(&file_ctx);
+        for reg in regs.iter_mut() {
+            if reg.return_type.is_some() {
+                continue;
+            }
+            let Some(closure_text) = reg.closure_text.as_deref() else {
+                continue;
+            };
+            let rctx = crate::type_engine::resolver::ResolutionCtx {
+                current_class: crate::diagnostics::helpers::find_innermost_enclosing_class(
+                    &file_ctx.classes,
+                    reg.closure_offset,
+                ),
+                all_classes: &file_ctx.classes,
+                content,
+                cursor_offset: reg.closure_offset,
+                class_loader: &class_loader,
+                backend: Some(self),
+                laravel_macro_this_resolver: None,
+                resolved_class_cache: Some(&self.resolved_class_cache),
+                function_loader: Some(&function_loader),
+                scope_var_resolver: None,
+                is_in_static_method: false,
+                preserve_static: false,
+            };
+            reg.return_type = Self::infer_closure_return_type(closure_text, &rctx);
         }
     }
 
