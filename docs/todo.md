@@ -109,7 +109,6 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B49 | [Analysis reports a different set of diagnostics on each run](todo/bugs.md#b49-analysis-reports-a-different-set-of-diagnostics-on-each-run)                                 | High        | Medium      |
 | B50 | [An array literal argument binds no element type through a union hint](todo/bugs.md#b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint)               | Medium      | Low-Medium  |
-| B51 | [A chained static factory call loses its method-level template](todo/bugs.md#b51-a-chained-static-factory-call-loses-its-method-level-template)                             | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

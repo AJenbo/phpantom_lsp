@@ -57,20 +57,3 @@ The same call with a variable or a call argument of type
 `array<string>` binds `TWrapValue` to `string` correctly. The generic
 wrapper binding path already unwraps array literals element by element;
 the union path needs the same treatment.
-
-#### B51. A chained static factory call loses its method-level template
-
-**Impact: Medium · Effort: Medium**
-
-A method-level `@template` bound on a *static* factory survives into a
-variable but not into a directly chained call:
-
-```php
-$w = Wrapper::make(names());
-$w->push([1]);              // Argument 1 ($value) expects string — correct
-
-Wrapper::make(names())->push([1]);   // no diagnostic at all
-```
-
-The instance-method equivalent (`$w->rewrap(names())->push([1])`)
-reports correctly, so this is specific to the static-call receiver.

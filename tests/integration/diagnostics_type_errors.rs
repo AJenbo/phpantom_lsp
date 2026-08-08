@@ -7231,3 +7231,77 @@ fn a_container_argument_binds_the_template_through_the_iterable_alternative() {
 fn a_scalar_argument_binds_the_template_through_the_bare_alternative() {
     assert!(wrapped_push_message("'solo'").contains("expects string"));
 }
+
+// ─── A method-level template survives into a directly chained call ──────────
+
+/// A generic wrapper with both a static factory and an instance method that
+/// bind a method-level `@template` from their argument and return a re-typed
+/// wrapper.  `push()` then reports what that template bound to.
+const METHOD_TEMPLATE_FACTORY: &str = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Wrapper
+{
+    /**
+     * @template TMakeValue
+     *
+     * @param  iterable<array-key, TMakeValue>  $value
+     * @return static<array-key, TMakeValue>
+     */
+    public static function make($value) {}
+
+    /**
+     * @template TReValue
+     *
+     * @param  iterable<array-key, TReValue>  $value
+     * @return static<array-key, TReValue>
+     */
+    public function rewrap($value) {}
+
+    /** @param TValue $value */
+    public function push($value) {}
+}
+
+/** @return array<string> */
+function names(): array { return []; }
+"#;
+
+/// Report the type error `push()` raises for `$expr->push([1])`, where the
+/// receiver is a call that binds a method-level template.
+fn factory_push_message(expr: &str) -> String {
+    let php = format!("{METHOD_TEMPLATE_FACTORY}\n{expr}->push([1]);\n");
+    let messages = type_error_messages(&collect(&php));
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected exactly one type error for `{expr}`, got {messages:?}"
+    );
+    messages.into_iter().next().unwrap()
+}
+
+#[test]
+fn a_static_factory_binds_its_template_into_a_chained_call() {
+    assert!(factory_push_message("Wrapper::make(names())").contains("expects string"));
+}
+
+#[test]
+fn an_instance_method_binds_its_template_into_a_chained_call() {
+    let php = format!("{METHOD_TEMPLATE_FACTORY}\n$w = new Wrapper();\n");
+    assert!(
+        type_error_messages(&collect(&format!("{php}$w->rewrap(names())->push([1]);\n")))
+            .concat()
+            .contains("expects string")
+    );
+}
+
+#[test]
+fn a_static_factory_binds_its_template_through_a_variable() {
+    let php = format!("{METHOD_TEMPLATE_FACTORY}\n$w = Wrapper::make(names());\n$w->push([1]);\n");
+    assert!(
+        type_error_messages(&collect(&php))
+            .concat()
+            .contains("expects string")
+    );
+}

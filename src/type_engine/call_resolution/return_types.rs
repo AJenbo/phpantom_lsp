@@ -613,22 +613,41 @@ impl Backend {
                         ctx.resolved_class_cache,
                     );
 
+                    let split_args = split_text_args(text_args);
+                    let arg_refs = split_args.to_vec();
+                    let template_subs =
+                        Self::build_method_template_subs(&merged, method_name, &arg_refs, ctx);
+
                     if let Some(ref mut hint_out) = return_type_hint_out
                         && let Some(m) = merged.get_method_ci(method_name)
                         && let Some(ref ret) = m.return_type
                     {
+                        // Bind the method's own @template params from the
+                        // call-site arguments before the hint travels on as
+                        // the receiver of the next link in the chain.  A
+                        // factory declared `@return static<array-key, T>`
+                        // otherwise hands the next call a raw `T`.
+                        let substituted = if template_subs.is_empty() {
+                            ret.clone()
+                        } else {
+                            ret.substitute(&template_subs)
+                        };
                         // Resolve self/static/parent keywords to
                         // concrete class names (mirrors instance path).
-                        let resolved_hint = if ret.is_parent_ref() {
+                        let resolved_hint = if substituted.is_parent_ref() {
                             merged
                                 .parent_class
                                 .as_ref()
                                 .map(|p| PhpType::named(atom(p.as_ref())))
-                                .unwrap_or_else(|| ret.clone())
-                        } else if ret.is_self_like() {
-                            PhpType::named(merged.fqn())
+                                .unwrap_or(substituted)
+                        } else if substituted.contains_self_ref() {
+                            // Replace only the `static`/`self` name so that
+                            // `static<array-key, string>` keeps its bound
+                            // arguments instead of collapsing to a bare
+                            // class name.
+                            substituted.replace_self(&merged.fqn())
                         } else {
-                            ret.clone()
+                            substituted
                         };
                         **hint_out = Some(
                             crate::virtual_members::laravel::replace_eloquent_collections_in_type(
@@ -639,10 +658,6 @@ impl Backend {
                         );
                     }
 
-                    let split_args = split_text_args(text_args);
-                    let arg_refs = split_args.to_vec();
-                    let template_subs =
-                        Self::build_method_template_subs(&merged, method_name, &arg_refs, ctx);
                     let var_resolver = build_var_resolver(ctx);
                     let mr_ctx = MethodReturnCtx {
                         all_classes: ctx.all_classes,

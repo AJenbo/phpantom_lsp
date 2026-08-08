@@ -939,6 +939,14 @@ class MethodTemplateDemo
         Factory::create(Pen::class)->write();             // static @template
         resolve(Marker::class)->highlight();              // function @template
 
+        // A static factory's method-level @template binds the element
+        // type of the collection it returns, whether the result goes
+        // through a variable or the call is chained straight through.
+        $iteration = new ScaffoldingIteration();
+        $made = TypedCollection::make($iteration->allPens());
+        $made->first()->write();                          // TValue = Pen via a variable
+        TypedCollection::make($iteration->allPens())->first()->write(); // ...and chained directly
+
         $mapper = new ObjectMapper();
         $mapped = $mapper->wrap(new Pen());
         $mapped->first();                         // → Pen (T resolved from argument)
@@ -5927,6 +5935,17 @@ class TypedCollection
     /** @param array<TKey, TValue> $items */
     public function __construct(array $items = []) { $this->items = $items; }
 
+    /**
+     * Static factory carrying a method-level `@template` into the
+     * class-level `TValue` of the collection it returns.
+     *
+     * @template TMakeValue
+     *
+     * @param  array<array-key, TMakeValue>  $items
+     * @return static<array-key, TMakeValue>
+     */
+    public static function make(array $items = []): static { return new static($items); }
+
     /** @return TValue */
     public function first() { return reset($this->items); }
 
@@ -6922,6 +6941,12 @@ function runDemoAssertions(): void
 
     $resolved = resolve(Marker::class);
     assert($resolved instanceof Marker, 'resolve(Marker::class) must return Marker');
+
+    // ── TypedCollection::make() carries its element type ────────────────
+    $madePens = TypedCollection::make([new Pen('blue')]);
+    assert($madePens instanceof TypedCollection, 'TypedCollection::make() must return a TypedCollection');
+    assert($madePens->first() instanceof Pen, 'TypedCollection::make([Pen])->first() must return Pen');
+    assert(TypedCollection::make([new Pen('red')])->first() instanceof Pen, 'the same holds for a directly chained call');
 
     // ── ObjectMapper::wrap() → TypedCollection ──────────────────────────
     $mapper = new ObjectMapper();
