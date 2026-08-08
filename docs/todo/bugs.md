@@ -32,28 +32,3 @@ resolved after. Beyond the correctness problem, this makes it
 impossible to tell a real regression from noise when comparing two
 builds over a corpus.
 
-#### B50. An array literal argument binds no element type through a union hint
-
-**Impact: Medium · Effort: Low-Medium**
-
-A union parameter hint that offers "the element or a container of
-elements" binds the template one level deeper for a container argument,
-but an array *literal* resolves to a bare `array` with no element type,
-so nothing useful binds:
-
-```php
-/**
- * @template TWrapValue
- * @param  iterable<array-key, TWrapValue>|TWrapValue  $value
- * @return static<array-key, TWrapValue>
- */
-public static function wrap($value) {}
-
-$w = Wrapper::wrap(['a', 'b']);
-$w->push([1]);   // no diagnostic; TWrapValue should be string
-```
-
-The same call with a variable or a call argument of type
-`array<string>` binds `TWrapValue` to `string` correctly. The generic
-wrapper binding path already unwraps array literals element by element;
-the union path needs the same treatment.

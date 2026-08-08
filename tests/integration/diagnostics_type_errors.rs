@@ -7232,6 +7232,15 @@ fn a_scalar_argument_binds_the_template_through_the_bare_alternative() {
     assert!(wrapped_push_message("'solo'").contains("expects string"));
 }
 
+/// An array *literal* argument resolves to a bare `array` with no element
+/// type, unlike a variable or call typed `array<string>`. The iterable
+/// alternative must still bind through its element rather than leaving
+/// `TWrapValue` unbound.
+#[test]
+fn an_array_literal_argument_binds_the_template_through_the_iterable_alternative() {
+    assert!(wrapped_push_message("['a', 'b']").contains("expects string"));
+}
+
 // ─── A method-level template survives into a directly chained call ──────────
 
 /// A generic wrapper with both a static factory and an instance method that

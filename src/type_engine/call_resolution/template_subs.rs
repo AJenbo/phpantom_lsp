@@ -141,9 +141,33 @@ impl Backend {
                         // Binding the whole argument there would re-wrap it,
                         // so unify the two shapes when the hint is not just
                         // the template name.
-                        let bound_type = param_hint
-                            .filter(|h| !matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name.as_str()))
-                            .and_then(|h| unify_template(h, &resolved_type, tpl_name))
+                        let unify_hint = param_hint.filter(
+                            |h| !matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name.as_str()),
+                        );
+                        let bound_type = unify_hint
+                            .and_then(|h| {
+                                // A union hint that offers an array-like
+                                // alternative alongside the bare template
+                                // name (`iterable<array-key, T>|T`) still
+                                // classifies as `Direct`, because the bare
+                                // alternative matches any argument. An
+                                // array *literal* argument resolves to a
+                                // bare `array` with no element type
+                                // though, so unifying against it falls
+                                // through to `mixed` — unwrap the
+                                // literal's first element the same way
+                                // `GenericWrapper` binding does and retry
+                                // before that fallback.
+                                if resolved_type.is_bare_array()
+                                    && let Some(elem) =
+                                        first_array_literal_element_type(arg_text, ctx)
+                                    && let Some(unified) =
+                                        unify_template(h, &PhpType::array_of(elem), tpl_name)
+                                {
+                                    return Some(unified);
+                                }
+                                unify_template(h, &resolved_type, tpl_name)
+                            })
                             .unwrap_or(resolved_type);
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
@@ -195,20 +219,14 @@ impl Backend {
                         // bare `array` (no generics), so we must unwrap the
                         // literal and resolve the first element directly.
                         if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                            let inner = arg_text[1..arg_text.len() - 1].trim();
-                            if !inner.is_empty() {
-                                let elems =
-                                    crate::type_engine::types::conditional::split_text_args(inner);
-                                if let Some(elem) = elems.first()
-                                    && let Some(resolved_elem) =
-                                        Self::resolve_arg_text_to_type(elem.trim(), ctx)
-                                {
-                                    crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                        &mut subs,
-                                        tpl_name.to_string(),
-                                        resolved_elem,
-                                    );
-                                }
+                            if let Some(resolved_elem) =
+                                first_array_literal_element_type(arg_text, ctx)
+                            {
+                                crate::type_engine::variable::rhs_resolution::insert_or_union(
+                                    &mut subs,
+                                    tpl_name.to_string(),
+                                    resolved_elem,
+                                );
                             }
                             continue;
                         }
@@ -942,6 +960,29 @@ pub(crate) fn self_bound_template_params(bindings: &[(Atom, Atom)]) -> AtomSet {
         }
     }
     result
+}
+
+/// Resolve an array literal argument's first element to a type.
+///
+/// `resolve_arg_text_to_type("[1, 2, 3]")` collapses the whole literal to
+/// a bare `array` with no element type, so callers that need the element
+/// type itself (binding a template through an array-like wrapper) must
+/// unwrap the literal and resolve the first element directly instead.
+///
+/// Returns `None` when `arg_text` is not a `[...]` literal, or the literal
+/// is empty.
+fn first_array_literal_element_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let trimmed = arg_text.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))?
+        .trim();
+    if inner.is_empty() {
+        return None;
+    }
+    let elems = crate::type_engine::types::conditional::split_text_args(inner);
+    let elem = elems.first()?;
+    Backend::resolve_arg_text_to_type(elem.trim(), ctx)
 }
 
 /// Bind a template parameter by walking a parameter hint and an argument
