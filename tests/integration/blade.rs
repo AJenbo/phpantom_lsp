@@ -696,4 +696,50 @@ mod tests {
             hover
         );
     }
+
+    /// A standalone `@var` docblock that carries generic arguments
+    /// (`Collection<string, Loaf>`) must narrow a member call through
+    /// the class-level `@template`, not just resolve the bare class.
+    ///
+    /// Every `{{ … }}` echo in a Blade template compiles to `echo e( … );`,
+    /// which is a non-expression statement — the forward walker's
+    /// diagnostic scope cache recorded a scope snapshot for that statement
+    /// *before* applying the standalone `@var`, and never re-recorded it
+    /// afterward, so a call site inside the echo's own expression saw
+    /// `$byName` typed as bare `Collection` and fell back to `TKey`'s
+    /// declared bound (`array-key`) instead of the annotated `string`.
+    #[tokio::test]
+    async fn test_var_docblock_with_generic_args_narrows_echo_call() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///Collection.php").unwrap();
+        let php_text = "<?php\nnamespace App\\Models;\nclass Loaf {}\n/**\n * @template TKey of array-key\n * @template TValue\n */\nclass Collection {\n    /** @param TKey|null $key */\n    public function get($key) {}\n}\n";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri,
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let uri = Url::parse("file:///byname.blade.php").unwrap();
+        let body = "@php\n/** @var \\App\\Models\\Collection<string, \\App\\Models\\Loaf> $byName */\n@endphp\n{{ $byName->get([1]) }}\n";
+        open_blade(&backend, &uri, body).await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+
+        assert!(
+            messages.iter().any(|m| m.contains("expects string|null")),
+            "expected TKey to narrow to string via the @var's generic arguments, got: {:?}",
+            messages
+        );
+    }
 }

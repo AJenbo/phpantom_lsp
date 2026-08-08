@@ -7112,3 +7112,50 @@ fn keyby_with_unannotated_callback_binds_the_key_from_the_body() {
         }
     }
 }
+
+// ─── A standalone `@var` docblock narrows a non-Expression statement ───────
+
+/// A generic collection with a `get()` whose parameter type comes from the
+/// class-level `@template`, matching Laravel's `Illuminate\Support\Collection`.
+const GENERIC_COLLECTION: &str = r#"<?php
+namespace App\Models;
+
+class Loaf {}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Collection
+{
+    /** @param TKey|null $key */
+    public function get($key) {}
+}
+"#;
+
+/// A standalone `/** @var Collection<string, Loaf> $byName */` followed by
+/// an `echo` (rather than a bare `$byName->get(...)` expression statement)
+/// used to lose the `<string, Loaf>` generic arguments once the diagnostic
+/// scope cache was active: the cache recorded the pre-docblock scope at the
+/// echo statement's start offset and never re-recorded it after the
+/// docblock was applied, so a lookup for the call site inside the echo's
+/// expression saw `$byName` typed only as bare `Collection` and fell back
+/// to `TKey`'s bound (`array-key`) instead of the annotated `string`. Every
+/// Blade `{{ $byName->get(...) }}` compiles to exactly this shape
+/// (`echo e( $byName->get(...) );`), which is how the bug originally
+/// surfaced.
+#[test]
+fn standalone_var_docblock_narrows_echo_statement() {
+    let php = format!(
+        "{GENERIC_COLLECTION}\nfunction e($x) {{ return $x; }}\n\
+         function render() {{\n\
+         /** @var \\App\\Models\\Collection<string, \\App\\Models\\Loaf> $byName */\n\
+         echo e( $byName->get([1]) );\n}}\n"
+    );
+    let diags = collect_slow(&php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.iter().any(|m| m.contains("expects string|null")),
+        "expected TKey to narrow to string, got {msgs:?}"
+    );
+}

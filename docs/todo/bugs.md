@@ -7,28 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-#### B48. Blade drops a variable's generic arguments
-
-**Impact: Medium · Effort: Medium**
-
-A collection passed to a template keeps its class but loses its generic
-arguments, so every member typed through a class-level `@template` falls
-back to that template's bound. With an explicit annotation in the
-template:
-
-```blade
-@php
-/** @var \Illuminate\Database\Eloquent\Collection<string, \App\Models\Loaf> $byName */
-@endphp
-{{ $byName->get([1]) }}
-{{-- Argument 1 ($key) expects array-key|null, got list<int> --}}
-```
-
-The identical `@var` in a plain PHP file resolves `$key` to
-`string|null`. `array-key` is the bound of `Eloquent\Collection`'s
-`@template TKey of array-key`, so the `<string, Loaf>` arguments never
-reach parameter substitution on the Blade side.
-
 #### B49. An unannotated callback body that is a method call binds no template
 
 **Impact: Medium · Effort: Medium**

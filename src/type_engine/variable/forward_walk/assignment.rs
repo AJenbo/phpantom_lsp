@@ -25,7 +25,17 @@ pub(crate) fn process_statement<'b>(
     // RHS, a scalar RHS blocks a class override).  Every other statement
     // kind only ever sees standalone annotations.
     if !matches!(stmt, Statement::Expression(_)) {
-        apply_standalone_var_docblocks(stmt.span().start.offset, scope, ctx);
+        let stmt_offset = stmt.span().start.offset;
+        if apply_standalone_var_docblocks(stmt_offset, scope, ctx) {
+            // The diagnostic scope snapshot at this offset was recorded
+            // by the caller *before* this call, so it still holds the
+            // pre-docblock scope. Re-record it now so that a lookup for
+            // an expression inside this same statement (e.g. `echo
+            // $v->method()` right after a standalone `@var $v` block)
+            // sees the type the docblock just applied instead of
+            // falling through to the stale snapshot.
+            record_scope_snapshot(stmt_offset, scope);
+        }
     }
 
     match stmt {
@@ -942,11 +952,16 @@ pub(crate) fn resolve_rhs_native_type(
 /// processed) for additional standalone `/** @var Type $var */` blocks.
 /// Each discovered block's `@var` tags are applied to `scope`.  Stops as
 /// soon as the text no longer ends with `*/` (after trimming).
+///
+/// Returns whether any `@var` annotation was applied, so callers that
+/// recorded a diagnostic scope snapshot before this call know to
+/// re-record it afterward.
 pub(crate) fn apply_preceding_var_docblocks(
     before: &str,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) {
+) -> bool {
+    let mut applied = false;
     let mut remaining = trim_trailing_line_comments(before);
     // Keep scanning as long as the preceding text ends with a docblock.
     while remaining.ends_with("*/") {
@@ -965,8 +980,10 @@ pub(crate) fn apply_preceding_var_docblocks(
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
             scope.set(var_name, resolved);
         }
+        applied = true;
         remaining = trim_trailing_line_comments(&remaining[..doc_start]);
     }
+    applied
 }
 
 /// Trim trailing whitespace and whole-line `//` / `#` comments from
@@ -1026,16 +1043,18 @@ const MAX_COMMENT_LINE_LOOKBACK: usize = 512;
 /// the walker's scope and every use of it falls back to a backward text
 /// scan, which cannot tell a preceding sibling block from a preceding
 /// sibling function body.
+///
+/// Returns whether any `@var` annotation was applied.
 pub(crate) fn apply_standalone_var_docblocks(
     stmt_offset: u32,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) {
+) -> bool {
     let offset = (stmt_offset as usize).min(ctx.content.len());
     if offset == 0 {
-        return;
+        return false;
     }
-    apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx);
+    apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx)
 }
 
 /// Resolve a [`PhpType`] to a complete `Vec<ResolvedType>` with

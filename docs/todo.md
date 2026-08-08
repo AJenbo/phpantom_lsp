@@ -107,7 +107,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B48 | [Blade drops a variable's generic arguments](todo/bugs.md#b48-blade-drops-a-variables-generic-arguments)                                                                    | Medium      | Medium      |
 | B49 | [An unannotated callback body that is a method call binds no template](todo/bugs.md#b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template)                | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
