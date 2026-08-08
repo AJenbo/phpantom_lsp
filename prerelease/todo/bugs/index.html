@@ -828,10 +828,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template" class="md-nav__link">
+  <a href="#b49-analysis-reports-a-different-set-of-diagnostics-on-each-run" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B49. An unannotated callback body that is a method call binds no template
+        B49. Analysis reports a different set of diagnostics on each run
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B50. An array literal argument binds no element type through a union hint
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b51-a-chained-static-factory-call-loses-its-method-level-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B51. A chained static factory call loses its method-level template
       </span>
     </span>
   </a>
@@ -1306,10 +1328,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template" class="md-nav__link">
+  <a href="#b49-analysis-reports-a-different-set-of-diagnostics-on-each-run" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B49. An unannotated callback body that is a method call binds no template
+        B49. Analysis reports a different set of diagnostics on each run
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B50. An array literal argument binds no element type through a union hint
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b51-a-chained-static-factory-call-loses-its-method-level-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B51. A chained static factory call loses its method-level template
       </span>
     </span>
   </a>
@@ -1346,19 +1390,56 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h4 id="b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template">B49. An unannotated callback body that is a method call binds no template<a class="headerlink" href="#b49-an-unannotated-callback-body-that-is-a-method-call-binds-no-template" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>When a callback has no return-type annotation, the template bound from
-its return type is inferred from the body expression. A body that is a
-<em>call</em> resolves to <code>mixed</code> (the call-return step is missing from
-argument-text resolution), so the template stays unbound and falls back
-to its declared bound:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$byRating = $reviews-&gt;keyBy(fn (Review $r) =&gt; $r-&gt;getRating());</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">foreach ($byRating as $key =&gt; $review) { … }</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">// $key is array-key|\UnitEnum, should be int</span>
+<h4 id="b49-analysis-reports-a-different-set-of-diagnostics-on-each-run">B49. Analysis reports a different set of diagnostics on each run<a class="headerlink" href="#b49-analysis-reports-a-different-set-of-diagnostics-on-each-run" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: High · Effort: Medium</strong></p>
+<p>Running <code>analyze</code> twice over the same unchanged directory reports
+different diagnostics. On Laravel's <code>vendor/</code> the count moves by around
+30 between consecutive runs, with a stable core and a flapping tail
+(the <code>Redis::eval()</code> argument checks in <code>Illuminate\Queue\RedisQueue</code>
+and <code>Illuminate\Redis\Limiters</code> are the most reliable flappers):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>$ phpantom_lsp analyze vendor --format json | jq &#39;[.files[].messages[]] | length&#39;
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>6577
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>$ phpantom_lsp analyze vendor --format json | jq &#39;[.files[].messages[]] | length&#39;
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>6606
 </code></pre></div>
-<p>A body that is a variable, a literal, or a <code>new</code> expression binds
-correctly, so this is specifically the call case.</p>
+<p>A file's diagnostics must not depend on what the workers happened to
+resolve first. The likely cause is that a shared resolution cache is
+populated in whatever order the parallel workers reach it, so a class
+resolved before its dependants sees different member types than one
+resolved after. Beyond the correctness problem, this makes it
+impossible to tell a real regression from noise when comparing two
+builds over a corpus.</p>
+<h4 id="b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint">B50. An array literal argument binds no element type through a union hint<a class="headerlink" href="#b50-an-array-literal-argument-binds-no-element-type-through-a-union-hint" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p>A union parameter hint that offers "the element or a container of
+elements" binds the template one level deeper for a container argument,
+but an array <em>literal</em> resolves to a bare <code>array</code> with no element type,
+so nothing useful binds:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @template TWrapValue</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> * @param  iterable&lt;array-key, TWrapValue&gt;|TWrapValue  $value</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x"> * @return static&lt;array-key, TWrapValue&gt;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x"> */</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">public static function wrap($value) {}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">$w = Wrapper::wrap([&#39;a&#39;, &#39;b&#39;]);</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">$w-&gt;push([1]);   // no diagnostic; TWrapValue should be string</span>
+</code></pre></div>
+<p>The same call with a variable or a call argument of type
+<code>array&lt;string&gt;</code> binds <code>TWrapValue</code> to <code>string</code> correctly. The generic
+wrapper binding path already unwraps array literals element by element;
+the union path needs the same treatment.</p>
+<h4 id="b51-a-chained-static-factory-call-loses-its-method-level-template">B51. A chained static factory call loses its method-level template<a class="headerlink" href="#b51-a-chained-static-factory-call-loses-its-method-level-template" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p>A method-level <code>@template</code> bound on a <em>static</em> factory survives into a
+variable but not into a directly chained call:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$w = Wrapper::make(names());</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$w-&gt;push([1]);              // Argument 1 ($value) expects string — correct</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">Wrapper::make(names())-&gt;push([1]);   // no diagnostic at all</span>
+</code></pre></div>
+<p>The instance-method equivalent (<code>$w-&gt;rewrap(names())-&gt;push([1])</code>)
+reports correctly, so this is specific to the static-call receiver.</p>
 
 
 
