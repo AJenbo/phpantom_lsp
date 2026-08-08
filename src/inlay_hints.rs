@@ -104,11 +104,18 @@ impl Backend {
 
         self.emit_declaration_count_hints(uri, content, (range_start, range_end), &mut hints);
 
-        // Translate hints back to Blade if needed.
+        // Translate hints back to Blade if needed.  A hint anchored in the
+        // injected prologue has no template text to attach to.
         if self.is_blade_file(uri) {
-            for hint in &mut hints {
-                hint.position = self.translate_php_to_blade(uri, hint.position);
-            }
+            hints.retain_mut(
+                |hint| match self.try_translate_php_to_blade(uri, hint.position) {
+                    Some(position) => {
+                        hint.position = position;
+                        true
+                    }
+                    None => false,
+                },
+            );
         }
 
         Some(hints)

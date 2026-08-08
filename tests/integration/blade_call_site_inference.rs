@@ -496,4 +496,155 @@ mod tests {
             hover
         );
     }
+
+    /// Open a workspace where `shop.blade.php` receives an `App\Item` from a
+    /// `view()` call but never names the class itself, so `App\Item` appears
+    /// in the template's virtual PHP only through the injected prologue.
+    async fn workspace_naming_item_only_in_the_prologue()
+    -> (phpantom_lsp::Backend, tempfile::TempDir, Url, Url) {
+        let (backend, dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nclass Controller {\n    public function show(): mixed {\n        $item = new Item();\n        return view('shop', ['item' => $item]);\n    }\n}\n",
+                ),
+                ("resources/views/shop.blade.php", "{{ $item->name }}\n"),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let item_uri = Url::from_file_path(root.join("app/Item.php")).unwrap();
+        let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
+
+        for rel in ["app/Item.php", "app/Controller.php"] {
+            let uri = Url::from_file_path(root.join(rel)).unwrap();
+            open(
+                &backend,
+                &uri,
+                "php",
+                &std::fs::read_to_string(root.join(rel)).unwrap(),
+            )
+            .await;
+        }
+        open(
+            &backend,
+            &blade_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/shop.blade.php")).unwrap(),
+        )
+        .await;
+
+        (backend, dir, item_uri, blade_uri)
+    }
+
+    /// Every text edit a workspace edit applies to `uri`, from either the
+    /// `changes` map or the `document_changes` operation list.
+    fn edits_for(edit: &WorkspaceEdit, uri: &Url) -> Vec<Range> {
+        let mut ranges = Vec::new();
+
+        if let Some(changes) = &edit.changes
+            && let Some(edits) = changes.get(uri)
+        {
+            ranges.extend(edits.iter().map(|e| e.range));
+        }
+
+        let doc_edits: Vec<&TextDocumentEdit> = match &edit.document_changes {
+            Some(DocumentChanges::Edits(edits)) => edits.iter().collect(),
+            Some(DocumentChanges::Operations(ops)) => ops
+                .iter()
+                .filter_map(|op| match op {
+                    DocumentChangeOperation::Edit(e) => Some(e),
+                    DocumentChangeOperation::Op(_) => None,
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        for doc_edit in doc_edits {
+            if doc_edit.text_document.uri != *uri {
+                continue;
+            }
+            ranges.extend(doc_edit.edits.iter().map(|e| match e {
+                OneOf::Left(e) => e.range,
+                OneOf::Right(e) => e.text_edit.range,
+            }));
+        }
+
+        ranges
+    }
+
+    /// A template that names a class only through its injected prologue is
+    /// not a reference site: the prologue is not template text, so there is
+    /// no Blade position to report.
+    #[tokio::test]
+    async fn references_skip_a_class_named_only_by_the_prologue() {
+        let (backend, _dir, item_uri, blade_uri) =
+            workspace_naming_item_only_in_the_prologue().await;
+
+        let locations = backend
+            .references(ReferenceParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: item_uri.clone(),
+                    },
+                    position: Position {
+                        line: 2,
+                        character: 7,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: ReferenceContext {
+                    include_declaration: true,
+                },
+            })
+            .await
+            .unwrap()
+            .unwrap_or_default();
+
+        let in_template: Vec<_> = locations.iter().filter(|l| l.uri == blade_uri).collect();
+        assert!(
+            in_template.is_empty(),
+            "the template never names App\\Item; the prologue is not a reference site: {:?}",
+            in_template
+        );
+    }
+
+    /// Renaming a class a template only receives (never names) must leave the
+    /// template alone.  Clamping the prologue match to `0:0` used to produce
+    /// an empty-range edit that prepended the new name to the template.
+    #[tokio::test]
+    async fn rename_does_not_write_into_a_template_that_only_names_the_class_in_its_prologue() {
+        let (backend, _dir, item_uri, blade_uri) =
+            workspace_naming_item_only_in_the_prologue().await;
+
+        let edit = backend
+            .rename(RenameParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: item_uri.clone(),
+                    },
+                    position: Position {
+                        line: 2,
+                        character: 7,
+                    },
+                },
+                new_name: "Product".to_string(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .unwrap();
+
+        let Some(edit) = edit else {
+            return;
+        };
+
+        let template_edits = edits_for(&edit, &blade_uri);
+        assert!(
+            template_edits.is_empty(),
+            "renaming App\\Item must not edit a template that only receives it: {:?}",
+            template_edits
+        );
+    }
 }

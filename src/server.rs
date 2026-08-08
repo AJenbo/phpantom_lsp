@@ -1135,7 +1135,7 @@ impl LanguageServer for Backend {
                         .find_references(&uri_clone, content, pos, include_declaration)
                         .map(|locs| {
                             locs.into_iter()
-                                .map(|l| backend.translate_location(l))
+                                .filter_map(|l| backend.try_translate_location(l))
                                 .collect()
                         })
                 })
@@ -1243,13 +1243,10 @@ impl LanguageServer for Backend {
                         .map(|highlights| {
                             highlights
                                 .into_iter()
-                                .map(|h| {
-                                    let mut h = h;
-                                    h.range.start =
-                                        backend.translate_php_to_blade(&uri_clone, h.range.start);
-                                    h.range.end =
-                                        backend.translate_php_to_blade(&uri_clone, h.range.end);
-                                    h
+                                .filter_map(|mut h| {
+                                    h.range =
+                                        backend.try_translate_blade_range(&uri_clone, h.range)?;
+                                    Some(h)
                                 })
                                 .collect()
                         })
@@ -1273,22 +1270,20 @@ impl LanguageServer for Backend {
             backend.handle_with_position("prepare_rename", &uri_clone, position, |content, pos| {
                 backend
                     .handle_prepare_rename(&uri_clone, content, pos)
-                    .map(|res| match res {
-                        PrepareRenameResponse::Range(r) => PrepareRenameResponse::Range(Range {
-                            start: backend.translate_php_to_blade(&uri_clone, r.start),
-                            end: backend.translate_php_to_blade(&uri_clone, r.end),
-                        }),
+                    .and_then(|res| match res {
+                        PrepareRenameResponse::Range(r) => backend
+                            .try_translate_blade_range(&uri_clone, r)
+                            .map(PrepareRenameResponse::Range),
                         PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
-                            PrepareRenameResponse::RangeWithPlaceholder {
-                                range: Range {
-                                    start: backend.translate_php_to_blade(&uri_clone, range.start),
-                                    end: backend.translate_php_to_blade(&uri_clone, range.end),
-                                },
-                                placeholder,
-                            }
+                            backend
+                                .try_translate_blade_range(&uri_clone, range)
+                                .map(|range| PrepareRenameResponse::RangeWithPlaceholder {
+                                    range,
+                                    placeholder,
+                                })
                         }
                         PrepareRenameResponse::DefaultBehavior { default_behavior } => {
-                            PrepareRenameResponse::DefaultBehavior { default_behavior }
+                            Some(PrepareRenameResponse::DefaultBehavior { default_behavior })
                         }
                     })
             })
@@ -1309,19 +1304,7 @@ impl LanguageServer for Backend {
                 backend
                     .handle_rename(&uri_clone, content, pos, &new_name)
                     .map(|mut edit| {
-                        if let Some(changes) = &mut edit.changes {
-                            for (uri, edits) in changes {
-                                let uri_str = uri.to_string();
-                                if backend.is_blade_file(&uri_str) {
-                                    for e in edits {
-                                        e.range.start =
-                                            backend.translate_php_to_blade(&uri_str, e.range.start);
-                                        e.range.end =
-                                            backend.translate_php_to_blade(&uri_str, e.range.end);
-                                    }
-                                }
-                            }
-                        }
+                        backend.translate_workspace_edit(&mut edit);
                         edit
                     })
             })

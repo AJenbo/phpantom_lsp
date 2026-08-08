@@ -168,8 +168,14 @@ impl Backend {
                     character: tok.start_char + tok.length,
                 };
 
-                let start_translated = self.translate_php_to_blade(uri, start_pos);
-                let end_translated = self.translate_php_to_blade(uri, end_pos);
+                // A token inside the injected prologue highlights nothing the
+                // template wrote.
+                let (Some(start_translated), Some(end_translated)) = (
+                    self.try_translate_php_to_blade(uri, start_pos),
+                    self.try_translate_php_to_blade(uri, end_pos),
+                ) else {
+                    continue;
+                };
 
                 if start_translated.line != end_translated.line {
                     // Token spans across lines after translation? Skip it.

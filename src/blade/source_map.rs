@@ -66,28 +66,45 @@ impl BladeSourceMap {
         }
     }
 
+    /// Map a virtual-PHP position back to Blade, clamping prologue
+    /// positions to the start of the template.
+    ///
+    /// Prefer [`Self::try_php_to_blade`] whenever the result becomes a text
+    /// edit or a range the user is sent to: the clamp invents a position the
+    /// template never had.
     pub fn php_to_blade(&self, pos: Position) -> Position {
+        self.try_php_to_blade(pos).unwrap_or(Position {
+            line: 0,
+            character: 0,
+        })
+    }
+
+    /// Map a virtual-PHP position back to Blade, or `None` when it falls in
+    /// the preprocessor's prologue.
+    ///
+    /// The prologue holds declarations no template wrote (`$errors`,
+    /// `$__env`, the injected `@var` docblocks, the `extends` clause of a
+    /// synthesized `$this` wrapper class), so there is no template text
+    /// behind it and no position to map to.
+    pub fn try_php_to_blade(&self, pos: Position) -> Option<Position> {
         if pos.line < self.prologue_lines {
-            return Position {
-                line: 0,
-                character: 0,
-            };
+            return None;
         }
         let line = (pos.line - self.prologue_lines) as usize;
 
         if line >= self.adjustments.len() {
-            return Position {
+            return Some(Position {
                 line: line as u32,
                 character: pos.character,
-            };
+            });
         }
 
         let line_adj = &self.adjustments[line];
         if line_adj.is_empty() {
-            return Position {
+            return Some(Position {
                 line: line as u32,
                 character: pos.character,
-            };
+            });
         }
 
         let mut best_idx = 0;
@@ -113,19 +130,19 @@ impl BladeSourceMap {
             if max_p_offset == 0 {
                 // PHP boilerplate mapped to zero-width Blade point?
                 // This shouldn't happen with our anchor strategy, but be safe.
-                return Position {
+                return Some(Position {
                     line: line as u32,
                     character: best_b,
-                };
+                });
             }
 
             if max_b_offset == 0 {
                 // PHP boilerplate mapped to a single Blade position.
                 // EVERYTHING in this PHP segment maps to best_b.
-                return Position {
+                return Some(Position {
                     line: line as u32,
                     character: best_b,
-                };
+                });
             }
 
             // Normal 1:1 or N:M mapping.
@@ -138,9 +155,9 @@ impl BladeSourceMap {
             }
         }
 
-        Position {
+        Some(Position {
             line: line as u32,
             character: best_b + char_offset,
-        }
+        })
     }
 }
