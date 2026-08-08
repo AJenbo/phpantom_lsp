@@ -1100,10 +1100,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#l46-facade-member-completion-from-the-concrete-class" class="md-nav__link">
+  <a href="#l47-facade-members-for-a-container-binding-accessor" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L46. Facade member completion from the concrete class
+        L47. Facade members for a container-binding accessor
       </span>
     </span>
   </a>
@@ -1826,10 +1826,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#l46-facade-member-completion-from-the-concrete-class" class="md-nav__link">
+  <a href="#l47-facade-members-for-a-container-binding-accessor" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L46. Facade member completion from the concrete class
+        L47. Facade members for a container-binding accessor
       </span>
     </span>
   </a>
@@ -2473,41 +2473,32 @@ degrades gracefully.</p>
 </ol>
 <p><strong>Impact: High · Effort: Medium (upstream PRs)</strong></p>
 <hr />
-<h2 id="l46-facade-member-completion-from-the-concrete-class">L46. Facade member completion from the concrete class<a class="headerlink" href="#l46-facade-member-completion-from-the-concrete-class" title="Permanent link">&para;</a></h2>
-<p>Calling a method on a facade types correctly even when the facade
-declares no <code>@method</code> tag for it: the static call falls through to the
-class <code>getFacadeAccessor()</code> names. Listing is a step behind. Completion
-on <code>MyFacade::</code> offers only what the facade class itself declares, so
-an app-defined facade with no generated docblock offers nothing but
-<code>__callStatic</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Container {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public function resolveThing(string $id): object {}</span>
+<h2 id="l47-facade-members-for-a-container-binding-accessor">L47. Facade members for a container-binding accessor<a class="headerlink" href="#l47-facade-members-for-a-container-binding-accessor" title="Permanent link">&para;</a></h2>
+<p><code>LaravelFacadeProvider</code> forwards the concrete class's members onto a
+facade whose <code>getFacadeAccessor()</code> names a class directly
+(<code>return Container::class;</code>). A facade that names a container binding
+instead gets nothing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Sentry extends \Illuminate\Support\Facades\Facade {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    protected static function getFacadeAccessor() { return &#39;sentry&#39;; }</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">class MyFacade extends \Illuminate\Support\Facades\Facade {</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    protected static function getFacadeAccessor() { return Container::class; }</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">MyFacade::resolveThing(&#39;x&#39;);   // types fine</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">MyFacade::                      // completion offers no `resolveThing`</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">Sentry::         // completion offers nothing the HubAdapter binding has</span>
 </code></pre></div>
-<p>Laravel's own facades are unaffected: their <code>@method static</code> tags list
-every method, so the list is already complete. This bites app-defined
-and package facades that never ran <code>facade-documenter</code>.</p>
-<p>The fix is a virtual member provider that forwards the concrete
-class's public instance methods as static virtual methods, ranked
-below the facade's own <code>@method</code> tags. The blocker is plumbing rather
-than logic: providers receive only a <code>ClassInfo</code> and a class loader,
-and the accessor's <code>::class</code> return is recoverable only from source
-(the container-alias case additionally needs the <code>Backend</code> alias
-table, which <code>facade_owner.rs</code> already reaches at call sites). Either
-record the parsed accessor on <code>ClassInfo</code> at parse time (costs a field
-on every class, and startup memory is a hard constraint) or give
-providers a project-context handle. Pick the plumbing before writing
-the provider, and do not solve it inside the completion handler alone:
-hover, go-to-definition, and unknown-member diagnostics need the same
-member set.</p>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p>Laravel's own facades all take this shape, but they carry generated
+<code>@method static</code> tags that already list everything, so the gap is
+confined to app and package facades that bind a string in a service
+provider.</p>
+<p>Mapping the binding key to its class needs the container alias table,
+which lives on the <code>Backend</code>; a virtual member provider receives only a
+<code>ClassInfo</code>, a class loader, and the resolved-class cache. Going through
+the class loader is not a substitute: <code>find_or_load_class</code> consults the
+alias table only after every ordinary lookup phase has missed, so a key
+like <code>'view'</code> would first match an unrelated class of that short name
+and forward the wrong members. So the fix is the plumbing: give
+providers a project-context handle, or put the container table
+somewhere all of them can already see. <code>facade_owner.rs</code> reaches the
+<code>Backend</code> at call sites and shows what the lookup should be.</p>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <hr />
 <h2 id="model-property-source-gaps">Model property source gaps<a class="headerlink" href="#model-property-source-gaps" title="Permanent link">&para;</a></h2>
 <p>The <code>LaravelModelProvider</code> synthesizes virtual properties from several
