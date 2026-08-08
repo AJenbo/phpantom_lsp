@@ -117,32 +117,6 @@ reported.
 message but never compared against `self.php_version()`. Deprecations
 with no recorded version keep firing, as today.
 
-#### B59. `App::make()` and `App::makeWith()` do not resolve when chained directly
-
-**Impact: Medium · Effort: Low**
-
-Resolving the container through the `App` facade works when the result
-is stored first and fails when it is used inline:
-
-```php
-$repo = App::make(EventRepository::class);
-$repo->getActiveEvents();                       // resolves
-
-App::make(EventRepository::class)->getActiveEvents();   // "could not be resolved"
-App::makeWith(Service::class, [$x])->run();             // "could not be resolved"
-```
-
-`app()->make(EventRepository::class)->getActiveEvents()` — the helper
-rather than the facade — resolves inline, so the class-string rule is
-reachable from the chain path for one spelling and not the other.
-
-**Where to look:** the class-string container rule added for
-`App::make()`/`makeWith()`/`resolve()` fires when the call is an
-assignment right-hand side. The chain resolver in
-`type_engine/resolver/` needs to consult the same rule when a static
-facade call is the subject of a `->` link, which it already does for
-the `app()` helper.
-
 #### B61. An `array_map()` callback parameter is not bound when the array argument is an inline array-function call
 
 **Impact: Medium · Effort: Medium**
