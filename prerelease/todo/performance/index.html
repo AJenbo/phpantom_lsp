@@ -1425,6 +1425,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P50. Cache the top-level scope for <code>global</code> keyword resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1998,6 +2009,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P49. A very long method chain costs superlinear time to analyse
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P50. Cache the top-level scope for <code>global</code> keyword resolution
       </span>
     </span>
   </a>
@@ -2884,6 +2906,23 @@ once per link:</p>
 first, <code>chain_cache_key</code> in <code>type_engine/resolver/mod.rs</code> for the second.
 Neither is a correctness problem, and hand-written code never reaches the
 lengths where it shows.</p>
+<hr />
+<h2 id="p50-cache-the-top-level-scope-for-global-keyword-resolution">P50. Cache the top-level scope for <code>global</code> keyword resolution<a class="headerlink" href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p>Every <code>resolve_variable_types</code> call on a file containing <code>global</code>
+rebuilds the top-level scope by forward-walking every top-level
+statement with <code>cursor_offset = u32::MAX</code>. This is done once per
+variable query, so hovering three variables in the same file walks the
+top-level three times.</p>
+<p>Re-entry guards (added to fix #327) prevent the walk from recursing
+unboundedly, but the repeated cost remains. The preferred shape is
+pre-compute-and-cache: build the top-level scope once per file version
+(keyed by content hash or pointer) and reuse it across queries within
+the same request cycle.</p>
+<p><strong>Where to look:</strong> <code>resolve_variable_in_statements</code> in
+<code>type_engine/variable/resolution.rs</code>, the <code>walk_top_level_for_globals</code>
+call. A per-request cache (similar to the chain resolution cache in
+<code>type_engine/resolver/context.rs</code>) would eliminate the redundant walks.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues were addressed by eager class
