@@ -1057,17 +1057,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl6-signature-merging-for-extends" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL6. Signature merging for <code>@extends</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#18-tests" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1397,10 +1386,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-8-cross-file-intelligence-bl5-bl6" class="md-nav__link">
+  <a href="#step-8-cross-file-intelligence-bl5" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 8: Cross-file intelligence (BL5, BL6)
+        Step 8: Cross-file intelligence (BL5)
       </span>
     </span>
   </a>
@@ -2235,17 +2224,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl6-signature-merging-for-extends" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL6. Signature merging for <code>@extends</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#18-tests" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2575,10 +2553,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-8-cross-file-intelligence-bl5-bl6" class="md-nav__link">
+  <a href="#step-8-cross-file-intelligence-bl5" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 8: Cross-file intelligence (BL5, BL6)
+        Step 8: Cross-file intelligence (BL5)
       </span>
     </span>
   </a>
@@ -2698,7 +2676,8 @@ For general architecture see <code>ARCHITECTURE.md</code>.</p>
   come from its declared contract: the Bladestan-compatible chain in
   <code>src/blade/signature.rs</code> — <code>@bladestan-signature</code> docblock, first
   docblock before template code, <code>@props</code>/<code>@aware</code>, Blade's own
-  component scope, and the backing component class. The template
+  component scope, the backing component class, and the layouts the
+  template <code>@extends</code>. The template
   declares what it expects; call sites are then
   <em>validated</em> against that contract (BL9), exactly as a function
   signature works. Inferring types <em>from</em> call sites inverts the contract and
@@ -2892,21 +2871,6 @@ attribute completions.</p>
 <ol>
 <li>Same pattern using the Livewire index.</li>
 </ol>
-<h3 id="bl6-signature-merging-for-extends">BL6. Signature merging for <code>@extends</code><a class="headerlink" href="#bl6-signature-merging-for-extends" title="Permanent link">&para;</a></h3>
-<p>When template A contains <code>@extends('layouts.app')</code>:</p>
-<ol>
-<li>Resolve <code>layouts.app</code> via the view index to a file path.</li>
-<li>Read or preprocess that file.</li>
-<li>Extract <code>@var</code> declarations from its <code>@php</code> blocks.</li>
-<li>Merge those declarations into template A's virtual PHP prologue,
-   following the Bladestan covariance model:</li>
-<li>Variables only in child: use child type.</li>
-<li>Variables only in parent: use parent type.</li>
-<li>Variables in both: child may narrow but not widen.</li>
-<li>Walk the chain recursively if the parent also <code>@extends</code>.</li>
-</ol>
-<p>This gives child templates access to the parent's declared
-variables without the user redeclaring them.</p>
 <h3 id="18-tests">18. Tests<a class="headerlink" href="#18-tests" title="Permanent link">&para;</a></h3>
 <p>Create <code>tests/definition_blade.rs</code>:</p>
 <ul>
@@ -2914,11 +2878,6 @@ variables without the user redeclaring them.</p>
 <li>Go-to-definition on <code>@extends('layouts.app')</code> → layout file</li>
 <li>Go-to-definition on <code>&lt;x-alert&gt;</code> → component class</li>
 <li>Go-to-definition on <code>&lt;livewire:counter&gt;</code> → Livewire class</li>
-</ul>
-<p>Extend <code>tests/completion_blade.rs</code>:</p>
-<ul>
-<li>Variables from parent layout available in child via <code>@extends</code></li>
-<li>Component class constructor types available in template</li>
 </ul>
 <hr />
 <h2 id="phase-4-blade-directive-completion">Phase 4: Blade Directive Completion<a class="headerlink" href="#phase-4-blade-directive-completion" title="Permanent link">&para;</a></h2>
@@ -3264,11 +3223,10 @@ completions.</p>
 <p>Implement <code>@</code> directive name completion with snippets.</p>
 <p><strong>Deliverable:</strong> Typing <code>@</code> in a Blade file shows all known
 directives with snippet templates.</p>
-<h3 id="step-8-cross-file-intelligence-bl5-bl6">Step 8: Cross-file intelligence (BL5, BL6)<a class="headerlink" href="#step-8-cross-file-intelligence-bl5-bl6" title="Permanent link">&para;</a></h3>
-<p>Implement go-to-definition for view names and component tags.
-Implement <code>@extends</code> signature merging.</p>
+<h3 id="step-8-cross-file-intelligence-bl5">Step 8: Cross-file intelligence (BL5)<a class="headerlink" href="#step-8-cross-file-intelligence-bl5" title="Permanent link">&para;</a></h3>
+<p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
-the file. Parent layout variables are available in child templates.</p>
+the file.</p>
 <h3 id="step-9-template-contracts-bl9-bl10-bl11">Step 9: Template contracts (BL9, BL10, BL11)<a class="headerlink" href="#step-9-template-contracts-bl9-bl10-bl11" title="Permanent link">&para;</a></h3>
 <p>Call-site validation builds on the shipped declaration chain
 (<code>src/blade/signature.rs</code>). Section/stack intelligence and custom
