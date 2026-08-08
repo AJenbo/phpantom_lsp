@@ -1100,17 +1100,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#l47-facade-members-for-a-container-binding-accessor" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L47. Facade members for a container-binding accessor
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#model-property-source-gaps" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1826,17 +1815,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#l47-facade-members-for-a-container-binding-accessor" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L47. Facade members for a container-binding accessor
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#model-property-source-gaps" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2473,33 +2451,6 @@ degrades gracefully.</p>
 </ol>
 <p><strong>Impact: High · Effort: Medium (upstream PRs)</strong></p>
 <hr />
-<h2 id="l47-facade-members-for-a-container-binding-accessor">L47. Facade members for a container-binding accessor<a class="headerlink" href="#l47-facade-members-for-a-container-binding-accessor" title="Permanent link">&para;</a></h2>
-<p><code>LaravelFacadeProvider</code> forwards the concrete class's members onto a
-facade whose <code>getFacadeAccessor()</code> names a class directly
-(<code>return Container::class;</code>). A facade that names a container binding
-instead gets nothing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Sentry extends \Illuminate\Support\Facades\Facade {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    protected static function getFacadeAccessor() { return &#39;sentry&#39;; }</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">Sentry::         // completion offers nothing the HubAdapter binding has</span>
-</code></pre></div>
-<p>Laravel's own facades all take this shape, but they carry generated
-<code>@method static</code> tags that already list everything, so the gap is
-confined to app and package facades that bind a string in a service
-provider.</p>
-<p>Mapping the binding key to its class needs the container alias table,
-which lives on the <code>Backend</code>; a virtual member provider receives only a
-<code>ClassInfo</code>, a class loader, and the resolved-class cache. Going through
-the class loader is not a substitute: <code>find_or_load_class</code> consults the
-alias table only after every ordinary lookup phase has missed, so a key
-like <code>'view'</code> would first match an unrelated class of that short name
-and forward the wrong members. So the fix is the plumbing: give
-providers a project-context handle, or put the container table
-somewhere all of them can already see. <code>facade_owner.rs</code> reaches the
-<code>Backend</code> at call sites and shows what the lookup should be.</p>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<hr />
 <h2 id="model-property-source-gaps">Model property source gaps<a class="headerlink" href="#model-property-source-gaps" title="Permanent link">&para;</a></h2>
 <p>The <code>LaravelModelProvider</code> synthesizes virtual properties from several
 sources on Eloquent models. The table below summarises what we handle
@@ -2562,11 +2513,11 @@ causing false "unknown member" warnings and missing completions.</p>
 be narrowed to exclude <code>null</code> in subsequent code.  Similarly,
 <code>abort_unless($user instanceof Admin, 403)</code> should narrow <code>$user</code>
 to <code>Admin</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">abort_if($user === null, 404);</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$user-&gt;email;  // $user should be non-null here</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">abort_unless($user instanceof Admin, 403);</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$user-&gt;grantPermission(&#39;edit&#39;);  // $user should be Admin here</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">abort_if($user === null, 404);</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$user-&gt;email;  // $user should be non-null here</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">abort_unless($user instanceof Admin, 403);</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$user-&gt;grantPermission(&#39;edit&#39;);  // $user should be Admin here</span>
 </code></pre></div>
 <p>Larastan handles this via <code>AbortIfFunctionTypeSpecifyingExtension</code>,
 a PHPStan-specific <code>TypeSpecifyingExtension</code> mechanism.  The
@@ -2629,8 +2580,8 @@ aggregate function (<code>withSum</code>/<code>withAvg</code> → <code>float</c
 support dynamic <code>with*()</code> calls via <code>__call()</code>.  For example,
 <code>view('home')-&gt;withUser($user)</code> is equivalent to
 <code>-&gt;with('user', $user)</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">view(&#39;home&#39;)-&gt;withUser($user);         // dynamic, no @method annotation</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">redirect(&#39;/&#39;)-&gt;withErrors($errors);    // has explicit withErrors(), but withFoo() is dynamic</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">view(&#39;home&#39;)-&gt;withUser($user);         // dynamic, no @method annotation</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">redirect(&#39;/&#39;)-&gt;withErrors($errors);    // has explicit withErrors(), but withFoo() is dynamic</span>
 </code></pre></div>
 <p>The framework provides no <code>@method</code> annotations for arbitrary
 <code>with*</code> calls — only specific ones like <code>withErrors()</code>,
@@ -2705,8 +2656,8 @@ name: the <code>morphMap()</code> keys themselves, <code>Relation::getMorphedMod
 <code>Model::getActualClassNameForMorph()</code>, and the <code>$types</code> argument of the
 <code>whereHasMorph()</code> family. It does <strong>not</strong> recognize an alias compared
 against a morph type <em>column</em>, which is how much real code reads it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$query-&gt;where(&#39;commentable_type&#39;, &#39;post&#39;);</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">if ($comment-&gt;commentable_type === &#39;post&#39;) { … }</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$query-&gt;where(&#39;commentable_type&#39;, &#39;post&#39;);</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">if ($comment-&gt;commentable_type === &#39;post&#39;) { … }</span>
 </code></pre></div>
 <p>Both are alias literals, but recognizing them means knowing that the
 column named on the other side is a polymorphic type column. The
@@ -2723,8 +2674,8 @@ dispatch on the <code>LaravelStringKind::MorphAlias</code> span kind.</p>
 <p>Morph aliases complete inside <code>Relation::getMorphedModel('|')</code> and
 <code>Model::getActualClassNameForMorph('|')</code>, but not in the two array
 positions where they are most often written:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">Relation::morphMap([&#39;|&#39; =&gt; Post::class]);</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$query-&gt;whereHasMorph(&#39;commentable&#39;, [&#39;|&#39;]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Relation::morphMap([&#39;|&#39; =&gt; Post::class]);</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$query-&gt;whereHasMorph(&#39;commentable&#39;, [&#39;|&#39;]);</span>
 </code></pre></div>
 <p>The blocker is not the alias index but
 <code>detect_laravel_string_key_context</code> in
@@ -3097,8 +3048,8 @@ reference found," never as an error.</p>
 <p><strong>Impact: Medium · Effort: Low</strong></p>
 <p><code>url()</code> returns the generator or a string depending on whether it got a
 path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
 </code></pre></div>
 <p>We resolve the call to the contract regardless of the argument, so a
 string result is typed as <code>UrlGenerator</code>. Real-world fallout is
@@ -3117,10 +3068,10 @@ Application : mixed)</code>).</p>
 <p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
 registrations that generate route names the same way are not, so every
 <code>route()</code> call naming one is reported as an unknown route:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
 </code></pre></div>
 <p><code>resources()</code> / <code>apiResources()</code> expand to the same seven (or five)
 conventional names per entry. <code>singleton()</code> generates <code>show</code>, <code>edit</code>, and
