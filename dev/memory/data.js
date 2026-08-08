@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786162833976,
+  "lastUpdate": 1786192606006,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -15639,6 +15639,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1c9a28f360fa9ded888570b22ff613c4ab808e77",
+          "message": "Implement support for HashMap aliases",
+          "timestamp": "2026-08-08T14:20:25+02:00",
+          "tree_id": "e73aa4d2dd39e9c939999d879e569dbb3e0b9ca2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1c9a28f360fa9ded888570b22ff613c4ab808e77"
+        },
+        "date": 1786192601797,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.3,
             "unit": "MiB"
           }
         ]
