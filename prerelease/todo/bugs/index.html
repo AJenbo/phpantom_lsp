@@ -850,17 +850,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B62. An application's container binding loses to the framework default for the same key
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1372,17 +1361,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B62. An application's container binding loses to the framework default for the same key
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1475,32 +1453,6 @@ reported.</p>
 <code>src/diagnostics/deprecated.rs</code>. The "since" version is parsed for the
 message but never compared against <code>self.php_version()</code>. Deprecations
 with no recorded version keep firing, as today.</p>
-<h4 id="b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key">B62. An application's container binding loses to the framework default for the same key<a class="headerlink" href="#b62-an-applications-container-binding-loses-to-the-framework-default-for-the-same-key" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>An application that replaces a framework binding still resolves to the
-framework's class:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// config/app.php registers Acme\Translation\TranslationServiceProvider,</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">// which extends Illuminate&#39;s and re-binds &#39;translator&#39;:</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;translator&#39;, function (Application $app) {</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    return new DatabaseTranslator($loader, $locale);</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">});</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">// …but:</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">return $this-&gt;app-&gt;make(&#39;translator&#39;);</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">// &quot;Return type Illuminate\Translation\Translator is incompatible with</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">//  declared return type Acme\Translation\DatabaseTranslator&quot;</span>
-</code></pre></div>
-<p>Both providers are indexed and the framework's wins. Overriding a
-framework binding from an application provider is the normal way to swap
-an implementation, so the application's registration has to take
-precedence.</p>
-<p><strong>Where to look:</strong> the binding index built by
-<code>virtual_members/laravel/provider_resources.rs</code> keeps one entry per key
-with no notion of precedence. A provider the application registers
-explicitly (<code>config/app.php</code> <code>providers</code>, <code>bootstrap/providers.php</code>)
-outranks a framework default, and a provider that <code>extends</code> another
-outranks its parent. Where two bindings genuinely tie, the union of both
-classes beats picking one arbitrarily.</p>
 <h4 id="b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment">B64. A dotted container key resolves to a class named after its first segment<a class="headerlink" href="#b64-a-dotted-container-key-resolves-to-a-class-named-after-its-first-segment" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
 <p><code>find_or_load_class</code> normalises through <code>PhpType::parse</code>, whose
@@ -1508,10 +1460,10 @@ classes beats picking one arbitrarily.</p>
 contain. A container key is handed to it verbatim, so <code>'demo.bakery'</code>
 becomes <code>demo</code> and matches any class of that short name before the
 binding table is ever consulted:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// app/Demo.php declares class App\Demo</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;demo.bakery&#39;, fn () =&gt; new BakeryService());</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">app(&#39;demo.bakery&#39;)-&gt;bake(&#39;croissant&#39;);   // resolves to App\Demo, not BakeryService</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// app/Demo.php declares class App\Demo</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$this-&gt;app-&gt;singleton(&#39;demo.bakery&#39;, fn () =&gt; new BakeryService());</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">app(&#39;demo.bakery&#39;)-&gt;bake(&#39;croissant&#39;);   // resolves to App\Demo, not BakeryService</span>
 </code></pre></div>
 <p>The bound class is indexed correctly; it is simply never reached,
 because the ordinary class-lookup phases claim the key first and the
@@ -1527,7 +1479,7 @@ tables should be consulted first (or exclusively) for it.</p>
 <p>A closure type writes <code>$</code>-prefixed names for its own parameters, and the
 <code>@var</code> scan takes the first <code>$</code> it finds after the tag as the annotated
 variable:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @var \Closure(\App\Models\User $user): string $callback */</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @var \Closure(\App\Models\User $user): string $callback */</span>
 </code></pre></div>
 <p>is read as declaring <code>$user</code> of type <code>\Closure(\App\Models\User</code>, so
 <code>$callback</code> stays untyped and a bogus <code>$user</code> enters the scope. The same
