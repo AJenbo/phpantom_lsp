@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL20 | [`$this` in a Livewire view resolves to nothing](todo/blade.md#bl20-this-in-a-livewire-view-resolves-to-nothing)                                                             | Medium      | Medium      |
 | BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |
 | BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures, depends on BL6)                                                       | Medium-High | Medium-High |
 | L46 | [Facade member completion from the concrete class](todo/laravel.md#l46-facade-member-completion-from-the-concrete-class)                                        | Medium      | Medium      |
@@ -110,6 +109,7 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
+| B1  | [A rename reaching a Blade prologue writes into the template](todo/bugs.md#b1-a-rename-reaching-a-blade-prologue-writes-into-the-template)                                   | Medium      | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

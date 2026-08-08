@@ -763,12 +763,12 @@ pub struct Backend {
     /// URIs opened with `languageId == "blade"` that don't have a `.blade.php` extension.
     /// Allows editors to signal Blade files via languageId alone.
     pub(crate) blade_uris: Arc<RwLock<std::collections::HashSet<String>>>,
-    /// Per-template call-site-inferred variables injected into the virtual
-    /// PHP prologue on the last preprocess (name without `$`, docblock
-    /// type).  Lets re-inference passes skip templates whose inferred set
-    /// is unchanged.
+    /// Per-template scope seeded into the virtual PHP on the last
+    /// preprocess: the declared and call-site-inferred variables, and the
+    /// class `$this` is bound to.  Lets re-inference passes skip templates
+    /// whose scope is unchanged.
     pub(crate) blade_injected_vars:
-        Arc<RwLock<HashMap<String, crate::blade::call_site_inference::InjectedVars>>>,
+        Arc<RwLock<HashMap<String, crate::blade::call_site_inference::BladeScope>>>,
     /// Whether the workspace directory has been fully scanned for PHP files.
     ///
     /// Set to `true` after the first Phase 2 walk in `ensure_workspace_indexed`.

@@ -50,7 +50,7 @@ enum CapturedDirective {
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
-    preprocess_with_vars(content, &[], TemplateKind::View)
+    preprocess_with_vars(content, &[], TemplateKind::View, None)
 }
 
 /// The variables Blade puts in a component view's scope on top of the data
@@ -109,10 +109,18 @@ fn docblock_safe_type(type_string: &str) -> &str {
 /// in the template body, where the forward walker reads it and carries the
 /// type over the rest of the file.  Re-declaring it here would put a second
 /// (and, for a `@props` default, a *wrong*) type in front of the author's.
+///
+/// `this_class` is the fully qualified name of the class a template renders
+/// with bound to `$this` (Livewire hands its view the component instance).
+/// `$this` cannot arrive through the declaration channel above, since PHP
+/// allows neither `$this = …` nor `global $this`, so the body is wrapped in
+/// a method of a synthesized subclass of that class instead of in a plain
+/// function.
 pub fn preprocess_with_vars(
     content: &str,
     injected_vars: &[(String, String)],
     kind: TemplateKind,
+    this_class: Option<&str>,
 ) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
@@ -186,6 +194,20 @@ pub fn preprocess_with_vars(
     // declared variable) are assigned in the outer scope above, so
     // pull them in with `global` — otherwise every use of them inside
     // the wrapped function is a false-positive "undefined variable".
+    //
+    // A template that renders with a component instance bound gets a
+    // method of a subclass of that component instead, so `$this` resolves
+    // off the component the way it does in any other method body.  The
+    // subclass is abstract: it exists only to carry the body, and a
+    // concrete one would be reported for every method its parent leaves
+    // abstract.
+    if let Some(fqn) = this_class {
+        virtual_php.push_str("abstract class ");
+        virtual_php.push_str(&super::scope_class_name(fqn));
+        virtual_php.push_str(" extends \\");
+        virtual_php.push_str(fqn.trim_matches('\\'));
+        virtual_php.push_str(" { public ");
+    }
     virtual_php.push_str("function ");
     virtual_php.push_str(super::WRAPPER_FUNCTION);
     virtual_php.push_str("() { global $errors, $__env");
@@ -855,8 +877,9 @@ pub fn preprocess_with_vars(
         virtual_php.push_str(");\n");
     }
 
-    // Close the wrapper function.
-    virtual_php.push_str("}\n");
+    // Close the wrapper function, and the class holding it when the body
+    // was wrapped in a method.
+    virtual_php.push_str(if this_class.is_some() { "} }\n" } else { "}\n" });
 
     // Splice the collected `@use` imports into the prologue as real
     // top-level `use` statements, and grow the prologue height by the
@@ -1160,12 +1183,44 @@ mod tests {
         );
     }
 
+    /// A template that renders with a component instance bound wraps its
+    /// body in a method of a subclass of that component, which is the only
+    /// way `$this` can carry a type: PHP allows neither `$this = …` nor
+    /// `global $this`.
+    #[test]
+    fn test_a_bound_this_wraps_the_body_in_a_subclass_method() {
+        let (php, map) = preprocess_with_vars(
+            "{{ $this->count }}",
+            &[],
+            TemplateKind::View,
+            Some("App\\Livewire\\Counter"),
+        );
+        assert!(
+            php.contains(
+                "abstract class __blade_scope_App_Livewire_Counter \
+                 extends \\App\\Livewire\\Counter \
+                 { public function __blade_template() { global $errors, $__env;"
+            ),
+            "the body must sit in a method of a subclass of the component: {}",
+            php
+        );
+        assert!(
+            php.trim_end().ends_with("} }"),
+            "the method and the class holding it must both close: {}",
+            php
+        );
+        // The wrapper still occupies exactly one prologue line, so Blade
+        // positions map the same as they do without a bound `$this`.
+        assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES);
+    }
+
     #[test]
     fn test_component_prologue_declares_attributes_and_slot() {
         let (php, map) = preprocess_with_vars(
             "<img {{ $attributes->merge(['class' => 'x']) }} />{{ $slot }}",
             &[],
             TemplateKind::Component,
+            None,
         );
         assert!(
             php.contains("/** @var \\Illuminate\\View\\ComponentAttributeBag $attributes */")
@@ -1207,6 +1262,7 @@ mod tests {
             "{{ $attributes }}",
             &[("attributes".to_string(), "string".to_string())],
             TemplateKind::Component,
+            None,
         );
         assert!(
             !php.contains("$attributes = null;"),
@@ -1226,6 +1282,7 @@ mod tests {
                 ("user".to_string(), "\\App\\Models\\User".to_string()),
             ],
             TemplateKind::View,
+            None,
         );
         assert!(
             php.contains("/** @var array<int, string> $results */"),
@@ -1272,6 +1329,7 @@ mod tests {
             "{{ $body }}",
             &[("body".to_string(), "'line1\nline2'".to_string())],
             TemplateKind::View,
+            None,
         );
         assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 2);
         assert!(
@@ -1296,6 +1354,7 @@ mod tests {
             "{{ $x }}",
             &[("x".to_string(), "'*/ evil()'".to_string())],
             TemplateKind::View,
+            None,
         );
         assert!(
             php.contains("/** @var mixed $x */") && !php.contains("evil()"),

@@ -98,12 +98,13 @@ impl Backend {
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
         let content_to_parse = if self.is_blade_file(uri) {
-            // Seed the template scope with the variable set cached by
-            // the refresh passes (post-index refresh, Blade did_open,
-            // caller save): the members of the component class backing
-            // the view, then the types its call sites imply.  Both sit
-            // below the template's own declarations, which the
-            // preprocessor gives priority.
+            // Seed the template scope with the set cached by the refresh
+            // passes (post-index refresh, Blade did_open, caller save):
+            // the members of the component class backing the view, then
+            // the types its call sites imply, plus the class the view's
+            // `$this` is bound to.  Both variable sources sit below the
+            // template's own declarations, which the preprocessor gives
+            // priority.
             //
             // Neither is computed here: `update_ast` is called from the
             // parallel index/analyse workers, where scanning call sites
@@ -119,8 +120,9 @@ impl Backend {
                 .unwrap_or_default();
             let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
                 content,
-                &injected,
+                &injected.vars,
                 crate::blade::template_kind(uri, content),
+                injected.this_class.as_deref(),
             );
             self.blade_source_maps
                 .write()
@@ -193,6 +195,32 @@ impl Backend {
     fn update_ast_inner(&self, uri: &str, content: &str) -> bool {
         let update = self.build_ast_index_update(uri, content);
         self.apply_ast_index_updates_batch(vec![update])
+    }
+
+    /// Pull the imports out of the wrapper *method* a template whose
+    /// `$this` is bound is wrapped in, for the same reason the wrapper
+    /// function's are pulled out.  A no-op for every other class.
+    fn extract_blade_wrapper_method_use_statements(
+        statement: &Statement<'_>,
+        use_map: &mut HashMap<String, String>,
+    ) {
+        use mago_syntax::cst::class_like::member::ClassLikeMember;
+        use mago_syntax::cst::class_like::method::MethodBody;
+
+        let Statement::Class(class) = statement else {
+            return;
+        };
+        if !crate::blade::is_scope_class(bytes_to_str(class.name.value)) {
+            return;
+        }
+        for member in class.members.iter() {
+            if let ClassLikeMember::Method(method) = member
+                && bytes_to_str(method.name.value) == crate::blade::WRAPPER_FUNCTION
+                && let MethodBody::Concrete(block) = &method.body
+            {
+                Self::extract_use_statements_from_statements(block.statements.iter(), use_map);
+            }
+        }
     }
 
     pub(crate) fn parse_ast_index_update_for_index(
@@ -423,6 +451,11 @@ impl Backend {
                     | Statement::DoWhile(_)
                     | Statement::For(_)
                     | Statement::Foreach(_) => {
+                        // A template whose `$this` is bound wraps its body
+                        // in a method rather than a function, which buries
+                        // the template's own imports just the same (see the
+                        // wrapper-function arm below).
+                        Self::extract_blade_wrapper_method_use_statements(statement, &mut use_map);
                         let mut top_classes = Vec::new();
                         Self::extract_classes_from_statements(
                             std::iter::once(statement),

@@ -327,6 +327,16 @@ pub(crate) fn build_completion_items(
         // filters below. The completion handler only surfaces them when the
         // user is explicitly typing a `_`-prefixed member name, so they do not
         // clutter the default member list.
+        // The Blade preprocessor wraps a template whose `$this` is bound
+        // in a method of a synthesized subclass of the bound class, so
+        // `$this->` inside the template would otherwise offer that
+        // wrapper as a member of the component.
+        if method.name == crate::blade::WRAPPER_FUNCTION
+            && crate::blade::is_scope_class(&target_class.name)
+        {
+            continue;
+        }
+
         let is_constructor = method.name.eq_ignore_ascii_case("__construct");
         if is_constructor {
             let allow = is_self_or_ancestor

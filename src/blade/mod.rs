@@ -19,6 +19,29 @@ pub const PROLOGUE_LINES: u32 = 6;
 /// analysable code.
 pub const WRAPPER_FUNCTION: &str = "__blade_template";
 
+/// Prefix of the class the preprocessor wraps a template's body in when
+/// the template renders with a component instance bound to `$this`.
+const SCOPE_CLASS_PREFIX: &str = "__blade_scope_";
+
+/// The name of the synthesized subclass whose method holds the body of a
+/// template rendered with `fqn` bound to `$this`.
+///
+/// Deriving the name from the bound class keeps two templates backed by
+/// different classes from colliding in the project-wide class index; two
+/// templates backed by the *same* class do collide, but they synthesize
+/// the identical class, so nothing is lost.
+pub fn scope_class_name(fqn: &str) -> String {
+    format!(
+        "{SCOPE_CLASS_PREFIX}{}",
+        fqn.trim_matches('\\').replace('\\', "_")
+    )
+}
+
+/// Whether a class name is one [`scope_class_name`] produced.
+pub fn is_scope_class(name: &str) -> bool {
+    name.starts_with(SCOPE_CLASS_PREFIX)
+}
+
 /// Check whether a URI refers to a Blade template file.
 pub fn is_blade_file(uri: &str) -> bool {
     uri.ends_with(".blade.php")

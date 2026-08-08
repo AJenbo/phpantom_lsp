@@ -47,31 +47,43 @@ const LIVEWIRE_DEFAULT_NAMESPACE: &str = "App\\Livewire";
 /// the return type instead would report the first of those as an error.
 const INVOKABLE_VARIABLE: &str = "\\Illuminate\\View\\InvokableComponentVariable";
 
-/// The names Livewire binds the component instance to in its view.
+/// The names Livewire binds the component instance to as ordinary
+/// variables in its view.
 ///
 /// Livewire binds it to `$this` as well, which no declaration here can
 /// cover: a variable arrives by being assigned in the virtual PHP's
 /// prologue and pulled into the wrapper function with `global`, and PHP
-/// allows neither for `$this`.
+/// allows neither for `$this`.  The preprocessor handles that one by
+/// wrapping the body in a method of a subclass of the component instead
+/// (see `super::preprocessor::preprocess_with_vars`).
 const LIVEWIRE_INSTANCE_VARS: [&str; 2] = ["_instance", "__livewire"];
 
 impl Backend {
     /// The variables the backing class of a component view contributes,
-    /// or an empty list when no view name resolves to one.
+    /// and the class the view's `$this` is bound to.  Empty when no view
+    /// name resolves to a backing class.
     ///
     /// Only the first name that resolves contributes: a template is one
     /// component, even when several view roots make it addressable by
     /// more than one name.
-    pub(crate) fn blade_backing_class_vars(&self, view_names: &[String]) -> InjectedVars {
+    ///
+    /// Only a Livewire view reports a `$this` class: Laravel renders a
+    /// Blade component's view through the view engine, where `$this` is
+    /// the engine rather than the component.
+    pub(crate) fn blade_backing_class_vars(
+        &self,
+        view_names: &[String],
+    ) -> (InjectedVars, Option<String>) {
         for view_name in view_names {
             if let Some(class) = self.livewire_component_class(view_name) {
-                return self.livewire_scope_vars(&class);
+                let fqn = class.fqn().to_string();
+                return (self.livewire_scope_vars(&class), Some(fqn));
             }
             if let Some(class) = self.blade_component_class(view_name) {
-                return self.component_scope_vars(&class);
+                return (self.component_scope_vars(&class), None);
             }
         }
-        Vec::new()
+        (Vec::new(), None)
     }
 
     /// The Blade component class a view name is the view of, over the
@@ -433,6 +445,7 @@ mod tests {
         let declares_month = |view_name: &str| {
             backend
                 .blade_backing_class_vars(&[view_name.to_string()])
+                .0
                 .iter()
                 .any(|(name, ty)| name == "month" && ty == "string")
         };

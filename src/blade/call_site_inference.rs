@@ -45,6 +45,20 @@ type InferredVars = Vec<(String, PhpType)>;
 /// (name without `$`, docblock type string).
 pub(crate) type InjectedVars = Vec<(String, String)>;
 
+/// What a template's virtual PHP is seeded with beyond the template's own
+/// source: the variables its prologue declares, and the class its `$this`
+/// is bound to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct BladeScope {
+    /// Highest-priority source first — the prologue declares the first
+    /// entry for a name and skips the rest.
+    pub vars: InjectedVars,
+    /// The fully qualified name of the component instance a Livewire view
+    /// renders with, which the preprocessor wraps the body in a method of
+    /// (see `preprocess_with_vars`).  `None` for every other template.
+    pub this_class: Option<String>,
+}
+
 /// User files that render Blade views, with their symbol maps.  Shared
 /// across a whole refresh pass so the workspace is walked once, not once
 /// per template.
@@ -70,7 +84,8 @@ impl Backend {
     ///
     /// Returns pairs of (variable name without `$`, docblock type
     /// string), highest-priority source first — the prologue declares
-    /// the first entry for a name and skips the rest.  Empty when the
+    /// the first entry for a name and skips the rest — alongside the
+    /// class the template's `$this` is bound to.  Empty when the
     /// template has no backing class and no call site references it, or
     /// when the template's view name cannot be derived from its path.
     pub(crate) fn compute_blade_injected_vars(
@@ -79,16 +94,16 @@ impl Backend {
         blade_content: &str,
         shared: Option<&ViewCallerSnapshot>,
         shared_blade: Option<&BladeCallerSnapshot>,
-    ) -> InjectedVars {
+    ) -> BladeScope {
         let view_names = self.view_names_for_blade_uri(uri);
         if view_names.is_empty() {
-            return Vec::new();
+            return BladeScope::default();
         }
 
         // The backing class is a *declared* source, so it stands whatever
         // else the template says; only the names its own signature
         // declares win over it (the preprocessor applies that).
-        let mut declared = self.blade_backing_class_vars(&view_names);
+        let (mut declared, this_class) = self.blade_backing_class_vars(&view_names);
 
         // What a service provider shares or composes into this template's
         // scope: no template declares it and no caller passes it, but it is
@@ -104,7 +119,10 @@ impl Backend {
         // A template that declares a signature manages its own contract;
         // inferring on top would fight the declared types.
         if crate::blade::signature::has_declared_signature(blade_content) {
-            return declared;
+            return BladeScope {
+                vars: declared,
+                this_class,
+            };
         }
 
         // Find every file whose symbol map contains a View string key
@@ -204,7 +222,10 @@ impl Backend {
         }
 
         if merged.is_empty() {
-            return declared;
+            return BladeScope {
+                vars: declared,
+                this_class,
+            };
         }
 
         // A name a declared source already carries needs no inference: what
@@ -236,7 +257,7 @@ impl Backend {
         // prologue emits for the names more than one source carries.
         let mut vars = declared;
         vars.extend(result);
-        vars
+        BladeScope { vars, this_class }
     }
 
     /// Re-run call-site inference for already-preprocessed Blade
@@ -335,7 +356,7 @@ impl Backend {
         let fresh = self.compute_blade_injected_vars(uri, content, shared, shared_blade);
         let unchanged = match self.blade_injected_vars.read().get(uri) {
             Some(prev) => *prev == fresh,
-            None => fresh.is_empty(),
+            None => fresh == BladeScope::default(),
         };
         if unchanged {
             return false;

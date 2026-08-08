@@ -1486,13 +1486,16 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     }
     {
         let m = backend.blade_injected_vars.read();
-        misc += map_buckets::<String, Vec<(String, String)>>(m.capacity());
-        for (k, vars) in m.iter() {
+        misc += map_buckets::<String, crate::blade::call_site_inference::BladeScope>(m.capacity());
+        for (k, scope) in m.iter() {
             blade.add(k.capacity());
-            blade.add(vars.capacity() * size_of::<(String, String)>());
-            for (name, ty) in vars {
+            blade.add(scope.vars.capacity() * size_of::<(String, String)>());
+            for (name, ty) in &scope.vars {
                 blade.add(name.capacity());
                 blade.add(ty.capacity());
+            }
+            if let Some(fqn) = &scope.this_class {
+                blade.add(fqn.capacity());
             }
         }
     }

@@ -271,12 +271,8 @@ mod tests {
     }
 
     /// A Livewire view gets the component's public properties and the
-    /// component instance under the names Livewire binds it to.
-    ///
-    /// The template also reads `$this`, which Livewire binds as well but
-    /// which no declared variable can stand in for: the template body is
-    /// wrapped in a function, where `$this` belongs to no class. It must
-    /// at least stay unflagged.
+    /// component instance under the names Livewire binds it to, `$this`
+    /// included.
     #[tokio::test]
     async fn a_livewire_view_gets_the_component_scope() {
         let (backend, _dir) = create_psr4_workspace(
@@ -320,10 +316,279 @@ mod tests {
             instance.contains("App\\Livewire") && instance.contains("OrderList"),
             "$_instance is the component itself, got: {instance}"
         );
+        let this_member = hover_text(&backend, &uri, 3, 11).await;
+        assert!(
+            this_member.contains("int"),
+            "$this->page reads the component's own property, got: {this_member}"
+        );
         assert!(
             undefined_variables(&backend, &uri).is_empty(),
             "the Livewire scope covers every variable used: {:?}",
             undefined_variables(&backend, &uri)
+        );
+    }
+
+    /// Livewire renders its view with the component bound to `$this`, so
+    /// the view reaches the component's properties, its actions (what
+    /// `wire:click` calls), and whatever it inherits.
+    #[tokio::test]
+    async fn a_livewire_view_resolves_this_to_the_component() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("app/Models/Order.php", ORDER_CLASS),
+                (
+                    "app/Livewire/OrderList.php",
+                    "<?php\nnamespace App\\Livewire;\n\
+                     use App\\Models\\Order;\n\
+                     use Livewire\\Component;\n\
+                     class OrderList extends Component {\n\
+                         public Order $selected;\n\
+                         public function reload(): Order { return $this->selected; }\n\
+                         public function render() {}\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/livewire/order-list.blade.php",
+                    "<div wire:click=\"reload\">\n\
+                     {{ $this->selected->reference }}\n\
+                     {{ $this->reload()->reference }}\n\
+                     {{ $this->dispatch('saved') }}\n\
+                     </div>\n",
+                ),
+            ],
+        );
+        let root = backend.workspace_root().read().clone().unwrap();
+        let uri = open_template(
+            &backend,
+            &root,
+            "resources/views/livewire/order-list.blade.php",
+        )
+        .await;
+
+        let property = hover_text(&backend, &uri, 1, 12).await;
+        assert!(
+            property.contains("Order $selected"),
+            "$this->selected is the component's own property, got: {property}"
+        );
+        let action = hover_text(&backend, &uri, 2, 12).await;
+        assert!(
+            action.contains("reload") && action.contains("Order"),
+            "$this->reload() is a component action, got: {action}"
+        );
+        let inherited = hover_text(&backend, &uri, 3, 12).await;
+        assert!(
+            inherited.contains("dispatch"),
+            "$this reaches what the component inherits, got: {inherited}"
+        );
+
+        // Nothing on `$this` may be reported as a member the component
+        // does not have.
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_unknown_member_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        assert!(
+            diags.is_empty(),
+            "the component's own members must resolve: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `$this->` in a Livewire view completes the component's members.
+    #[tokio::test]
+    async fn completion_on_this_offers_the_component_members() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                (
+                    "app/Livewire/Counter.php",
+                    "<?php\nnamespace App\\Livewire;\n\
+                     use Livewire\\Component;\n\
+                     class Counter extends Component {\n\
+                         public int $count = 0;\n\
+                         public function increment(): void {}\n\
+                         public function render() {}\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/livewire/counter.blade.php",
+                    "{{ $this-> }}\n",
+                ),
+            ],
+        );
+        let root = backend.workspace_root().read().clone().unwrap();
+        let uri = open_template(
+            &backend,
+            &root,
+            "resources/views/livewire/counter.blade.php",
+        )
+        .await;
+
+        let result = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position {
+                        line: 0,
+                        character: 10,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(">".to_string()),
+                }),
+            })
+            .await
+            .unwrap();
+        let labels: Vec<String> = match result {
+            Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
+            Some(CompletionResponse::List(list)) => {
+                list.items.into_iter().map(|i| i.label).collect()
+            }
+            None => Vec::new(),
+        };
+        for name in ["count", "increment()", "dispatch($event)"] {
+            assert!(
+                labels.iter().any(|l| l == name),
+                "$this-> should offer {name}: {labels:?}"
+            );
+        }
+        assert!(
+            !labels.iter().any(|l| l.starts_with("__blade")),
+            "the synthesized wrapper is not a member of the component: {labels:?}"
+        );
+    }
+
+    /// Go-to-definition on a `$this` member in a Livewire view lands on
+    /// the component class, not on the synthesized wrapper.
+    #[tokio::test]
+    async fn go_to_definition_on_a_this_member_lands_on_the_component() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                (
+                    "app/Livewire/Counter.php",
+                    "<?php\nnamespace App\\Livewire;\n\
+                     use Livewire\\Component;\n\
+                     class Counter extends Component {\n\
+                         public int $count = 0;\n\
+                         public function increment(): void {}\n\
+                         public function render() {}\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/livewire/counter.blade.php",
+                    "<button wire:click=\"{{ $this->increment() }}\">{{ $this->count }}</button>\n",
+                ),
+            ],
+        );
+        let root = backend.workspace_root().read().clone().unwrap();
+        let uri = open_template(
+            &backend,
+            &root,
+            "resources/views/livewire/counter.blade.php",
+        )
+        .await;
+
+        let target = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position {
+                        line: 0,
+                        character: 34,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        let uri_of = |r: &GotoDefinitionResponse| match r {
+            GotoDefinitionResponse::Scalar(l) => l.uri.to_string(),
+            GotoDefinitionResponse::Array(ls) => ls[0].uri.to_string(),
+            other => panic!("unexpected definition response {other:?}"),
+        };
+        let target = target.as_ref().map(uri_of).unwrap_or_default();
+        assert!(
+            target.ends_with("app/Livewire/Counter.php"),
+            "increment() is declared on the component, got: {target}"
+        );
+    }
+
+    /// Wrapping a Livewire view's body in a method must not bury the
+    /// imports its `@php` region declares: Laravel compiles those to the
+    /// top level of the generated view file.
+    #[tokio::test]
+    async fn a_livewire_view_still_hoists_its_own_imports() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("app/Models/Order.php", ORDER_CLASS),
+                (
+                    "app/Livewire/Counter.php",
+                    "<?php\nnamespace App\\Livewire;\n\
+                     use Livewire\\Component;\n\
+                     class Counter extends Component { public function render() {} }\n",
+                ),
+                (
+                    "resources/views/livewire/counter.blade.php",
+                    "@php\nuse App\\Models\\Order;\n$order = new Order();\n@endphp\n\
+                     {{ $order->reference }}\n{{ $order->missing() }}\n",
+                ),
+            ],
+        );
+        let root = backend.workspace_root().read().clone().unwrap();
+        let uri = open_template(
+            &backend,
+            &root,
+            "resources/views/livewire/counter.blade.php",
+        )
+        .await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let messages: Vec<String> = diags
+            .into_iter()
+            .map(|d| d.message)
+            .filter(|m| !m.contains("Function 'e' not found"))
+            .collect();
+        assert_eq!(
+            messages,
+            vec!["Method 'missing' not found on class 'App\\Models\\Order'"],
+            "the template's own import must still resolve"
+        );
+    }
+
+    /// A Blade component's view is rendered by the view engine, where
+    /// `$this` is *not* the component, so nothing may be invented for it.
+    #[tokio::test]
+    async fn a_blade_component_view_does_not_bind_this() {
+        let (backend, _dir, root) = component_workspace("{{ $this->label }}\n");
+        let uri = open_template(
+            &backend,
+            &root,
+            "resources/views/components/order-card.blade.php",
+        )
+        .await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        assert!(
+            !virtual_php.contains("__blade_scope_"),
+            "a Blade component view must keep the plain function wrapper: {virtual_php}"
         );
     }
 

@@ -349,30 +349,6 @@ Where Bladestan defines a concept (signature chain, covariant merging,
 call-site validation), we implement the same semantics so the
 ecosystem converges on one way to type a template.
 
-### BL20. `$this` in a Livewire view resolves to nothing
-
-A Livewire template is rendered with the component instance bound, so
-`{{ $this->orders }}` and `wire:click`-driven bodies read members off
-`$this`. The rest of the Livewire scope now arrives through
-`Backend::blade_injected_vars` (`$_instance` and `$__livewire` are the
-component, and its public properties are declared), but `$this` cannot:
-the injection channel declares a variable by assigning it in the
-prologue and pulling it into the wrapper function with `global`, and
-both `$this = …` and `global $this` are compile errors in PHP. The type
-engine also resolves `$this` from the enclosing class rather than from
-the variable scope, so a declaration would not be read even if it
-parsed. Hover, completion, and go-to-definition on `$this` therefore
-return nothing inside a Livewire view (nothing is *wrongly* reported —
-the undefined-variable diagnostic leaves `$this` alone).
-
-The fix is on the preprocessor side: when a template's backing class is
-known, wrap the body in a method of a synthesized subclass of that class
-rather than in a plain function, so `$this` resolves the way it does in
-any other method body. `WRAPPER_FUNCTION` is looked up as a top-level
-function when hoisting a template's `@use` imports
-(`src/parser/ast_update.rs`), so that lookup has to learn the method
-form at the same time.
-
 ### BL10. Cross-file `@section` / `@stack` name intelligence
 
 `@section`/`@hasSection`/`@sectionMissing`/`@yield` and
