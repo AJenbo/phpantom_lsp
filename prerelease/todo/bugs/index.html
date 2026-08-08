@@ -838,17 +838,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b66-ascommand-outranks-the-signature-that-actually-names-the-command" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B66. <code>#[AsCommand]</code> outranks the signature that actually names the command
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1327,17 +1316,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b66-ascommand-outranks-the-signature-that-actually-names-the-command" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B66. <code>#[AsCommand]</code> outranks the signature that actually names the command
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1384,29 +1362,6 @@ where it also decides which names the contract declares.</p>
 <code>$</code> after <code>@var</code>. The annotated variable is the <code>$name</code> at paren depth 0
 and angle depth 0, so the scan has to track both while walking the type
 rather than stopping at the first <code>$</code>.</p>
-<h4 id="b66-ascommand-outranks-the-signature-that-actually-names-the-command">B66. <code>#[AsCommand]</code> outranks the signature that actually names the command<a class="headerlink" href="#b66-ascommand-outranks-the-signature-that-actually-names-the-command" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p><code>command_from_class</code> reads the command name from <code>#[AsCommand]</code> first
-and only falls back to <code>$signature</code> / <code>#[Signature]</code> / <code>$name</code>. At
-runtime the order is the reverse: <code>Command::__construct()</code> uses the
-signature whenever one is set and never reaches Symfony's
-<code>getDefaultName()</code>, and when there is no signature it passes <code>$this-&gt;name</code>
-to the parent, which again wins over the attribute. So a class that
-carries both is indexed under a name Artisan does not answer to:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">#[AsCommand(name: &#39;x:from-as-command&#39;)]</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class Sync extends Command</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">{</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    protected $signature = &#39;x:from-property {user}&#39;;   // Artisan registers this one</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>The command is then reported as unknown at every call site that spells
-it the way Artisan does, and go-to-definition on the spelling we did
-index lands on the attribute rather than the signature.</p>
-<p><strong>Where to look:</strong> the three-branch chain in <code>command_from_class</code>
-(<code>src/virtual_members/laravel/commands.rs</code>). The branches need to run in
-the runtime order (signature, then <code>$name</code>, then <code>#[AsCommand]</code>), which
-also removes the case where <code>CommandEntry::name</code> comes from the
-attribute while <code>CommandEntry::signature.name</code> comes from the signature.</p>
 
 
 
