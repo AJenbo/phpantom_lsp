@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786227961776,
+  "lastUpdate": 1786228200637,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16421,6 +16421,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e1af0d0511f59cb3a89814a0088359037820b850",
+          "message": "A facade that names a container binding lists its members too",
+          "timestamp": "2026-08-09T00:13:01+02:00",
+          "tree_id": "63fe06a24cb304258d105f44b5f5a7a0398d6506",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e1af0d0511f59cb3a89814a0088359037820b850"
+        },
+        "date": 1786228195921,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.8,
             "unit": "MiB"
           }
         ]
