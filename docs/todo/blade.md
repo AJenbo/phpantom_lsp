@@ -14,8 +14,8 @@ For general architecture see `ARCHITECTURE.md`.
   come from its declared contract: the Bladestan-compatible chain in
   `src/blade/signature.rs` — `@bladestan-signature` docblock, first
   docblock before template code, `@props`/`@aware`, Blade's own
-  component scope, and (still to come) the backing component class
-  (BL18). The template declares what it expects; call sites are then
+  component scope, and the backing component class. The template
+  declares what it expects; call sites are then
   *validated* against that contract (BL9), exactly as a function
   signature works. Inferring types *from* call sites inverts the contract and
   produces "true for one caller" types, so it is not the foundation —
@@ -410,30 +410,29 @@ Where Bladestan defines a concept (signature chain, covariant merging,
 call-site validation), we implement the same semantics so the
 ecosystem converges on one way to type a template.
 
-### BL18. Backed component class members in the template body
+### BL20. `$this` in a Livewire view resolves to nothing
 
-`src/blade/signature.rs` resolves a template's declared contract and the
-`@props`/`@aware` and Blade-injected sources below it, but the class
-backing a component view contributes nothing yet. Blade merges a class
-component's public properties and its zero-argument public methods into
-the view's data, and Livewire additionally gives its view `$this`,
-`$_instance`, and `$__livewire` (all the component instance) plus the
-component's public properties. A class component with no hand-written
-signature therefore reports every member it reads as undefined.
+A Livewire template is rendered with the component instance bound, so
+`{{ $this->orders }}` and `wire:click`-driven bodies read members off
+`$this`. The rest of the Livewire scope now arrives through
+`Backend::blade_injected_vars` (`$_instance` and `$__livewire` are the
+component, and its public properties are declared), but `$this` cannot:
+the injection channel declares a variable by assigning it in the
+prologue and pulling it into the wrapper function with `global`, and
+both `$this = …` and `global $this` are compile errors in PHP. The type
+engine also resolves `$this` from the enclosing class rather than from
+the variable scope, so a declaration would not be read even if it
+parsed. Hover, completion, and go-to-definition on `$this` therefore
+return nothing inside a Livewire view (nothing is *wrongly* reported —
+the undefined-variable diagnostic leaves `$this` alone).
 
-Resolve the backing class the way Laravel does — the registered class
-component namespaces and the default `App\View\Components` convention
-for `components.alert` → `App\View\Components\Alert`, and Livewire's
-`livewire.create-refund` → `App\Livewire\CreateRefund` under the
-configured `livewire.class_namespace` — then feed its members into the
-declaration chain below `@props` and above call-site inference. Skip
-members declared on the framework base class and any method that
-requires an argument, since Blade does not expose those.
-
-The preprocessor is a pure function of the template text, so the members
-have to arrive through the same channel the call-site-inferred variables
-already use (`Backend::blade_injected_vars`, populated by a refresh
-pass), not by resolving classes inside the preprocessor.
+The fix is on the preprocessor side: when a template's backing class is
+known, wrap the body in a method of a synthesized subclass of that class
+rather than in a plain function, so `$this` resolves the way it does in
+any other method body. `WRAPPER_FUNCTION` is looked up as a top-level
+function when hoisting a template's `@use` imports
+(`src/parser/ast_update.rs`), so that lookup has to learn the method
+form at the same time.
 
 ### BL19. Shared and view-composer variables in the declaration chain
 
@@ -452,9 +451,9 @@ provider builds), then feed the resulting names into
 scope (a shared variable named `slot` does not displace the real one)
 and above call-site inference. Types come from resolving the shared
 expression, or from the `with()` calls in the composer's body, through
-the shared resolution pipeline. Like BL18, the values have to arrive
-via `Backend::blade_injected_vars` rather than being resolved inside the
-preprocessor.
+the shared resolution pipeline. Like the backing class's members, the
+values have to arrive via `Backend::blade_injected_vars` rather than
+being resolved inside the preprocessor.
 
 ### BL10. Cross-file `@section` / `@stack` name intelligence
 
@@ -799,11 +798,10 @@ Implement `@` directive name completion with snippets.
 **Deliverable:** Typing `@` in a Blade file shows all known
 directives with snippet templates.
 
-### Step 8: Cross-file intelligence (BL5, BL6, BL18)
+### Step 8: Cross-file intelligence (BL5, BL6)
 
 Implement go-to-definition for view names and component tags.
-Implement `@extends` signature merging. Implement component class to
-template variable typing.
+Implement `@extends` signature merging.
 
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file. Parent layout variables are available in child templates.

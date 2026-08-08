@@ -105,6 +105,11 @@ pub(crate) struct ProviderResources {
     /// every provider has been scanned: the key an alias points at may well
     /// be bound by a provider that comes later.
     pub aliases: HashMap<String, Alias>,
+    /// `Blade::componentNamespace('Nightshade\Views\Components', 'nightshade')`
+    /// entries, as (tag prefix, class namespace).  A view addressed under the
+    /// prefix (`nightshade::calendar`) is backed by a component class in that
+    /// namespace, whose members its template reads.
+    pub class_component_namespaces: Vec<(String, String)>,
     /// A provider rebound `translator` or `translation.loader` to something
     /// other than Laravel's own file-based pair, so the strings come from a
     /// source we cannot enumerate (a database table, say) and the set of
@@ -118,6 +123,8 @@ impl ProviderResources {
         self.view_dirs.extend(other.view_dirs);
         self.trans_dirs.extend(other.trans_dirs);
         self.route_files.extend(other.route_files);
+        self.class_component_namespaces
+            .extend(other.class_component_namespaces);
         for (key, binding) in other.bindings {
             self.record_binding(key, binding);
         }
@@ -260,6 +267,24 @@ pub(crate) fn extract_provider_resources(
             registers_routes_inline = true;
         }
 
+        // `Blade::componentNamespace('Nightshade\\Views\\Components',
+        // 'nightshade')` says which classes back the views a package
+        // registers under its own prefix.
+        if let Expression::Call(Call::StaticMethod(sc)) = expr
+            && let ClassLikeMemberSelector::Identifier(method) = &sc.method
+            && method.value.eq_ignore_ascii_case(b"componentNamespace")
+            && let Expression::Identifier(id) = sc.class
+            && id
+                .value()
+                .rsplit(|&b| b == b'\\')
+                .next()
+                .is_some_and(|seg| seg.eq_ignore_ascii_case(b"Blade"))
+            && let Some(entry) = component_namespace_args(&sc.argument_list, content, &scope)
+        {
+            resources.class_component_namespaces.push(entry);
+            return ControlFlow::Continue(());
+        }
+
         let Expression::Call(Call::Method(mc)) = expr else {
             return ControlFlow::Continue(());
         };
@@ -369,6 +394,16 @@ pub(crate) fn extract_provider_resources(
             return ControlFlow::Continue(());
         }
 
+        // The same registration written against the compiler instance a
+        // deferred callback receives (`$blade->componentNamespace(…)`),
+        // which is how a package registers before Blade is resolved.
+        if method_lower == b"componentnamespace"
+            && let Some(entry) = component_namespace_args(&mc.argument_list, content, &scope)
+        {
+            resources.class_component_namespaces.push(entry);
+            return ControlFlow::Continue(());
+        }
+
         if !is_this_expr(mc.object) {
             return ControlFlow::Continue(());
         }
@@ -435,6 +470,30 @@ pub(crate) fn extract_provider_resources(
     }
 
     resources
+}
+
+/// The (tag prefix, class namespace) pair a `componentNamespace()` call
+/// registers, as `(prefix, namespace)`.
+///
+/// The namespace is read from source text, where a single-quoted literal
+/// still carries its doubled separators, so those are collapsed back to
+/// the namespace the application sees.
+fn component_namespace_args(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    scope: &Scope,
+) -> Option<(String, String)> {
+    let mut args = argument_list.arguments.iter();
+    let namespace = const_string(args.next()?.value(), content, scope)?;
+    let prefix = const_string(args.next()?.value(), content, scope)?;
+    let namespace = namespace
+        .replace("\\\\", "\\")
+        .trim_matches('\\')
+        .to_string();
+    if namespace.is_empty() || prefix.is_empty() {
+        return None;
+    }
+    Some((prefix, namespace))
 }
 
 fn is_this_expr(expr: &Expression<'_>) -> bool {
@@ -720,6 +779,40 @@ fn chain_roots_at_route(expr: &Expression<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn records_registered_class_component_namespaces() {
+        // Both shapes a package registers its components with: the facade,
+        // and the compiler instance a deferred callback receives.  A
+        // single-quoted namespace keeps its doubled separators in source,
+        // so the recorded value must be the namespace itself.
+        let content = "<?php\n\
+            class PackageServiceProvider {\n\
+                public function boot(): void {\n\
+                    Blade::componentNamespace('Nightshade\\\\Views\\\\Components', 'nightshade');\n\
+                    $this->callAfterResolving('blade.compiler', function ($blade) {\n\
+                        $blade->componentNamespace('Acme\\\\Ui', 'acme');\n\
+                    });\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/app/Providers/PackageServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            resources.class_component_namespaces,
+            vec![
+                (
+                    "nightshade".to_string(),
+                    "Nightshade\\Views\\Components".to_string()
+                ),
+                ("acme".to_string(), "Acme\\Ui".to_string()),
+            ]
+        );
+    }
 
     #[test]
     fn detects_route_group_base_path_registration() {

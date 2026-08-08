@@ -98,6 +98,11 @@
         {{ __('messages.welcome') }}
     </x-panel>
 
+    {{-- <x-post-summary> is backed by a class, App\View\Components\PostSummary.
+         Its view reads the class's public members, not what this tag
+         passes: resources/views/components/post-summary.blade.php --}}
+    <x-post-summary :post="$posts->first()" heading="Latest post" />
+
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim
         <p>This {{ $blade }} syntax is not processed</p>

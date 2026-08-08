@@ -331,7 +331,7 @@ impl Backend {
             // `view()` call sites; with the whole workspace indexed,
             // re-run call-site inference and re-parse the templates
             // whose inferred variable set changed.
-            self.refresh_blade_call_site_inference();
+            self.refresh_blade_injected_vars();
         }
         self.report_workspace_index_progress(progress, 100, "Workspace index ready");
         *self.workspace_index_status.lock() = None;

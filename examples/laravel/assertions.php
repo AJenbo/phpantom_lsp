@@ -981,6 +981,33 @@ check(
         && $prune->getDefinition()->getOption('days')->getDefault() === '7'
 );
 
+// ─── Component class members reaching the view ──────────────────────────────
+
+// Blade renders a class component's view with the data `Component::data()`
+// returns, which is every public property plus every public method. An
+// argument-less method arrives as an InvokableComponentVariable (so the view
+// can both print it and call it) and one that takes an argument as a plain
+// Closure, which is why only the argument-less ones are variables a template
+// can read. Framework members declared on Component itself are ignored.
+$summary = new \App\View\Components\PostSummary(new \App\Models\BlogPost());
+$viewData = $summary->data();
+check(
+    'a public property reaches the component view',
+    array_key_exists('post', $viewData) && array_key_exists('heading', $viewData)
+);
+check(
+    'an argument-less public method reaches the view as an invokable variable',
+    ($viewData['wordCount'] ?? null) instanceof \Illuminate\View\InvokableComponentVariable
+);
+check(
+    'a method that takes an argument is a bare closure, not a readable variable',
+    ($viewData['excerpt'] ?? null) instanceof \Closure
+);
+check(
+    'framework members of Component are not view data',
+    !array_key_exists('render', $viewData) && !array_key_exists('data', $viewData)
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

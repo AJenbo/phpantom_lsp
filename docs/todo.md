@@ -25,9 +25,9 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL18 | [Backed component class members in the template body](todo/blade.md#bl18-backed-component-class-members-in-the-template-body)                                              | High        | Medium      |
 | BL2  | [Template and component file discovery](todo/blade.md#bl2-template-and-component-file-discovery)                            | High       | Medium     |
 | BL19 | [Shared and view-composer variables in the declaration chain](todo/blade.md#bl19-shared-and-view-composer-variables-in-the-declaration-chain)                                | Medium      | Medium      |
+| BL20 | [`$this` in a Livewire view resolves to nothing](todo/blade.md#bl20-this-in-a-livewire-view-resolves-to-nothing)                                                             | Medium      | Medium      |
 | BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |
 | BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures, depends on BL6)                                                       | Medium-High | Medium-High |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |

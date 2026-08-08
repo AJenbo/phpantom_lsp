@@ -14,11 +14,11 @@
 //!
 //! This is deliberately the lowest-priority source: an in-template
 //! `@var` annotation shadows an injected one (it sits closer to every
-//! use site in the backward docblock scan), `@props`/`@aware` win over it
-//! per name (see `super::signature`), and templates that declare a
-//! signature are skipped entirely. Types are "true for the callers we
-//! found": multiple call sites union per variable, and dynamic view
-//! names contribute nothing.
+//! use site in the backward docblock scan), `@props`/`@aware` and a
+//! component's backing class (see `super::backing_class`) win over it
+//! per name, and templates that declare a signature are skipped
+//! entirely. Types are "true for the callers we found": multiple call
+//! sites union per variable, and dynamic view names contribute nothing.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,28 +61,36 @@ pub(crate) type BladeCallerSnapshot = Vec<(String, Arc<String>)>;
 
 impl Backend {
     /// Compute the variables to inject into a Blade template's virtual
-    /// PHP, by scanning `view()` call sites and, for a component,
-    /// `<x-…>` tag call sites across the workspace.
+    /// PHP: the members of the class backing a component view (see
+    /// [`super::backing_class`]), then the variables its `view()` call
+    /// sites and, for a component, its `<x-…>` tag call sites pass.
     ///
     /// Returns pairs of (variable name without `$`, docblock type
-    /// string).  Empty when the template declares its own signature,
-    /// when no call site references it, or when the template's view
-    /// name cannot be derived from its path.
-    pub(crate) fn infer_blade_call_site_vars(
+    /// string), highest-priority source first — the prologue declares
+    /// the first entry for a name and skips the rest.  Empty when the
+    /// template has no backing class and no call site references it, or
+    /// when the template's view name cannot be derived from its path.
+    pub(crate) fn compute_blade_injected_vars(
         &self,
         uri: &str,
         blade_content: &str,
         shared: Option<&ViewCallerSnapshot>,
         shared_blade: Option<&BladeCallerSnapshot>,
     ) -> InjectedVars {
-        // A template that declares a signature manages its own contract;
-        // injecting on top would fight the declared types.
-        if crate::blade::signature::has_declared_signature(blade_content) {
-            return Vec::new();
-        }
         let view_names = self.view_names_for_blade_uri(uri);
         if view_names.is_empty() {
             return Vec::new();
+        }
+
+        // The backing class is a *declared* source, so it stands whatever
+        // else the template says; only the names its own signature
+        // declares win over it (the preprocessor applies that).
+        let backing = self.blade_backing_class_vars(&view_names);
+
+        // A template that declares a signature manages its own contract;
+        // inferring on top would fight the declared types.
+        if crate::blade::signature::has_declared_signature(blade_content) {
+            return backing;
         }
 
         // Find every file whose symbol map contains a View string key
@@ -182,8 +190,12 @@ impl Backend {
         }
 
         if merged.is_empty() {
-            return Vec::new();
+            return backing;
         }
+
+        // A name the backing class already declares needs no inference:
+        // what the class holds beats what one caller happened to pass.
+        merged.retain(|name, _| !backing.iter().any(|(declared, _)| declared == name));
 
         let mut result: Vec<(String, String)> = merged
             .into_iter()
@@ -205,7 +217,11 @@ impl Backend {
         // Deterministic prologue ordering so re-preprocessing an
         // unchanged template produces identical virtual PHP.
         result.sort_by(|a, b| a.0.cmp(&b.0));
-        result
+        // The backing class leads, so its declarations are the ones the
+        // prologue emits for the names both sources carry.
+        let mut vars = backing;
+        vars.extend(result);
+        vars
     }
 
     /// Re-run call-site inference for already-preprocessed Blade
@@ -218,7 +234,7 @@ impl Backend {
     /// CLI's parse phase) or after a controller edit, so templates pick
     /// up call sites discovered since they were preprocessed.  Cheap
     /// for templates whose inference is unchanged (no re-parse).
-    pub(crate) fn refresh_blade_call_site_inference(&self) {
+    pub(crate) fn refresh_blade_injected_vars(&self) {
         let blade_uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
         if blade_uris.is_empty() {
             return;
@@ -266,7 +282,7 @@ impl Backend {
     }
 
     /// Every known Blade file's raw source, for the component-tag scan in
-    /// [`Self::infer_blade_call_site_vars`]. Unlike [`Self::view_caller_snapshot`]
+    /// [`Self::compute_blade_injected_vars`]. Unlike [`Self::view_caller_snapshot`]
     /// this cannot pre-filter by symbol-map spans (component tags are HTML,
     /// not something the symbol map extracts), so it just snapshots every
     /// Blade file once per refresh pass.
@@ -301,7 +317,7 @@ impl Backend {
         shared: Option<&ViewCallerSnapshot>,
         shared_blade: Option<&BladeCallerSnapshot>,
     ) -> bool {
-        let fresh = self.infer_blade_call_site_vars(uri, content, shared, shared_blade);
+        let fresh = self.compute_blade_injected_vars(uri, content, shared, shared_blade);
         let unchanged = match self.blade_injected_vars.read().get(uri) {
             Some(prev) => *prev == fresh,
             None => fresh.is_empty(),
@@ -416,7 +432,7 @@ impl Backend {
     /// Derive the view names a Blade file is addressable by: one per
     /// configured view root that contains it, in dot notation, plus
     /// `namespace::name` forms for provider-registered directories.
-    fn view_names_for_blade_uri(&self, uri: &str) -> Vec<String> {
+    pub(crate) fn view_names_for_blade_uri(&self, uri: &str) -> Vec<String> {
         let Ok(url) = tower_lsp::lsp_types::Url::parse(uri) else {
             return Vec::new();
         };

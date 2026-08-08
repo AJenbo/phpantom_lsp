@@ -13,7 +13,9 @@
 //!    default value;
 //! 4. the variables Blade itself injects into a component body
 //!    (`$attributes`, `$slot`, `$componentName`);
-//! 5. types inferred from `view()` call sites (see
+//! 5. the members of the class backing a component view, which Blade
+//!    merges into the view's data (see [`super::backing_class`]);
+//! 6. types inferred from `view()` call sites (see
 //!    [`super::call_site_inference`]), the lowest-priority fallback.
 //!
 //! Everything here works on the raw Blade source with byte-offset-stable

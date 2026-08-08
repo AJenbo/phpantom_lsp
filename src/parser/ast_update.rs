@@ -98,32 +98,25 @@ impl Backend {
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
         let content_to_parse = if self.is_blade_file(uri) {
-            // Seed the template scope with the call-site-inferred
-            // variable set cached by the inference passes (post-index
-            // refresh, Blade did_open, caller save) — the
-            // lowest-priority variable source; templates with their own
-            // `@var` declarations opt out entirely.
+            // Seed the template scope with the variable set cached by
+            // the refresh passes (post-index refresh, Blade did_open,
+            // caller save): the members of the component class backing
+            // the view, then the types its call sites imply.  Both sit
+            // below the template's own declarations, which the
+            // preprocessor gives priority.
             //
-            // Inference itself never runs here: `update_ast` is called
-            // from the parallel index/analyse workers, where scanning
-            // call sites is wasted (callers may not be parsed yet) and
-            // resolving their expression types from many threads at
-            // once has deadlocked against the batch-publish locks.  The
-            // serial refresh passes own the cache; this path only reads
-            // it.
-            let injected = if crate::blade::signature::has_declared_signature(content) {
-                // The template declares its own contract; drop any
-                // cached set so removing the declaration later
-                // re-triggers inference.
-                self.blade_injected_vars.write().remove(uri);
-                Vec::new()
-            } else {
-                self.blade_injected_vars
-                    .read()
-                    .get(uri)
-                    .cloned()
-                    .unwrap_or_default()
-            };
+            // Neither is computed here: `update_ast` is called from the
+            // parallel index/analyse workers, where scanning call sites
+            // is wasted (callers may not be parsed yet) and resolving
+            // their expression types from many threads at once has
+            // deadlocked against the batch-publish locks.  The serial
+            // refresh passes own the cache; this path only reads it.
+            let injected = self
+                .blade_injected_vars
+                .read()
+                .get(uri)
+                .cloned()
+                .unwrap_or_default();
             let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
                 content,
                 &injected,
