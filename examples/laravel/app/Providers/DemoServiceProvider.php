@@ -8,11 +8,14 @@ use App\Support\BakeryService;
 use App\Support\CarbonMixin;
 use App\Support\CollectionMixin;
 use App\Support\CroissantSupplier;
+use App\View\Composers\SidebarComposer;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\View;
+use Illuminate\View\View as ViewInstance;
 use League\Flysystem\Filesystem;
 use League\Flysystem\Local\LocalFilesystemAdapter;
 
@@ -74,6 +77,23 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         // each public method of the trait becomes a method on the target,
         // using the trait method's own signature directly.
         CarbonImmutable::mixin(CarbonMixin::class);
+
+        // `View::share()` puts a variable in *every* template's scope, and a
+        // view composer puts one in the scope of the views its registration
+        // targets.  Neither is written in a template or passed by any `view()`
+        // call, so this provider is the only record of them: PHPantom reads
+        // both from here and resolves the type from the expression itself.
+        View::share('siteName', config('app.name'));
+        View::share('supplier', app(CroissantSupplier::class));
+
+        // Every view under `partials.` gets what SidebarComposer::compose()
+        // writes.  See resources/views/partials/sidebar.blade.php.
+        View::composer('partials.*', SidebarComposer::class);
+
+        // A composer written inline declares its data the same way.
+        View::composer('emails.*', function (ViewInstance $view) {
+            $view->with('mailFooter', __('messages.welcome'));
+        });
 
         // A custom disk driver is bound here rather than in the framework, so
         // the type it builds is only knowable from this closure.  PHPantom

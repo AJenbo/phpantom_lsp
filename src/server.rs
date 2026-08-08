@@ -2408,7 +2408,7 @@ impl Backend {
     /// Resolve a class FQN to the URI of the file that declares it, loading the
     /// class if it is not yet in the FQN → URI index.  Used to locate provider
     /// source files for the macro scan.
-    fn resolve_class_uri(&self, fqn: &str) -> Option<String> {
+    pub(crate) fn resolve_class_uri(&self, fqn: &str) -> Option<String> {
         if let Some(uri) = self.symbols.fqn_uri_index.read().get(fqn).cloned() {
             return Some(uri);
         }
@@ -2608,6 +2608,11 @@ impl Backend {
         let binding_count = resources.bindings.len();
         let component_namespace_count = resources.class_component_namespaces.len();
         *self.laravel_provider_resources.write() = resources;
+
+        // The shared and composed template variables are resolved from these
+        // registrations, so the previous scan's set is stale whether or not
+        // any other resource count moved.
+        self.laravel_string_key_cache.write().shared_view_vars = None;
 
         if config_count + view_count + trans_count + route_count + component_namespace_count > 0 {
             let mut cache = self.laravel_string_key_cache.write();

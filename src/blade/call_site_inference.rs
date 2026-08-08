@@ -14,9 +14,10 @@
 //!
 //! This is deliberately the lowest-priority source: an in-template
 //! `@var` annotation shadows an injected one (it sits closer to every
-//! use site in the backward docblock scan), `@props`/`@aware` and a
-//! component's backing class (see `super::backing_class`) win over it
-//! per name, and templates that declare a signature are skipped
+//! use site in the backward docblock scan), `@props`/`@aware`, a
+//! component's backing class (see `super::backing_class`), and a
+//! provider's shared and composed data (see `super::shared_vars`) win
+//! over it per name, and templates that declare a signature are skipped
 //! entirely. Types are "true for the callers we found": multiple call
 //! sites union per variable, and dynamic view names contribute nothing.
 
@@ -62,8 +63,10 @@ pub(crate) type BladeCallerSnapshot = Vec<(String, Arc<String>)>;
 impl Backend {
     /// Compute the variables to inject into a Blade template's virtual
     /// PHP: the members of the class backing a component view (see
-    /// [`super::backing_class`]), then the variables its `view()` call
-    /// sites and, for a component, its `<x-…>` tag call sites pass.
+    /// [`super::backing_class`]), the variables a service provider shares
+    /// or composes into its scope (see [`super::shared_vars`]), then the
+    /// variables its `view()` call sites and, for a component, its `<x-…>`
+    /// tag call sites pass.
     ///
     /// Returns pairs of (variable name without `$`, docblock type
     /// string), highest-priority source first — the prologue declares
@@ -85,12 +88,23 @@ impl Backend {
         // The backing class is a *declared* source, so it stands whatever
         // else the template says; only the names its own signature
         // declares win over it (the preprocessor applies that).
-        let backing = self.blade_backing_class_vars(&view_names);
+        let mut declared = self.blade_backing_class_vars(&view_names);
+
+        // What a service provider shares or composes into this template's
+        // scope: no template declares it and no caller passes it, but it is
+        // still written down somewhere, so it beats inference (see
+        // [`super::shared_vars`]).
+        for (name, ty) in self.blade_provider_vars(&view_names) {
+            if declared.iter().any(|(existing, _)| existing == &name) {
+                continue;
+            }
+            declared.push((name, ty));
+        }
 
         // A template that declares a signature manages its own contract;
         // inferring on top would fight the declared types.
         if crate::blade::signature::has_declared_signature(blade_content) {
-            return backing;
+            return declared;
         }
 
         // Find every file whose symbol map contains a View string key
@@ -190,12 +204,13 @@ impl Backend {
         }
 
         if merged.is_empty() {
-            return backing;
+            return declared;
         }
 
-        // A name the backing class already declares needs no inference:
-        // what the class holds beats what one caller happened to pass.
-        merged.retain(|name, _| !backing.iter().any(|(declared, _)| declared == name));
+        // A name a declared source already carries needs no inference: what
+        // the backing class holds, and what a provider writes into the view's
+        // data, beat what one caller happened to pass.
+        merged.retain(|name, _| !declared.iter().any(|(existing, _)| existing == name));
 
         let mut result: Vec<(String, String)> = merged
             .into_iter()
@@ -217,9 +232,9 @@ impl Backend {
         // Deterministic prologue ordering so re-preprocessing an
         // unchanged template produces identical virtual PHP.
         result.sort_by(|a, b| a.0.cmp(&b.0));
-        // The backing class leads, so its declarations are the ones the
-        // prologue emits for the names both sources carry.
-        let mut vars = backing;
+        // The declared sources lead, so theirs are the declarations the
+        // prologue emits for the names more than one source carries.
+        let mut vars = declared;
         vars.extend(result);
         vars
     }

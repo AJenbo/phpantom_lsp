@@ -15,7 +15,11 @@
     <p>Slug: {{ $post->getSlug() }}</p>
     <p>Published: {{ $post->created_at->diffForHumans() }}</p>
 
+    {{-- $mailFooter is not declared above and no caller passes it: the
+         inline `View::composer('emails.*', …)` in DemoServiceProvider puts
+         it in the scope of every view under `emails.`. --}}
     <footer>
-        <p>&copy; {{ config('app.name') }} {{ date('Y') }}</p>
+        <p>{{ $mailFooter }}</p>
+        <p>&copy; {{ $siteName }} {{ date('Y') }}</p>
     </footer>
 </div>

@@ -72,6 +72,10 @@
     {{-- @include: Ctrl+Click navigates to the included view --}}
     @include('emails.order_shipped', ['post' => $posts->first()])
 
+    {{-- partials/sidebar.blade.php reads variables nothing passes it: a
+         provider shares them, or a view composer writes them. --}}
+    @include('partials.sidebar')
+
     {{-- The <x-alert> component view is where $attributes and $slot come
          from: resources/views/components/alert.blade.php --}}
     <x-alert class="mt-4">{{ __('messages.welcome') }}</x-alert>

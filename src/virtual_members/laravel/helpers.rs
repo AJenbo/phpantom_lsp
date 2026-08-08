@@ -960,6 +960,19 @@ pub(crate) fn walk_expression_tree(
     let _ = walk_expr_depth(expr, visitor);
 }
 
+/// Like [`walk_program_expressions`], but rooted at one block the caller
+/// already holds (a method or closure body).
+pub(crate) fn walk_block_expressions(
+    block: &Block<'_>,
+    visitor: &mut impl FnMut(&Expression<'_>) -> ControlFlow<()>,
+) {
+    for stmt in block.statements.iter() {
+        if walk_stmt_exprs(stmt, visitor).is_break() {
+            return;
+        }
+    }
+}
+
 // ─── Scope walking ──────────────────────────────────────────────────────────
 
 /// Whether `span` covers `offset`, inclusive at both ends.

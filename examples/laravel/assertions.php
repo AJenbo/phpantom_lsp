@@ -1061,6 +1061,39 @@ check(
         && $guessed . '\\Card' === \App\View\Components\Card\Card::class
 );
 
+// ─── Shared data and view composers ─────────────────────────────────────────
+
+// `View::composer('partials.*', …)` matches view names with `Str::is()`, so a
+// `*` stands for any run of characters and nothing else is a wildcard.  This is
+// the rule PHPantom applies when deciding which templates a composer reaches.
+check(
+    'a composer pattern matches view names through Str::is()',
+    \Illuminate\Support\Str::is('partials.*', 'partials.sidebar')
+        && \Illuminate\Support\Str::is('*', 'partials.sidebar')
+        && !\Illuminate\Support\Str::is('partials.*', 'emails.blog_published')
+        && !\Illuminate\Support\Str::is('profile', 'profiles')
+);
+
+// A composer body writes its data with `$view->with()`, which takes either a
+// key and a value or a whole array, and returns the view so the calls chain.
+// PHPantom reads both forms, and follows the chain.
+$withParameters = (new ReflectionMethod(\Illuminate\View\View::class, 'with'))->getParameters();
+check(
+    'View::with() takes a key-or-array first argument and an optional value',
+    count($withParameters) === 2
+        && $withParameters[0]->getName() === 'key'
+        && $withParameters[1]->isOptional()
+);
+
+// Shared data is merged *under* the view's own data, so a variable a caller
+// passes wins over one `View::share()` registered.  A composer runs after both
+// and writes straight into the view's data, so its value wins over either.
+check(
+    'the view factory keeps shared data in its own bag',
+    method_exists(\Illuminate\View\Factory::class, 'share')
+        && method_exists(\Illuminate\View\Factory::class, 'getShared')
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

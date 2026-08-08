@@ -373,27 +373,6 @@ function when hoisting a template's `@use` imports
 (`src/parser/ast_update.rs`), so that lookup has to learn the method
 form at the same time.
 
-### BL19. Shared and view-composer variables in the declaration chain
-
-`View::share('key', $value)` puts a variable in *every* template's
-scope, and `View::composer('view.name', …)` (or a composer class's
-`compose(View $view)` body calling `$view->with(…)`) puts one in the
-scope of the views it targets. Neither is written in any template, so a
-template that reads a shared variable reports it undefined unless it
-declares the variable itself.
-
-Scan service providers for `View::share()` / `$this->app['view']
-->share()` and for composer registrations (including
-`View::composer([...], Class::class)` and the `composers` array a
-provider builds), then feed the resulting names into
-`src/blade/signature.rs`'s chain: below the Blade-injected component
-scope (a shared variable named `slot` does not displace the real one)
-and above call-site inference. Types come from resolving the shared
-expression, or from the `with()` calls in the composer's body, through
-the shared resolution pipeline. Like the backing class's members, the
-values have to arrive via `Backend::blade_injected_vars` rather than
-being resolved inside the preprocessor.
-
 ### BL10. Cross-file `@section` / `@stack` name intelligence
 
 `@section`/`@hasSection`/`@sectionMissing`/`@yield` and

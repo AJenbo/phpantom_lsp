@@ -1458,6 +1458,20 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 }
             }
         }
+        if let Some(groups) = &c.shared_view_vars {
+            laravel_keys
+                .add(groups.capacity() * size_of::<crate::blade::shared_vars::SharedVarGroup>());
+            for group in groups.iter() {
+                laravel_keys.add(group.views.capacity() * size_of::<String>());
+                laravel_keys.add(group.vars.capacity() * size_of::<(String, String)>());
+                for pattern in &group.views {
+                    laravel_keys.add(pattern.capacity());
+                }
+                for (name, ty) in &group.vars {
+                    laravel_keys.add(name.capacity() + ty.capacity());
+                }
+            }
+        }
     }
     let mut blade = Sz::default();
     let n_blade;

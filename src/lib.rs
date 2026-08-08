@@ -338,6 +338,12 @@ pub(crate) struct LaravelStringKeyCache {
             crate::virtual_members::laravel::config_values::ConfigNode,
         )>,
     >,
+    /// The variables service providers share into every template, and the
+    /// ones their view composers add to the templates they target, with each
+    /// value expression already resolved to a type.  Shared behind an `Arc`
+    /// because every Blade template reads the whole set to pick the groups
+    /// that reach it.
+    pub shared_view_vars: Option<std::sync::Arc<Vec<crate::blade::shared_vars::SharedVarGroup>>>,
 }
 
 /// Compute-once guards for the entries of [`LaravelStringKeyCache`].
@@ -361,6 +367,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub trans_keys: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
     pub blade_discovery: parking_lot::Mutex<()>,
+    pub shared_view_vars: parking_lot::Mutex<()>,
 }
 
 impl LaravelStringKeyCache {

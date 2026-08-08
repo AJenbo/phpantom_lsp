@@ -130,6 +130,7 @@ mod string_keys;
 mod trans_keys;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
+mod view_data;
 mod view_names;
 pub(crate) mod where_property;
 
@@ -168,6 +169,7 @@ pub(crate) use storage::{
 };
 pub(crate) use trans_keys::collect_trans_declarations;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
+pub(crate) use view_data::{SharedViewVar, composer_class_vars};
 pub(crate) use view_names::canonical_view_name;
 
 pub(crate) use builder_injection::{try_inject_builder_scopes, try_inject_mixin_builder_scopes};

@@ -12,6 +12,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::const_eval::{ClassContext, Scope, const_string};
+use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_data_registration};
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
 
@@ -110,6 +111,12 @@ pub(crate) struct ProviderResources {
     /// prefix (`nightshade::calendar`) is backed by a component class in that
     /// namespace, whose members its template reads.
     pub class_component_namespaces: Vec<(String, String)>,
+    /// `View::share('key', $value)` registrations, which put a variable in
+    /// every template's scope.
+    pub shared_view_vars: Vec<SharedViewVar>,
+    /// `View::composer(…)` registrations, which put variables in the scope of
+    /// the views each one targets.
+    pub view_composers: Vec<ViewComposer>,
     /// A provider rebound `translator` or `translation.loader` to something
     /// other than Laravel's own file-based pair, so the strings come from a
     /// source we cannot enumerate (a database table, say) and the set of
@@ -125,6 +132,8 @@ impl ProviderResources {
         self.route_files.extend(other.route_files);
         self.class_component_namespaces
             .extend(other.class_component_namespaces);
+        self.shared_view_vars.extend(other.shared_view_vars);
+        self.view_composers.extend(other.view_composers);
         for (key, binding) in other.bindings {
             self.record_binding(key, binding);
         }
@@ -282,6 +291,22 @@ pub(crate) fn extract_provider_resources(
             && let Some(entry) = component_namespace_args(&sc.argument_list, content, &scope)
         {
             resources.class_component_namespaces.push(entry);
+            return ControlFlow::Continue(());
+        }
+
+        // `View::share()` / `View::composer()` and the same calls written
+        // against the container's view factory.  Checked ahead of the generic
+        // method-call handling below, which only looks at `$this->…` and
+        // `$this->app->…` receivers.
+        if let Some(registration) =
+            view_data_registration(expr, content, file_path, &scope, &resolved)
+        {
+            match registration {
+                ViewDataRegistration::Shared(vars) => resources.shared_view_vars.extend(vars),
+                ViewDataRegistration::Composers(composers) => {
+                    resources.view_composers.extend(composers)
+                }
+            }
             return ControlFlow::Continue(());
         }
 
@@ -505,7 +530,7 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
 
 /// Whether `expr` names the service container: `$this->app` in a provider
 /// method, the `$app` a deferred callback receives, or the `app()` helper.
-fn is_app_container_expr(expr: &Expression<'_>) -> bool {
+pub(in crate::virtual_members::laravel) fn is_app_container_expr(expr: &Expression<'_>) -> bool {
     match expr {
         Expression::Variable(Variable::Direct(dv)) => dv.name == b"$app",
         Expression::Access(Access::Property(pa)) => {

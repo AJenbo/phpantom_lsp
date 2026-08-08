@@ -15,7 +15,9 @@
 //!    (`$attributes`, `$slot`, `$componentName`);
 //! 5. the members of the class backing a component view, which Blade
 //!    merges into the view's data (see [`super::backing_class`]);
-//! 6. types inferred from `view()` call sites (see
+//! 6. the variables a service provider shares into every template or a view
+//!    composer adds to the ones it targets (see [`super::shared_vars`]);
+//! 7. types inferred from `view()` call sites (see
 //!    [`super::call_site_inference`]), the lowest-priority fallback.
 //!
 //! Everything here works on the raw Blade source with byte-offset-stable
