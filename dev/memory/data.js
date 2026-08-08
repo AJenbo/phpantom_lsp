@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786223249611,
+  "lastUpdate": 1786225613600,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16353,6 +16353,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "19a6c840afc807c6e249949d60d878a3264d7799",
+          "message": "An app-defined facade lists the members it actually forwards",
+          "timestamp": "2026-08-08T23:30:11+02:00",
+          "tree_id": "d036b02f1ef3e480edbc24fb22589e41e379d66c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/19a6c840afc807c6e249949d60d878a3264d7799"
+        },
+        "date": 1786225609243,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77,
             "unit": "MiB"
           }
         ]
