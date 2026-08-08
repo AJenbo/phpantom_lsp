@@ -2119,7 +2119,10 @@ impl Backend {
     /// Candidate files are those declaring a class whose short name ends in
     /// `Command` (the near-universal Laravel/Symfony convention) or which
     /// live under a `Console/`, `Commands/` or `Command/` directory (so
-    /// commands with unconventional names are still found).  Each candidate is
+    /// commands with unconventional names are still found), or any other
+    /// non-vendor project class (so commands registered via `withCommands()`
+    /// in `bootstrap/app.php` from arbitrary directories — e.g.
+    /// `app/Actions/Sync` — are indexed too).  Each candidate is
     /// read once,
     /// gated by a cheap byte pre-filter for a `signature`/`AsCommand`/`$name`
     /// declaration before parsing, then scanned by
@@ -2134,6 +2137,14 @@ impl Backend {
                 if short.ends_with("Command")
                     || crate::virtual_members::laravel::is_command_directory_uri(uri)
                 {
+                    candidate_uris.insert(uri.to_string());
+                } else if !uri.contains("/vendor/") {
+                    // A project class registered as a command outside the
+                    // conventional locations — e.g. `withCommands()` in
+                    // bootstrap/app.php pointing at an arbitrary directory
+                    // such as app/Actions/Sync.  scan_command_file's
+                    // extends-Command / attribute checks decide whether the
+                    // file really declares a command.
                     candidate_uris.insert(uri.to_string());
                 }
             }
@@ -2272,8 +2283,12 @@ impl Backend {
             return;
         }
         let was_contributor = self.laravel_commands.read().has_uri(uri);
+        // Same candidate rule as the full build: a contributor file, a
+        // conventionally-named command file, or any non-vendor project file
+        // (commands registered via `withCommands()` may live anywhere).
         let looks_like_command_file = uri.ends_with("Command.php")
-            || crate::virtual_members::laravel::is_command_directory_uri(uri);
+            || crate::virtual_members::laravel::is_command_directory_uri(uri)
+            || (!uri.contains("/vendor/") && uri.ends_with(".php"));
         if !was_contributor && !looks_like_command_file {
             return;
         }
