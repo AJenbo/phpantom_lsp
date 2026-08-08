@@ -13305,3 +13305,66 @@ function test(): void {
         "$mailer = app(Mailer::class) should resolve to Mailer, got: {text}"
     );
 }
+
+// ─── Global keyword re-entry cycle ──────────────────────────────────────────
+
+/// Regression test for #327: resolving the receiver of `$value->method()`
+/// in a file that combines `global` with top-level call arguments must
+/// terminate.  The triggering shape needs *undefined* functions (so RHS
+/// resolution falls through to the argument-resolution paths that
+/// re-enter `resolve_variable_types`) and a member access whose subject
+/// resolution starts the query.  Without the re-entry guards each nested
+/// query restarts the whole top-level walk and the request never
+/// returns; each guard is independently required.
+#[test]
+fn hover_global_keyword_reentry_terminates() {
+    let backend = create_test_backend();
+    let uri = "file:///global_reentry.php";
+    let content = r#"<?php
+function capture($input) {
+    global $shared;
+    $shared = transform($input);
+}
+$arg = source_value();
+$old_global = factory($arg);
+$value = consume($old_global);
+$value->method();
+"#;
+
+    // Hover the receiver `$value` on the member-access line.
+    let hover = hover_at(&backend, uri, content, 8, 1);
+    assert!(hover.is_some(), "expected a hover result on $value");
+}
+
+/// When a file uses `global` and top-level variables are assigned from
+/// functions with declared return types, the variable's type must still
+/// resolve correctly through the re-entry guards.
+#[test]
+fn hover_global_keyword_preserves_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///global_return_type.php";
+    let content = r#"<?php
+class ResultObj {
+    public function done(): bool { return true; }
+}
+
+function factory(): ResultObj {
+    return new ResultObj();
+}
+
+function worker() {
+    global $shared;
+    $shared = 1;
+}
+
+$result = factory();
+$result;
+"#;
+
+    let hover = hover_at(&backend, uri, content, 15, 1).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("ResultObj"),
+        "$result = factory() should resolve to ResultObj, got: {text}"
+    );
+}

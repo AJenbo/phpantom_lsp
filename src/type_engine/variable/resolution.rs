@@ -7,13 +7,16 @@
 /// (template substitution, array shape merging, pass-by-reference
 /// seeding, abstract-method parameter resolution) that the forward
 /// walker delegates to.
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{atom, bytes_to_str, last_segment};
+use crate::atom::{Atom, atom, bytes_to_str, last_segment};
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{
@@ -23,6 +26,112 @@ use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
 
 use crate::Backend;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+
+// ─── Re-entry guards ───────────────────────────────────────────────────────
+//
+// Variable resolution can re-enter itself while building the top-level
+// scope for `global` keyword resolution.  The cycle is:
+//
+//   resolve_variable_types → resolve_variable_in_statements
+//   → walk_top_level_for_globals → RHS resolution → resolve_variable_types
+//
+// Two guards break this cycle at different levels:
+//
+// Guard 1 (`BUILDING_TOP_LEVEL_SCOPE`): prevents re-entrant top-level
+//   scope construction for the same file.
+// Guard 2 (`RESOLVING_VARS`): prevents re-entrant resolution of the
+//   exact same variable query.
+
+thread_local! {
+    /// Source content addresses currently building a top-level scope
+    /// via [`walk_top_level_for_globals`](super::forward_walk::walk_top_level_for_globals).
+    /// Keyed by `content.as_ptr() as usize`: re-entry within one call
+    /// tree always borrows the same slice, so pointer identity marks
+    /// exactly the cycle we want to break.  Two independent copies of
+    /// the same text are separate queries and must not block one
+    /// another, which pointer identity also gets right.
+    static BUILDING_TOP_LEVEL_SCOPE: RefCell<HashSet<usize>> =
+        RefCell::new(HashSet::new());
+
+    /// Variable resolution queries currently in progress on this
+    /// thread.  Keyed by `(content_ptr, name_hash, cursor_offset,
+    /// class_name)` so that only the exact same query is suppressed.
+    static RESOLVING_VARS: RefCell<HashSet<(usize, u64, u32, Atom)>> =
+        RefCell::new(HashSet::new());
+}
+
+/// RAII guard for [`BUILDING_TOP_LEVEL_SCOPE`].
+struct TopLevelScopeGuard {
+    key: usize,
+}
+
+impl Drop for TopLevelScopeGuard {
+    fn drop(&mut self) {
+        BUILDING_TOP_LEVEL_SCOPE.with(|set| {
+            set.borrow_mut().remove(&self.key);
+        });
+    }
+}
+
+/// Try to acquire the top-level scope build guard for `content`.
+/// Returns `Some(guard)` on success, `None` when the same file is
+/// already mid-construction (re-entry detected).
+fn try_acquire_top_level_guard(content: &str) -> Option<TopLevelScopeGuard> {
+    let key = content.as_ptr() as usize;
+    let inserted = BUILDING_TOP_LEVEL_SCOPE.with(|set| set.borrow_mut().insert(key));
+    if inserted {
+        Some(TopLevelScopeGuard { key })
+    } else {
+        None
+    }
+}
+
+/// RAII guard for [`RESOLVING_VARS`].
+struct ResolvingVarGuard {
+    key: (usize, u64, u32, Atom),
+}
+
+impl Drop for ResolvingVarGuard {
+    fn drop(&mut self) {
+        RESOLVING_VARS.with(|set| {
+            set.borrow_mut().remove(&self.key);
+        });
+    }
+}
+
+/// Try to acquire the variable resolution guard.
+/// Returns `Some(guard)` on success, `None` on re-entry.
+fn try_acquire_var_guard(
+    content: &str,
+    var_name: &str,
+    cursor_offset: u32,
+    class_name: Atom,
+) -> Option<ResolvingVarGuard> {
+    // Callers spell the same variable both with and without the `$`
+    // prefix, so normalise before keying.  The name is hashed rather
+    // than interned: this runs on every variable resolution, and
+    // `atom` would take the global interner lock and allocate for the
+    // unprefixed spelling.  Only the queries live on the current stack
+    // (a handful) share the set, so a 64-bit hash cannot realistically
+    // collide.
+    let mut hasher = DefaultHasher::new();
+    var_name
+        .strip_prefix('$')
+        .unwrap_or(var_name)
+        .hash(&mut hasher);
+    let key = (
+        content.as_ptr() as usize,
+        hasher.finish(),
+        cursor_offset,
+        class_name,
+    );
+    let inserted = RESOLVING_VARS.with(|set| set.borrow_mut().insert(key));
+    if inserted {
+        Some(ResolvingVarGuard { key })
+    } else {
+        None
+    }
+}
 
 /// Build a [`VarClassStringResolver`] closure from a [`VarResolutionCtx`].
 ///
@@ -139,6 +248,18 @@ pub(crate) fn resolve_variable_types(
         // Variable not in the forward-walked scope — fall through to
         // the full resolution path.
     }
+
+    // ── Re-entry guard (Guard 2) ────────────────────────────────
+    // Break cycles where the same variable query re-enters through
+    // call-argument resolution or template substitution paths that
+    // bypass scope_var_resolver.  A re-entrant query cannot
+    // contribute information while its outer invocation is still
+    // incomplete.
+    let _var_guard =
+        match try_acquire_var_guard(content, var_name, cursor_offset, current_class.name) {
+            Some(guard) => guard,
+            None => return vec![],
+        };
 
     with_parsed_program(content, "resolve_variable_types", |program, _content| {
         let active_cache = crate::virtual_members::active_resolved_class_cache();
@@ -553,28 +674,36 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     // the variable lookup, avoiding a redundant second forward walk.
     let file_has_global_keyword = ctx.content.contains("global ");
     let top_level_scope = if ctx.top_level_scope.is_none() && file_has_global_keyword {
-        let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: u32::MAX,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: None,
-            top_level_scope: None,
-        };
-        let mut tl_scope = super::forward_walk::ScopeState::new();
-        super::forward_walk::walk_top_level_for_globals(
-            stmts.iter().copied(),
-            &mut tl_scope,
-            &tl_fw_ctx,
-        );
-        if tl_scope.locals.is_empty() {
-            None
+        // Guard 1: prevent re-entrant top-level scope construction for
+        // the same file.  RHS resolution during the walk can trigger
+        // another resolve_variable_types call, which would start a
+        // second walk_top_level_for_globals on the same file content.
+        if let Some(_tl_guard) = try_acquire_top_level_guard(ctx.content) {
+            let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
+                current_class: ctx.current_class,
+                all_classes: ctx.all_classes,
+                content: ctx.content,
+                cursor_offset: u32::MAX,
+                class_loader: ctx.class_loader,
+                backend: ctx.backend,
+                loaders: ctx.loaders,
+                resolved_class_cache: ctx.resolved_class_cache,
+                enclosing_return_type: None,
+                top_level_scope: None,
+            };
+            let mut tl_scope = super::forward_walk::ScopeState::new();
+            super::forward_walk::walk_top_level_for_globals(
+                stmts.iter().copied(),
+                &mut tl_scope,
+                &tl_fw_ctx,
+            );
+            if tl_scope.locals.is_empty() {
+                None
+            } else {
+                Some(tl_scope.locals)
+            }
         } else {
-            Some(tl_scope.locals)
+            None
         }
     } else {
         ctx.top_level_scope.clone()
