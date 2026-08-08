@@ -1146,10 +1146,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl9-view-call-site-validation" class="md-nav__link">
+  <a href="#bl18-mailable-and-view-method-render-sites" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL9. <code>view()</code> call-site validation
+        BL18. Mailable and view-method render sites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bl19-signature-covariance-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL19. Signature covariance diagnostic
       </span>
     </span>
   </a>
@@ -1397,10 +1408,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl9-bl10-bl11" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL9, BL10, BL11)
+        Step 9: Template contracts (BL10, BL11, BL18, BL19)
       </span>
     </span>
   </a>
@@ -2313,10 +2324,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl9-view-call-site-validation" class="md-nav__link">
+  <a href="#bl18-mailable-and-view-method-render-sites" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL9. <code>view()</code> call-site validation
+        BL18. Mailable and view-method render sites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bl19-signature-covariance-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL19. Signature covariance diagnostic
       </span>
     </span>
   </a>
@@ -2564,10 +2586,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl9-bl10-bl11" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL9, BL10, BL11)
+        Step 9: Template contracts (BL10, BL11, BL18, BL19)
       </span>
     </span>
   </a>
@@ -2679,7 +2701,8 @@ For general architecture see <code>ARCHITECTURE.md</code>.</p>
   component scope, the backing component class, and the layouts the
   template <code>@extends</code>. The template
   declares what it expects; call sites are then
-  <em>validated</em> against that contract (BL9), exactly as a function
+  <em>validated</em> against that contract (<code>src/blade/contract.rs</code> and
+  <code>src/diagnostics/blade_call_site.rs</code>), exactly as a function
   signature works. Inferring types <em>from</em> call sites inverts the contract and
   produces "true for one caller" types, so it is not the foundation —
   the shipped call-site inference fallback for unannotated projects
@@ -2955,17 +2978,40 @@ scanner — so that:</p>
 <li>directive name completion (BL7) includes them;</li>
 <li>registered component namespaces/paths extend the discovery index.</li>
 </ul>
-<h3 id="bl9-view-call-site-validation">BL9. <code>view()</code> call-site validation<a class="headerlink" href="#bl9-view-call-site-validation" title="Permanent link">&para;</a></h3>
-<p>The diagnostics counterpart of the declaration chain, matching Bladestan's
-call-site validation rule: where a template has a
-declared signature, a <code>view('name', [...])</code> call (and
-<code>View::make()</code>, mailable content, <code>Route::view()</code> data,
-<code>@include('name', [...])</code> inside templates) with a literal array
-argument is checked against the merged signature as an array shape —
-missing required variables, unknown extras, and type mismatches each
-get a diagnostic. Templates without a signature produce no call-site
-diagnostics. This gives the editor the same errors Bladestan reports
-in CI, live while typing, from one annotation.</p>
+<h3 id="bl18-mailable-and-view-method-render-sites">BL18. Mailable and view-method render sites<a class="headerlink" href="#bl18-mailable-and-view-method-render-sites" title="Permanent link">&para;</a></h3>
+<p>Call-site validation (<code>src/diagnostics/blade_call_site.rs</code>) reaches every
+render site the symbol map records a view name for: <code>view()</code>,
+<code>View::make()</code>, <code>Route::view()</code>, and the <code>blade_view_directive</code> the
+preprocessor compiles <code>@include</code>/<code>@extends</code>/<code>@component</code>/<code>@each</code> into.
+Two shapes Bladestan matches are missing, because nothing indexes their
+view name in the first place — which also costs them go-to-definition,
+hover, and the unknown-view diagnostic, so this is an indexing item
+rather than a diagnostics one:</p>
+<ul>
+<li><code>new Content(view: 'emails.orders.shipped', with: [...])</code> in a
+  mailable's <code>content()</code>, along with the <code>html:</code>, <code>text:</code>, and
+  <code>markdown:</code> arguments. The data argument is named (<code>with:</code>) rather
+  than positional, so <code>ViewCallWalker::matches</code> needs to pair a named
+  view argument with a named data argument instead of taking the next
+  positional one.</li>
+<li><code>-&gt;view('name', [...])</code> / <code>-&gt;render()</code> / <code>-&gt;first([...])</code> on a value
+  typed as the view factory or a mailable, which Bladestan's
+  <code>BladeViewMethodsMatcher</code> resolves by receiver type. Keying on the
+  method name alone would be far too broad, so this needs the receiver
+  resolved through the forward walker first.</li>
+</ul>
+<h3 id="bl19-signature-covariance-diagnostic">BL19. Signature covariance diagnostic<a class="headerlink" href="#bl19-signature-covariance-diagnostic" title="Permanent link">&para;</a></h3>
+<p><code>blade_template_contract</code> (<code>src/blade/contract.rs</code>) merges a template's
+signature with the layouts it <code>@extends</code>, nearest declaration winning,
+which lets a child narrow a layout's declared type. It does not check
+the other direction: a child that <em>widens</em> what its layout declared
+(<code>string</code> → <code>string|int</code>), or declares something outright incompatible,
+merges silently. Bladestan reports both as <code>bladestan.signatureMerge</code>.</p>
+<p>The merge already has both types in hand, so the check itself is a
+subtype comparison. What it needs is a home: the error belongs on the
+child template's own docblock, not on every call site that renders it
+(which is where Bladestan puts it), so it wants a diagnostic pass over
+the Blade file rather than a hook in the call-site collector.</p>
 <hr />
 <h2 id="phase-6-editor-tooling-parity">Phase 6: Editor Tooling Parity<a class="headerlink" href="#phase-6-editor-tooling-parity" title="Permanent link">&para;</a></h2>
 <p>Other Blade-aware editors ship a full structure view, folding builder,
@@ -3227,13 +3273,15 @@ directives with snippet templates.</p>
 <p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file.</p>
-<h3 id="step-9-template-contracts-bl9-bl10-bl11">Step 9: Template contracts (BL9, BL10, BL11)<a class="headerlink" href="#step-9-template-contracts-bl9-bl10-bl11" title="Permanent link">&para;</a></h3>
-<p>Call-site validation builds on the shipped declaration chain
-(<code>src/blade/signature.rs</code>). Section/stack intelligence and custom
-directive discovery are independent and can land in either order.</p>
+<h3 id="step-9-template-contracts-bl10-bl11-bl18-bl19">Step 9: Template contracts (BL10, BL11, BL18, BL19)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl18-bl19" title="Permanent link">&para;</a></h3>
+<p>Call-site validation is shipped. What is left widens it (BL18 for the
+render sites nothing indexes a view name for, BL19 for the covariance
+the merge does not check) and is independent of section/stack
+intelligence and custom directive discovery, so the four can land in
+any order.</p>
 <p><strong>Deliverable:</strong> A template with a <code>@bladestan-signature</code> docblock
-gets typed completion for its declared variables, and a <code>view()</code>
-call missing a required variable gets a diagnostic.</p>
+gets typed completion for its declared variables at every render site,
+and a signature that widens its layout's is flagged.</p>
 <h3 id="step-10-editor-tooling-parity-bl13-bl16">Step 10: Editor tooling parity (BL13-BL16)<a class="headerlink" href="#step-10-editor-tooling-parity-bl13-bl16" title="Permanent link">&para;</a></h3>
 <p>Implement directive-pair validation (BL13), then Blade-position
 translation for folding (BL14) and document symbols (BL15) — both
