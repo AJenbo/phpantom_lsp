@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786249675040,
+  "lastUpdate": 1786284644659,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17057,6 +17057,40 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/40b372fb14d1d9678e0d3a364576bdbca624de6b"
         },
         "date": 1786249670464,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c19b9c5dbd5b47b96b82ee94339108f0089610de",
+          "message": "Fix a stall and 3 minor bugs",
+          "timestamp": "2026-08-09T15:54:42+02:00",
+          "tree_id": "547a3b4530ad7e278a61144b4aed236465045132",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c19b9c5dbd5b47b96b82ee94339108f0089610de"
+        },
+        "date": 1786284638898,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
