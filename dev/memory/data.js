@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786294048532,
+  "lastUpdate": 1786295161665,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17373,6 +17373,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "46faa3f7fa0f286859560514976864706baee098",
+          "message": "Fix non-php livewire attribute handeling",
+          "timestamp": "2026-08-09T18:49:50+02:00",
+          "tree_id": "8d6818e8d59a99d64bec842393673c06cc8af1fb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/46faa3f7fa0f286859560514976864706baee098"
+        },
+        "date": 1786295156323,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.9,
             "unit": "MiB"
           }
         ]
