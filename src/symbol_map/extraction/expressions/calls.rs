@@ -209,6 +209,7 @@ fn extract_call<'a>(
                 // `view()` helper call.  Both are keyed on the receiver:
                 // `view`, `make`, and `first` are far too common as method
                 // names to recognise on their own.
+                let mut named_syntactically = true;
                 if ctx.in_mailable
                     && is_mailable_view_method(&member_name)
                     && matches!(method_call.object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this")
@@ -227,6 +228,30 @@ fn extract_call<'a>(
                         &method_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
+                    );
+                } else if is_laravel_view_factory_call(method_call.object)
+                    && is_render_each_method(&member_name)
+                {
+                    try_emit_render_each_view_spans(
+                        &method_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                } else {
+                    named_syntactically = false;
+                }
+                // Nothing the receiver is spelled as says it renders, so
+                // whether this names a template at all is a question about
+                // its type — recorded here and answered lazily.
+                if !named_syntactically
+                    && let Some((receiver, name_indices)) = view_receiver_method(&member_name)
+                {
+                    record_view_receiver_sites(
+                        receiver,
+                        name_indices,
+                        &method_call.argument_list,
+                        ctx.content,
+                        &mut ctx.view_receiver_sites,
                     );
                 }
                 // `$this->call('app:sync')` / `$this->callSilently('app:sync')`
@@ -417,16 +442,23 @@ fn extract_call<'a>(
                 }
                 // The `View` facade proxies the view factory, so every
                 // factory method that names a template does so here too.
-                if (clean_subject.eq_ignore_ascii_case("View")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View"))
-                    && let Some(index) = view_factory_method_name_index(&member_name)
+                if clean_subject.eq_ignore_ascii_case("View")
+                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
                 {
-                    try_emit_laravel_view_span_at(
-                        index,
-                        &static_call.argument_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
+                    if let Some(index) = view_factory_method_name_index(&member_name) {
+                        try_emit_laravel_view_span_at(
+                            index,
+                            &static_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    } else if is_render_each_method(&member_name) {
+                        try_emit_render_each_view_spans(
+                            &static_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                 }
                 // `Route::view('/about', 'pages.about', [...])` binds a URI
                 // straight to a template, naming the view second;

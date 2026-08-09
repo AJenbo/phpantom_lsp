@@ -773,6 +773,12 @@ pub struct Backend {
     /// whose scope is unchanged.
     pub(crate) blade_injected_vars:
         Arc<RwLock<HashMap<String, crate::blade::call_site_inference::BladeScope>>>,
+    /// Per-file view spans whose render site only the receiver's *type*
+    /// settles, computed on first use and dropped when the file is
+    /// re-parsed (see [`crate::blade::typed_receiver`]).  Only files whose
+    /// symbol map recorded a candidate site ever get an entry.
+    pub(crate) typed_receiver_view_spans_cache:
+        Arc<RwLock<HashMap<String, crate::blade::typed_receiver::TypedReceiverSpans>>>,
     /// Whether the workspace directory has been fully scanned for PHP files.
     ///
     /// Set to `true` after the first Phase 2 walk in `ensure_workspace_indexed`.
@@ -997,6 +1003,7 @@ impl Backend {
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
+            typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1089,6 +1096,7 @@ impl Backend {
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
+            typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1716,6 +1724,7 @@ impl Backend {
             blade_source_maps: Arc::clone(&self.blade_source_maps),
             blade_uris: Arc::clone(&self.blade_uris),
             blade_injected_vars: Arc::clone(&self.blade_injected_vars),
+            typed_receiver_view_spans_cache: Arc::clone(&self.typed_receiver_view_spans_cache),
             workspace_indexed: Arc::clone(&self.workspace_indexed),
             workspace_index_lock: Arc::clone(&self.workspace_index_lock),
             full_index_in_progress: Arc::clone(&self.full_index_in_progress),

@@ -13,7 +13,8 @@ use super::docblock::{
 };
 use super::{
     CallSite, ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap,
-    SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite,
+    SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite, ViewReceiverClass,
+    ViewReceiverSite,
 };
 use crate::atom::bytes_to_str;
 use crate::util::strip_fqn_prefix;
@@ -72,6 +73,9 @@ struct ExtractionCtx<'a> {
     /// Closures and arrow functions passed as arguments to callable-typed
     /// parameters, used by inlay hints.
     untyped_closure_sites: Vec<UntypedClosureSite>,
+    /// Render sites whose receiver only a type settles, left for
+    /// `Backend::typed_receiver_view_spans` to confirm.
+    view_receiver_sites: Vec<ViewReceiverSite>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -158,6 +162,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         trivias: program.trivia.as_slice(),
         content,
         untyped_closure_sites: Vec::new(),
+        view_receiver_sites: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -252,6 +257,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     ctx.loop_scopes.sort_by_key(|s| s.0);
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
+    ctx.view_receiver_sites.sort_by_key(|s| s.start);
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
         crate::atom::AtomMap::default();
@@ -281,6 +287,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         static_method_scopes: ctx.static_method_scopes,
         instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
+        view_receiver_sites: ctx.view_receiver_sites,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
     }
 }

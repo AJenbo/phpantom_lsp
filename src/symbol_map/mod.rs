@@ -385,6 +385,74 @@ pub(crate) enum LaravelStringKind {
     MorphAlias,
 }
 
+// ─── Render sites behind a typed receiver ───────────────────────────────────
+
+/// The class a receiver has to be an instance of for the call it receives
+/// to name a template.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewReceiverClass {
+    /// Laravel's view factory, whose `make()` / `first()` / `exists()` /
+    /// `renderWhen()` / `renderUnless()` / `renderEach()` all name one.
+    Factory,
+    /// A mailable, whose `view()` / `text()` / `markdown()` name the
+    /// template the message is built from.
+    Mailable,
+}
+
+impl ViewReceiverClass {
+    /// The fully qualified name a receiver's type must be a subtype of.
+    pub(crate) fn fqn(self) -> &'static str {
+        match self {
+            // The concrete `Illuminate\View\Factory` implements the
+            // contract, so the contract covers both spellings.
+            Self::Factory => "Illuminate\\Contracts\\View\\Factory",
+            Self::Mailable => "Illuminate\\Mail\\Mailable",
+        }
+    }
+}
+
+/// A method call that names a template but whose viewness lives in its
+/// receiver's *type* rather than its spelling: a constructor-injected
+/// `Factory $views` behind `$this->views->make('page')`, or a mailable
+/// held in a local behind `$mail->view('emails.shipped')`.
+///
+/// [`extract_symbol_map`] runs during `update_ast`, before the file's
+/// classes are resolved, and cannot ask the forward walker what the
+/// receiver is. It records the site instead, and
+/// `Backend::typed_receiver_view_spans` settles it lazily.
+#[derive(Debug, Clone)]
+pub(crate) struct ViewReceiverSite {
+    /// Byte offset of the first character of the view-name string's
+    /// contents, matching what a [`SymbolKind::LaravelStringKey`] span
+    /// records.
+    pub start: u32,
+    /// Byte offset one past the last character of those contents.
+    pub end: u32,
+    /// The view name in its canonical dotted spelling.
+    pub key: String,
+    /// Whether the call renders whichever of several candidates exists,
+    /// so a name matching no template is the shape working as intended.
+    pub is_optional: bool,
+    /// What the receiver has to be for this to name a template at all.
+    pub receiver: ViewReceiverClass,
+}
+
+impl ViewReceiverSite {
+    /// The span this site contributes once its receiver is confirmed.
+    pub(crate) fn to_span(&self) -> SymbolSpan {
+        SymbolSpan {
+            start: self.start,
+            end: self.end,
+            kind: SymbolKind::LaravelStringKey {
+                key: self.key.clone(),
+                kind: LaravelStringKind::View,
+                is_write: false,
+                is_optional: self.is_optional,
+            },
+        }
+    }
+}
+
 // ─── Template parameter definition site structures ──────────────────────────
 
 /// A `@template` parameter definition site discovered during docblock extraction.
@@ -665,6 +733,12 @@ pub(crate) struct SymbolMap {
     /// parameters.  Used by inlay hints to show inferred parameter types
     /// and return types from the enclosing callable signature.
     pub untyped_closure_sites: Vec<UntypedClosureSite>,
+    /// Render sites whose receiver only a type settles, sorted by `start`.
+    ///
+    /// Empty for all but the handful of files that call a view factory or
+    /// a mailable through something other than the spellings
+    /// [`SymbolKind::LaravelStringKey`] is emitted for.
+    pub view_receiver_sites: Vec<ViewReceiverSite>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).

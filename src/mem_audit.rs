@@ -1310,6 +1310,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sm.untyped_closure_sites.capacity()
                     * size_of::<crate::symbol_map::UntypedClosureSite>(),
             );
+            sym.add(
+                sm.view_receiver_sites.capacity()
+                    * size_of::<crate::symbol_map::ViewReceiverSite>(),
+            );
+            for site in &sm.view_receiver_sites {
+                sym.add(site.key.capacity());
+            }
         }
     }
     eprintln!(

@@ -57,25 +57,24 @@ impl Backend {
     ) {
         // The view name each recorded key sits at, so a call site found by
         // offset can be traced back to the template it names.
-        let keys: HashMap<u32, String> = {
-            let maps = self.symbol_maps.read();
-            let Some(symbol_map) = maps.get(uri) else {
-                return;
-            };
-            symbol_map
-                .spans
-                .iter()
-                .filter_map(|span| match &span.kind {
-                    SymbolKind::LaravelStringKey {
-                        kind: LaravelStringKind::View,
-                        key,
-                        is_write: false,
-                        ..
-                    } => Some((span.start, key.clone())),
-                    _ => None,
-                })
-                .collect()
+        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+            return;
         };
+        let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
+        let keys: HashMap<u32, String> = symbol_map
+            .spans
+            .iter()
+            .chain(extra.iter())
+            .filter_map(|span| match &span.kind {
+                SymbolKind::LaravelStringKey {
+                    kind: LaravelStringKind::View,
+                    key,
+                    is_write: false,
+                    ..
+                } => Some((span.start, key.clone())),
+                _ => None,
+            })
+            .collect();
         if keys.is_empty() {
             return;
         }

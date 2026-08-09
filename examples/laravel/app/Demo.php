@@ -11,6 +11,7 @@ namespace App;
 use App\Facades\Oven;
 use App\Facades\PastryOven;
 use App\Http\Controllers\BakeryController;
+use App\Mail\OrderShipped;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
 use App\Models\Bakery;
@@ -34,6 +35,7 @@ use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
+use Illuminate\View\Factory as ViewFactory;
 
 class Demo
 {
@@ -502,6 +504,40 @@ class Demo
         trans_choice('messages.notifications', 5);
         Lang::get('pagination.next');
         Lang::has('validation.required');
+    }
+
+    /**
+     * Render sites whose receiver only a *type* settles.
+     *
+     * Nothing about `$views->make(…)` or `$mail->view(…)` says it renders
+     * a template — a `make()` is a `make()` — so what makes each of these a
+     * call site is what the receiver turns out to be. They navigate,
+     * complete, and are checked against the template's signature exactly
+     * like the spellings that announce themselves.
+     *
+     * Try:
+     *  1. Ctrl+Click 'welcome' below to open welcome.blade.php.
+     *  2. Drop a key from the compact() and the call reports the variable
+     *     the template declares but no longer receives.
+     *  3. Ctrl+Click 'partials.post_row' and 'partials.no_posts' — a
+     *     renderEach() names both templates it can render.
+     */
+    public function typedRenderSites(ViewFactory $views): void
+    {
+        $posts = BlogPost::where('published', true)->get();
+        $user = BlogAuthor::first();
+        $views->make('welcome', compact('posts', 'user'));
+
+        // A mailable held in a local names its template the same way one
+        // reached through $this does.
+        $mail = new OrderShipped();
+        $mail->view('emails.order_shipped', ['post' => $posts->first()]);
+
+        // renderEach() is the PHP spelling of @each, down to the argument
+        // order: the partial is rendered once per entry with the entry
+        // under the name the third argument spells and $key beside it, and
+        // the fourth template only when the collection is empty.
+        $views->renderEach('partials.post_row', $posts, 'post', 'partials.no_posts');
     }
 
     /**

@@ -362,51 +362,6 @@ scanner — so that:
 - directive name completion (BL7) includes them;
 - registered component namespaces/paths extend the discovery index.
 
-### BL23. Render sites behind a typed receiver
-
-The symbol map decides what is a view name syntactically, so the render
-sites it recognises by receiver are the ones a receiver's *spelling*
-settles: `$this->view('emails.shipped')` inside a class that extends a
-`Mailable`, and `view()->make(…)` / `->first(…)` off the bare helper call
-that returns the factory. A receiver whose viewness is only in its
-*type* is still missed:
-
-- a constructor-injected factory (`Factory $views` → `$this->views->make('x')`)
-  or one pulled from the container, which Bladestan's
-  `BladeViewMethodsMatcher` resolves by receiver type;
-- a mailable held in a local (`$mail = new OrderShipped(); $mail->view('x')`).
-
-Resolving those means asking the forward walker for the receiver's type,
-which `extract_symbol_map` cannot do: it runs during `update_ast`, before
-the file's classes are resolved, and a forward walk per method call would
-be paid on every keystroke. So this wants a lazily-computed set of extra
-view spans per file, consulted alongside the symbol map by the consumers
-that read view keys (`blade_call_site`, `call_site_inference`, the
-reference index, definition, hover) rather than a second syntactic guess
-in the indexer.
-
-`Factory::renderEach($view, $data, $iterator, $empty)` belongs with it:
-it is the PHP spelling of `@each`, so both its view arguments are render
-sites and its data argument means what `blade_each_directive`'s does
-rather than what a data array does.
-
-**Acceptance tests.** Bladestan's `view-call-site-view-methods` fixture
-is the behaviour spec, and every one of its cases is written against a
-typed receiver, so the whole fixture lands here. Given a template
-declaring `string $title` and `App\Models\User $user`, each of these
-passes only `$title` and must report `$user` missing:
-
-- `$factory->make('signed-template', ['title' => 'Hello'])`;
-- `$factory->first(['optional-override', 'signed-template'], […])`,
-  judged against the fallback candidate the list guarantees;
-- `$factory->renderWhen(true, 'signed-template', […])` and
-  `renderUnless(false, …)`, which name their template second;
-- `$mailable->markdown('signed-template', […])` on a `Mailable` held in a
-  parameter rather than reached through `$this`.
-
-`$factory->renderEach('render-each-item', ['a', 'b'], 'item')` is the
-clean case: it binds `$item` and `$key` the way `@each` does, so a
-partial declaring exactly those two is satisfied and nothing is reported.
 
 ### BL22. A template never learns anything from the templates that render it
 
@@ -736,14 +691,14 @@ Implement go-to-definition for view names and component tags.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file.
 
-### Step 9: Template contracts (BL10, BL11, BL22, BL23)
+### Step 9: Template contracts (BL10, BL11, BL22)
 
 Call-site validation is shipped, and so is the covariance check on the
-signature chain and the data shapes the checks used to stand down on.
-What is left is BL23 for the render sites whose receiver only a type
-settles and BL22 for the templates that render other templates, and it
-is independent of section/stack intelligence and custom directive
-discovery, so the two can land in any order.
+signature chain, the data shapes the checks used to stand down on, and
+the render sites whose receiver only a type settles. What is left is
+BL22 for the templates that render other templates, and it is
+independent of section/stack intelligence and custom directive
+discovery, so it can land at any point.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
 gets typed completion for its declared variables at every render site.

@@ -238,6 +238,21 @@ impl Backend {
             }
         }
 
+        // A render site behind a typed receiver is only settled lazily, and
+        // whoever wants the answer has to find the file before it can be
+        // asked for. The candidate joins the index unconfirmed: this index
+        // narrows a workspace scan to the files that *might* hold a key,
+        // and every consumer of it re-checks what it found.
+        for site in &symbol_map.view_receiver_sites {
+            entries.push((
+                ReferenceIndexKey::LaravelString {
+                    kind: crate::symbol_map::LaravelStringKind::View,
+                    key: site.key.clone(),
+                },
+                false,
+            ));
+        }
+
         if let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() {
             for class in classes {
                 for prop in &class.properties {

@@ -9,6 +9,7 @@ pub mod preprocessor;
 pub(crate) mod shared_vars;
 pub(crate) mod signature;
 pub mod source_map;
+pub(crate) mod typed_receiver;
 
 use std::path::{Path, PathBuf};
 

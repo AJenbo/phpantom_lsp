@@ -622,11 +622,10 @@ pattern set. Gaps by kind:
   `Response` facades and on `redirect()`/`url()` helper chains
   (`redirect()->route('x')`); `Route::is()` and `$request->routeIs()`
   (glob-aware, see L14); and the `#[RedirectToRoute]` attribute.
-- **View names** — add `View::first()`, `View::renderEach()`,
-  `View::renderWhen()`/`renderUnless()` (view name at arg 1),
-  `Route::view()` (arg 1), `MailMessage::view()`/`markdown()`, and the
-  mailable `#[Content]` attribute (`view`/`markdown` arguments, named or
-  positional).
+- **View names** — add `MailMessage::view()`/`markdown()`, which is a
+  notification's mail message rather than a mailable or the view
+  factory, and the mailable `#[Content]` attribute (`view`/`markdown`
+  arguments, named or positional).
 - **Translation keys** — add `Lang::has()`/`hasForLocale()`. (`@lang`
   and other Blade directives arrive via the Blade preprocessor;
   see `blade.md`.)

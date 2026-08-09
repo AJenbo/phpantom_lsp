@@ -211,9 +211,11 @@ impl Backend {
             if self.is_blade_file(file_uri) {
                 continue;
             }
+            let extra = self.typed_receiver_view_spans_for(file_uri, symbol_map);
             let offsets: Vec<u32> = symbol_map
                 .spans
                 .iter()
+                .chain(extra.iter())
                 .filter_map(|span| match &span.kind {
                     SymbolKind::LaravelStringKey {
                         kind: LaravelStringKind::View,
@@ -354,15 +356,16 @@ impl Backend {
                     && !uri.starts_with("phpantom-stub-fn://")
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
                     && !self.is_blade_file(uri)
-                    && map.spans.iter().any(|span| {
-                        matches!(
-                            &span.kind,
-                            SymbolKind::LaravelStringKey {
-                                kind: LaravelStringKind::View,
-                                ..
-                            }
-                        )
-                    })
+                    && (!map.view_receiver_sites.is_empty()
+                        || map.spans.iter().any(|span| {
+                            matches!(
+                                &span.kind,
+                                SymbolKind::LaravelStringKey {
+                                    kind: LaravelStringKind::View,
+                                    ..
+                                }
+                            )
+                        }))
             })
             .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
             .collect()
@@ -435,9 +438,11 @@ impl Backend {
         let Some(map) = self.symbol_maps.read().get(caller_uri).cloned() else {
             return;
         };
+        let extra = self.typed_receiver_view_spans_for(caller_uri, &map);
         let mut names: Vec<&str> = map
             .spans
             .iter()
+            .chain(extra.iter())
             .filter_map(|span| match &span.kind {
                 SymbolKind::LaravelStringKey {
                     kind: LaravelStringKind::View,
@@ -1123,7 +1128,12 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
         let ClassLikeMemberSelector::Identifier(method) = &node.method else {
             return;
         };
-        if !is_view_render_static_call(node.class, bytes_to_str(method.value)) {
+        let method_name = bytes_to_str(method.value);
+        if is_view_facade(node.class) && is_render_each_method(method_name) {
+            collect_render_each_sites(node.span().start.offset, &node.argument_list, self, ctx);
+            return;
+        }
+        if !is_view_render_static_call(node.class, method_name) {
             return;
         }
         let Some((index, name_ranges)) = self.matches(&node.argument_list) else {
@@ -1173,6 +1183,14 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
             return;
         };
         let method_name = bytes_to_str(method.value);
+
+        // `renderEach()` is the PHP spelling of `@each`, down to the
+        // argument order, so both templates it names are read the way the
+        // directive's are.
+        if is_render_each_method(method_name) {
+            collect_render_each_sites(node.span().start.offset, &node.argument_list, self, ctx);
+            return;
+        }
 
         // A render the receiver's type decides: a mailable's
         // `$this->view('name', […])` and the view factory's own `make()` /
@@ -1396,12 +1414,56 @@ fn is_view_render_static_call(class: &Expression<'_>, method: &str) -> bool {
     let is_facade = |short: &str, fqn: &str| {
         subject.eq_ignore_ascii_case(short) || subject.eq_ignore_ascii_case(fqn)
     };
-    (is_facade("View", "Illuminate\\Support\\Facades\\View")
-        && view_render_method_name_index(method).is_some())
+    (is_view_facade(class) && view_render_method_name_index(method).is_some())
         || (is_facade("Route", "Illuminate\\Support\\Facades\\Route")
             && method.eq_ignore_ascii_case("view"))
         || (is_facade("Response", "Illuminate\\Support\\Facades\\Response")
             && method.eq_ignore_ascii_case("view"))
+}
+
+/// Whether a static call's subject is the `View` facade, which proxies the
+/// view factory.
+fn is_view_facade(class: &Expression<'_>) -> bool {
+    let Expression::Identifier(ident) = class else {
+        return false;
+    };
+    let subject = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
+    subject.eq_ignore_ascii_case("View")
+        || subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
+}
+
+/// Whether a method is the view factory's `renderEach()`.
+fn is_render_each_method(method: &str) -> bool {
+    method.eq_ignore_ascii_case("renderEach")
+}
+
+/// Record the sites a `renderEach($view, $data, $iterator, $empty)` call is.
+///
+/// It renders `$view` once per entry of `$data`, with the entry under the
+/// name `$iterator` spells and the key beside it, and `$empty` once with
+/// nothing at all when the collection is empty. Neither partial sees the
+/// scope the call is written in, so neither forwards it.
+fn collect_render_each_sites<'ast, 'arena>(
+    offset: u32,
+    argument_list: &'ast ArgumentList<'arena>,
+    walker: &ViewCallWalker<'_>,
+    ctx: &mut CollectCtx<'_, 'ast, 'arena>,
+) {
+    let mut arguments = argument_list.arguments.iter();
+    if let Some(view) = arguments.next() {
+        let ranges = walker.matching_ranges(view.value());
+        if !ranges.is_empty() {
+            let mut entries = Vec::new();
+            let complete = collect_each_arguments(argument_list, &mut entries);
+            ctx.record(offset, &ranges, entries, complete, false);
+        }
+    }
+    if let Some(empty) = arguments.nth(2) {
+        let ranges = walker.matching_ranges(empty.value());
+        if !ranges.is_empty() {
+            ctx.record(offset, &ranges, Vec::new(), true, false);
+        }
+    }
 }
 
 /// The argument index at which a view-rendering *method* names its

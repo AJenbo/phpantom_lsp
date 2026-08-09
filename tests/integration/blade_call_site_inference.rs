@@ -690,4 +690,49 @@ mod tests {
             template_edits
         );
     }
+
+    /// A render site the receiver's *type* settles feeds the template it
+    /// names, the same as a `view()` helper call does.
+    #[tokio::test]
+    async fn injected_factory_call_site_types_template_variable() {
+        const FACTORY: &str = "<?php\nnamespace Illuminate\\Contracts\\View;\n\
+            interface Factory { public function make($view, $data = [], $mergeData = []); }\n";
+        let (backend, _dir) = create_psr4_workspace(
+            r#"{"autoload": {"psr-4": {"App\\": "app/", "Illuminate\\": "stubs/Illuminate/"}}}"#,
+            &[
+                ("stubs/Illuminate/Contracts/View/Factory.php", FACTORY),
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nuse Illuminate\\Contracts\\View\\Factory;\nclass Controller {\n    public function __construct(private Factory $views) {}\n    public function show(): mixed {\n        $item = new Item();\n        return $this->views->make('shop', ['item' => $item]);\n    }\n}\n",
+                ),
+                ("resources/views/shop.blade.php", "{{ $item->name }}\n"),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
+        let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
+
+        open(
+            &backend,
+            &controller_uri,
+            "php",
+            &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
+        )
+        .await;
+        open(
+            &backend,
+            &blade_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/shop.blade.php")).unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &blade_uri, 0, 5).await;
+        assert!(
+            hover.contains("Item"),
+            "expected $item typed from the injected factory's call site, got {hover}"
+        );
+    }
 }

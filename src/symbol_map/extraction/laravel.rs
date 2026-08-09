@@ -255,12 +255,157 @@ pub(super) fn is_mailable_view_method(member_name: &str) -> bool {
 /// or `None` when the method names none.
 ///
 /// `first()` names a list of candidates rather than one template, which
-/// [`try_emit_laravel_view_span_at`] reads either way.
+/// [`try_emit_laravel_view_span_at`] reads either way.  `renderEach()` names
+/// two, so it is read by [`try_emit_render_each_view_spans`] instead.
 pub(super) fn view_factory_method_name_index(member_name: &str) -> Option<usize> {
     match member_name.to_ascii_lowercase().as_str() {
         "make" | "first" | "exists" => Some(0),
         "renderwhen" | "renderunless" => Some(1),
         _ => None,
+    }
+}
+
+/// The argument indices at which `Factory::renderEach($view, $data,
+/// $iterator, $empty)` names a template: the partial rendered per entry,
+/// and the one rendered when the collection is empty.
+pub(super) const RENDER_EACH_VIEW_ARGS: [usize; 2] = [0, RENDER_EACH_EMPTY_ARG];
+
+/// The argument at which `renderEach()` takes the template it falls back
+/// to, which is the one that doubles as raw markup.
+const RENDER_EACH_EMPTY_ARG: usize = 3;
+
+/// Whether `member_name` is the view factory's `renderEach()`, the PHP
+/// spelling of Blade's `@each`.
+pub(super) fn is_render_each_method(member_name: &str) -> bool {
+    member_name.eq_ignore_ascii_case("renderEach")
+}
+
+/// Push a view span for each template a `renderEach()` call names.
+///
+/// The `$empty` argument doubles as raw markup: Laravel renders it as a
+/// template unless it carries the `raw|` prefix, which is also the
+/// default, so a string spelled that way names nothing.
+pub(super) fn try_emit_render_each_view_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for index in RENDER_EACH_VIEW_ARGS {
+        if names_a_render_each_template(index, argument_list, content) {
+            try_emit_laravel_string_span_at(
+                crate::symbol_map::LaravelStringKind::View,
+                index,
+                argument_list,
+                content,
+                spans,
+            );
+        }
+    }
+}
+
+/// Whether the `renderEach()` argument at `index` names a template.
+///
+/// Only the fallback can fail to: Laravel renders it as a template unless
+/// it carries the `raw|` prefix, which is also its default, so a string
+/// spelled that way is markup rather than a name.
+fn names_a_render_each_template(
+    index: usize,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+) -> bool {
+    if index != RENDER_EACH_EMPTY_ARG {
+        return true;
+    }
+    let Some(arg) = argument_list.arguments.iter().nth(index) else {
+        return false;
+    };
+    let Expression::Literal(literal::Literal::String(s)) = arg.value() else {
+        return true;
+    };
+    let inner_start = (s.span.start.offset + 1) as usize;
+    let inner_end = (s.span.end.offset - 1) as usize;
+    if inner_start >= inner_end || inner_end > content.len() {
+        return true;
+    }
+    !content[inner_start..inner_end].starts_with("raw|")
+}
+
+/// The class a receiver has to be for the method call it receives to name a
+/// template, when nothing about the receiver's *spelling* settles it.
+///
+/// Returns the expected receiver alongside the argument indices that name a
+/// template.  Kept allocation-free: this runs on every method call in every
+/// file, and `make`, `first`, and `view` are common enough method names that
+/// lowercasing each one would be a real cost.
+pub(super) fn view_receiver_method(
+    member_name: &str,
+) -> Option<(ViewReceiverClass, &'static [usize])> {
+    const FIRST: &[usize] = &[0];
+    const SECOND: &[usize] = &[1];
+    // Every name below starts with one of these, so a method call that
+    // cannot be a render is turned away on a single byte.
+    if !matches!(
+        member_name.as_bytes().first().map(u8::to_ascii_lowercase),
+        Some(b'm' | b'f' | b'e' | b'v' | b't' | b'r')
+    ) {
+        return None;
+    }
+    if member_name.eq_ignore_ascii_case("make")
+        || member_name.eq_ignore_ascii_case("first")
+        || member_name.eq_ignore_ascii_case("exists")
+    {
+        return Some((ViewReceiverClass::Factory, FIRST));
+    }
+    if member_name.eq_ignore_ascii_case("view")
+        || member_name.eq_ignore_ascii_case("text")
+        || member_name.eq_ignore_ascii_case("markdown")
+    {
+        return Some((ViewReceiverClass::Mailable, FIRST));
+    }
+    if member_name.eq_ignore_ascii_case("renderWhen")
+        || member_name.eq_ignore_ascii_case("renderUnless")
+    {
+        return Some((ViewReceiverClass::Factory, SECOND));
+    }
+    if is_render_each_method(member_name) {
+        return Some((ViewReceiverClass::Factory, &RENDER_EACH_VIEW_ARGS));
+    }
+    None
+}
+
+/// Record every template a method call names, for the lazy pass that
+/// settles what its receiver is (see [`ViewReceiverSite`]).
+///
+/// The names are read exactly as the confirmed spellings read them, so a
+/// site that turns out to be a render contributes the same spans a
+/// syntactically recognised one would.
+pub(super) fn record_view_receiver_sites(
+    receiver: ViewReceiverClass,
+    name_indices: &[usize],
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    sites: &mut Vec<ViewReceiverSite>,
+) {
+    let mut spans = Vec::new();
+    for index in name_indices {
+        if names_a_render_each_template(*index, argument_list, content) {
+            try_emit_laravel_view_span_at(*index, argument_list, content, &mut spans);
+        }
+    }
+    for span in spans {
+        let SymbolKind::LaravelStringKey {
+            key, is_optional, ..
+        } = span.kind
+        else {
+            continue;
+        };
+        sites.push(ViewReceiverSite {
+            start: span.start,
+            end: span.end,
+            key,
+            is_optional,
+            receiver,
+        });
     }
 }
 

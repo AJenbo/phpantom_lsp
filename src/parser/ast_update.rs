@@ -1110,6 +1110,14 @@ impl Backend {
 
         if changed {
             self.member_completion_cache.lock().clear();
+            // A receiver's type is settled against the classes of the whole
+            // workspace, so a signature change anywhere can turn a call that
+            // was not a render into one, or the other way round.
+            self.typed_receiver_view_spans_cache.write().clear();
+        } else {
+            for update in &prepared {
+                self.evict_typed_receiver_view_spans(&update.uri);
+            }
         }
 
         let reference_items: Vec<(String, Arc<SymbolMap>)> = prepared

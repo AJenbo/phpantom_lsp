@@ -554,13 +554,14 @@ impl Backend {
         let mut has_command = false;
         let mut has_morph_alias = false;
         let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
-            let maps = self.symbol_maps.read();
-            let Some(symbol_map) = maps.get(uri) else {
+            let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
                 return;
             };
+            let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
             symbol_map
                 .spans
                 .iter()
+                .chain(extra.iter())
                 .filter_map(|span| {
                     if let SymbolKind::LaravelStringKey {
                         kind,
@@ -591,7 +592,6 @@ impl Backend {
                     }
                 })
                 .collect()
-            // `maps` read lock is dropped here.
         };
 
         if !has_route && !has_config && !has_view && !has_trans && !has_command && !has_morph_alias

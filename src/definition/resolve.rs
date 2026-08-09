@@ -88,9 +88,24 @@ impl Backend {
         uri: &str,
         offset: u32,
     ) -> Option<crate::symbol_map::SymbolSpan> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
-        map.lookup(offset).cloned()
+        let map = self.symbol_maps.read().get(uri).cloned()?;
+        if let Some(span) = map.lookup(offset) {
+            return Some(span.clone());
+        }
+        // A view name behind a typed receiver is a gap in the map — the
+        // indexer could not tell it was one — so the cursor lands in what
+        // reads as a plain string literal until the receiver is typed.
+        if !map
+            .view_receiver_sites
+            .iter()
+            .any(|site| offset >= site.start && offset < site.end)
+        {
+            return None;
+        }
+        self.typed_receiver_view_spans_for(uri, &map)
+            .iter()
+            .find(|span| offset >= span.start && offset < span.end)
+            .cloned()
     }
 
     /// Look up the symbol span at a cursor position, handling end-of-token

@@ -132,9 +132,23 @@ fn find_string_key_usages(
 
     let mut locations = Vec::new();
     for (file_uri, symbol_map) in snapshot {
+        // A render site whose receiver only a type settles is not in the
+        // map, so ask for the file's confirmed extras — but only when a
+        // candidate names this very key, so the type resolution is paid
+        // for the handful of files that could contribute a hit.
+        let has_candidate = symbol_map
+            .view_receiver_sites
+            .iter()
+            .any(|site| *kind == crate::symbol_map::LaravelStringKind::View && site.key == key);
+        let extra = if has_candidate {
+            backend.typed_receiver_view_spans_for(file_uri, symbol_map)
+        } else {
+            std::sync::Arc::new(Vec::new())
+        };
+
         // First pass: check if this file even has ANY LaravelStringKey matches.
         // This avoids reading file content from disk for thousands of unrelated files.
-        let has_match = symbol_map.spans.iter().any(|span| {
+        let has_match = symbol_map.spans.iter().chain(extra.iter()).any(|span| {
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
                 key: span_key,
@@ -157,7 +171,7 @@ fn find_string_key_usages(
         let Some(content) = backend.get_file_content_arc(file_uri) else {
             continue;
         };
-        for span in &symbol_map.spans {
+        for span in symbol_map.spans.iter().chain(extra.iter()) {
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
                 key: span_key,

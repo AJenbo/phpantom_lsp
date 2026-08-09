@@ -301,6 +301,7 @@ impl Backend {
         // when the uri_classes_index entry is missing.
         self.symbols.uri_classes_index.write().remove(uri);
         self.symbol_maps.write().remove(uri);
+        self.evict_typed_receiver_view_spans(uri);
         self.evict_reference_index_uri(uri);
         self.file_imports.write().remove(uri);
         self.resolved_names.write().remove(uri);

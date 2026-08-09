@@ -52,10 +52,34 @@ mod tests {
         @endphp\n\
         <h1>{{ $title }}</h1>\n";
 
+    /// The view factory contract a container-injected `Factory $views` is
+    /// typed as, and the concrete factory that adds `renderEach()`.
+    const FACTORY_CONTRACT_STUB: &str = "<?php\nnamespace Illuminate\\Contracts\\View;\n\
+        interface Factory {\n\
+        \x20   public function exists($view);\n\
+        \x20   public function first(array $views, $data = [], $mergeData = []);\n\
+        \x20   public function make($view, $data = [], $mergeData = []);\n\
+        \x20   public function renderWhen($condition, $view, $data = [], $mergeData = []);\n\
+        }\n";
+
+    const FACTORY_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
+        class Factory implements \\Illuminate\\Contracts\\View\\Factory {\n\
+        \x20   public function exists($view) { return true; }\n\
+        \x20   public function first(array $views, $data = [], $mergeData = []) { return null; }\n\
+        \x20   public function make($view, $data = [], $mergeData = []) { return null; }\n\
+        \x20   public function renderWhen($condition, $view, $data = [], $mergeData = []) { return ''; }\n\
+        \x20   public function renderEach($view, $data, $iterator, $empty = 'raw|') { return ''; }\n\
+        }\n";
+
     fn workspace(files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempDir) {
         let mut all = vec![
             ("stubs/Illuminate/Mail/Mailable.php", MAILABLE_STUB),
             ("stubs/Illuminate/Mail/Mailables/Content.php", CONTENT_STUB),
+            (
+                "stubs/Illuminate/Contracts/View/Factory.php",
+                FACTORY_CONTRACT_STUB,
+            ),
+            ("stubs/Illuminate/View/Factory.php", FACTORY_STUB),
         ];
         all.extend_from_slice(files);
         create_psr4_workspace(COMPOSER, &all)
@@ -132,6 +156,33 @@ mod tests {
                 Some(NumberOrString::String(code)) if code.ends_with("_view_variable") => {
                     Some((code.clone(), d.message))
                 }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every diagnostic code reported for one file, so a check that a
+    /// string is *not* read as a view name has something to assert on.
+    async fn diagnostic_codes(
+        backend: &phpantom_lsp::Backend,
+        dir: &tempfile::TempDir,
+        relative: &str,
+        language_id: &str,
+    ) -> Vec<String> {
+        backend.initialized(InitializedParams {}).await;
+        let path = dir.path().join(relative);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let uri = Url::from_file_path(&path).unwrap();
+        open(backend, &uri, language_id, &text).await;
+
+        let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
+        let uri = uri.to_string();
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(&uri, &effective, &mut diags);
+        diags
+            .into_iter()
+            .filter_map(|d| match d.code {
+                Some(NumberOrString::String(code)) => Some(code),
                 _ => None,
             })
             .collect()
@@ -685,5 +736,288 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    // ── Receivers whose viewness is only in their type ───────────────────
+
+    #[tokio::test]
+    async fn an_injected_factory_names_a_template() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\Contracts\\View\\Factory;\n\
+            class PageController {\n\
+            \x20   public function __construct(private Factory $views) {}\n\
+            \x20   public function show(): mixed {\n\
+            \x20       return $this->views->make('pages.about', ['title' => 'About']);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/pages/about.blade.php", TITLED),
+            ("app/PageController.php", controller),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/PageController.php", "php", 6, 38).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/pages/about.blade.php")),
+            "an injected factory's make() should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "expected a clean call site, got {diags:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_injected_factory_is_judged_against_the_contract() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\Contracts\\View\\Factory;\n\
+            class PageController {\n\
+            \x20   public function __construct(private Factory $views) {}\n\
+            \x20   public function show(): mixed {\n\
+            \x20       return $this->views->make('pages.about', ['titel' => 'About']);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/pages/about.blade.php", TITLED),
+            ("app/PageController.php", controller),
+        ]);
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert_eq!(diags.len(), 2, "got {diags:?}");
+        assert!(
+            diags.iter().any(
+                |(code, message)| code == "missing_view_variable" && message.contains("$title")
+            ),
+            "got {diags:?}"
+        );
+        assert!(
+            diags.iter().any(
+                |(code, message)| code == "unknown_view_variable" && message.contains("$titel")
+            ),
+            "got {diags:?}"
+        );
+    }
+
+    /// An injected factory's `first()` takes a candidate list the way
+    /// `@includeFirst` does, and every candidate that exists is judged
+    /// against its own contract — the policy
+    /// `include_first_judges_every_candidate` pins down for the directive.
+    ///
+    /// Bladestan judges only the list's last entry, the one the call is
+    /// guaranteed to fall back to, so its report count for this shape is
+    /// smaller than ours by design.
+    #[tokio::test]
+    async fn an_injected_factorys_first_judges_every_candidate() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\Contracts\\View\\Factory;\n\
+            class PageController {\n\
+            \x20   public function __construct(private Factory $views) {}\n\
+            \x20   public function show(): mixed {\n\
+            \x20       return $this->views->first(['custom.header', 'partials.header'], ['title' => 'Hi']);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/custom/header.blade.php", TITLED),
+            (
+                "resources/views/partials/header.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $heading\n */\n@endphp\n<h1>{{ $heading }}</h1>\n",
+            ),
+            ("app/PageController.php", controller),
+        ]);
+
+        // The cursor sits on the *second* candidate, which nothing would
+        // reach if only the first entry of the array were indexed.
+        let target = definition_file(&backend, &dir, "app/PageController.php", "php", 6, 58).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/partials/header.blade.php")),
+            "the second candidate should reach its template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert_eq!(
+            diags.len(),
+            2,
+            "the second candidate is short of $heading and has no use for $title: {diags:?}"
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|(code, message)| code == "missing_view_variable"
+                    && message.contains("$heading")),
+            "got {diags:?}"
+        );
+        assert!(
+            diags.iter().any(
+                |(code, message)| code == "unknown_view_variable" && message.contains("$title")
+            ),
+            "got {diags:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mailable_held_in_a_local_names_a_template() {
+        let sender = "<?php\nnamespace App;\n\
+            class Sender {\n\
+            \x20   public function send(): void {\n\
+            \x20       $mail = new OrderShipped();\n\
+            \x20       $mail->view('emails.shipped', ['title' => 'Hi']);\n\
+            \x20   }\n\
+            }\n";
+        let mailable = "<?php\nnamespace App;\nuse Illuminate\\Mail\\Mailable;\n\
+            class OrderShipped extends Mailable {}\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/emails/shipped.blade.php", TITLED),
+            ("app/OrderShipped.php", mailable),
+            ("app/Sender.php", sender),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/Sender.php", "php", 5, 24).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/emails/shipped.blade.php")),
+            "a mailable in a local should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/Sender.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "expected a clean call site, got {diags:?}"
+        );
+    }
+
+    /// The receiver's type is the whole test, so the same method name on a
+    /// class that is neither a factory nor a mailable stays an ordinary
+    /// method call.
+    #[tokio::test]
+    async fn a_make_on_another_receiver_is_not_a_render() {
+        let controller = "<?php\nnamespace App;\n\
+            class Registry {\n\
+            \x20   public function make(string $name): string { return $name; }\n\
+            }\n\
+            class PageController {\n\
+            \x20   public function __construct(private Registry $registry) {}\n\
+            \x20   public function show(): string {\n\
+            \x20       return $this->registry->make('pages.about');\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/pages/about.blade.php", TITLED),
+            ("app/PageController.php", controller),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/PageController.php", "php", 8, 41).await;
+        assert!(
+            target
+                .as_deref()
+                .is_none_or(|uri| !uri.ends_with(".blade.php")),
+            "a plain class's make() should name no template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    // ── Factory::renderEach() ───────────────────────────────────────────
+
+    /// `renderEach($view, $data, $iterator, $empty)` is the PHP spelling of
+    /// `@each`: both its view arguments are render sites, and the partial
+    /// sees the entry and the key rather than a data array.
+    #[tokio::test]
+    async fn render_each_names_both_of_its_templates() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\View\\Factory;\n\
+            class RowController {\n\
+            \x20   public function __construct(private Factory $views) {}\n\
+            \x20   /** @param list<string> $rows */\n\
+            \x20   public function show(array $rows): string {\n\
+            \x20       return $this->views->renderEach('rows.row', $rows, 'row', 'rows.empty');\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/rows/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $row\n */\n@endphp\n<li>{{ $row }}</li>\n",
+            ),
+            ("resources/views/rows/empty.blade.php", "<li>None</li>\n"),
+            ("app/RowController.php", controller),
+        ]);
+
+        let per_entry =
+            definition_file(&backend, &dir, "app/RowController.php", "php", 7, 47).await;
+        assert!(
+            per_entry
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/rows/row.blade.php")),
+            "the per-entry partial should be reached, got {per_entry:?}"
+        );
+
+        let fallback = definition_file(&backend, &dir, "app/RowController.php", "php", 7, 73).await;
+        assert!(
+            fallback
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/rows/empty.blade.php")),
+            "the empty-collection template should be reached, got {fallback:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/RowController.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "the partial is handed the entry it declares, got {diags:?}"
+        );
+    }
+
+    /// The entry the partial binds is typed from the collection, the way
+    /// `@each`'s is.
+    #[tokio::test]
+    async fn render_each_types_its_entry_from_the_collection() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\View\\Factory;\n\
+            class RowController {\n\
+            \x20   public function __construct(private Factory $views) {}\n\
+            \x20   /** @param list<int> $rows */\n\
+            \x20   public function show(array $rows): string {\n\
+            \x20       return $this->views->renderEach('rows.row', $rows, 'row');\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/rows/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $row\n */\n@endphp\n<li>{{ $row }}</li>\n",
+            ),
+            ("app/RowController.php", controller),
+        ]);
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/RowController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert!(diags[0].1.contains("$row"), "got {:?}", diags[0].1);
+    }
+
+    /// `renderEach()`'s fallback doubles as raw markup, which the `raw|`
+    /// prefix marks, so a string spelled that way names no template.
+    #[tokio::test]
+    async fn a_raw_render_each_fallback_names_no_template() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\View\\Factory;\n\
+            class RowController {\n\
+            \x20   public function __construct(private Factory $views) {}\n\
+            \x20   /** @param list<string> $rows */\n\
+            \x20   public function show(array $rows): string {\n\
+            \x20       return $this->views->renderEach('rows.row', $rows, 'row', 'raw|<li>None</li>');\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/rows/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $row\n */\n@endphp\n<li>{{ $row }}</li>\n",
+            ),
+            ("app/RowController.php", controller),
+        ]);
+
+        let codes = diagnostic_codes(&backend, &dir, "app/RowController.php", "php").await;
+        assert!(
+            !codes.iter().any(|code| code == "invalid_laravel_view"),
+            "raw markup should not be read as a view name, got {codes:?}"
+        );
     }
 }

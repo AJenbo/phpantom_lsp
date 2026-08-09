@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL23 | [Render sites behind a typed receiver](todo/blade.md#bl23-render-sites-behind-a-typed-receiver)                                                               | Low-Medium  | Medium-High |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Implementation → test navigation via `@covers`](todo/lsp-features.md#f8-implementation--test-navigation-via-covers)                                                        | Low         | Medium      |
