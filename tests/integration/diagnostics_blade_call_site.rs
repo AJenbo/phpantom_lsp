@@ -375,6 +375,100 @@ mod tests {
         assert_eq!(diags.len(), 2, "got {diags:?}");
     }
 
+    /// The public surface a component inherits from `Illuminate\View\Component`
+    /// is plumbing rather than view data, and a method that takes an argument
+    /// reaches the view as a closure no template can call, so neither excuses
+    /// a call site from passing a variable of that name.
+    #[tokio::test]
+    async fn a_components_framework_surface_satisfies_nothing() {
+        let (backend, dir) = create_psr4_workspace(
+            r#"{
+                "require": { "laravel/framework": "^11.0" },
+                "autoload": { "psr-4": {
+                    "App\\": "app/",
+                    "Illuminate\\": "stubs/Illuminate/"
+                } }
+            }"#,
+            &[
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    "<?php\nnamespace Illuminate\\View;\nabstract class Component {\n    public function data(): array { return []; }\n    public function render() {}\n}\n",
+                ),
+                (
+                    "resources/views/card.blade.php",
+                    "@php\n/**\n * @bladestan-signature\n * @var array $data\n * @var string $label\n */\n@endphp\n{{ count($data) }}{{ $label }}\n",
+                ),
+                (
+                    "app/View/Components/ProfileCard.php",
+                    "<?php\nnamespace App\\View\\Components;\nuse Illuminate\\View\\Component;\nclass ProfileCard extends Component {\n    public function label(string $suffix): string { return $suffix; }\n    public function render(): mixed {\n        return view('card');\n    }\n}\n",
+                ),
+            ],
+        );
+        let diags =
+            call_site_diagnostics(&backend, &dir, "app/View/Components/ProfileCard.php", "php")
+                .await;
+        assert_eq!(diags.len(), 2, "got {diags:?}");
+        assert!(
+            diags.iter().any(|(_, message)| message.contains("$data")),
+            "got {diags:?}"
+        );
+        assert!(
+            diags.iter().any(|(_, message)| message.contains("$label")),
+            "got {diags:?}"
+        );
+    }
+
+    /// Livewire hands its view the properties the subclass declares, judged
+    /// by where they are declared rather than by name, so a property is
+    /// still view data when the base class has a *method* of that name
+    /// (`Livewire\Component::id()` against a component's own `$id`).
+    #[tokio::test]
+    async fn a_livewire_property_named_after_a_framework_method_is_still_supplied() {
+        let (backend, dir) = create_psr4_workspace(
+            r#"{
+                "require": { "laravel/framework": "^11.0" },
+                "autoload": { "psr-4": {
+                    "App\\": "app/",
+                    "Livewire\\": "stubs/Livewire/"
+                } }
+            }"#,
+            &[
+                (
+                    "stubs/Livewire/Component.php",
+                    "<?php\nnamespace Livewire;\nabstract class Component {\n    public function id() {}\n}\n",
+                ),
+                (
+                    "resources/views/panel.blade.php",
+                    "@php\n/**\n * @bladestan-signature\n * @var string $id\n */\n@endphp\n<div id=\"{{ $id }}\"></div>\n",
+                ),
+                (
+                    "app/Livewire/ShowPanel.php",
+                    "<?php\nnamespace App\\Livewire;\nuse Livewire\\Component;\nclass ShowPanel extends Component {\n    public string $id = '';\n    public function render(): mixed {\n        return view('panel');\n    }\n}\n",
+                ),
+            ],
+        );
+        let diags =
+            call_site_diagnostics(&backend, &dir, "app/Livewire/ShowPanel.php", "php").await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    /// A Livewire component's public methods are actions, not view data, so
+    /// one that shares a name with a declared variable excuses nothing.
+    #[tokio::test]
+    async fn a_livewire_components_actions_satisfy_nothing() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/Livewire/ShowProfile.php",
+                "<?php\nnamespace App\\Livewire;\nuse App\\Models\\User;\nuse Livewire\\Component;\nclass ShowProfile extends Component {\n    public string $title = '';\n    public function user(): ?User { return null; }\n    public function render(): mixed {\n        return view('profile');\n    }\n}\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "app/Livewire/ShowProfile.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert!(diags[0].1.contains("$user"), "got {diags:?}");
+    }
+
     /// `$loop` is Blade's own object however a call site writes it down, so
     /// the type a template declares for it is not the caller's to satisfy.
     #[tokio::test]

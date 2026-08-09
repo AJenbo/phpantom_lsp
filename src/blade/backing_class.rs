@@ -16,9 +16,10 @@
 //! `livewire.class_namespace` (`livewire.create-refund` →
 //! `App\Livewire\CreateRefund`).
 //!
-//! Members declared on the framework base class are plumbing rather than
-//! view data, so they are skipped, as is any method that requires an
-//! argument: Blade only exposes the argument-less ones as variables.
+//! What counts as view data is narrower than the class's public surface,
+//! and each framework draws the line differently: see [`Exposure`] for the
+//! two rules and [`Backend::class_member_vars`] for the one member list
+//! both the template's declarations and the call-site checks read.
 
 use std::sync::Arc;
 
@@ -57,6 +58,42 @@ const INVOKABLE_VARIABLE: &str = "\\Illuminate\\View\\InvokableComponentVariable
 /// wrapping the body in a method of a subclass of the component instead
 /// (see `super::preprocessor::preprocess_with_vars`).
 const LIVEWIRE_INSTANCE_VARS: [&str; 2] = ["_instance", "__livewire"];
+
+/// Which framework's rules decide the members a component hands its view.
+///
+/// The two differ in more than which kinds of member they merge, so the
+/// member set cannot be computed without knowing the framework.
+#[derive(Clone, Copy)]
+enum Exposure {
+    /// Laravel merges a component's public properties *and* its public
+    /// argument-less methods, skipping every name
+    /// `Component::shouldIgnore()` lists. That list is the base class's own
+    /// public surface, and it is checked against both kinds of member, so a
+    /// property sharing a name with a base-class method is skipped too.
+    BladeComponent,
+    /// Livewire merges the public properties the subclass declares and
+    /// nothing else (`Utils::getPublicPropertiesDefinedOnSubclass()`): a
+    /// public method is an *action* (what `wire:click` calls), reached
+    /// through the typed instance rather than being a variable of its own.
+    /// Because the filter is by declaring class, a property is skipped only
+    /// when the base declares a *property* of that name.
+    LivewireComponent,
+}
+
+impl Exposure {
+    /// The base class the framework's components extend.
+    fn base(self) -> &'static str {
+        match self {
+            Self::BladeComponent => COMPONENT_BASE,
+            Self::LivewireComponent => LIVEWIRE_BASE,
+        }
+    }
+
+    /// Whether public methods become variables of the view.
+    fn merges_methods(self) -> bool {
+        matches!(self, Self::BladeComponent)
+    }
+}
 
 impl Backend {
     /// The variables the backing class of a component view contributes,
@@ -228,70 +265,48 @@ impl Backend {
     /// Laravel merges a Blade component's public members into its view's
     /// data (`Component::data()`), and Livewire does the same for a
     /// component's public properties plus the instance itself, so a
-    /// `render()` that passes nothing still hands the template everything
-    /// the class holds. A plain controller's properties never reach the
+    /// `render()` that passes nothing still hands the template the members
+    /// the class exposes. A plain controller's properties never reach the
     /// view, which is why this is keyed on the base class rather than
     /// applied to any enclosing class.
     ///
-    /// Unlike [`Self::class_member_vars`], which builds the declarations a
-    /// template body is typed from, this keeps the members the framework
-    /// base class also declares. A component that names one of them is
-    /// still naming its own property, and the answer here only ever
-    /// excuses a call site from passing something.
+    /// The member set is the one [`Self::class_member_vars`] builds for the
+    /// template's own prologue, so the declaration a body is typed from and
+    /// the excuse a call site is given cannot disagree: a name the class
+    /// does not really hand its view is neither declared nor treated as
+    /// supplied.
     pub(crate) fn component_render_scope_names(&self, class: &ClassInfo) -> Option<Vec<String>> {
         let fqn = class.fqn();
         let loader = |name: &str| self.find_or_load_class(name);
         let extends = |base: &str| {
             crate::type_engine::variable::forward_walk::is_subclass_of(&fqn, base, &loader)
         };
-        let is_livewire = extends(LIVEWIRE_BASE);
-        if !is_livewire && !extends(COMPONENT_BASE) {
-            return None;
-        }
-
-        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-            class,
-            &loader,
-            Some(&self.resolved_class_cache),
-        );
-        let mut names: Vec<String> = resolved
-            .properties
-            .iter()
-            .filter(|property| !property.is_static && property.visibility == Visibility::Public)
-            .map(|property| property.name.to_string())
-            .chain(
-                resolved
-                    .methods
-                    .iter()
-                    .filter(|method| !method.is_static && method.visibility == Visibility::Public)
-                    .map(|method| method.name.to_string()),
-            )
-            .collect();
-        if is_livewire {
-            names.extend(LIVEWIRE_INSTANCE_VARS.iter().map(|name| name.to_string()));
-            // Livewire renders the view with the component bound, so `$this`
-            // is the component inside the template.
-            names.push("this".to_string());
+        // Livewire renders the view with the component bound, so `$this` is
+        // the component inside the template.  `livewire_scope_vars` covers
+        // the other names the instance arrives under.
+        let (vars, extra) = if extends(LIVEWIRE_BASE) {
+            (self.livewire_scope_vars(class), "this")
+        } else if extends(COMPONENT_BASE) {
+            (self.component_scope_vars(class), "slot")
         } else {
-            names.push("slot".to_string());
-        }
+            return None;
+        };
+
+        let mut names: Vec<String> = vars.into_iter().map(|(name, _)| name).collect();
+        names.push(extra.to_string());
         Some(names)
     }
 
     /// A Blade component's scope: its public properties and its public
     /// argument-less methods.
     fn component_scope_vars(&self, class: &ClassInfo) -> InjectedVars {
-        self.class_member_vars(class, COMPONENT_BASE, true)
+        self.class_member_vars(class, Exposure::BladeComponent)
     }
 
     /// A Livewire component's scope: its public properties, plus the
     /// component instance under each of the names Livewire binds it to.
-    ///
-    /// Public methods are Livewire *actions* (what `wire:click` calls),
-    /// not view data, so they are reached through the typed instance
-    /// rather than being variables of their own.
     fn livewire_scope_vars(&self, class: &ClassInfo) -> InjectedVars {
-        let mut vars = self.class_member_vars(class, LIVEWIRE_BASE, false);
+        let mut vars = self.class_member_vars(class, Exposure::LivewireComponent);
         let instance_type = format!("\\{}", class.fqn());
         for name in LIVEWIRE_INSTANCE_VARS {
             vars.push((name.to_string(), instance_type.clone()));
@@ -299,24 +314,18 @@ impl Backend {
         vars
     }
 
-    /// The public members `class` exposes to its view, skipping everything
-    /// the framework base class declares.
-    fn class_member_vars(
-        &self,
-        class: &ClassInfo,
-        base: &str,
-        include_methods: bool,
-    ) -> InjectedVars {
+    /// The public members `class` exposes to its view, under the rules the
+    /// framework it belongs to applies.
+    fn class_member_vars(&self, class: &ClassInfo, exposure: Exposure) -> InjectedVars {
         let loader = |name: &str| self.find_or_load_class(name);
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             class,
             &loader,
             Some(&self.resolved_class_cache),
         );
-        let framework_members = self.framework_member_names(base);
-        let exposed = |name: &Atom| {
-            !name.starts_with("__") && !framework_members.iter().any(|known| known == name)
-        };
+        let ignored = self.framework_member_names(exposure);
+        let exposed =
+            |name: &Atom| !name.starts_with("__") && !ignored.iter().any(|known| known == name);
 
         let mut vars: InjectedVars = Vec::new();
         for property in resolved.properties.iter() {
@@ -332,7 +341,7 @@ impl Backend {
             ));
         }
 
-        if !include_methods {
+        if !exposure.merges_methods() {
             return vars;
         }
 
@@ -356,11 +365,8 @@ impl Backend {
 
     /// The member names the framework base class declares, which a
     /// component inherits but never exposes as view data.
-    ///
-    /// Laravel skips these by name (`Component::shouldIgnore()`), so a
-    /// component that *overrides* `render()` hides it just the same.
-    fn framework_member_names(&self, base: &str) -> Vec<Atom> {
-        let Some(base_class) = self.find_or_load_class(base) else {
+    fn framework_member_names(&self, exposure: Exposure) -> Vec<Atom> {
+        let Some(base_class) = self.find_or_load_class(exposure.base()) else {
             return Vec::new();
         };
         let loader = |name: &str| self.find_or_load_class(name);
@@ -369,10 +375,11 @@ impl Backend {
             &loader,
             Some(&self.resolved_class_cache),
         );
-        resolved
-            .properties
-            .iter()
-            .map(|property| property.name)
+        let properties = resolved.properties.iter().map(|property| property.name);
+        if !exposure.merges_methods() {
+            return properties.collect();
+        }
+        properties
             .chain(resolved.methods.iter().map(|method| method.name))
             .collect()
     }
