@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,54 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b1-a-blade-templates-inferred-union-types-vary-between-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. A Blade template's inferred union types vary between runs
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="B1. A Blade template&#x27;s inferred union types vary between runs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1299,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1315,42 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b1-a-blade-templates-inferred-union-types-vary-between-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. A Blade template's inferred union types vary between runs
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="B1. A Blade template&#x27;s inferred union types vary between runs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1274,7 +1380,35 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>No outstanding items.</p>
+<h2 id="b1-a-blade-templates-inferred-union-types-vary-between-runs">B1. A Blade template's inferred union types vary between runs<a class="headerlink" href="#b1-a-blade-templates-inferred-union-types-vary-between-runs" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p>When more than one <code>view()</code> call site passes the same variable name,
+<code>compute_blade_injected_vars</code> unions the types each site contributes, but
+the member order of that union changes from run to run. Analysing the
+same unmodified project twice produces, for the same template:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>$analysis: \Acme\Decimal\Decimal|\Acme\Models\CustomBrand|null
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>$analysis: \Acme\Models\CustomBrand|null|\Acme\Decimal\Decimal
+</code></pre></div>
+<p>The union members are always the same set; only their order moves.</p>
+<p>The order comes from the order the call sites are visited, and
+<code>view_caller_snapshot</code> builds its list by iterating <code>symbol_maps</code>, which
+is a <code>HashMap</code> — so the iteration order is not stable across runs. The
+per-name sort at the end of <code>compute_blade_injected_vars</code> sorts the
+variable <em>names</em> only, so it does not settle the type strings.</p>
+<p>Two consequences beyond the cosmetic one:</p>
+<ul>
+<li>Hover on such a variable shows <code>A|B</code> on one run and <code>B|A</code> on the next.</li>
+<li><code>reinfer_and_reparse_blade_with</code> decides whether to re-parse a template
+  by comparing the fresh <code>BladeScope</code> against the cached one with <code>==</code>. A
+  reordered union compares unequal, so the template is re-parsed on a
+  refresh pass that discovered nothing new.</li>
+</ul>
+<h3 id="fix">Fix<a class="headerlink" href="#fix" title="Permanent link">&para;</a></h3>
+<p>Give the union a deterministic order independent of visit order. Sorting
+the deduplicated members before <code>PhpType::union</code> is the smallest fix;
+sorting <code>view_caller_snapshot</code>'s output by URI also makes the whole pass
+reproducible, which is worth having on its own for the re-parse
+comparison above.</p>
 
 
 
