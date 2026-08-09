@@ -279,6 +279,31 @@ pub(crate) fn referenced_component_tags(content: &str) -> Vec<String> {
     tags
 }
 
+/// The `<x-…>` openings that could name one of `tag_names`, for the
+/// cheap rejection test [`may_contain_component_tag`] applies.
+///
+/// Built once per component rather than per candidate file: a bulk
+/// refresh pass tests one component's tags against every Blade file in
+/// the workspace, and [`scan_component_tag_calls`] masks the whole file
+/// before it can answer, which is far more than a rejection needs.
+pub(crate) fn component_tag_needles(tag_names: &[String]) -> Vec<String> {
+    tag_names.iter().map(|name| format!("<x-{name}")).collect()
+}
+
+/// Whether `content` is worth handing to [`scan_component_tag_calls`].
+///
+/// Conservative in the direction that matters: masking only ever removes
+/// tags (a `<x-…>` inside a comment or a `@php` block), and a needle hit
+/// on a longer tag name (`<x-card` for the needle `<x-car`) is settled by
+/// the real scan, so a `true` here can still scan to nothing while a
+/// `false` cannot hide a call.
+pub(crate) fn may_contain_component_tag(content: &str, needles: &[String]) -> bool {
+    content.contains("<x-")
+        && needles
+            .iter()
+            .any(|needle| content.contains(needle.as_str()))
+}
+
 /// Scan `content` for `<x-…>` occurrences whose tag name (after the `x-`
 /// prefix) is one of `tag_names`, and collect the attributes each passes.
 ///

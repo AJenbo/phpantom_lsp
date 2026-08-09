@@ -105,6 +105,7 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
+| B1  | [A Blade template's inferred union types vary between runs](todo/bugs.md#b1-a-blade-templates-inferred-union-types-vary-between-runs)                                        | Medium      | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
@@ -190,7 +191,6 @@ unlikely to move the needle for most users.
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P48 | [Analyse wall-clock regressed on the two largest Laravel samples](todo/performance.md#p48-analyse-wall-clock-regressed-on-the-two-largest-laravel-samples)                    | Medium      | Medium      |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.45.0, still no `mago-hir` consumers upstream) | Medium-High | High        |
 | P47 | [The resolved-class cache lock caps concurrent class resolution](todo/performance.md#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution)                     | Medium      | Medium-High |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |

@@ -211,7 +211,25 @@ impl Backend {
             if self.is_blade_file(file_uri) {
                 continue;
             }
-            let extra = self.typed_receiver_view_spans_for(file_uri, symbol_map);
+            // A render site whose receiver only a type settles is not in
+            // the map, so ask for the file's confirmed extras — but only
+            // when a candidate names one of *this* template's views, since
+            // the loop below keeps no other key anyway.  Confirming a
+            // candidate resolves its receiver's type, and a file that
+            // spells many candidates it will never confirm (`$xw->text(…)`
+            // on an `XMLWriter` reads as a mailable's `text()` until the
+            // receiver is resolved) would otherwise pay for all of them
+            // here, in the serial refresh pass, rather than in the
+            // parallel diagnostic pass that has a warm scope cache.
+            let has_candidate = symbol_map
+                .view_receiver_sites
+                .iter()
+                .any(|site| view_names.contains(&site.key));
+            let extra = if has_candidate {
+                self.typed_receiver_view_spans_for(file_uri, symbol_map)
+            } else {
+                Arc::new(Vec::new())
+            };
             let offsets: Vec<u32> = symbol_map
                 .spans
                 .iter()
@@ -255,8 +273,12 @@ impl Backend {
                     own_blade_snapshot.as_slice()
                 }
             };
+            let needles = crate::blade::component_tags::component_tag_needles(&tag_names);
             for (file_uri, content) in blade_snapshot {
                 if file_uri == uri {
+                    continue;
+                }
+                if !crate::blade::component_tags::may_contain_component_tag(content, &needles) {
                     continue;
                 }
                 let occurrences =
