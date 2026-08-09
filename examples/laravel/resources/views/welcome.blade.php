@@ -76,6 +76,12 @@
          provider shares them, or a view composer writes them. --}}
     @include('partials.sidebar')
 
+    {{-- An @include hands the partial the scope it is written in, so
+         partials/author_badge.blade.php gets $user without this directive
+         passing anything. The type comes with it: what this template holds
+         under $user is checked against the partial's signature. --}}
+    @include('partials.author_badge')
+
     {{-- @includeFirst renders the first candidate that exists, so a project
          can override a partial without the caller changing. Both names are
          navigable, and a candidate that exists nowhere is the point of the

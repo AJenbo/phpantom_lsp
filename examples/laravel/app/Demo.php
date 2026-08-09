@@ -16,6 +16,7 @@ use App\Http\Requests\UpdateBakeryRequest;
 use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
+use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -438,6 +439,17 @@ class Demo
         // through $this->view() in the older build() shape — see
         // app/Mail/OrderShipped.php and app/Mail/BlogPublished.php.
 
+        // A data argument that writes no keys down still passes what its
+        // type spells out: welcomeData() returns an array shape, so both
+        // names reach welcome.blade.php and this call satisfies its
+        // signature.  Hover $posts inside the template to see the type this
+        // shape gives it.
+        view('welcome', $this->welcomeData());
+
+        // The factory converts an Arrayable before rendering, so what
+        // WelcomeData::toArray() returns is what the template receives.
+        view('welcome', new WelcomeData());
+
         // A declared variable this call leaves out → `missing_view_variable`,
         // and a key nothing in welcome.blade.php (or anything it @includes)
         // reads → `unknown_view_variable`.  Both are intentional.
@@ -490,6 +502,22 @@ class Demo
         trans_choice('messages.notifications', 5);
         Lang::get('pagination.next');
         Lang::has('validation.required');
+    }
+
+    /**
+     * The data welcome.blade.php is rendered from, as one array shape.
+     *
+     * A call site that hands this straight to view() writes neither key
+     * down, so the shape is where both names and both types come from.
+     *
+     * @return array{user: ?BlogAuthor, posts: PostCollection}
+     */
+    private function welcomeData(): array
+    {
+        return [
+            'user' => BlogAuthor::first(),
+            'posts' => BlogPost::where('published', true)->get(),
+        ];
     }
 
 

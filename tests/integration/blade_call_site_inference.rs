@@ -272,6 +272,49 @@ mod tests {
         );
     }
 
+    /// A data argument that writes no names down still names its
+    /// variables in its type, so the template is typed from the shape.
+    #[tokio::test]
+    async fn a_shaped_data_argument_types_template_variables() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nclass Controller {\n    /** @param array{item: Item} $data */\n    public function show(array $data): mixed {\n        return view('shop', $data);\n    }\n}\n",
+                ),
+                ("resources/views/shop.blade.php", "{{ $item->name }}\n"),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
+        let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
+
+        open(
+            &backend,
+            &controller_uri,
+            "php",
+            &std::fs::read_to_string(root.join("app/Controller.php")).unwrap(),
+        )
+        .await;
+        open(
+            &backend,
+            &blade_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/shop.blade.php")).unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &blade_uri, 0, 4).await;
+        assert!(
+            hover.contains("Item"),
+            "the shape's entry should type the template variable, got: {}",
+            hover
+        );
+    }
+
     /// Injected variables must not shift diagnostics: an undefined
     /// variable in the template is still reported on the right line,
     /// and injected variables produce no undefined-variable diagnostic.

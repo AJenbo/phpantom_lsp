@@ -32,7 +32,7 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap};
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::types::ClassInfo;
@@ -666,6 +666,9 @@ impl Backend {
                 };
 
                 let mut vars: Vec<PassedVar> = Vec::new();
+                // Only what a shape argument turns out to hold can lower
+                // the completeness the walker settled syntactically.
+                let mut complete = site.complete;
                 for entry in site.entries {
                     let framework_bound = entry.framework_bound();
                     let (name, key_range, value_range, ty) = match entry {
@@ -706,19 +709,30 @@ impl Backend {
                             let ty = each_variable_type(collection, part, &var_ctx);
                             (name, key_range, (span.start.offset, span.end.offset), ty)
                         }
-                    };
-                    // Render FQNs so the injected `@var` resolves from the
-                    // template's namespace-less context.
-                    let ty = ty.resolve_names(&|name: &str| {
-                        if let Some(cls) = class_loader(name) {
-                            format!("\\{}", cls.fqn())
-                        } else {
-                            name.to_string()
+                        SiteEntry::Shape { expr } => {
+                            // Nothing at the call site spells the names out,
+                            // so the argument as a whole is what a diagnostic
+                            // about any one of them points at.
+                            let span = expr.span();
+                            let range = (span.start.offset, span.end.offset);
+                            match data_shape_entries(expr, &var_ctx) {
+                                Some(entries) => {
+                                    vars.extend(entries.into_iter().map(|(name, ty)| PassedVar {
+                                        name,
+                                        ty: qualify_class_names(ty, &class_loader),
+                                        key_range: range,
+                                        value_range: range,
+                                        framework_bound: false,
+                                    }))
+                                }
+                                None => complete = false,
+                            }
+                            continue;
                         }
-                    });
+                    };
                     vars.push(PassedVar {
                         name,
-                        ty,
+                        ty: qualify_class_names(ty, &class_loader),
                         key_range,
                         value_range,
                         framework_bound,
@@ -727,12 +741,48 @@ impl Backend {
                 result.push(ResolvedViewCall {
                     name_range: site.name_range,
                     vars,
-                    complete: site.complete,
+                    complete,
                     forwards_scope: site.forwards_scope,
                 });
             }
             result
         })
+    }
+
+    /// The type the file at `uri` holds under `name` at `offset`.
+    ///
+    /// `blade_rendering_scope` answers which names a template forwards to
+    /// the views it renders; this is the other half of that answer — what
+    /// it holds under one of them *where the render is written*, so a
+    /// `@foreach` binding reads as the loop binds it and a `@php`
+    /// assignment as the last write before the include leaves it.
+    ///
+    /// `content` is the template's virtual PHP, which is where every source
+    /// of a Blade scope lands: its own `@var` docblocks, the prologue the
+    /// backing class and the providers are injected into, and the
+    /// statements the body compiles to. So the ordinary variable
+    /// resolution answers it, at the offset of the render itself.
+    pub(crate) fn blade_scope_var_type(
+        &self,
+        file_ctx: &crate::types::FileContext,
+        content: &str,
+        offset: u32,
+        name: &str,
+    ) -> Option<PhpType> {
+        let class_loader = self.class_loader(file_ctx);
+        let function_loader = self.function_loader(file_ctx);
+        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+        let ty = crate::type_engine::variable::resolution::resolve_variable_php_type(
+            name,
+            content,
+            offset,
+            crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
+            &file_ctx.classes,
+            &class_loader,
+            Some(self),
+            Loaders::with_function(Some(&function_loader_cl)),
+        )?;
+        Some(qualify_class_names(ty, &class_loader))
     }
 
     /// Extract the variables one Blade caller passes to component tags,
@@ -801,14 +851,7 @@ impl Backend {
                         expr, &var_ctx,
                     )
                     .unwrap_or_else(PhpType::mixed);
-                        let ty = ty.resolve_names(&|name: &str| {
-                            if let Some(cls) = class_loader(name) {
-                                format!("\\{}", cls.fqn())
-                            } else {
-                                name.to_string()
-                            }
-                        });
-                        vars.push((name, ty));
+                        vars.push((name, qualify_class_names(ty, &class_loader)));
                     }
                     if !vars.is_empty() {
                         result.push(vars);
@@ -862,8 +905,9 @@ enum IterationPart {
 
 /// One variable passed at a call site: the value expression (array entry
 /// / `->with()` value), the same-named variable to resolve at the
-/// call-site offset (for `compact('name')`), or one of the two variables
-/// `@each` derives from the collection it iterates.
+/// call-site offset (for `compact('name')`), one of the two variables
+/// `@each` derives from the collection it iterates, or a whole data
+/// argument whose entries only its type names.
 #[derive(Clone)]
 enum SiteEntry<'ast, 'arena> {
     Expr {
@@ -880,6 +924,14 @@ enum SiteEntry<'ast, 'arena> {
         key_range: ByteRange,
         collection: &'ast Expression<'arena>,
         part: IterationPart,
+    },
+    /// A data argument written as anything but an array literal or a
+    /// `compact()` call — `view('page', $data)`, `->with($extra)`,
+    /// `array_merge($a, $b)`, a method call returning an array. It names
+    /// its variables only in its type, so it stands for however many
+    /// entries [`data_shape_entries`] reads off it.
+    Shape {
+        expr: &'ast Expression<'arena>,
     },
 }
 
@@ -1229,6 +1281,87 @@ fn each_variable_type(
     })
 }
 
+/// Render the class names a resolved type mentions as FQNs.
+///
+/// A call site's types are resolved in the caller's import context, while
+/// the template that receives them has neither those imports nor a
+/// namespace: an injected `@var User $user` in a template's prologue means
+/// the global `\User`, and a template's contract is qualified the same way
+/// before a call site is judged against it.
+fn qualify_class_names(
+    ty: PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    ty.resolve_names(&|name: &str| match class_loader(name) {
+        Some(cls) => format!("\\{}", cls.fqn()),
+        None => name.to_string(),
+    })
+}
+
+/// The interface Laravel's view factory accepts in place of a data array,
+/// converting it with `toArray()` before rendering.
+const ARRAYABLE: &str = "Illuminate\\Contracts\\Support\\Arrayable";
+
+/// The variables a data argument hands the template when only its type
+/// names them.
+///
+/// The argument is resolved through the shared pipeline and read as a
+/// single constant array shape, which is what Bladestan reads off
+/// `$scope->getType()`. Optional keys (`array{user?: User}`) are dropped:
+/// the caller may or may not pass them, so they stay reportable as missing
+/// while the guaranteed keys are still type-checked.
+///
+/// `None` when the type is not one shape, which leaves the call site
+/// incomplete and stands the missing and unknown checks down as before.
+fn data_shape_entries(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<(String, PhpType)>> {
+    let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, ctx)?;
+    array_shape_entries(&ty).or_else(|| arrayable_shape_entries(&ty, ctx))
+}
+
+/// The guaranteed entries of an array shape, under the names Blade's
+/// `extract()` would bind them to.
+///
+/// A positional entry, or one keyed by anything that is not a variable
+/// name, is dropped rather than counted against the shape: `extract()`
+/// skips it too, so it hides nothing the caller passes.
+fn array_shape_entries(ty: &PhpType) -> Option<Vec<(String, PhpType)>> {
+    let TypeKind::ArrayShape(entries) = ty.kind() else {
+        return None;
+    };
+    Some(
+        entries
+            .iter()
+            .filter(|entry| !entry.optional)
+            .filter_map(|entry| {
+                let key = entry.key.as_deref().filter(|key| is_variable_name(key))?;
+                Some((key.to_string(), entry.value_type.clone()))
+            })
+            .collect(),
+    )
+}
+
+/// The entries an `Arrayable` hands over: the factory calls `toArray()` on
+/// one before rendering, so its return type describes the data exactly as
+/// an array argument's own type does.
+fn arrayable_shape_entries(
+    ty: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<(String, PhpType)>> {
+    let class = (ctx.class_loader)(ty.base_name()?)?;
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &class,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    if !crate::class_lookup::is_subtype_of(&merged, ARRAYABLE, ctx.class_loader) {
+        return None;
+    }
+    array_shape_entries(merged.get_method_ci("toArray")?.return_type.as_ref()?)
+}
+
 /// Whether a helper function renders a view named by one of its string
 /// arguments.
 ///
@@ -1448,10 +1581,14 @@ fn collect_each_arguments<'ast, 'arena>(
 }
 
 /// Collect entries from a data expression: an array literal with
-/// string keys, or a `compact('a', 'b')` call (whose values are the
-/// same-named variables at the call site).
+/// string keys, a `compact('a', 'b')` call (whose values are the
+/// same-named variables at the call site), or anything else, whose
+/// entries are read off its resolved type instead (see
+/// [`data_shape_entries`]).
 ///
-/// Returns whether every entry of the expression was readable.
+/// Returns whether every entry the expression writes down was readable.
+/// An expression that writes none is readable here and answered for when
+/// its type is resolved.
 fn collect_from_data_expr<'ast, 'arena>(
     expr: &'ast Expression<'arena>,
     entries: &mut Vec<SiteEntry<'ast, 'arena>>,
@@ -1485,14 +1622,7 @@ fn collect_from_data_expr<'ast, 'arena>(
     match expr {
         Expression::Array(array) => collect_array_elements(&array.elements),
         Expression::LegacyArray(array) => collect_array_elements(&array.elements),
-        Expression::Call(Call::Function(fc)) => {
-            let Expression::Identifier(ident) = fc.function else {
-                return false;
-            };
-            let name = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
-            if !name.eq_ignore_ascii_case("compact") {
-                return false;
-            }
+        Expression::Call(Call::Function(fc)) if is_compact_call(fc) => {
             let mut complete = true;
             for arg in fc.argument_list.arguments.iter() {
                 match arg.value() {
@@ -1508,19 +1638,33 @@ fn collect_from_data_expr<'ast, 'arena>(
             }
             complete
         }
-        _ => false,
+        _ => {
+            entries.push(SiteEntry::Shape { expr });
+            true
+        }
     }
+}
+
+/// Whether a function call is `compact(…)`, whose arguments name the
+/// variables it copies out of the calling scope.
+fn is_compact_call(call: &FunctionCall<'_>) -> bool {
+    let Expression::Identifier(ident) = call.function else {
+        return false;
+    };
+    crate::util::strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("compact")
 }
 
 /// The contents of a single- or double-quoted string literal, when it
 /// is a plain identifier-safe name.
 pub(crate) fn string_literal_contents(s: &LiteralString<'_>) -> Option<String> {
     let value = s.value.map(bytes_to_str)?;
-    if value.is_empty()
-        || !value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        || value.chars().next().is_some_and(|c| c.is_ascii_digit())
-    {
-        return None;
-    }
-    Some(value.to_string())
+    is_variable_name(value).then(|| value.to_string())
+}
+
+/// Whether a key can name a PHP variable, and so survive the `extract()`
+/// Blade hands a template's data through.
+fn is_variable_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !value.starts_with(|c: char| c.is_ascii_digit())
 }

@@ -14,7 +14,7 @@ mod tests {
 
     const COMPOSER: &str = r#"{
         "require": { "laravel/framework": "^11.0" },
-        "autoload": { "psr-4": { "App\\": "app/" } }
+        "autoload": { "psr-4": { "App\\": "app/", "Illuminate\\": "illuminate/" } }
     }"#;
 
     const USER_CLASS: &str =
@@ -88,6 +88,14 @@ mod tests {
     fn controller(data: &str) -> String {
         format!(
             "<?php\nnamespace App;\nuse App\\Models\\User;\nclass ProfileController {{\n    public function show(User $user): mixed {{\n        return view('profile'{data});\n    }}\n}}\n"
+        )
+    }
+
+    /// A controller that renders `profile` with a variable of type `shape`
+    /// as its data argument, so the names it passes are only in its type.
+    fn shaped_controller(shape: &str) -> String {
+        format!(
+            "<?php\nnamespace App;\nclass ProfileController {{\n    /** @param {shape} $data */\n    public function show(array $data): mixed {{\n        return view('profile', $data);\n    }}\n}}\n"
         )
     }
 
@@ -709,6 +717,214 @@ mod tests {
         assert!(
             diags[0].1.contains("$caption"),
             "message should name the variable the partial is short of, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// A data argument that writes no names down still passes the ones its
+    /// type spells out, so a site built from a variable is checked on them.
+    #[tokio::test]
+    async fn a_shaped_data_argument_satisfies_the_contract() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/ProfileController.php",
+                &shaped_controller("array{title: string, user: \\App\\Models\\User}"),
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "expected a clean call site, got {diags:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_shaped_data_argument_short_of_a_declared_name_is_reported() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/ProfileController.php",
+                &shaped_controller("array{title: string}"),
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$user"),
+            "message should name the variable the shape is short of, got {:?}",
+            diags[0].1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_shaped_data_argument_of_the_wrong_type_is_reported() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/ProfileController.php",
+                &shaped_controller("array{title: int, user: \\App\\Models\\User}"),
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert!(
+            diags[0].1.contains("$title"),
+            "message should name the variable whose type is wrong, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// An optional key may or may not be there when the render happens, so
+    /// it is no more passed than an absent one.
+    #[tokio::test]
+    async fn an_optional_key_of_a_shaped_data_argument_is_still_missing() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/ProfileController.php",
+                &shaped_controller("array{title: string, user?: \\App\\Models\\User}"),
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$user"),
+            "message should name the optional key, got {:?}",
+            diags[0].1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_key_of_a_shaped_data_argument_the_template_never_reads_is_reported() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/ProfileController.php",
+                &shaped_controller("array{title: string, user: \\App\\Models\\User, extra: int}"),
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "unknown_view_variable");
+        assert!(
+            diags[0].1.contains("$extra"),
+            "message should name the key nothing reads, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// A `->with()` whose argument names nothing itself is read off its type
+    /// just as a `view()` data argument is.
+    #[tokio::test]
+    async fn a_shaped_with_argument_completes_the_call_site() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/ProfileController.php",
+                "<?php\nnamespace App;\nclass ProfileController {\n    /** @param array{user: \\App\\Models\\User} $extra */\n    public function show(array $extra): mixed {\n        return view('profile', ['title' => 'Profile'])->with($extra);\n    }\n}\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "expected a clean call site, got {diags:?}"
+        );
+    }
+
+    /// The factory converts an `Arrayable` before rendering, so what its
+    /// `toArray()` returns is the data the template receives.
+    #[tokio::test]
+    async fn an_arrayable_data_argument_is_read_through_to_array() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "illuminate/Contracts/Support/Arrayable.php",
+                "<?php\nnamespace Illuminate\\Contracts\\Support;\ninterface Arrayable { public function toArray(): array; }\n",
+            ),
+            (
+                "app/ProfileData.php",
+                "<?php\nnamespace App;\nuse Illuminate\\Contracts\\Support\\Arrayable;\nclass ProfileData implements Arrayable {\n    /** @return array{title: string} */\n    public function toArray(): array { return ['title' => 'Profile']; }\n}\n",
+            ),
+            (
+                "app/ProfileController.php",
+                "<?php\nnamespace App;\nclass ProfileController {\n    public function show(ProfileData $data): mixed {\n        return view('profile', $data);\n    }\n}\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$user"),
+            "the shape carries $title; only $user is short, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// A data argument whose type says nothing about its keys hides the
+    /// names it carries, so every check still stands down.
+    #[tokio::test]
+    async fn a_shapeless_data_argument_stands_the_checks_down() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/profile.blade.php", PROFILE),
+            (
+                "app/ProfileController.php",
+                "<?php\nnamespace App;\nclass ProfileController {\n    public function show(array $data): mixed {\n        return view('profile', array_merge($data, ['title' => 'Profile']));\n    }\n}\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    /// An `@include` inherits the scope it is written in, so the type the
+    /// surrounding template holds is the one the partial receives.
+    #[tokio::test]
+    async fn an_include_reports_an_inherited_type_the_partial_does_not_accept() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/card.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User $user\n */\n@endphp\n<p>{{ $user->email }}</p>\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $user\n */\n@endphp\n@include('partials.card')\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert!(
+            diags[0].1.contains("$user") && diags[0].1.contains("surrounding scope"),
+            "message should name the variable and where it came from, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// A name the surrounding template binds itself is inherited with the
+    /// type it was bound to, not merely as a name.
+    #[tokio::test]
+    async fn an_include_reports_an_inherited_loop_binding_of_the_wrong_type() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/card.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User $row\n */\n@endphp\n<p>{{ $row->email }}</p>\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var array<int, string> $rows\n */\n@endphp\n@foreach ($rows as $row)\n@include('partials.card')\n@endforeach\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert!(
+            diags[0].1.contains("$row"),
+            "message should name the loop binding, got {:?}",
             diags[0].1
         );
     }

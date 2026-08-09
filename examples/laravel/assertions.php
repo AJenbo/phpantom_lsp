@@ -1154,6 +1154,43 @@ check(
     !array_key_exists('callbacks', $viewData) && !array_key_exists('subject', $viewData)
 );
 
+// ─── Data arguments that are not arrays ──────────────────────────────────────
+
+// The view factory accepts an Arrayable where a data array goes and converts
+// it with toArray() before rendering, so `view('welcome', new WelcomeData())`
+// hands the template what that method returns.  PHPantom reads the same
+// return shape, which is only correct because the conversion happens.
+$factory = (new ReflectionClass(\Illuminate\View\Factory::class))->newInstanceWithoutConstructor();
+$parseData = new ReflectionMethod(\Illuminate\View\Factory::class, 'parseData');
+$arrayable = new class implements \Illuminate\Contracts\Support\Arrayable {
+    public function toArray(): array
+    {
+        return ['user' => null, 'posts' => []];
+    }
+};
+check(
+    'the view factory converts an Arrayable data argument with toArray()',
+    $parseData->invoke($factory, $arrayable) === ['user' => null, 'posts' => []]
+);
+
+// ─── The scope an @include inherits ──────────────────────────────────────────
+
+// @include compiles to a render of the partial with the variables defined at
+// that point in the including template, so a partial's declared variable can
+// arrive from the surrounding scope with no data passed at all — and with
+// whatever type that scope holds, which is what PHPantom checks it against.
+$compiler = new \Illuminate\View\Compilers\BladeCompiler(
+    new \Illuminate\Filesystem\Filesystem(),
+    sys_get_temp_dir()
+);
+check(
+    '@include hands the partial the variables the including template holds',
+    str_contains(
+        $compiler->compileString("@include('partials.author_badge')"),
+        'get_defined_vars()'
+    )
+);
+
 // ─── @each item and key variables ────────────────────────────────────────────
 
 // `@each('partial', $rows, 'row')` compiles to Factory::renderEach(), which

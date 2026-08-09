@@ -405,33 +405,6 @@ child template's own docblock, not on every call site that renders it
 (which is where Bladestan puts it), so it wants a diagnostic pass over
 the Blade file rather than a hook in the call-site collector.
 
-### BL20. Call-site data the checks stand down on
-
-`ResolvedViewCall::complete` is false whenever a call site's data cannot
-be read entry by entry, and the missing and unknown checks then skip the
-site entirely. That is the right default, but two shapes Bladestan still
-checks fall into it today:
-
-- **A data argument that is not a literal.** `view('page', $data)`,
-  `->with($extra)`, `array_merge($a, $b)`, and a method call returning an
-  array all collect nothing, so the site is not just exempt from the
-  missing check: its variables are never type-checked either. Bladestan
-  resolves any expression through `$scope->getType()` and reads a single
-  constant array shape off it, dropping optional keys (`array{user?:
-  User}`) so they stay reportable as missing while the guaranteed keys
-  are still validated. `PhpType::ArrayShape` carries the same
-  information, so this is a matter of running the data argument through
-  `resolve_expression_type` and reading the entries off the result when
-  it resolves to one shape. An `Arrayable` receiver resolves through its
-  `toArray()` return type the same way.
-- **The types a scope-forwarded `@include` inherits.** `blade_rendering_scope`
-  answers with names only, so a variable the surrounding template already
-  holds satisfies the partial's contract whatever its type. Bladestan
-  type-checks it against the signature and reports "but %s given by the
-  surrounding scope". Getting there means the rendering scope carrying
-  types rather than a `HashSet<String>`, which the forward walker can
-  answer for the template's virtual PHP at the include's offset.
-
 ### BL22. A template never learns anything from the templates that render it
 
 `compute_blade_injected_vars` skips every Blade file in the caller
@@ -760,14 +733,13 @@ Implement go-to-definition for view names and component tags.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file.
 
-### Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)
+### Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)
 
 Call-site validation is shipped. What is left widens it (BL23 for the
 render sites whose receiver only a type settles, BL19 for the covariance
-the merge does not check, BL20 for the data shapes the checks stand down
-on, BL22 for the templates that render other templates) and is
-independent of section/stack intelligence and custom directive
-discovery, so the six can land in any order.
+the merge does not check, BL22 for the templates that render other
+templates) and is independent of section/stack intelligence and custom
+directive discovery, so the five can land in any order.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
 gets typed completion for its declared variables at every render site,

@@ -44,6 +44,13 @@ pub(crate) fn is_framework_var(name: &str) -> bool {
     AMBIENT_VARS.contains(&name)
 }
 
+/// Whether Blade puts `name` in a template's scope itself, so what a
+/// partial inherits under it is the framework's own object rather than
+/// anything the surrounding template holds.
+pub(crate) fn is_framework_scope_var(name: &str) -> bool {
+    AMBIENT_VARS.contains(&name) || COMPONENT_SCOPE_VARS.contains(&name)
+}
+
 /// Whether a directive's view argument is one name or a list of
 /// candidates, of which Blade renders the first that exists.
 #[derive(Clone, Copy, PartialEq)]

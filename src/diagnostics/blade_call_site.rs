@@ -175,10 +175,24 @@ impl Backend {
                 );
                 for (name, ty) in &contract.vars {
                     if contract.supplied.contains(name)
-                        || inherited.contains(name)
                         || from_class.contains(name)
                         || site.vars.iter().any(|var| &var.name == name)
                     {
+                        continue;
+                    }
+                    // A name the render does not pass but the surrounding
+                    // scope holds arrives from there, so what the template
+                    // holds under it is judged against the declaration the
+                    // same way a passed value is.
+                    if inherited.contains(name) {
+                        self.check_inherited_var(
+                            uri,
+                            content,
+                            &file_ctx,
+                            (view_name, site.name_range),
+                            (name, ty),
+                            out,
+                        );
                         continue;
                     }
                     let Some(range) = self.offset_range_to_lsp_range(
@@ -228,6 +242,57 @@ impl Backend {
                 ));
             }
         }
+    }
+
+    /// Report the variable a scope-forwarding render inherits when the
+    /// surrounding template holds a type the rendered one does not accept.
+    ///
+    /// Blade hands an `@include` the scope it is written in, so a declared
+    /// name the directive does not pass still arrives — with whatever the
+    /// including template holds under it at that point. Nothing at the call
+    /// site names the variable, so the report points at the view name, the
+    /// way a missing one does.
+    fn check_inherited_var(
+        &self,
+        uri: &str,
+        content: &str,
+        file_ctx: &crate::types::FileContext,
+        (view_name, name_range): (&str, (u32, u32)),
+        (name, declared): (&str, &crate::php_type::PhpType),
+        out: &mut Vec<Diagnostic>,
+    ) {
+        // Blade builds these itself in every template, so what a partial
+        // inherits under one of them is the framework's object, not a value
+        // the including template decided.
+        if crate::blade::contract::is_framework_scope_var(name) {
+            return;
+        }
+        let Some(actual) = self.blade_scope_var_type(file_ctx, content, name_range.0, name) else {
+            return;
+        };
+        if is_type_compatible(&actual, declared, &self.class_loader(file_ctx), true) {
+            return;
+        }
+        let Some(range) = self.offset_range_to_lsp_range(
+            uri,
+            content,
+            name_range.0 as usize,
+            name_range.1 as usize,
+        ) else {
+            return;
+        };
+        out.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            TYPE_MISMATCH_CODE,
+            format!(
+                "View '{}' expects ${} of type {}, but {} given by the surrounding scope",
+                view_name,
+                name,
+                declared.conditionals_as_branch_unions(),
+                actual,
+            ),
+        ));
     }
 
     /// The names the class enclosing the call at `offset` puts in the
