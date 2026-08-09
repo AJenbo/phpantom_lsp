@@ -3003,6 +3003,23 @@ in the indexer.</p>
 it is the PHP spelling of <code>@each</code>, so both its view arguments are render
 sites and its data argument means what <code>blade_each_directive</code>'s does
 rather than what a data array does.</p>
+<p><strong>Acceptance tests.</strong> Bladestan's <code>view-call-site-view-methods</code> fixture
+is the behaviour spec, and every one of its cases is written against a
+typed receiver, so the whole fixture lands here. Given a template
+declaring <code>string $title</code> and <code>App\Models\User $user</code>, each of these
+passes only <code>$title</code> and must report <code>$user</code> missing:</p>
+<ul>
+<li><code>$factory-&gt;make('signed-template', ['title' =&gt; 'Hello'])</code>;</li>
+<li><code>$factory-&gt;first(['optional-override', 'signed-template'], […])</code>,
+  judged against the fallback candidate the list guarantees;</li>
+<li><code>$factory-&gt;renderWhen(true, 'signed-template', […])</code> and
+  <code>renderUnless(false, …)</code>, which name their template second;</li>
+<li><code>$mailable-&gt;markdown('signed-template', […])</code> on a <code>Mailable</code> held in a
+  parameter rather than reached through <code>$this</code>.</li>
+</ul>
+<p><code>$factory-&gt;renderEach('render-each-item', ['a', 'b'], 'item')</code> is the
+clean case: it binds <code>$item</code> and <code>$key</code> the way <code>@each</code> does, so a
+partial declaring exactly those two is satisfied and nothing is reported.</p>
 <h3 id="bl22-a-template-never-learns-anything-from-the-templates-that-render-it">BL22. A template never learns anything from the templates that render it<a class="headerlink" href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" title="Permanent link">&para;</a></h3>
 <p><code>compute_blade_injected_vars</code> skips every Blade file in the caller
 snapshot (<code>if self.is_blade_file(file_uri) { continue; }</code>, and
