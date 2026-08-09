@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786311189999,
+  "lastUpdate": 1786311516487,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17713,6 +17713,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "626a783e310562dd10658bc6845c9a85299caf8a",
+          "message": "Gate ability and policy strings",
+          "timestamp": "2026-08-09T23:22:01+02:00",
+          "tree_id": "5c9948a8ac875ca78b8c0bf06e97c5076cc9302d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/626a783e310562dd10658bc6845c9a85299caf8a"
+        },
+        "date": 1786311510522,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74,
             "unit": "MiB"
           }
         ]
