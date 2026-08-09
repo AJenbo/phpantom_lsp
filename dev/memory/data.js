@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786292223335,
+  "lastUpdate": 1786292285896,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17237,6 +17237,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "01db96655b5075d48922cff47167219e6bd65569",
+          "message": "An inline `@php(…)` no longer hides the rest of the template",
+          "timestamp": "2026-08-09T18:01:41+02:00",
+          "tree_id": "7bfb9fd001b52a4abe9a0954a51a2d61ef8f4aad",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/01db96655b5075d48922cff47167219e6bd65569"
+        },
+        "date": 1786292281140,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.5,
             "unit": "MiB"
           }
         ]
