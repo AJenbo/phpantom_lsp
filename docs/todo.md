@@ -32,7 +32,7 @@ within the same impact tier.
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#bl10-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
-| F8  | [Implementation → test navigation via `@covers`](todo/lsp-features.md#f8-implementation--test-navigation-via-covers)                                                        | Low         | Medium      |
+| F8  | [Implementation → test navigation via `@covers`](todo/lsp-features.md#f8-implementation-test-navigation-via-covers)                                                        | Low         | Medium      |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 
@@ -56,7 +56,7 @@ within the same impact tier.
 | BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
 | BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
-| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format---check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
+| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
 
 # Backlog
 

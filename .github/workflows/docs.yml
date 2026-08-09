@@ -15,6 +15,13 @@ on:
 permissions:
   contents: write
 
+# Both jobs push to the shared gh-pages branch via mike. Serialize runs so a
+# second deploy never builds on a gh-pages tip the first has already moved
+# past (which mike's push would then reject as non-fast-forward).
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
 jobs:
   # Only deploy from the upstream repo, not from forks (forks don't
   # have write access to gh-pages and would fail).
