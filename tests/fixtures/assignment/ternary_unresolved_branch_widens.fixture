@@ -1,0 +1,15 @@
+// test: a ternary branch that cannot be typed widens the union to mixed
+// feature: hover
+// Dropping the branch would leave the surviving one claiming to be the
+// complete set of what the variable holds.
+// expect: mixed
+// expect_absent: 'exception'
+---
+<?php
+
+function pick(bool $cond): void
+{
+    $value = $cond ? whateverThisIs() : 'exception';
+
+    echo $val<>ue;
+}

@@ -328,8 +328,14 @@ impl ResolvedType {
     /// Branch resolution can return class and scalar alternatives side by
     /// side. Joining the entire vector would discard `class_info`, but leaving
     /// every entry untouched produces unions such as `Foo|'fixed'|string`.
-    /// Normalize only the non-class alternatives, and skip unions containing
-    /// `mixed` because independent completion fallbacks must remain visible.
+    /// Normalize only the non-class alternatives.
+    ///
+    /// `mixed` absorbs every literal beside it, and that is the point: a
+    /// branch the resolver could not type is `mixed`, and the union it joins
+    /// must not go on advertising a sibling literal as if it were the whole
+    /// answer. The exception is a `mixed` buried in a compound alternative
+    /// such as `mixed|Foo`, where absorbing would drop the `Foo` that carries
+    /// the completion fallback.
     pub(crate) fn collapse_redundant_runtime_literals(
         results: Vec<ResolvedType>,
     ) -> Vec<ResolvedType> {
@@ -353,6 +359,14 @@ impl ResolvedType {
             }
         }
 
+        fn mixed_hides_alternatives(ty: &PhpType) -> bool {
+            match ty.kind() {
+                TypeKind::Union(members) => members.len() > 1 && members.iter().any(contains_mixed),
+                TypeKind::Nullable(inner) => contains_mixed(inner),
+                _ => false,
+            }
+        }
+
         let non_class_types: Vec<PhpType> = results
             .iter()
             .filter(|result| result.class_info.is_none())
@@ -360,7 +374,7 @@ impl ResolvedType {
             .collect();
         if non_class_types.is_empty()
             || !non_class_types.iter().any(contains_scalar_literal)
-            || non_class_types.iter().any(contains_mixed)
+            || non_class_types.iter().any(mixed_hides_alternatives)
         {
             return results;
         }

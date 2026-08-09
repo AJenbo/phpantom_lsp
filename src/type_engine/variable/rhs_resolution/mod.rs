@@ -440,6 +440,33 @@ fn resolve_null_coalesce_chain<'b>(
     }
 }
 
+/// Turn a branch that resolved to nothing into `mixed`.
+///
+/// A union built from branches must never come out narrower than the
+/// truth. A branch the resolver could not type still holds *some* value
+/// at runtime, so letting it vanish leaves the surviving branches
+/// claiming to be the complete set of what the expression can hold, and
+/// every consumer reads that as a confident answer: hover names one
+/// value, completion offers its members, and a diagnostic that treats the
+/// type as exhaustive contradicts the code.
+///
+/// Branches that produce no value at all (`throw`, `exit`, `die`) are the
+/// exception. They never reach the union, so they widen nothing.
+fn widen_unresolved_branch(expr: &Expression<'_>, results: Vec<ResolvedType>) -> Vec<ResolvedType> {
+    if !results.is_empty() || branch_yields_no_value(expr) {
+        return results;
+    }
+    vec![ResolvedType::from_type_string(PhpType::mixed())]
+}
+
+/// Whether a branch expression aborts instead of producing a value.
+fn branch_yields_no_value(expr: &Expression<'_>) -> bool {
+    matches!(
+        peel_type_transparent(expr),
+        Expression::Throw(_) | Expression::Construct(Construct::Exit(_) | Construct::Die(_))
+    )
+}
+
 /// Drop `null` from each resolved alternative of a `??` operand.
 ///
 /// Example: `?Foo ?? Bar` → `Foo|Bar`.  A bare `null` alternative is
@@ -486,9 +513,10 @@ fn resolve_conditional_chain<'b>(
         let truthiness = static_condition_truthiness(current.condition);
         if truthiness != Some(false) {
             let then_ctx = ctx.with_cursor_offset(then_expr.span().start.offset);
+            let then_results = resolve_rhs_expression(then_expr, &then_ctx);
             ResolvedType::extend_unique(
                 &mut combined,
-                resolve_rhs_expression(then_expr, &then_ctx),
+                widen_unresolved_branch(then_expr, then_results),
             );
         }
         if truthiness == Some(true) {
@@ -498,9 +526,10 @@ fn resolve_conditional_chain<'b>(
             Expression::Conditional(next) => current = next,
             _ => {
                 let else_ctx = ctx.with_cursor_offset(current.r#else.span().start.offset);
+                let else_results = resolve_rhs_expression(current.r#else, &else_ctx);
                 ResolvedType::extend_unique(
                     &mut combined,
-                    resolve_rhs_expression(current.r#else, &else_ctx),
+                    widen_unresolved_branch(current.r#else, else_results),
                 );
                 return simplify_branch_results(combined);
             }
@@ -784,8 +813,12 @@ fn resolve_rhs_expression_inner<'b>(
                     None
                 };
                 let effective_ctx = arm_ctx.as_ref().unwrap_or(ctx);
-                let arm_results = resolve_rhs_expression(arm.expression(), effective_ctx);
-                ResolvedType::extend_unique(&mut combined, arm_results);
+                let arm_expr = arm.expression();
+                let arm_results = resolve_rhs_expression(arm_expr, effective_ctx);
+                ResolvedType::extend_unique(
+                    &mut combined,
+                    widen_unresolved_branch(arm_expr, arm_results),
+                );
             }
             simplify_branch_results(combined)
         }

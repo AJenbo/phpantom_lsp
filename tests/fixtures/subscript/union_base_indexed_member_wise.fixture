@@ -1,0 +1,20 @@
+// test: indexing a union indexes every member instead of resolving to nothing
+// feature: hover
+// The `array` half yields its (unknown) element type, the `string` half
+// yields `string`, and the `null` half yields `null`, so the read is
+// `mixed` rather than untyped.  Modelled on Symfony's
+// YamlFileLoader::parseDefinition(), where the ternary below used to drop
+// its then branch and come out as the literal `'exception'`.
+// expect: mixed
+// expect_absent: 'exception'
+---
+<?php
+
+function parseDefinition(array|string|null $service): void
+{
+    $decorationOnInvalid = \array_key_exists('decoration_on_invalid', $service)
+        ? $service['decoration_on_invalid']
+        : 'exception';
+
+    echo $decoration<>OnInvalid;
+}

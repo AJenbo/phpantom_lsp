@@ -1,0 +1,12 @@
+// test: reading an offset off a string yields a string
+// feature: hover
+// expect: string
+---
+<?php
+
+function firstCharacter(string $word): void
+{
+    $first = $word[0];
+
+    echo $fi<>rst;
+}

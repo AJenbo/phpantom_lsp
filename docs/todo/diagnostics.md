@@ -258,4 +258,29 @@ all parameters are used. Users can now silence false positives with
 - Parameters in abstract methods and interface method signatures
   (no body to check).
 
+---
+
+## D16. `unreachable_match_arm` ignores literal subject types
+
+**Impact: Low-Medium · Effort: Low**
+
+`scalar_type_label` in `src/diagnostics/match_type_errors.rs` answers
+`None` for a literal type (`'exception'`, `42`), so a subject the
+resolver typed as one exact value never reaches the arm check and no
+arm is ever reported unreachable. The comment there explains why: a
+literal was as often what survived after resolution lost an
+alternative it could not type as it was a genuine one-value subject,
+and taking the claim without that evidence produced false positives.
+
+The resolver no longer loses those alternatives. An unresolvable
+branch now widens the union it belongs to instead of dropping out of
+it, so a literal that reaches this diagnostic is a claim the resolver
+stands behind.
+
+**Fix:** Give `TypeKind::Literal` its scalar kind in
+`scalar_type_label` and check the resulting arms. Cover the case the
+old comment was guarding against with a test: a subject whose other
+branch cannot be typed must still produce no diagnostic, because it
+now resolves to `mixed` rather than to the surviving literal.
+
 

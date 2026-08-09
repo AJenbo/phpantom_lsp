@@ -102,10 +102,10 @@ unlikely to move the needle for most users.
 | D13 | [Unify diagnostic subject resolution with completion/hover](todo/diagnostics.md#d13-unify-diagnostic-subject-resolution-with-completionhover)                              | Medium      | Medium      |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Low         |
 | D3  | [Deprecated rendering — chain subject resolution](todo/diagnostics.md#d3-deprecated-rendering-chain-subject-resolution)                                                    | Low-Medium  | Medium      |
+| D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Low         |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B68 | [An unresolvable branch drops out of a union instead of widening it](todo/bugs.md#b68-an-unresolvable-branch-drops-out-of-a-union-instead-of-widening-it)                   | High        | Medium      |
 | B69 | [A `Blueprint` macro is missing from the schema index until a migration is edited](todo/bugs.md#b69-a-blueprint-macro-is-missing-from-the-schema-index-until-a-migration-is-edited) | Medium      | Low         |
 | B70 | [Migration discovery and the migration watcher disagree on ignored directories](todo/bugs.md#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories) | Low-Medium  | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |

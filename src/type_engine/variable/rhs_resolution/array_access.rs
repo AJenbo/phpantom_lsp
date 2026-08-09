@@ -113,56 +113,10 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
     // Walk each bracket segment, narrowing the type at each step.
     for seg in &segments {
-        // Try pure-type extraction first (array shapes, generics).
-        let extracted = match seg {
-            ArrayBracketSegment::StringKey(key) | ArrayBracketSegment::IntKey(key) => current
-                .shape_value_type(key)
-                .cloned()
-                .or_else(|| current.extract_element_type().cloned()),
-            // A dynamic (non-literal) key can address any entry, so a
-            // shape yields the union of its value types (via
-            // `iterable_element_type`); generic arrays yield their
-            // value type as before.
-            ArrayBracketSegment::ElementAccess => current.iterable_element_type(),
+        let Some(element) = index_segment(&current, seg, ctx) else {
+            return vec![];
         };
-
-        if let Some(element) = extracted {
-            current = element;
-        } else {
-            // Fallback: when the current type is a plain class name (e.g.
-            // `OpeningHours`), resolve the class and check its iterable
-            // generics (`@extends`, `@implements`) for the element type.
-            // This handles `$obj->prop['key']` where `prop` is a collection
-            // class like `OpeningHours extends DataCollection<string, Day>`.
-            let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &current,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )
-            .into_iter()
-            .find_map(|cls| {
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    ctx.class_loader,
-                    ctx.resolved_class_cache,
-                );
-                crate::type_engine::variable::foreach_resolution::extract_iterable_element_type_from_class(
-                    &merged,
-                    ctx.class_loader,
-                )
-            });
-
-            if let Some(element) = class_element {
-                current = element;
-            } else if current.is_bare_array() || current.is_mixed() {
-                // Bare `array` and `mixed` have unknown element types;
-                // accessing any key yields `mixed`.
-                current = PhpType::mixed();
-            } else {
-                return vec![];
-            }
-        }
+        current = element;
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
@@ -191,6 +145,122 @@ pub(super) fn resolve_rhs_array_access<'b>(
     } else {
         ResolvedType::from_classes_with_hint(classes, current)
     }
+}
+
+/// Read one bracket segment off `base` and return the value type it
+/// yields, or `None` when the offset read cannot be typed at all.
+///
+/// A union is indexed member-wise and the results joined, because each
+/// member answers the offset read differently: an array yields its
+/// element or shape value type, a string yields `string`, and `null` (or
+/// any other non-array scalar) yields `null`, which is what PHP itself
+/// produces for an offset read on such a value. Indexing the union as a
+/// whole instead would find no element type and resolve to nothing, and a
+/// caller unioning that away turns a value it knows nothing about into a
+/// type narrower than the truth.
+///
+/// For the same reason a member the walk cannot type widens the join to
+/// `mixed` rather than dropping out of it.
+///
+/// The one member that defers instead of widening is an array that names
+/// no element type (`array`, `iterable`, an unparameterised `list`).
+/// Indexing it can only answer `mixed`, and on its own that is the honest
+/// answer. Beside a sibling array that *does* name an element type it is
+/// the same alternative spelled vaguer, though, so letting it through
+/// would drown the sibling's answer out of the join.
+fn index_segment(
+    base: &PhpType,
+    seg: &ArrayBracketSegment,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    match base.kind() {
+        TypeKind::Union(members) => {
+            let indexed: Vec<(bool, PhpType)> = members
+                .iter()
+                .map(|member| {
+                    let value = index_segment(member, seg, ctx).unwrap_or_else(PhpType::mixed);
+                    (member.is_array_like(), value)
+                })
+                .collect();
+            let specific_array = indexed
+                .iter()
+                .any(|(array_like, value)| *array_like && !value.is_mixed());
+            let joined: Vec<PhpType> = indexed
+                .into_iter()
+                .filter(|(array_like, value)| !(specific_array && *array_like && value.is_mixed()))
+                .map(|(_, value)| value)
+                .collect();
+            return Some(PhpType::join_runtime_value_types(joined));
+        }
+        // `?T` is `T|null`, and the `null` half yields `null`.
+        TypeKind::Nullable(inner) => {
+            let indexed = index_segment(inner, seg, ctx).unwrap_or_else(PhpType::mixed);
+            return Some(PhpType::join_runtime_value_types(vec![
+                indexed,
+                PhpType::null(),
+            ]));
+        }
+        _ => {}
+    }
+
+    // Try pure-type extraction first (array shapes, generics).
+    let extracted = match seg {
+        ArrayBracketSegment::StringKey(key) | ArrayBracketSegment::IntKey(key) => base
+            .shape_value_type(key)
+            .cloned()
+            .or_else(|| base.extract_element_type().cloned()),
+        // A dynamic (non-literal) key can address any entry, so a shape
+        // yields the union of its value types (via
+        // `iterable_element_type`); generic arrays yield their value type
+        // as before.
+        ArrayBracketSegment::ElementAccess => base.iterable_element_type(),
+    };
+    if let Some(element) = extracted {
+        return Some(element);
+    }
+
+    // Fallback: when the base type is a plain class name (e.g.
+    // `OpeningHours`), resolve the class and check its iterable generics
+    // (`@extends`, `@implements`) for the element type. This handles
+    // `$obj->prop['key']` where `prop` is a collection class like
+    // `OpeningHours extends DataCollection<string, Day>`.
+    let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        base,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    )
+    .into_iter()
+    .find_map(|cls| {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        crate::type_engine::variable::foreach_resolution::extract_iterable_element_type_from_class(
+            &merged,
+            ctx.class_loader,
+        )
+    });
+    if let Some(element) = class_element {
+        return Some(element);
+    }
+
+    if base.is_bare_array() || base.is_mixed() {
+        // Bare `array` and `mixed` have unknown element types; accessing
+        // any key yields `mixed`.
+        return Some(PhpType::mixed());
+    }
+    // A string offset is itself a one-character string.
+    if base.is_string_subtype() {
+        return Some(PhpType::string());
+    }
+    // Reading an offset off anything else that is not an object yields
+    // `null` at runtime (with a warning), rather than being untypeable.
+    if base.is_null() || base.is_int_subtype() || base.is_float_subtype() || base.is_bool() {
+        return Some(PhpType::null());
+    }
+    None
 }
 
 /// Classification of an array access index expression.

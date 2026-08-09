@@ -1,0 +1,17 @@
+// test: a throwing match arm produces no value, so it does not widen the union
+// feature: hover
+// expect: int
+// expect_absent: mixed
+---
+<?php
+
+function score(string $grade): void
+{
+    $points = match ($grade) {
+        'a' => 10,
+        'b' => 5,
+        default => throw new \InvalidArgumentException($grade),
+    };
+
+    echo $poi<>nts;
+}
