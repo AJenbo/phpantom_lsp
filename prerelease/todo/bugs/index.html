@@ -849,6 +849,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. Directive coverage gaps in <code>match_directive</code>/<code>translate_directive</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1338,6 +1349,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B3. Directive coverage gaps in <code>match_directive</code>/<code>translate_directive</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1416,6 +1438,32 @@ defaults, its component scope, its backing class members, and its
 provider vars. <code>blade_layout_chain</code> returns the view name alongside the
 source, so the names each level needs are already in hand.
 <code>blade_rendering_scope</code> has the same shape and needs the same fix.</p>
+<h3 id="b3-directive-coverage-gaps-in-match_directivetranslate_directive">B3. Directive coverage gaps in <code>match_directive</code>/<code>translate_directive</code><a class="headerlink" href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" title="Permanent link">&para;</a></h3>
+<p>Discovered while building directive-name completion (<code>DIRECTIVE_COMPLETIONS</code>
+in <code>src/blade/directives.rs</code>) and cross-checking it against Laravel's own
+compiler source (<code>Illuminate\View\Compilers\Concerns\*</code>, vendored under
+<code>examples/laravel/vendor/laravel/framework/</code>).</p>
+<p><strong>Directives <code>match_directive</code> (<code>src/blade/directives.rs</code>) does not
+recognise at all</strong>, so a template that writes them is silently left
+unprocessed (masked as inert HTML) rather than mistranslated:
+<code>@can</code>/<code>@cannot</code>/<code>@canany</code>/<code>@elsecan</code>/<code>@elsecannot</code>/<code>@elsecanany</code>/
+<code>@endcan</code>/<code>@endcannot</code>/<code>@endcanany</code> (<code>CompilesAuthorizations.php</code>),
+<code>@lang</code>/<code>@endlang</code>/<code>@choice</code> (<code>CompilesTranslations.php</code>), <code>@unset</code>
+(<code>CompilesRawPhp.php</code>), and <code>@js</code>/<code>@vite</code>/<code>@viteReactRefresh</code>/<code>@fonts</code>/<code>@dd</code>
+(<code>CompilesJs.php</code>/<code>CompilesHelpers.php</code>).</p>
+<p><strong>Directives that are recognised but whose arguments <code>translate_directive</code>
+still degrades to a bare comment</strong> (<code>_ =&gt; format!("/* @{directive} */")</code>)
+instead of an expression-preserving <code>blade_directive(...)</code> call, so their
+arguments go completely untyped: <code>pushIf</code>, <code>pushOnce</code>, <code>prependOnce</code>,
+<code>endPushIf</code>, <code>endPushOnce</code>, <code>endPrependOnce</code>, <code>hasStack</code>, <code>csrf</code>, <code>parent</code>,
+<code>continue</code>. The last three take no arguments in real Blade, so a comment is
+correct for them; the rest do take arguments that should be type-checked
+the way <code>@error</code>/<code>@session</code>/<code>@context</code> already are.</p>
+<p>Fix: add the missing directives to <code>match_directive</code>'s list with real
+translations (each has a <code>compile*</code> method in the vendored source above to
+copy the shape from), and give <code>pushIf</code>/<code>pushOnce</code>/<code>prependOnce</code>/<code>hasStack</code>
+a <code>blade_directive(...)</code>-style translation instead of falling through to
+the default comment.</p>
 
 
 
