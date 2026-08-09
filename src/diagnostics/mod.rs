@@ -204,6 +204,7 @@
 
 mod argument_count;
 mod blade_call_site;
+mod blade_directives;
 mod blade_signature;
 pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
@@ -479,6 +480,10 @@ impl Backend {
             step!(
                 "blade_signature",
                 self.collect_blade_signature_diagnostics(uri_str, out)
+            );
+            step!(
+                "blade_directive_balance",
+                self.collect_blade_directive_diagnostics(uri_str, out)
             );
         }
     }

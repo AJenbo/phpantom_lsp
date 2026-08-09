@@ -113,6 +113,7 @@ mod diag_forward_walk_complex_expr;
 mod diag_timing;
 mod diagnostics_argument_count;
 mod diagnostics_assertion_variables;
+mod diagnostics_blade;
 mod diagnostics_blade_call_site;
 mod diagnostics_blade_signature;
 mod diagnostics_compound_narrowing;

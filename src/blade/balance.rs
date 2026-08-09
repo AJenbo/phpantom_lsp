@@ -1,0 +1,601 @@
+//! Whether a template's block directives pair up.
+//!
+//! Blade compiles every directive independently by name: `@foreach` becomes
+//! a `foreach (…):` and `@endif` an `endif;`, with nothing checking that the
+//! two belong together. A template that closes a loop with the wrong
+//! directive therefore compiles without complaint and fails at render time,
+//! with the error pointing at the compiled cache file rather than at the
+//! template. The same goes for a block nobody closes.
+//!
+//! This scan reads the raw Blade source (not the virtual PHP the
+//! preprocessor emits) and walks the directive stream with a stack of open
+//! blocks. The regions Blade itself excludes from directive processing —
+//! comments, `@verbatim`, and `@php` blocks — are masked out first by
+//! [`super::signature::inert_regions`], the same scan the `@props` and
+//! component-tag readers use, so an `@endif` written in prose or in PHP
+//! code opens and closes nothing here either.
+
+use std::ops::Range;
+
+use super::directives::match_directive;
+use super::signature::{
+    InertOpener, inert_regions, mask_regions, matching_paren, split_top_level_args,
+};
+
+/// A byte range of the original Blade source.
+pub(crate) type Span = Range<usize>;
+
+/// A place where the block structure does not add up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Imbalance {
+    /// A closing directive that does not close the innermost open block.
+    Mismatched {
+        closer: Span,
+        found: &'static str,
+        expected: &'static str,
+        opener: &'static str,
+        opener_span: Span,
+    },
+    /// A closing directive with no open block to close.
+    Unexpected {
+        closer: Span,
+        found: &'static str,
+        opener: &'static str,
+    },
+    /// A block the template never closes.
+    Unclosed {
+        opener_span: Span,
+        opener: &'static str,
+        expected: &'static str,
+    },
+}
+
+impl Imbalance {
+    /// The range the report is anchored on: the offending directive
+    /// itself.
+    pub(crate) fn span(&self) -> &Span {
+        match self {
+            Imbalance::Mismatched { closer, .. } | Imbalance::Unexpected { closer, .. } => closer,
+            Imbalance::Unclosed { opener_span, .. } => opener_span,
+        }
+    }
+}
+
+/// When a directive opens a block that has to be closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Opens {
+    /// Always, argument list or not: `@once`, `@auth`, `@auth('admin')`.
+    Always,
+    /// Only with an argument list. Blade has nothing to compile without
+    /// one, and the bare name in a template is something else: `@empty` is
+    /// `@forelse`'s separator, and an `@error="…"` in markup is a
+    /// JavaScript framework's event binding.
+    WithArgs,
+    /// `@section('sidebar')` opens a section; the two-argument
+    /// `@section('title', 'Home')` is a complete statement on its own.
+    Section,
+    /// `@lang` and `@lang(['count' => 1])` open a translation block, while
+    /// `@lang('messages.welcome')` echoes one string.
+    Lang,
+    /// Never, because the region scan consumes the whole block before the
+    /// stack is built. The entry exists only to name the opener a stray
+    /// closer is missing.
+    Never,
+}
+
+/// One block-structuring directive: what opens it, what Blade accepts as
+/// its close, and when the opener actually opens a block.
+///
+/// Laravel compiles most of these closers to a bare `endif;`, so its own
+/// compiler would accept any of them anywhere. The pairing below is the one
+/// Laravel's documentation gives and the one every Blade-aware editor
+/// checks, which is what an author means when they write it.
+struct Block {
+    opener: &'static str,
+    closers: &'static [&'static str],
+    opens: Opens,
+}
+
+const BLOCKS: &[Block] = &[
+    Block {
+        opener: "if",
+        closers: &["endif"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "unless",
+        closers: &["endunless"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "isset",
+        closers: &["endisset"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "empty",
+        closers: &["endempty"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "foreach",
+        closers: &["endforeach"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "forelse",
+        closers: &["endforelse"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "for",
+        closers: &["endfor"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "while",
+        closers: &["endwhile"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "switch",
+        closers: &["endswitch"],
+        opens: Opens::WithArgs,
+    },
+    // Laravel compiles all three to a plain `if`, so `@endif` is what
+    // closes them.
+    Block {
+        opener: "hasSection",
+        closers: &["endif"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "sectionMissing",
+        closers: &["endif"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "hasStack",
+        closers: &["endif"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "auth",
+        closers: &["endauth"],
+        opens: Opens::Always,
+    },
+    Block {
+        opener: "guest",
+        closers: &["endguest"],
+        opens: Opens::Always,
+    },
+    Block {
+        opener: "production",
+        closers: &["endproduction"],
+        opens: Opens::Always,
+    },
+    Block {
+        opener: "env",
+        closers: &["endenv"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "session",
+        closers: &["endsession"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "context",
+        closers: &["endcontext"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "error",
+        closers: &["enderror"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "can",
+        closers: &["endcan"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "cannot",
+        closers: &["endcannot"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "canany",
+        closers: &["endcanany"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "once",
+        closers: &["endonce"],
+        opens: Opens::Always,
+    },
+    Block {
+        opener: "fragment",
+        closers: &["endfragment"],
+        opens: Opens::WithArgs,
+    },
+    // A section ends with any of the four directives that publish it.
+    Block {
+        opener: "section",
+        closers: &["endsection", "stop", "show", "append", "overwrite"],
+        opens: Opens::Section,
+    },
+    Block {
+        opener: "push",
+        closers: &["endpush"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "pushIf",
+        closers: &["endPushIf"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "pushOnce",
+        closers: &["endPushOnce"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "prepend",
+        closers: &["endprepend"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "prependOnce",
+        closers: &["endPrependOnce"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "component",
+        closers: &["endcomponent"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "componentFirst",
+        closers: &["endcomponentFirst"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "slot",
+        closers: &["endslot"],
+        opens: Opens::WithArgs,
+    },
+    Block {
+        opener: "lang",
+        closers: &["endlang"],
+        opens: Opens::Lang,
+    },
+    Block {
+        opener: "verbatim",
+        closers: &["endverbatim"],
+        opens: Opens::Never,
+    },
+    Block {
+        opener: "php",
+        closers: &["endphp"],
+        opens: Opens::Never,
+    },
+];
+
+/// Every block directive in `content` that does not pair up.
+pub(crate) fn check(content: &str) -> Vec<Imbalance> {
+    if !content.contains('@') {
+        return Vec::new();
+    }
+
+    let regions = inert_regions(content, true);
+    let masked = mask_regions(content, &regions);
+    let bytes = masked.as_bytes();
+
+    let mut out: Vec<Imbalance> = Vec::new();
+    let mut stack: Vec<(&Block, Span)> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'@' {
+            i += 1;
+            continue;
+        }
+        let Some((name, args)) = directive_at(&masked, i) else {
+            i += 1;
+            continue;
+        };
+        let span = i..i + 1 + name.len();
+        // Continue past the argument list, so a directive name written
+        // inside one (`@include('partials.@endif')`) is not read as a
+        // directive of its own.
+        i = args.as_ref().map_or(span.end, |args| args.end);
+
+        if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
+            if opens_block(block, &masked, args.as_ref()) {
+                stack.push((block, span));
+            }
+            continue;
+        }
+        let Some(block) = BLOCKS.iter().find(|block| block.closers.contains(&name)) else {
+            continue;
+        };
+        match stack
+            .iter()
+            .rposition(|(open, _)| open.closers.contains(&name))
+        {
+            // The closer belongs to a block that is open. Anything opened
+            // inside it was never closed, and nothing later can close it
+            // now, so the innermost of those is reported here and the
+            // whole run comes off the stack.
+            Some(index) => {
+                if let Some((skipped, skipped_span)) = stack.get(index + 1) {
+                    out.push(Imbalance::Mismatched {
+                        closer: span,
+                        found: name,
+                        expected: skipped.closers[0],
+                        opener: skipped.opener,
+                        opener_span: skipped_span.clone(),
+                    });
+                }
+                stack.truncate(index);
+            }
+            // No open block takes this closer: inside one, the author
+            // named the wrong end for it; outside every block, the closer
+            // stands alone.
+            None => match stack.pop() {
+                Some((open, open_span)) => out.push(Imbalance::Mismatched {
+                    closer: span,
+                    found: name,
+                    expected: open.closers[0],
+                    opener: open.opener,
+                    opener_span: open_span,
+                }),
+                None => out.push(Imbalance::Unexpected {
+                    closer: span,
+                    found: name,
+                    opener: block.opener,
+                }),
+            },
+        }
+    }
+
+    // An unterminated `@verbatim` or `@php` swallows the rest of the
+    // template, so everything still open at this point is open only
+    // because its closer was eaten. Report the region that ate them and
+    // leave the stack alone.
+    let unterminated = regions
+        .iter()
+        .find(|region| !region.terminated && region.opener != InertOpener::Comment);
+    if let Some(region) = unterminated {
+        let (opener, expected) = match region.opener {
+            InertOpener::Verbatim => ("verbatim", "endverbatim"),
+            _ => ("php", "endphp"),
+        };
+        out.push(Imbalance::Unclosed {
+            opener_span: region.span.start..region.span.start + 1 + opener.len(),
+            opener,
+            expected,
+        });
+    } else {
+        for (block, span) in stack {
+            out.push(Imbalance::Unclosed {
+                opener_span: span,
+                opener: block.opener,
+                expected: block.closers[0],
+            });
+        }
+    }
+
+    out.sort_by_key(|imbalance| imbalance.span().start);
+    out
+}
+
+/// Whether an occurrence of `block`'s opener with `args` opens a block.
+fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
+    match block.opens {
+        Opens::Always => true,
+        Opens::WithArgs => args.is_some(),
+        Opens::Section => {
+            args.is_some_and(|args| split_top_level_args(inside(content, args)).len() < 2)
+        }
+        Opens::Lang => args.is_none_or(|args| inside(content, args).trim_start().starts_with('[')),
+        Opens::Never => false,
+    }
+}
+
+/// The argument text between a directive's parentheses.
+fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
+    content
+        .get(args.start + 1..args.end - 1)
+        .unwrap_or_default()
+}
+
+/// The directive at `at` (which is on an `@`), and the byte range of its
+/// argument list, parentheses included, when it has one.
+///
+/// Blade's own `compileStatements` pattern is anchored with `\B`, so a name
+/// glued to a preceding word is not a directive: an `@production` in
+/// `admin@production.example` compiles to nothing, and `@@if` is the escape
+/// for a literal `@if`.
+fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
+    let bytes = content.as_bytes();
+    if at > 0 && (bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1])) {
+        return None;
+    }
+    let name = match_directive(content.get(at + 1..)?)?;
+    let after = at + 1 + name.len();
+    // `@error="…"` and `@class="…"` are a JavaScript framework's bindings
+    // written in markup. Blade has no directive form that runs a name into
+    // an `=`, so neither opens nor closes anything.
+    if bytes.get(after) == Some(&b'=') {
+        return None;
+    }
+    // Blade allows spaces and tabs, but no newline, between a directive
+    // name and its opening parenthesis.
+    let mut open = after;
+    while matches!(bytes.get(open), Some(b' ' | b'\t')) {
+        open += 1;
+    }
+    if bytes.get(open) != Some(&b'(') {
+        return Some((name, None));
+    }
+    // An unterminated argument list is a template mid-edit; the directive
+    // is read without one rather than swallowing the rest of the file.
+    Some((name, matching_paren(bytes, open).map(|end| open..end + 1)))
+}
+
+fn is_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The imbalances of `content` as short strings, for readable
+    /// assertions: `"mismatched endif/endforeach"`, `"unexpected endif"`,
+    /// `"unclosed if"`.
+    fn report(content: &str) -> Vec<String> {
+        check(content)
+            .into_iter()
+            .map(|imbalance| match imbalance {
+                Imbalance::Mismatched {
+                    found, expected, ..
+                } => format!("mismatched {found}/{expected}"),
+                Imbalance::Unexpected { found, .. } => format!("unexpected {found}"),
+                Imbalance::Unclosed { opener, .. } => format!("unclosed {opener}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn paired_directives_report_nothing() {
+        let blade = "@foreach ($rows as $row)\n\
+                     @if ($row->visible)\n\
+                     <p>{{ $row->name }}</p>\n\
+                     @else\n\
+                     <p>hidden</p>\n\
+                     @endif\n\
+                     @endforeach\n\
+                     @forelse ($rows as $row)\n{{ $row }}\n@empty\nnone\n@endforelse\n\
+                     @section('body')\n@show\n\
+                     @push('scripts')\n@endpush\n\
+                     @once\n@endonce\n\
+                     @auth\n@endauth\n\
+                     @can('edit', $post)\n@endcan\n";
+        assert!(report(blade).is_empty(), "{:?}", report(blade));
+    }
+
+    #[test]
+    fn a_closer_for_another_block_is_mismatched() {
+        assert_eq!(
+            report("@foreach ($rows as $row)\n@endif\n"),
+            ["mismatched endif/endforeach"]
+        );
+    }
+
+    #[test]
+    fn a_closer_with_nothing_open_is_unexpected() {
+        assert_eq!(report("<p>hi</p>\n@endif\n"), ["unexpected endif"]);
+    }
+
+    #[test]
+    fn a_block_the_template_never_closes_is_reported() {
+        assert_eq!(report("@if ($ok)\n<p>hi</p>\n"), ["unclosed if"]);
+    }
+
+    /// The `@empty` of a `@forelse` is a separator, but `@empty($rows)` is
+    /// a block of its own.
+    #[test]
+    fn empty_is_read_by_its_argument_list() {
+        assert!(report("@forelse ($rows as $row)\n@empty\n@endforelse\n").is_empty());
+        assert_eq!(report("@empty($rows)\nnone\n"), ["unclosed empty"]);
+        assert!(report("@empty($rows)\nnone\n@endempty\n").is_empty());
+    }
+
+    /// The two-argument `@section` is a complete statement; the
+    /// one-argument form opens a block.
+    #[test]
+    fn a_two_argument_section_opens_nothing() {
+        assert!(report("@section('title', 'Home')\n").is_empty());
+        assert_eq!(report("@section('body')\n"), ["unclosed section"]);
+        assert!(report("@section('body')\n@endsection\n").is_empty());
+    }
+
+    /// `@lang('key')` echoes a string; the bare and array forms buffer a
+    /// translation block.
+    #[test]
+    fn lang_is_read_by_its_argument_list() {
+        assert!(report("@lang('messages.welcome')\n").is_empty());
+        assert_eq!(report("@lang\nhello\n"), ["unclosed lang"]);
+        assert!(report("@lang\nhello\n@endlang\n").is_empty());
+    }
+
+    /// A directive is only a directive where Blade compiles one: not in a
+    /// comment, a `@verbatim` block, a `@php` block, an escaped `@@if`,
+    /// glued to a word, or as a markup attribute name.
+    #[test]
+    fn text_that_only_looks_like_a_directive_is_left_alone() {
+        assert!(report("{{-- @if ($ok) --}}\n").is_empty());
+        assert!(report("@verbatim\n@if\n@endif\n@endverbatim\n").is_empty());
+        assert!(report("@php\n// @endif\n@endphp\n").is_empty());
+        assert!(report("@@if ($ok)\n").is_empty());
+        assert!(report("<a href=\"mailto:admin@production.example\">x</a>\n").is_empty());
+        assert!(report("<img @error=\"fallback()\">\n").is_empty());
+        assert!(report("@include('partials.@endif')\n").is_empty());
+    }
+
+    /// An unterminated `@verbatim` eats every directive after it, so it is
+    /// the only thing worth reporting.
+    #[test]
+    fn an_unterminated_inert_region_is_the_only_report() {
+        assert_eq!(
+            report("@if ($ok)\n@verbatim\n@endif\n"),
+            ["unclosed verbatim"]
+        );
+        assert_eq!(report("@php\n$x = 1;\n"), ["unclosed php"]);
+    }
+
+    /// A stray closer for a region the scan consumed whole still has an
+    /// opener to name.
+    #[test]
+    fn a_stray_region_closer_is_unexpected() {
+        assert_eq!(
+            report("<p>hi</p>\n@endverbatim\n"),
+            ["unexpected endverbatim"]
+        );
+        assert_eq!(report("@php($x = 1)\n@endphp\n"), ["unexpected endphp"]);
+    }
+
+    /// A closer that closes a block further out is that block's close, and
+    /// what it skipped past is the one report: the `@if` here is what has
+    /// no end, not the `@section` the `@show` publishes.
+    #[test]
+    fn a_closer_matching_a_deeper_block_reports_what_it_skipped() {
+        assert_eq!(
+            report("@section('body')\n@if ($ok)\n<p>hi</p>\n@show\n"),
+            ["mismatched show/endif"]
+        );
+    }
+
+    /// Every closer in the table has to be a directive the preprocessor
+    /// recognises, or a template using it would never reach this scan.
+    #[test]
+    fn every_block_name_is_a_known_directive() {
+        for block in BLOCKS {
+            assert_eq!(
+                match_directive(block.opener),
+                Some(block.opener),
+                "opener {:?} is not a known directive",
+                block.opener
+            );
+            for closer in block.closers {
+                assert_eq!(
+                    match_directive(closer),
+                    Some(*closer),
+                    "closer {closer:?} is not a known directive"
+                );
+            }
+        }
+    }
+}

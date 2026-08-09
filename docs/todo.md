@@ -28,7 +28,6 @@ within the same impact tier.
 | BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor)          | High       | High       |
 | BL4  | [Component tag and attribute completion](todo/blade.md#bl4-component-tag-and-attribute-completion)                         | High       | Medium     |
 | BL5  | [Go-to-definition for component tags](todo/blade.md#bl5-go-to-definition-for-component-tags)                               | Medium     | Medium     |
-| BL13 | [Mismatched and unbalanced directive diagnostics](todo/blade.md#bl13-mismatched-and-unbalanced-directive-diagnostics)       | Medium     | Low-Medium |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#bl10-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
@@ -53,6 +52,7 @@ within the same impact tier.
 | ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------- |
 |      | Clear [refactoring gate](todo/refactor.md)                                                                                | —          | —          |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium     |
+| BL23 | [Unbalanced component tag diagnostics](todo/blade.md#bl23-unbalanced-component-tag-diagnostics)                            | Low-Medium | Low        |
 | BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
 | BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |

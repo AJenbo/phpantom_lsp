@@ -208,155 +208,33 @@ completions from the Alert class.
 
 ---
 
-## BL13. Mismatched and unbalanced directive diagnostics
+## BL23. Unbalanced component tag diagnostics
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Low-Medium · Effort: Low**
 
-`translate_directive` (`src/blade/directives.rs`) maps each directive
-to PHP independently by name, with no check that a closing directive
-matches the block it opened. `@foreach ($items as $item) ... @endif`
-currently translates silently instead of producing a diagnostic.
+`src/blade/balance.rs` pairs up block *directives*, but a component tag
+body is a block too: `<x-alert>` … `</x-alert>`, `<x-slot:title>` …
+`</x-slot>`. A tag nobody closes renders the rest of the template inside
+it, and a stray closing tag renders nothing at all, neither of which is
+reported today.
 
-- Track a stack of open control directives (`if`, `foreach`, `for`,
-  `while`, `switch`, `unless`, `isset`, `empty`, `once`, `verbatim`,
-  `fragment`, component/slot tags) during preprocessing, alongside the
-  existing source map.
-- When a closing directive doesn't match the top of the stack (or the
-  stack is empty), emit a diagnostic at the closing directive's Blade
-  position: "Expected `@endX`, found `@endY`" or "Unexpected `@endY`
-  with no matching `@y`".
-- Flag unclosed directives at end-of-file (stack non-empty when the
-  file ends).
-- Matches the mismatched-closing-directive inspection other Blade-aware
-  editors already ship.
-
-No dependency on component parsing (BL3) — this operates on the raw
-directive token stream and can land independently.
+- Extend the block stack with component tags, reusing the raw-text tag
+  scan in `src/blade/component_tags.rs` rather than a second parser.
+- A self-closing `<x-alert />` opens nothing, and an attribute value may
+  hold a `>` (`<x-alert :items="$a > $b">`), so the scan has to read the
+  whole tag rather than stop at the first `>`.
+- Report against the tag, in the same three shapes the directive check
+  uses: a closing tag for another component, a closing tag with nothing
+  open, and a tag the template never closes.
 
 ### Tests
 
-New file `tests/integration/diagnostics_blade.rs`:
+In `tests/integration/diagnostics_blade.rs`:
 
-- `@foreach(...) @endif` → mismatched-directive diagnostic
-- `@if(...)` with no `@endif` before EOF → unclosed-directive diagnostic
-- correctly paired directives → no diagnostic
-
----
-
-## BL11. Custom directive discovery
-
-**Impact: Medium · Effort: Low-Medium**
-
-`Blade::directive('datetime', …)`, `Blade::if('env', …)`, and
-component namespace registrations (`Blade::componentNamespace()`,
-`Blade::anonymousComponentPath()`) in app and package service
-providers declare project-specific directives. Scan literal
-registrations — the same provider-scanning shape as the macro
-scanner — so that:
-
-- known custom directives stop degrading to comments in the
-  preprocessor and instead map to expression-preserving PHP (their
-  argument is still type-checked);
-- `Blade::if('admin')` synthesizes the full family (`@admin`,
-  `@elseadmin`, `@endadmin`, `@unlessadmin`);
-- directive name completion (`DIRECTIVE_COMPLETIONS` in
-  `src/blade/directives.rs`) includes them;
-- registered component namespaces/paths extend the discovery index.
-
----
-
-## BL1. Blade-aware code actions
-
-**Impact: Medium · Effort: Medium**
-
-Code actions are currently disabled for `.blade.php` files because
-text edits target virtual PHP coordinates and actions like "Import
-class" insert `use` statements at the top of the file rather than
-inside a `@php` / `<?php` block. Re-enable code actions with:
-
-- Range translation (virtual PHP → Blade) for all text edits.
-- Blade-aware code generation (e.g. insert `use` inside `@php`).
-- Filtering out actions that don't make sense in Blade context.
-
-**Deliverable:** Code actions are re-enabled for `.blade.php` files.
-
----
-
-## BL5. Go-to-definition for component tags
-
-**Impact: Medium · Effort: Medium**
-
-### Component tag go-to-definition
-
-On `<x-alert>`:
-
-1. Extract the component name.
-2. Look up in the component index to get the FQN.
-3. Use `find_or_load_class` + `fqn_uri_index` to find the
-   source file.
-4. Return a `Location` pointing to the class definition.
-
-On `<livewire:counter>`: same pattern using the Livewire index.
-
-### Tests
-
-New file `tests/integration/definition_blade.rs`:
-
-- Go-to-definition on `<x-alert>` → component class
-- Go-to-definition on `<livewire:counter>` → Livewire class
-
-**Deliverable:** Ctrl-click on `<x-alert>` jumps to the component
-class.
-
----
-
-## BL10. Cross-file `@section` / `@stack` name intelligence
-
-**Impact: Medium · Effort: Medium**
-
-`@section`/`@hasSection`/`@sectionMissing`/`@yield` and
-`@push`/`@prepend`/`@stack` name arguments are cross-file string
-keys: yields and stacks are declared in layouts, filled in children.
-Index section and stack names per template (alongside the discovery
-index in `src/blade/discovery.rs`, recording the `@extends` target),
-then provide:
-
-- completion of section/stack names inside child templates from the
-  resolved layout chain, and vice versa in layouts from known
-  children;
-- go-to-definition between `@section('x')` and its `@yield('x')`;
-- an unknown-section diagnostic when a child fills a section its
-  layout chain never yields (dynamic names skip, as always).
-
----
-
-## BL22. A template never learns anything from the templates that render it
-
-**Impact: Medium · Effort: Medium**
-
-`compute_blade_injected_vars` skips every Blade file in the caller
-snapshot (`if self.is_blade_file(file_uri) { continue; }`, and
-`view_caller_snapshot` filters them out again), so call-site inference
-only ever reads controllers. A partial rendered exclusively from other
-templates therefore gets nothing: neither the entries of an
-`@include('partials.row', ['row' => $row])`, nor the item and key an
-`@each` binds, reach it, and an unannotated partial has no type for the
-variable it exists to display. Only the diagnostics path, which runs on
-the rendering template itself, reads those sites today.
-
-The comment gives the two reasons: a template must not feed itself, and
-other templates' `@include`s would recurse. Both are addressable the way
-the component-tag path already does it — that one *does* read Blade
-callers, keying off `blade_virtual_content` rather than the raw source
-(the symbol map's offsets are virtual-PHP offsets, so the raw Blade
-source is the wrong thing to parse) and skipping the template's own URI.
-What is left to settle is mutual rendering: A includes B includes A
-resolves each against the other's cached scope, so the refresh pass needs
-to converge rather than oscillate.
-
-Until then a partial rendered only from templates must declare its own
-`@bladestan-signature` to get completion and hover, which is what the
-contract checks want anyway.
+- `<x-alert>` closed by `</x-card>` → mismatched-tag diagnostic
+- `<x-alert>` with no closing tag → unclosed-tag diagnostic
+- self-closing tags, and tags whose attributes contain `>`, report
+  nothing
 
 ---
 
@@ -372,7 +250,8 @@ source map.
 - Translate each `FoldingRange` through `source_map.php_to_blade`
   before returning, matching the pattern in `inlay_hints.rs`.
 - Add Blade-native fold regions the underlying PHP has no concept of:
-  `@if`/`@endif` and friends (using the stack from BL13),
+  `@if`/`@endif` and friends (the block stack `src/blade/balance.rs`
+  already walks),
   `<x-component>`...`</x-component>` tag bodies, `@section`/
   `@endsection`, `@push`/`@endpush`.
 - Matches the folding behaviour other Blade-aware editors already

@@ -270,52 +270,105 @@ fn parse_entries(args: &str) -> Option<Vec<PropDecl>> {
     })
 }
 
-/// Blank out the regions Blade excludes from directive processing:
-/// `{{-- … --}}` comments, `@verbatim … @endverbatim` blocks, and (on
-/// request) raw `@php … @endphp` blocks.
+/// One stretch of a template Blade processes no directives in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InertRegion {
+    /// The whole region, from the first byte of its opener to the last
+    /// byte of its terminator.
+    pub(crate) span: std::ops::Range<usize>,
+    /// What opened it.
+    pub(crate) opener: InertOpener,
+    /// Whether the terminator was found. An unterminated region runs to
+    /// end of input.
+    pub(crate) terminated: bool,
+}
+
+/// What opened an [`InertRegion`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InertOpener {
+    /// `{{-- … --}}`.
+    Comment,
+    /// `@verbatim … @endverbatim`.
+    Verbatim,
+    /// `@php … @endphp`.
+    PhpBlock,
+    /// `@php(…)`, which closes on its own parenthesis.
+    PhpStatement,
+}
+
+/// Every region Blade excludes from directive processing: `{{-- … --}}`
+/// comments, `@verbatim … @endverbatim` blocks, and (on request) raw
+/// `@php … @endphp` blocks, in source order and never overlapping.
 ///
-/// Every masked byte becomes a space, newlines are kept, so the result has
-/// the same length and line structure as the input and an offset found in
-/// the masked text points at the same byte of the original.
-///
-/// `@php` masking is opt-in because the signature scan deliberately parks
+/// `@php` scanning is opt-in because the signature scan deliberately parks
 /// its docblock inside a `@php` block and must keep seeing it; only the
-/// directive scans (`@props`, `@aware`) want PHP blocks blanked.
-pub(crate) fn mask_inert_regions(content: &str, mask_php_blocks: bool) -> Cow<'_, str> {
+/// directive scans (`@props`, `@aware`, the block-balance check) want PHP
+/// blocks treated as inert.
+pub(crate) fn inert_regions(content: &str, scan_php_blocks: bool) -> Vec<InertRegion> {
     let needs_scan = content.contains("{{--")
         || content.contains("@verbatim")
-        || (mask_php_blocks && content.contains("@php"));
+        || (scan_php_blocks && content.contains("@php"));
     if !needs_scan {
-        return Cow::Borrowed(content);
+        return Vec::new();
     }
 
     let bytes = content.as_bytes();
-    let mut out = content.as_bytes().to_vec();
+    let mut regions = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         // `@@verbatim` / `@@php` are Blade's escapes for the literal text,
         // so they open no block.
         let escaped = i > 0 && bytes[i - 1] == b'@';
         let region = if bytes[i..].starts_with(b"{{--") {
-            Some(end_of_region(bytes, i + 4, b"--}}"))
+            let (end, terminated) = end_of_region(bytes, i + 4, b"--}}");
+            Some((end, InertOpener::Comment, terminated))
         } else if !escaped && bytes[i..].starts_with(b"@verbatim") {
-            Some(end_of_region(bytes, i + 9, b"@endverbatim"))
-        } else if mask_php_blocks && !escaped && bytes[i..].starts_with(b"@php") {
+            let (end, terminated) = end_of_region(bytes, i + 9, b"@endverbatim");
+            Some((end, InertOpener::Verbatim, terminated))
+        } else if scan_php_blocks && !escaped && bytes[i..].starts_with(b"@php") {
             php_region(bytes, i)
         } else {
             None
         };
 
         match region {
-            Some(end) => {
-                for byte in &mut out[i..end] {
-                    if *byte != b'\n' {
-                        *byte = b' ';
-                    }
-                }
+            Some((end, opener, terminated)) => {
+                regions.push(InertRegion {
+                    span: i..end,
+                    opener,
+                    terminated,
+                });
                 i = end;
             }
             None => i += 1,
+        }
+    }
+
+    regions
+}
+
+/// Blank out the regions Blade excludes from directive processing.
+///
+/// Every masked byte becomes a space, newlines are kept, so the result has
+/// the same length and line structure as the input and an offset found in
+/// the masked text points at the same byte of the original.
+pub(crate) fn mask_inert_regions(content: &str, mask_php_blocks: bool) -> Cow<'_, str> {
+    mask_regions(content, &inert_regions(content, mask_php_blocks))
+}
+
+/// Blank out already-scanned [`inert_regions`], for a caller that needs
+/// both the masked text and the regions themselves.
+pub(crate) fn mask_regions<'a>(content: &'a str, regions: &[InertRegion]) -> Cow<'a, str> {
+    if regions.is_empty() {
+        return Cow::Borrowed(content);
+    }
+
+    let mut out = content.as_bytes().to_vec();
+    for region in regions {
+        for byte in &mut out[region.span.clone()] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
         }
     }
 
@@ -324,8 +377,7 @@ pub(crate) fn mask_inert_regions(content: &str, mask_php_blocks: bool) -> Cow<'_
     Cow::Owned(String::from_utf8(out).unwrap_or_else(|_| content.to_string()))
 }
 
-/// The end offset (exclusive) of the inert region a `@php` at `at` opens,
-/// or `None` when it opens none.
+/// The inert region a `@php` at `at` opens, or `None` when it opens none.
 ///
 /// Blade spells `@php` two ways. The block form runs to its `@endphp`.
 /// The inline form, `@php($featured = $posts->first())`, is a single
@@ -334,7 +386,7 @@ pub(crate) fn mask_inert_regions(content: &str, mask_php_blocks: bool) -> Cow<'_
 /// there to the next `@endphp` anywhere in the file, or to end of input
 /// when there is none. Blade's own `compileStatements` regex allows spaces
 /// and tabs between a directive name and its opening `(`.
-fn php_region(bytes: &[u8], at: usize) -> Option<usize> {
+fn php_region(bytes: &[u8], at: usize) -> Option<(usize, InertOpener, bool)> {
     let after = at + 4;
     // `@phpinfo(…)` is a call written in template text, not the directive.
     if bytes
@@ -352,24 +404,26 @@ fn php_region(bytes: &[u8], at: usize) -> Option<usize> {
         // as its own closing parenthesis. An unterminated one is a syntax
         // error mid-edit, so it masks nothing rather than the rest of the
         // file.
-        return matching_paren(bytes, i).map(|end| end + 1);
+        return matching_paren(bytes, i).map(|end| (end + 1, InertOpener::PhpStatement, true));
     }
-    Some(end_of_region(bytes, after, b"@endphp"))
+    let (end, terminated) = end_of_region(bytes, after, b"@endphp");
+    Some((end, InertOpener::PhpBlock, terminated))
 }
 
 /// The end offset (exclusive) of a region that opened at `from`, i.e. just
-/// past `terminator`. An unterminated region runs to end of input, matching
-/// Blade's non-greedy patterns failing to match and the compiler leaving
-/// the rest of the file alone.
-fn end_of_region(bytes: &[u8], from: usize, terminator: &[u8]) -> usize {
+/// past `terminator`, and whether the terminator was there at all. An
+/// unterminated region runs to end of input, matching Blade's non-greedy
+/// patterns failing to match and the compiler leaving the rest of the file
+/// alone.
+fn end_of_region(bytes: &[u8], from: usize, terminator: &[u8]) -> (usize, bool) {
     let mut i = from;
     while i + terminator.len() <= bytes.len() {
         if bytes[i..].starts_with(terminator) {
-            return i + terminator.len();
+            return (i + terminator.len(), true);
         }
         i += 1;
     }
-    bytes.len()
+    (bytes.len(), false)
 }
 
 /// The byte range of the first docblock carrying a `@bladestan-signature`
