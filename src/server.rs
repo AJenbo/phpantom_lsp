@@ -371,8 +371,11 @@ impl LanguageServer for Backend {
                 }
             }
 
-            let is_laravel = self.resolved_class_cache.read().is_laravel();
-            if is_laravel {
+            // Laravel-only startup work.  The project classification is
+            // set by the init pass above from composer.json, so it has to
+            // run after it: a Symfony workspace must never pay for the
+            // whole-tree migration walk, let alone hang in it.
+            if self.resolved_class_cache.read().is_laravel() {
                 let laravel_config = self.config().laravel;
                 if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
                     let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
@@ -396,11 +399,9 @@ impl LanguageServer for Backend {
                         }
                     }
                 }
-            }
 
-            // Warm the Eloquent Builder resolution cache only for Laravel
-            // projects; a non-Laravel workspace has nothing to warm.
-            if is_laravel {
+                // Warm the Eloquent Builder resolution cache; a non-Laravel
+                // workspace has nothing to warm.
                 progress.set_percentage(90, "Warming Laravel completions");
                 let warmed = self.warm_laravel_completion_cache();
                 if warmed > 0 {

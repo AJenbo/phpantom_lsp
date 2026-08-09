@@ -487,6 +487,17 @@ fn collect_configured_migration_files(
     Ok(())
 }
 
+/// Find every `database/migrations/*.php` file in the workspace.
+///
+/// Used when no explicit migration paths are configured, so the walk
+/// starts at the workspace root and has to cross the whole project.  It
+/// uses the `ignore` crate for the same reason the other workspace
+/// walkers do (`collect_php_files`, `collect_php_files_gitignore`):
+/// generated and vendored trees are skipped rather than crawled, and
+/// directory symlinks are not followed, so a link that points back at an
+/// ancestor cannot spin the walk forever.  Entries that cannot be read
+/// are skipped so one unreadable directory does not cost the project its
+/// whole schema index.
 fn collect_default_migration_files(
     workspace_root: &Path,
     files: &mut Vec<PathBuf>,
@@ -506,13 +517,15 @@ fn collect_default_migration_files(
                 return false;
             }
 
+            // Migrations are read one level deep (as
+            // `collect_configured_migration_files` does), so there is
+            // nothing below a migrations directory worth descending into.
             !entry.file_type().is_some_and(|kind| kind.is_dir())
                 || !path.parent().is_some_and(is_database_migrations_dir)
         })
         .build();
 
-    for entry in walker {
-        let entry = entry.map_err(std::io::Error::other)?;
+    for entry in walker.flatten() {
         let path = entry.path();
         if entry.file_type().is_some_and(|kind| kind.is_file())
             && path.parent().is_some_and(is_database_migrations_dir)

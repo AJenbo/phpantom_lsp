@@ -156,8 +156,6 @@ mod tests {
         std::fs::create_dir_all(schema.parent().unwrap()).unwrap();
         std::fs::write(&schema, "CREATE TABLE users (id bigint);").unwrap();
 
-        let backend = Backend::new_test();
-        backend.resolved_class_cache.write().set_laravel(false);
         let params = DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
                 uri: Url::from_file_path(&schema).unwrap(),
@@ -165,6 +163,14 @@ mod tests {
             }],
         };
 
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(false);
         assert!(!backend.apply_watched_file_changes(&params, dir.path()));
+
+        // The gate is on the project type alone: the same event in a
+        // Laravel workspace still rebuilds the schema index.
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        assert!(backend.apply_watched_file_changes(&params, dir.path()));
     }
 }
