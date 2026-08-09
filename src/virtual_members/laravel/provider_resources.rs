@@ -111,6 +111,18 @@ pub(crate) struct ProviderResources {
     /// prefix (`nightshade::calendar`) is backed by a component class in that
     /// namespace, whose members its template reads.
     pub class_component_namespaces: Vec<(String, String)>,
+    /// `Blade::anonymousComponentNamespace('components', 'webshop')` entries,
+    /// as (tag prefix, view directory in dot notation).  A tag written under
+    /// the prefix (`<x-webshop::pages.boxes>`) names a plain view in that
+    /// directory (`components.pages.boxes`) rather than a component class.
+    pub anonymous_component_namespaces: Vec<(String, String)>,
+    /// `Blade::anonymousComponentPath(resource_path('views/components'),
+    /// 'webshop')` entries, as (tag prefix, directory on disk).  The same
+    /// mechanism keyed by a directory; which view prefix it stands for is
+    /// only known once it is matched against the configured view roots,
+    /// which this scan cannot see.  An empty prefix is the prefix-less
+    /// registration, whose templates every un-namespaced tag can address.
+    pub anonymous_component_paths: Vec<(String, PathBuf)>,
     /// `View::share('key', $value)` registrations, which put a variable in
     /// every template's scope.
     pub shared_view_vars: Vec<SharedViewVar>,
@@ -132,6 +144,10 @@ impl ProviderResources {
         self.route_files.extend(other.route_files);
         self.class_component_namespaces
             .extend(other.class_component_namespaces);
+        self.anonymous_component_namespaces
+            .extend(other.anonymous_component_namespaces);
+        self.anonymous_component_paths
+            .extend(other.anonymous_component_paths);
         self.shared_view_vars.extend(other.shared_view_vars);
         self.view_composers.extend(other.view_composers);
         for (key, binding) in other.bindings {
@@ -278,19 +294,29 @@ pub(crate) fn extract_provider_resources(
 
         // `Blade::componentNamespace('Nightshade\\Views\\Components',
         // 'nightshade')` says which classes back the views a package
-        // registers under its own prefix.
+        // registers under its own prefix; the two anonymous registrations
+        // point a prefix at a directory of class-less component views.
         if let Expression::Call(Call::StaticMethod(sc)) = expr
             && let ClassLikeMemberSelector::Identifier(method) = &sc.method
-            && method.value.eq_ignore_ascii_case(b"componentNamespace")
             && let Expression::Identifier(id) = sc.class
             && id
                 .value()
                 .rsplit(|&b| b == b'\\')
                 .next()
                 .is_some_and(|seg| seg.eq_ignore_ascii_case(b"Blade"))
-            && let Some(entry) = component_namespace_args(&sc.argument_list, content, &scope)
+            && record_component_registration(
+                &method.value.to_ascii_lowercase(),
+                &sc.argument_list,
+                content,
+                &scope,
+                &PathContext {
+                    file_dir,
+                    workspace_root,
+                    program,
+                },
+                &mut resources,
+            )
         {
-            resources.class_component_namespaces.push(entry);
             return ControlFlow::Continue(());
         }
 
@@ -419,13 +445,21 @@ pub(crate) fn extract_provider_resources(
             return ControlFlow::Continue(());
         }
 
-        // The same registration written against the compiler instance a
+        // The same registrations written against the compiler instance a
         // deferred callback receives (`$blade->componentNamespace(…)`),
         // which is how a package registers before Blade is resolved.
-        if method_lower == b"componentnamespace"
-            && let Some(entry) = component_namespace_args(&mc.argument_list, content, &scope)
-        {
-            resources.class_component_namespaces.push(entry);
+        if record_component_registration(
+            &method_lower,
+            &mc.argument_list,
+            content,
+            &scope,
+            &PathContext {
+                file_dir,
+                workspace_root,
+                program,
+            },
+            &mut resources,
+        ) {
             return ControlFlow::Continue(());
         }
 
@@ -495,6 +529,90 @@ pub(crate) fn extract_provider_resources(
     }
 
     resources
+}
+
+/// What a path argument is resolved against: the referring file's directory
+/// and the workspace root, plus the parse a variable's assignment is looked
+/// up in.
+struct PathContext<'a, 'arena> {
+    file_dir: &'a Path,
+    workspace_root: &'a Path,
+    program: &'a Program<'arena>,
+}
+
+/// Record a component-namespace registration, whichever of the three
+/// `method` names, and report whether the call was one of them.
+///
+/// All three are written both on the `Blade` facade and on the compiler
+/// instance a deferred callback receives, so both call shapes route here.
+fn record_component_registration(
+    method: &[u8],
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    scope: &Scope,
+    paths: &PathContext<'_, '_>,
+    resources: &mut ProviderResources,
+) -> bool {
+    match method {
+        b"componentnamespace" => {
+            if let Some(entry) = component_namespace_args(argument_list, content, scope) {
+                resources.class_component_namespaces.push(entry);
+            }
+        }
+        b"anonymouscomponentnamespace" => {
+            if let Some(entry) = anonymous_component_namespace_args(argument_list, content, scope) {
+                resources.anonymous_component_namespaces.push(entry);
+            }
+        }
+        b"anonymouscomponentpath" => {
+            let mut args = argument_list.arguments.iter();
+            if let Some(path_arg) = args.next()
+                && let Some(path) = resolve_path_arg(
+                    path_arg.value(),
+                    content,
+                    paths.file_dir,
+                    paths.workspace_root,
+                    paths.program,
+                )
+            {
+                // The prefix is optional: without one, every tag that names
+                // no namespace of its own reaches the directory.
+                let prefix = args
+                    .next()
+                    .and_then(|arg| const_string(arg.value(), content, scope))
+                    .unwrap_or_default();
+                resources.anonymous_component_paths.push((prefix, path));
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// The (tag prefix, view directory) pair an `anonymousComponentNamespace()`
+/// call registers.
+///
+/// Laravel normalises the directory to the dot notation a view name is
+/// written in, and defaults the prefix to the directory as it was written.
+fn anonymous_component_namespace_args(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    scope: &Scope,
+) -> Option<(String, String)> {
+    let mut args = argument_list.arguments.iter();
+    let directory = const_string(args.next()?.value(), content, scope)?;
+    let prefix = args
+        .next()
+        .and_then(|arg| const_string(arg.value(), content, scope))
+        .unwrap_or_else(|| directory.clone());
+    let directory = directory
+        .replace('/', ".")
+        .trim_matches(|c| c == '.' || c == ' ')
+        .to_string();
+    if directory.is_empty() || prefix.is_empty() {
+        return None;
+    }
+    Some((prefix, directory))
 }
 
 /// The (tag prefix, class namespace) pair a `componentNamespace()` call
@@ -741,19 +859,25 @@ pub(crate) fn resolve_path_arg(
         return resolved.canonicalize().ok().or(Some(resolved));
     }
 
-    // `base_path('app/.../web.php')` resolves relative to the workspace root.
+    // `base_path('app/.../web.php')` resolves relative to the workspace
+    // root, `resource_path('views/components')` relative to `resources/`
+    // inside it.  Both take an optional argument, and naming the base
+    // directory alone is a path in its own right.
     if let Expression::Call(Call::Function(fc)) = expr
         && let Expression::Identifier(id) = fc.function
-        && id
-            .value()
-            .rsplit(|&b| b == b'\\')
-            .next()
-            .is_some_and(|seg| seg.eq_ignore_ascii_case(b"base_path"))
-        && let Some(first_arg) = fc.argument_list.arguments.iter().next()
-        && let Some((val, _, _)) =
-            super::helpers::extract_string_literal(first_arg.value(), content)
+        && let Some(base) = path_helper_base(id.value())
+        && let Some(val) = match fc.argument_list.arguments.iter().next() {
+            Some(first_arg) => super::helpers::extract_string_literal(first_arg.value(), content)
+                .map(|(val, _, _)| val),
+            None => Some(""),
+        }
     {
-        let resolved = workspace_root.join(val.trim_start_matches('/'));
+        let mut resolved = workspace_root.to_path_buf();
+        for segment in [base, val.trim_start_matches('/')] {
+            if !segment.is_empty() {
+                resolved.push(segment);
+            }
+        }
         return resolved.canonicalize().ok().or(Some(resolved));
     }
 
@@ -772,6 +896,17 @@ pub(crate) fn resolve_path_arg(
     }
 
     None
+}
+
+/// The workspace-relative directory a Laravel path helper resolves against,
+/// or `None` for a function that is not one.
+fn path_helper_base(name: &[u8]) -> Option<&'static str> {
+    const HELPERS: [(&[u8], &str); 2] = [(b"base_path", ""), (b"resource_path", "resources")];
+    let short = name.rsplit(|&b| b == b'\\').next()?;
+    HELPERS
+        .iter()
+        .find(|(helper, _)| short.eq_ignore_ascii_case(helper))
+        .map(|(_, base)| *base)
 }
 
 /// The RHS of the last `$name = <expr>;` assignment before `offset` in the
@@ -870,6 +1005,49 @@ mod tests {
                     "Nightshade\\Views\\Components".to_string()
                 ),
                 ("acme".to_string(), "Acme\\Ui".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn records_registered_anonymous_component_directories() {
+        // The directory is normalised to the dot notation a view name is
+        // written in, and a registration with no prefix of its own is
+        // addressed under the directory it names.
+        let content = "<?php\n\
+            class AppServiceProvider {\n\
+                public function boot(): void {\n\
+                    Blade::anonymousComponentNamespace('components', 'webshop');\n\
+                    Blade::anonymousComponentNamespace('theme/components');\n\
+                    Blade::anonymousComponentPath(resource_path('views/ui'), 'ui');\n\
+                    Blade::anonymousComponentPath(__DIR__ . '/../views/pkg');\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/app/Providers/AppServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            resources.anonymous_component_namespaces,
+            vec![
+                ("webshop".to_string(), "components".to_string()),
+                (
+                    "theme/components".to_string(),
+                    "theme.components".to_string()
+                ),
+            ]
+        );
+        assert_eq!(
+            resources.anonymous_component_paths,
+            vec![
+                ("ui".to_string(), PathBuf::from("/ws/resources/views/ui")),
+                (
+                    String::new(),
+                    Path::new("/ws/app/Providers").join("../views/pkg")
+                ),
             ]
         );
     }

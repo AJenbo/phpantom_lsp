@@ -540,6 +540,72 @@ mod tests {
         );
     }
 
+    /// `Blade::anonymousComponentNamespace('components', 'webshop')` makes
+    /// `<x-webshop::brand.boxes>` address the plain view
+    /// `components.brand.boxes`, so its attributes have to reach that
+    /// template even though nothing about the view name mentions the prefix.
+    #[tokio::test]
+    async fn a_registered_anonymous_prefix_types_the_components_variable() {
+        let (backend, dir) = create_psr4_workspace(
+            r#"{
+                "require": { "laravel/framework": "^11.0" },
+                "autoload": {"psr-4": {"App\\": "app/"}}
+            }"#,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "bootstrap/providers.php",
+                    "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+                ),
+                (
+                    "app/Providers/AppServiceProvider.php",
+                    "<?php\nnamespace App\\Providers;\n\
+                     use Illuminate\\Support\\Facades\\Blade;\n\
+                     class AppServiceProvider {\n\
+                         public function boot(): void {\n\
+                             Blade::anonymousComponentNamespace('components', 'webshop');\n\
+                         }\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/page.blade.php",
+                    "@php\n/** @var \\App\\Item $model */\n@endphp\n\
+                     <x-webshop::brand.boxes :hairAnalysis=\"$model\" />\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $hairAnalysis->name }}\n",
+                ),
+            ],
+        );
+
+        // The provider scan is what makes the registration visible.
+        backend.initialized(InitializedParams {}).await;
+
+        let root = dir.path();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+        for uri in [&page_uri, &component_uri] {
+            let path = uri.to_file_path().unwrap();
+            open(
+                &backend,
+                uri,
+                "blade",
+                &std::fs::read_to_string(path).unwrap(),
+            )
+            .await;
+        }
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("Item"),
+            "$hairAnalysis should be typed Item from the registered prefix's tag, got: {}",
+            hover
+        );
+    }
+
     /// Open a workspace where `shop.blade.php` receives an `App\Item` from a
     /// `view()` call but never names the class itself, so `App\Item` appears
     /// in the template's virtual PHP only through the injected prologue.

@@ -7,32 +7,31 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-### B67. `Blade::anonymousComponentNamespace()` registrations are invisible
+### B67. An inline `@php(…)` masks the rest of the template
 
-`Blade::anonymousComponentNamespace('components', 'webshop')` makes
-`<x-webshop::pages.boxes>` resolve to the plain view `components.pages.boxes`
-against the configured view roots
-(`ComponentTagCompiler::guessAnonymousComponentUsingNamespaces` runs
-`guessViewName` with the registered directory as the prefix).
-`Blade::anonymousComponentPath()` is the same mechanism keyed by directory.
+`mask_inert_regions` (`src/blade/signature.rs`) treats every `@php` as the
+opening of a block and runs `end_of_region(bytes, i + 4, b"@endphp")` on
+it. Blade has two spellings: the block form, which does close with
+`@endphp`, and the inline directive `@php($featured = $posts->first())`,
+which closes with its own parenthesis and never writes `@endphp` at all.
+An inline one therefore masks everything from itself to the *next*
+`@endphp` anywhere in the file, or to EOF when there is none.
 
-PHPantom models neither registration. `component_tag_names` /
-`view_name_for_component_tag` (`src/blade/component_tags.rs`) only know the
-un-registered fallback (`ns::X` ↔ `ns::components.X`), so a component
-addressed through a registered prefix matches none of its `<x-…>` call
-sites: the attributes those tags pass are never inferred, and a variable
-the component reads from them is reported `unknown_variable` even though
-`AnonymousComponent::data()` supplies it at runtime. One live instance in
-the Website sample (`$kerastaseHairAnalysis` in
-`components/pages/brand/pro-hair-care/kerastase-boxes.blade.php`, called as
-`<x-webshop::pages.brand.pro-hair-care.kerastase-boxes>` from two
-templates).
+Every consumer of the masked text loses that span: `has_declared_signature`,
+`extract_extends`, `extract_props`/`extract_aware`,
+`referenced_component_tags`, and `scan_component_tag_calls`. The last is
+the one that shows: a `<x-…>` tag written after an inline `@php(…)` is
+invisible, so the component it names never sees the attributes that call
+site passes and reports the variables they supply as
+`unknown_variable`. `examples/laravel/resources/views/welcome.blade.php`
+has a live instance — `@php($bakery = …)` near the bottom masks every tag
+after it.
 
-Fix: extract `anonymousComponentNamespace()` / `anonymousComponentPath()`
-registrations in `provider_resources.rs` the way `componentNamespace()`
-already is (`component_namespace_args`), and consult them in the tag ↔
-view-name mapping, which today is a pure function of the view name and
-needs the `Backend`'s registrations to do this.
+Fix: only open a block when the `@php` is *not* the inline form. Blade's
+own `compileStatements` regex admits `[ \t]*` between the directive name
+and an opening `(`, so `@php` followed by optional spaces or tabs and then
+`(` is inline and masks nothing. The same shape applies to any other
+directive that has both a block and an inline form.
 
 ### B2. A layout's contract is enforced without the layout's own suppliers
 

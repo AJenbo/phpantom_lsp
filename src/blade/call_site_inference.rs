@@ -239,9 +239,13 @@ impl Backend {
         }
 
         // The attributes each `<x-…>` tag passes, for a template
-        // addressable as a component tag (`components.*` or a namespaced
-        // view name — see `component_tags::component_tag_names`).
-        let tag_names = crate::blade::component_tags::component_tag_names(&view_names);
+        // addressable as a component tag (`components.*`, a namespaced
+        // view name, or a directory a provider registered a tag prefix
+        // for — see `component_tags::component_tag_names`).
+        let tag_names = crate::blade::component_tags::component_tag_names(
+            &view_names,
+            &self.anonymous_component_namespaces(),
+        );
         if !tag_names.is_empty() {
             let own_blade_snapshot;
             let blade_snapshot = match shared_blade {
@@ -496,27 +500,31 @@ impl Backend {
             return;
         }
 
+        let anonymous = self.anonymous_component_namespaces();
         for tag in tags {
-            let view_name = crate::blade::component_tags::view_name_for_component_tag(&tag);
-            for location in crate::virtual_members::laravel::resolve_laravel_string_key(
-                self,
-                &LaravelStringKind::View,
-                &view_name,
-            ) {
-                let template_uri = location.uri.to_string();
-                if template_uri == caller_uri
-                    || !self
-                        .blade_virtual_content
-                        .read()
-                        .contains_key(&template_uri)
-                {
-                    continue;
-                }
-                let Some(template_content) = self.get_file_content(&template_uri) else {
-                    continue;
-                };
-                if self.reinfer_and_reparse_blade(&template_uri, &template_content) {
-                    self.schedule_diagnostics(template_uri);
+            for view_name in
+                crate::blade::component_tags::view_names_for_component_tag(&tag, &anonymous)
+            {
+                for location in crate::virtual_members::laravel::resolve_laravel_string_key(
+                    self,
+                    &LaravelStringKind::View,
+                    &view_name,
+                ) {
+                    let template_uri = location.uri.to_string();
+                    if template_uri == caller_uri
+                        || !self
+                            .blade_virtual_content
+                            .read()
+                            .contains_key(&template_uri)
+                    {
+                        continue;
+                    }
+                    let Some(template_content) = self.get_file_content(&template_uri) else {
+                        continue;
+                    };
+                    if self.reinfer_and_reparse_blade(&template_uri, &template_content) {
+                        self.schedule_diagnostics(template_uri);
+                    }
                 }
             }
         }

@@ -127,6 +127,13 @@
          passes: resources/views/components/post-summary.blade.php --}}
     <x-post-summary :post="$posts->first()" heading="Latest post" />
 
+    {{-- <x-widgets::badge> is not a namespaced view: the `widgets::` prefix
+         is registered in DemoServiceProvider::boot() with
+         Blade::anonymousComponentNamespace(), so the tag renders the plain
+         view components/widgets/badge.blade.php. The attributes below are
+         where that template's $label and $author come from. --}}
+    <x-widgets::badge label="Author" :author="$posts->first()?->author" />
+
     {{-- <x-card> names a directory, not a class: Blade falls back to the
          class inside it that repeats its name, App\View\Components\Card\Card.
          Its view reads that class's members:

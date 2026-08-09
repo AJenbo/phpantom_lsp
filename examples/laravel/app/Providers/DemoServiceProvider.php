@@ -13,6 +13,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 use Illuminate\View\View as ViewInstance;
@@ -94,6 +95,15 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         View::composer('emails.*', function (ViewInstance $view) {
             $view->with('mailFooter', __('messages.welcome'));
         });
+
+        // An anonymous component namespace points a tag prefix at a directory
+        // of class-less component views: `<x-widgets::badge>` renders the
+        // plain view `components.widgets.badge`.  Nothing about that view's
+        // name mentions the prefix, so this registration is the only record
+        // of the pairing, and without it the attributes those tags pass would
+        // reach no template at all.  See
+        // resources/views/components/widgets/badge.blade.php.
+        Blade::anonymousComponentNamespace('components/widgets', 'widgets');
 
         // A custom disk driver is bound here rather than in the framework, so
         // the type it builds is only knowable from this closure.  PHPantom
