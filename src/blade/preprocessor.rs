@@ -90,6 +90,25 @@ fn docblock_safe_type(type_string: &str) -> &str {
     if usable { type_string } else { "mixed" }
 }
 
+/// Whether `name` (without the `$`) is something PHP can bind as a
+/// variable.
+///
+/// A component tag's attributes become the template's variables, but an
+/// attribute name is HTML, not PHP: `wire:model.live`, `@click` and
+/// `x-on:keydown` are all legal there.  Blade hands the data to
+/// `extract()`, which silently skips any key that is not a valid variable
+/// name, so those attributes are reachable only through `$attributes`.
+/// Declaring one anyway would emit `$wire:model.live = null;` into the
+/// prologue and break the whole template with a syntax error.
+fn is_php_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_' || !first.is_ascii())
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || !ch.is_ascii())
+}
+
 /// Like [`preprocess`], but seeds the template's scope with externally
 /// inferred variables (name without `$`, docblock type string).  Each
 /// variable is declared in the top-level prologue with a `@var` docblock
@@ -130,7 +149,10 @@ pub fn preprocess_with_vars(
     // (name without `$`, the PHP that declares it), in priority order.
     let mut declared: Vec<(String, String)> = Vec::new();
     let mut declare = |name: &str, decl: String| {
-        if signature.declares(name) || declared.iter().any(|(existing, _)| existing == name) {
+        if !is_php_variable_name(name)
+            || signature.declares(name)
+            || declared.iter().any(|(existing, _)| existing == name)
+        {
             return;
         }
         declared.push((name.to_string(), decl));
@@ -1416,6 +1438,35 @@ mod tests {
         assert!(
             php.contains("/** @var mixed $x */") && !php.contains("evil()"),
             "a type containing */ must degrade to mixed: {}",
+            php
+        );
+    }
+
+    /// A component tag's attribute names are HTML, so a caller writing
+    /// `wire:model.live="…"` or `@click="…"` offers a name PHP cannot bind.
+    /// Blade's `extract()` skips those keys, and so must the prologue:
+    /// emitting `$wire:model.live = null;` would be a syntax error that
+    /// takes the whole template down with it.
+    #[test]
+    fn test_preprocess_with_vars_skips_names_php_cannot_bind() {
+        let (php, _) = preprocess_with_vars(
+            "{{ $ok }}",
+            &[
+                ("wire:model.live".to_string(), "string".to_string()),
+                ("@click".to_string(), "string".to_string()),
+                ("ok".to_string(), "string".to_string()),
+            ],
+            TemplateKind::Component,
+            None,
+        );
+        assert!(
+            !php.contains("wire:model.live") && !php.contains("@click"),
+            "an attribute name that is not a PHP variable must not be declared: {}",
+            php
+        );
+        assert!(
+            php.contains("$ok = null;") && php.contains(", $ok;"),
+            "a valid name alongside it must still be declared: {}",
             php
         );
     }
