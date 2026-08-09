@@ -39,6 +39,8 @@ impl Backend {
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
+        let mut migration_discovery =
+            crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         {
             let open = self.open_files.read();
@@ -65,7 +67,19 @@ impl Backend {
                             &file_path,
                         )
                     {
-                        migration_changes.push((file_path, change.typ));
+                        // A deletion only ever removes a file the initial
+                        // scan itself put in the plan, so it needs no
+                        // discovery check -- and the file is gone from disk
+                        // by now, so a walk could not find it anyway.
+                        if change.typ == FileChangeType::DELETED
+                            || migration_discovery.is_discoverable(
+                                root,
+                                &laravel_config.migrations,
+                                &file_path,
+                            )
+                        {
+                            migration_changes.push((file_path, change.typ));
+                        }
                     } else {
                         schema_full_rebuild = true;
                     }

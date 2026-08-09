@@ -487,23 +487,26 @@ fn collect_configured_migration_files(
     Ok(())
 }
 
-/// Find every `database/migrations/*.php` file in the workspace.
+/// The workspace walk that finds `database/migrations/*.php` files when
+/// no explicit migration paths are configured.
 ///
-/// Used when no explicit migration paths are configured, so the walk
-/// starts at the workspace root and has to cross the whole project.  It
-/// uses the `ignore` crate for the same reason the other workspace
+/// It starts at the workspace root and has to cross the whole project, so
+/// it uses the `ignore` crate for the same reason the other workspace
 /// walkers do (`collect_php_files`, `collect_php_files_gitignore`):
 /// generated and vendored trees are skipped rather than crawled, and
 /// directory symlinks are not followed, so a link that points back at an
 /// ancestor cannot spin the walk forever.  Entries that cannot be read
 /// are skipped so one unreadable directory does not cost the project its
 /// whole schema index.
-fn collect_default_migration_files(
-    workspace_root: &Path,
-    files: &mut Vec<PathBuf>,
-) -> std::io::Result<()> {
+///
+/// `restrict_to`, when set, prunes everything outside that directory, so
+/// the walk answers "would the full scan have reached this directory?"
+/// without crossing the rest of the project.  Both callers share this
+/// builder so the watcher cannot start accepting migrations the initial
+/// scan skips.
+fn migration_walk(workspace_root: &Path, restrict_to: Option<PathBuf>) -> ignore::Walk {
     let root = workspace_root.to_path_buf();
-    let walker = ignore::WalkBuilder::new(workspace_root)
+    ignore::WalkBuilder::new(workspace_root)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
@@ -517,24 +520,84 @@ fn collect_default_migration_files(
                 return false;
             }
 
+            if let Some(target) = &restrict_to
+                && !path.starts_with(target)
+                && !target.starts_with(path)
+            {
+                return false;
+            }
+
             // Migrations are read one level deep (as
             // `collect_configured_migration_files` does), so there is
             // nothing below a migrations directory worth descending into.
             !entry.file_type().is_some_and(|kind| kind.is_dir())
                 || !path.parent().is_some_and(is_database_migrations_dir)
         })
-        .build();
+        .build()
+}
 
-    for entry in walker.flatten() {
-        let path = entry.path();
-        if entry.file_type().is_some_and(|kind| kind.is_file())
-            && path.parent().is_some_and(is_database_migrations_dir)
-            && path.extension().and_then(|extension| extension.to_str()) == Some("php")
-        {
-            files.push(path.to_path_buf());
+fn is_walked_migration_file(entry: &ignore::DirEntry) -> bool {
+    let path = entry.path();
+    entry.file_type().is_some_and(|kind| kind.is_file())
+        && path.parent().is_some_and(is_database_migrations_dir)
+        && path.extension().and_then(|extension| extension.to_str()) == Some("php")
+}
+
+/// Find every `database/migrations/*.php` file in the workspace.
+fn collect_default_migration_files(
+    workspace_root: &Path,
+    files: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    for entry in migration_walk(workspace_root, None).flatten() {
+        if is_walked_migration_file(&entry) {
+            files.push(entry.path().to_path_buf());
         }
     }
     Ok(())
+}
+
+/// Answers whether a watched migration file is one the initial scan would
+/// also have found.
+///
+/// Without this the two paths disagree: the scan honours gitignore, hidden
+/// and `.ignore` rules, while the watcher only looks at the path's shape,
+/// so a migration in an ignored directory joined the schema index the
+/// moment somebody edited it and vanished again on restart.
+///
+/// Each distinct migrations directory costs one pruned walk, so build one
+/// of these per watched-file batch and reuse it across the batch.
+#[derive(Default)]
+pub struct MigrationDiscovery {
+    directories: HashMap<PathBuf, Vec<PathBuf>>,
+}
+
+impl MigrationDiscovery {
+    pub fn is_discoverable(
+        &mut self,
+        workspace_root: &Path,
+        config: &LaravelMigrationsConfig,
+        path: &Path,
+    ) -> bool {
+        // Configured paths are read with a plain `read_dir` on both the
+        // scan and the watcher path, so those already agree.
+        if !config.paths.is_empty() {
+            return true;
+        }
+        let Some(directory) = path.parent() else {
+            return false;
+        };
+        self.directories
+            .entry(directory.to_path_buf())
+            .or_insert_with(|| {
+                migration_walk(workspace_root, Some(directory.to_path_buf()))
+                    .flatten()
+                    .filter(is_walked_migration_file)
+                    .map(|entry| entry.path().to_path_buf())
+                    .collect()
+            })
+            .iter()
+            .any(|found| found == path)
+    }
 }
 
 fn schema_paths(config: &LaravelSchemaConfig) -> Vec<String> {
@@ -1760,6 +1823,76 @@ fn skip_php_whitespace(input: &str, mut offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_migration(root: &Path, relative: &str) -> PathBuf {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "<?php\n").unwrap();
+        path
+    }
+
+    /// Editing a migration must never add a table the initial scan would
+    /// not have found, or the schema index depends on which files happened
+    /// to be touched during the session.
+    #[test]
+    fn watched_migrations_agree_with_the_default_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let visible = write_migration(root, "database/migrations/2024_01_01_000000_users.php");
+        let ignored = write_migration(
+            root,
+            "build/database/migrations/2024_01_01_000001_posts.php",
+        );
+        let hidden = write_migration(
+            root,
+            ".cache/database/migrations/2024_01_01_000002_tags.php",
+        );
+        let vendored = write_migration(
+            root,
+            "vendor/acme/pkg/database/migrations/2024_01_01_000003_logs.php",
+        );
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), "/build/\n").unwrap();
+
+        let mut scanned = Vec::new();
+        collect_default_migration_files(root, &mut scanned).unwrap();
+        assert_eq!(scanned, vec![visible.clone()]);
+
+        let config = LaravelMigrationsConfig::default();
+        let mut discovery = MigrationDiscovery::default();
+        for path in [&visible, &ignored, &hidden, &vendored] {
+            assert_eq!(
+                discovery.is_discoverable(root, &config, path),
+                scanned.contains(path),
+                "{} disagrees with the default scan",
+                path.display()
+            );
+        }
+    }
+
+    /// Explicit paths are read with a plain `read_dir` on both sides, so
+    /// naming an ignored directory still opts it in.
+    #[test]
+    fn configured_migration_paths_ignore_the_walk_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let ignored = write_migration(
+            root,
+            "build/database/migrations/2024_01_01_000000_posts.php",
+        );
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), "/build/\n").unwrap();
+
+        let config = LaravelMigrationsConfig {
+            enabled: None,
+            paths: vec!["build/database/migrations".to_string()],
+        };
+        let scanned = discover_migration_files(root, &config).unwrap();
+        assert_eq!(scanned, vec![ignored.clone()]);
+        assert!(MigrationDiscovery::default().is_discoverable(root, &config, &ignored));
+    }
 
     #[test]
     fn database_type_to_php_type_maps_arrays_before_scalar_elements() {
