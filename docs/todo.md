@@ -106,6 +106,8 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B68 | [An unresolvable branch drops out of a union instead of widening it](todo/bugs.md#b68-an-unresolvable-branch-drops-out-of-a-union-instead-of-widening-it)                   | High        | Medium      |
+| B69 | [A `Blueprint` macro is missing from the schema index until a migration is edited](todo/bugs.md#b69-a-blueprint-macro-is-missing-from-the-schema-index-until-a-migration-is-edited) | Medium      | Low         |
+| B70 | [Migration discovery and the migration watcher disagree on ignored directories](todo/bugs.md#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories) | Low-Medium  | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
