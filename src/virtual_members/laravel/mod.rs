@@ -114,6 +114,7 @@ pub(crate) mod database_schema;
 mod env_vars;
 mod facade;
 mod factory;
+pub(crate) mod factory_count;
 mod helpers;
 mod higher_order_proxy;
 mod macros;
@@ -218,6 +219,7 @@ pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
     factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
 };
+pub(crate) use factory_count::resolve_factory_count_return;
 
 use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
