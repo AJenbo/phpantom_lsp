@@ -68,6 +68,7 @@ mod tests {
         \x20   public function first(array $views, $data = [], $mergeData = []) { return null; }\n\
         \x20   public function make($view, $data = [], $mergeData = []) { return null; }\n\
         \x20   public function renderWhen($condition, $view, $data = [], $mergeData = []) { return ''; }\n\
+        \x20   public function renderUnless($condition, $view, $data = [], $mergeData = []) { return ''; }\n\
         \x20   public function renderEach($view, $data, $iterator, $empty = 'raw|') { return ''; }\n\
         }\n";
 
@@ -854,6 +855,76 @@ mod tests {
             ),
             "got {diags:?}"
         );
+    }
+
+    /// The conditional renders name their template second whatever the
+    /// receiver is, so a factory taken as a parameter reaches them too.
+    /// `renderUnless()` is the concrete factory's, not the contract's.
+    #[tokio::test]
+    async fn an_injected_factorys_conditional_renders_name_their_second_argument() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\View\\Factory;\n\
+            class PageController {\n\
+            \x20   public function when(Factory $views): mixed {\n\
+            \x20       return $views->renderWhen(true, 'pages.about', []);\n\
+            \x20   }\n\
+            \x20   public function unless(Factory $views): mixed {\n\
+            \x20       return $views->renderUnless(false, 'pages.about', []);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/pages/about.blade.php", TITLED),
+            ("app/PageController.php", controller),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/PageController.php", "php", 5, 45).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/pages/about.blade.php")),
+            "an injected factory's renderWhen() should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert_eq!(
+            diags.len(),
+            2,
+            "both conditional renders are short of $title: {diags:?}"
+        );
+        assert!(
+            diags.iter().all(
+                |(code, message)| code == "missing_view_variable" && message.contains("$title")
+            ),
+            "got {diags:?}"
+        );
+    }
+
+    /// A mailable taken as a parameter is as much a mailable as one held in
+    /// a local, and `markdown()` names a template the way `view()` does.
+    #[tokio::test]
+    async fn a_mailable_parameter_names_a_template_through_markdown() {
+        let sender = "<?php\nnamespace App;\nuse Illuminate\\Mail\\Mailable;\n\
+            class Sender {\n\
+            \x20   public function send(Mailable $mail): void {\n\
+            \x20       $mail->markdown('emails.shipped', []);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/emails/shipped.blade.php", TITLED),
+            ("app/Sender.php", sender),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/Sender.php", "php", 5, 30).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/emails/shipped.blade.php")),
+            "a mailable parameter's markdown() should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/Sender.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
     }
 
     #[tokio::test]
