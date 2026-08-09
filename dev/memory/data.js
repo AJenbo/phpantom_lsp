@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786308910290,
+  "lastUpdate": 1786309057618,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17645,6 +17645,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "krist7599555@gmail.com",
+            "name": "Krist Ponpairin",
+            "username": "krist7599555"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9ee47697de8747ef5b9b082ba97bbc485fcbcca4",
+          "message": "fix(laravel): index commands registered via withCommands() and their aliases",
+          "timestamp": "2026-08-09T22:41:04+02:00",
+          "tree_id": "d8758683b9d5ccb515c0648daa9bf24ddd43aa84",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9ee47697de8747ef5b9b082ba97bbc485fcbcca4"
+        },
+        "date": 1786309052922,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.4,
             "unit": "MiB"
           }
         ]
