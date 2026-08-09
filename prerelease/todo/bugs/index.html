@@ -838,6 +838,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b69-a-blueprint-macro-is-missing-from-the-schema-index-until-a-migration-is-edited" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B69. A <code>Blueprint</code> macro is missing from the schema index until a migration is edited
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B70. Migration discovery and the migration watcher disagree on ignored directories
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1316,6 +1338,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b69-a-blueprint-macro-is-missing-from-the-schema-index-until-a-migration-is-edited" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B69. A <code>Blueprint</code> macro is missing from the schema index until a migration is edited
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B70. Migration discovery and the migration watcher disagree on ignored directories
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1375,6 +1419,38 @@ element type, <code>string</code> yields <code>string</code>, and <code>null</co
 the resolver generally, distinguish "this expression is <code>mixed</code>" from "this
 expression did not resolve": a branch that fails to resolve must widen the
 union it belongs to rather than silently vanish from it.</p>
+<h3 id="b69-a-blueprint-macro-is-missing-from-the-schema-index-until-a-migration-is-edited">B69. A <code>Blueprint</code> macro is missing from the schema index until a migration is edited<a class="headerlink" href="#b69-a-blueprint-macro-is-missing-from-the-schema-index-until-a-migration-is-edited" title="Permanent link">&para;</a></h3>
+<p><code>load_schema_index</code> takes the project's <code>Blueprint</code> macro closures so a
+migration calling a custom column helper (<code>$table-&gt;money('total')</code>,
+registered with <code>Blueprint::macro()</code>) contributes the columns that helper
+adds. At startup the map it is handed is always empty:
+<code>build_laravel_macro_index</code> is what fills <code>laravel_macros</code>, and it runs
+later in <code>initialized()</code> than the schema load does.</p>
+<p>So the initial index is built as if no macro existed, and every column a
+macro adds is absent from the model's virtual properties: hover, completion,
+and the unknown-property diagnostic all disagree with the database. Editing
+any migration or <code>config/database.php</code> afterwards calls
+<code>reload_laravel_schema_index</code>, which reads the (now populated) macro map and
+produces the correct index, so the columns appear only after an unrelated
+edit and the result depends on session history.</p>
+<p>Fix: build the macro index before the schema index at startup, or rebuild
+the schema index once the macro scan has run. The macro scan needs the
+class index, so it cannot simply move ahead of <code>init_single_project</code>.</p>
+<h3 id="b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories">B70. Migration discovery and the migration watcher disagree on ignored directories<a class="headerlink" href="#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories" title="Permanent link">&para;</a></h3>
+<p>Default migration discovery (<code>collect_default_migration_files</code>) walks the
+workspace with the <code>ignore</code> crate, so a <code>database/migrations</code> directory that
+is gitignored, hidden, or under <code>vendor/</code> contributes nothing to the schema
+index. The watched-file path uses <code>is_migration_php_file</code>, which checks only
+<code>vendor/</code> and the directory name, so editing a file in one of those same
+directories <em>does</em> apply it to the index.</p>
+<p>A project therefore ends up with a different schema index depending on which
+migrations happen to have been touched in the session, and a table defined
+only in an ignored migration appears on a model's virtual members after an
+edit and disappears again on restart.</p>
+<p>Fix: apply the same ignore rules on both paths, either by having
+<code>is_migration_php_file</code> consult a <code>Gitignore</code> matcher built once per
+workspace, or by testing candidate paths against the discovery walk's own
+result set.</p>
 
 
 
