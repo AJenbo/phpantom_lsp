@@ -1168,17 +1168,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl20-call-site-data-the-checks-stand-down-on" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL20. Call-site data the checks stand down on
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1430,10 +1419,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl22-bl23" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)
+        Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)
       </span>
     </span>
   </a>
@@ -2368,17 +2357,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl20-call-site-data-the-checks-stand-down-on" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL20. Call-site data the checks stand down on
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2630,10 +2608,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl22-bl23" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)
+        Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)
       </span>
     </span>
   </a>
@@ -3059,32 +3037,6 @@ subtype comparison. What it needs is a home: the error belongs on the
 child template's own docblock, not on every call site that renders it
 (which is where Bladestan puts it), so it wants a diagnostic pass over
 the Blade file rather than a hook in the call-site collector.</p>
-<h3 id="bl20-call-site-data-the-checks-stand-down-on">BL20. Call-site data the checks stand down on<a class="headerlink" href="#bl20-call-site-data-the-checks-stand-down-on" title="Permanent link">&para;</a></h3>
-<p><code>ResolvedViewCall::complete</code> is false whenever a call site's data cannot
-be read entry by entry, and the missing and unknown checks then skip the
-site entirely. That is the right default, but two shapes Bladestan still
-checks fall into it today:</p>
-<ul>
-<li><strong>A data argument that is not a literal.</strong> <code>view('page', $data)</code>,
-  <code>-&gt;with($extra)</code>, <code>array_merge($a, $b)</code>, and a method call returning an
-  array all collect nothing, so the site is not just exempt from the
-  missing check: its variables are never type-checked either. Bladestan
-  resolves any expression through <code>$scope-&gt;getType()</code> and reads a single
-  constant array shape off it, dropping optional keys (<code>array{user?:
-  User}</code>) so they stay reportable as missing while the guaranteed keys
-  are still validated. <code>PhpType::ArrayShape</code> carries the same
-  information, so this is a matter of running the data argument through
-  <code>resolve_expression_type</code> and reading the entries off the result when
-  it resolves to one shape. An <code>Arrayable</code> receiver resolves through its
-  <code>toArray()</code> return type the same way.</li>
-<li><strong>The types a scope-forwarded <code>@include</code> inherits.</strong> <code>blade_rendering_scope</code>
-  answers with names only, so a variable the surrounding template already
-  holds satisfies the partial's contract whatever its type. Bladestan
-  type-checks it against the signature and reports "but %s given by the
-  surrounding scope". Getting there means the rendering scope carrying
-  types rather than a <code>HashSet&lt;String&gt;</code>, which the forward walker can
-  answer for the template's virtual PHP at the include's offset.</li>
-</ul>
 <h3 id="bl22-a-template-never-learns-anything-from-the-templates-that-render-it">BL22. A template never learns anything from the templates that render it<a class="headerlink" href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" title="Permanent link">&para;</a></h3>
 <p><code>compute_blade_injected_vars</code> skips every Blade file in the caller
 snapshot (<code>if self.is_blade_file(file_uri) { continue; }</code>, and
@@ -3368,13 +3320,12 @@ directives with snippet templates.</p>
 <p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file.</p>
-<h3 id="step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23">Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23" title="Permanent link">&para;</a></h3>
+<h3 id="step-9-template-contracts-bl10-bl11-bl19-bl22-bl23">Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl19-bl22-bl23" title="Permanent link">&para;</a></h3>
 <p>Call-site validation is shipped. What is left widens it (BL23 for the
 render sites whose receiver only a type settles, BL19 for the covariance
-the merge does not check, BL20 for the data shapes the checks stand down
-on, BL22 for the templates that render other templates) and is
-independent of section/stack intelligence and custom directive
-discovery, so the six can land in any order.</p>
+the merge does not check, BL22 for the templates that render other
+templates) and is independent of section/stack intelligence and custom
+directive discovery, so the five can land in any order.</p>
 <p><strong>Deliverable:</strong> A template with a <code>@bladestan-signature</code> docblock
 gets typed completion for its declared variables at every render site,
 and a signature that widens its layout's is flagged.</p>
