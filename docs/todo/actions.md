@@ -399,3 +399,68 @@ this as a transformer.
   update it to match.
 
 **Code action kind:** `quickfix`.
+
+---
+
+### A44. Sort `use` statements
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+Re-sort a file's existing `use` imports alphabetically, the way
+PhpStorm's "Optimize Imports" and Phpactor's import sorter do. PHPantom
+already sorts *new* candidates when offering an import (`import_class.rs`),
+and `analyze_use_block` (`src/completion/use_edit.rs`) already parses the
+existing block's entries, but nothing re-orders the block once it exists,
+so a file edited by hand or merged from two branches keeps whatever order
+it ended up in.
+
+- Sort within each of the three PHP import kinds separately (plain
+  `use`, `use function`, `use const`); do not interleave them.
+- Sort case-insensitively by the imported name, not by the alias — `use
+  Zebra\Foo as Aardvark;` sorts under `Zebra\Foo`, matching how a reader
+  scans the block for a namespace, not an alias.
+- A blank line inside the block marks a group boundary a developer put
+  there on purpose (e.g. separating vendor imports from app imports);
+  sort within each group rather than collapsing the block into one.
+- A `use Foo\{Bar, Baz};` group-use statement sorts as one entry, keyed
+  on `Foo`; do not expand it into separate statements.
+- A comment attached to one `use` line (leading or trailing) must move
+  with it, not get orphaned by the reorder.
+- Offer as a code action over the `use` block (`source.organizeImports`
+  kind), not as an always-on formatter step — a developer who groups
+  imports by hand for readability should not have that undone on every
+  save.
+
+**Code action kind:** `source.organizeImports`.
+
+---
+
+### A45. Simplify with `?:` (Elvis operator)
+
+**Impact: Low-Medium · Effort: Low**
+
+Replace `$x ? $x : $y` with `$x ?: $y` (PHP's short ternary / "Elvis"
+operator), the mirror image of the null-coalescing simplifications
+`src/code_actions/simplify_null.rs` already offers. That module's
+`try_simplify_ternary` currently handles `isset($x) ? $x : $default` and
+`$x !== null ? $x : $default` (both → `??`) and the nullsafe patterns,
+but not the plain case where the condition and the then-branch are
+literally the same expression — its doc comment even notes short ternary
+is only handled as something to *leave alone* on the input side, not
+something to produce as output.
+
+- Match a full ternary (`Conditional` with a `then` branch) whose
+  condition's source text equals the then-branch's source text exactly,
+  the same string-equality heuristic the existing `??` patterns use.
+- Emit `<condition> ?: <else>`, dropping the duplicated then-branch.
+- `??` already covers the null-specific version of this
+  (`$x !== null ? $x : $default` → `$x ?? $default`); this pattern is
+  for the truthiness version (`$x ? $x : $default` → `$x ?: $default`),
+  which is a different operator with different semantics (falsy values
+  other than `null`, like `0`, `''`, or `false`, also take the
+  else-branch) and should not be conflated with it.
+- Natural home is alongside the existing patterns in
+  `try_simplify_ternary`, reusing its cursor-position walk and
+  `Simplification` enum rather than a new module.
+
+**Code action kind:** `refactor.rewrite`.
