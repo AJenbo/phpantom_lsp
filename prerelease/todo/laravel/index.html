@@ -1190,17 +1190,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l13-factory-count-conditional-return-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L13. Factory count-conditional return types
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l41-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1898,17 +1887,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L12. <code>HasUuids</code> / <code>HasUlids</code> trait — <code>$id</code> typed as <code>string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l13-factory-count-conditional-return-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L13. Factory count-conditional return types
       </span>
     </span>
   </a>
@@ -2616,38 +2594,6 @@ purposes just the <code>id</code> type is the main gap.</p>
 <p>Alternatively, if the stubs for these traits include <code>@property</code>
 tags or a typed <code>$id</code> override, the PHPDoc provider may handle it
 automatically once the traits are loaded.</p>
-<h4 id="l13-factory-count-conditional-return-types">L13. Factory count-conditional return types<a class="headerlink" href="#l13-factory-count-conditional-return-types" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium-High</strong></p>
-<p><code>User::factory()-&gt;create()</code> returns <code>User</code>, but
-<code>User::factory(3)-&gt;create()</code> and
-<code>User::factory()-&gt;count(3)-&gt;create()</code> return
-<code>Collection&lt;int, User&gt;</code>. Larastan resolves this via conditional
-return type extensions that inspect whether <code>count()</code> or the
-<code>$count</code> constructor argument was called with a non-null value.</p>
-<p>Currently PHPantom always resolves <code>create()</code> and <code>make()</code> to the
-single model type. This is correct for the common case but wrong
-when <code>count()</code> or <code>times()</code> has been called, or when the factory
-constructor receives an integer argument.</p>
-<p>Larastan's <code>model-factories.php</code> has 64 assertions covering these
-patterns, including <code>count(null)</code> resetting back to single-model
-return.</p>
-<p><strong>Where to change:</strong> This requires tracking call-chain state
-(whether <code>count()</code>/<code>times()</code> was called) through the resolution
-pipeline, which is non-trivial. Possible approaches:</p>
-<ol>
-<li><strong>Conservative:</strong> Always return <code>User|Collection&lt;int, User&gt;</code>
-   union when count state is ambiguous. Simple but noisy.</li>
-<li><strong>Chain-aware:</strong> Track whether <code>count()</code>/<code>times()</code> appears in
-   the chain before <code>create()</code>/<code>make()</code>. If yes, return
-   <code>Collection&lt;int, User&gt;</code>. If no, return <code>User</code>. Requires
-   the resolver to inspect preceding calls in the chain.</li>
-<li><strong>Argument-aware:</strong> Also check <code>User::factory($count)</code> for a
-   literal integer argument. Most complex but most accurate.</li>
-</ol>
-<p>Approach 2 is likely the best balance. The factory virtual member
-provider already knows the model type; it would need to emit
-different return types for <code>create()</code>/<code>make()</code> based on whether
-the chain includes a count-setting call.</p>
 <h4 id="l41-morph-aliases-in-_type-column-comparisons">L41. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l41-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p>The morph-map index (<code>virtual_members/laravel/morph_map.rs</code>) recognizes
