@@ -208,54 +208,6 @@ completions from the Alert class.
 
 ---
 
-## BL7. Directive name completion
-
-**Impact: Medium · Effort: Low**
-
-When the user types `@` in a Blade file (outside `{{ }}`, `@php`
-blocks, and string literals), offer completions for all known Blade
-directives with snippet templates.
-
-Each completion inserts a snippet with tab stops:
-
-```
-@if ($1)
-    $0
-@endif
-
-@foreach ($1 as $2)
-    $0
-@endforeach
-
-@include('$1')
-
-@props([$1])
-
-@inject('$1', '$2')
-
-@php
-$0
-@endphp
-```
-
-Detection: The `@` trigger character is already registered. In
-`handle_completion`, check `is_blade_file` and that the cursor is in
-an HTML/directive context (not inside `{{ }}`, not inside a `@php`
-block, not inside a string literal).
-
-### Tests
-
-Extend `tests/integration/completion_blade.rs`:
-
-- `@` triggers directive name completions
-- `@if` partial triggers filtered directive completions
-- No directive completion inside `{{ }}` or `@php` blocks
-
-**Deliverable:** Typing `@` in a Blade file shows all known
-directives with snippet templates.
-
----
-
 ## BL13. Mismatched and unbalanced directive diagnostics
 
 **Impact: Medium · Effort: Low-Medium**
@@ -307,7 +259,8 @@ scanner — so that:
   argument is still type-checked);
 - `Blade::if('admin')` synthesizes the full family (`@admin`,
   `@elseadmin`, `@endadmin`, `@unlessadmin`);
-- directive name completion (BL7) includes them;
+- directive name completion (`DIRECTIVE_COMPLETIONS` in
+  `src/blade/directives.rs`) includes them;
 - registered component namespaces/paths extend the discovery index.
 
 ---

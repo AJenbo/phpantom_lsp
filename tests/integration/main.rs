@@ -35,6 +35,7 @@ mod completion_array_shapes;
 mod completion_assertion_variables;
 mod completion_attributes;
 mod completion_basic;
+mod completion_blade;
 mod completion_callable_invocation;
 mod completion_callable_snippets;
 mod completion_catch;

@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL7  | [Blade directive completion](todo/blade.md#bl7-directive-name-completion)                                                  | Medium     | Low        |
 | BL13 | [Mismatched and unbalanced directive diagnostics](todo/blade.md#bl13-mismatched-and-unbalanced-directive-diagnostics)       | Medium     | Low-Medium |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
@@ -107,6 +106,7 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B2  | [A layout's contract is enforced without the layout's own suppliers](todo/bugs.md#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers)                       | Medium-High | Low-Medium  |
 | B67 | [`Blade::anonymousComponentNamespace()` registrations are invisible](todo/bugs.md#b67-bladeanonymouscomponentnamespace-registrations-are-invisible)                          | Medium      | Medium      |
+| B3  | [Directive coverage gaps in `match_directive`/`translate_directive`](todo/bugs.md#b3-directive-coverage-gaps-in-match_directivetranslate_directive)                          | Low         | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

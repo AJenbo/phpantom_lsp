@@ -40,6 +40,7 @@ use crate::completion::class_completion::{ClassCompletionParams, ClassNameContex
 use crate::text_position::position_to_byte_offset;
 use crate::types::FileContext;
 
+mod blade_directive;
 mod class_constant;
 mod member_access;
 mod named_args;
@@ -139,6 +140,21 @@ impl Backend {
         let uri = params.text_document_position.text_document.uri.to_string();
         let mut position = params.text_document_position.position;
         let completion_context = params.context.clone();
+
+        // ── Blade directive-name completion ─────────────────────────────
+        // Runs before the virtual-PHP content/position swap below: an `@`
+        // the user is still typing a directive name after doesn't survive
+        // Blade preprocessing (an unrecognised directive is masked as
+        // inert HTML), so this reads the raw buffer at the untranslated
+        // position instead. Always short-circuits once the cursor is
+        // confirmed to be in an HTML/directive position — even a prefix
+        // matching no known directive returns an empty list rather than
+        // falling through to class/variable completion.
+        if self.is_blade_file(&uri)
+            && let Some(prefix) = self.blade_directive_prefix_at(&uri, position)
+        {
+            return Ok(Some(self.complete_blade_directive(&prefix)));
+        }
 
         // Get file content for offset calculation.  For Blade files,
         // use the virtual PHP content and translate the cursor position
