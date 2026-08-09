@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B70. Migration discovery and the migration watcher disagree on ignored directories
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B70. Migration discovery and the migration watcher disagree on ignored directories
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,21 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h3 id="b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories">B70. Migration discovery and the migration watcher disagree on ignored directories<a class="headerlink" href="#b70-migration-discovery-and-the-migration-watcher-disagree-on-ignored-directories" title="Permanent link">&para;</a></h3>
-<p>Default migration discovery (<code>collect_default_migration_files</code>) walks the
-workspace with the <code>ignore</code> crate, so a <code>database/migrations</code> directory that
-is gitignored, hidden, or under <code>vendor/</code> contributes nothing to the schema
-index. The watched-file path uses <code>is_migration_php_file</code>, which checks only
-<code>vendor/</code> and the directory name, so editing a file in one of those same
-directories <em>does</em> apply it to the index.</p>
-<p>A project therefore ends up with a different schema index depending on which
-migrations happen to have been touched in the session, and a table defined
-only in an ignored migration appears on a model's virtual members after an
-edit and disappears again on restart.</p>
-<p>Fix: apply the same ignore rules on both paths, either by having
-<code>is_migration_php_file</code> consult a <code>Gitignore</code> matcher built once per
-workspace, or by testing candidate paths against the discovery walk's own
-result set.</p>
+<p>No outstanding items.</p>
 
 
 
