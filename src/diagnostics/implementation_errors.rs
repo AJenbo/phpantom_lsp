@@ -61,13 +61,10 @@ impl Backend {
             };
 
             // Find the matching ClassInfo in the uri_classes_index.
-            let class_info =
-                match ctx.file.classes.iter().find(|c| {
-                    c.name == *class_name || self.class_fqn_matches(c, class_name, &ctx.file)
-                }) {
-                    Some(c) => Arc::clone(c),
-                    None => continue,
-                };
+            let class_info = match ctx.declared_class(class_name) {
+                Some(c) => Arc::clone(c),
+                None => continue,
+            };
 
             // Only concrete classes and enums can have implementation errors.
             // Abstract classes, interfaces, and traits are skipped.
@@ -143,26 +140,6 @@ impl Backend {
                 tags: None,
                 data: None,
             });
-        }
-    }
-
-    /// Check if a ClassInfo's fully-qualified name matches the given name.
-    ///
-    /// The symbol map stores the short class name, but classes in the
-    /// uri_classes_index may have their FQN stored differently.  This handles the
-    /// common case where the class name is unqualified.
-    fn class_fqn_matches(
-        &self,
-        class: &crate::types::ClassInfo,
-        name: &str,
-        ctx: &crate::types::FileContext,
-    ) -> bool {
-        // Build FQN from namespace + class name and compare.
-        if let Some(ref ns) = ctx.namespace {
-            let fqn = format!("{}\\{}", ns, class.name);
-            fqn == name || class.name == name
-        } else {
-            class.name == name
         }
     }
 }

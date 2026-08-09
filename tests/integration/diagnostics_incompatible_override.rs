@@ -114,6 +114,86 @@ interface Foo {
         assert!(collect(php).is_empty());
     }
 
+    /// A class method displaces the concrete trait method it collides
+    /// with and PHP runs no compatibility check on that pair, so the
+    /// narrower return type is legal here.
+    #[test]
+    fn concrete_trait_method_override_no_diagnostic() {
+        let php = r#"<?php
+trait Fluent {
+    public function fluent(): static {
+        return $this;
+    }
+}
+
+class Uses {
+    use Fluent;
+
+    public function fluent(): self {
+        return $this;
+    }
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn abstract_trait_method_override_is_flagged() {
+        let php = r#"<?php
+trait RequiresFluent {
+    abstract public function fluent(): static;
+}
+
+class Uses {
+    use RequiresFluent;
+
+    public function fluent(): self {
+        return $this;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("RequiresFluent::fluent()"));
+    }
+
+    /// `never` is the bottom type, so it is a legal narrowing of any
+    /// declared return type. Symfony's `ButtonBuilder` overrides a whole
+    /// interface this way.
+    #[test]
+    fn never_return_type_no_diagnostic() {
+        let php = r#"<?php
+interface Buildable {
+    public function add(): static;
+}
+
+class Button implements Buildable {
+    public function add(): never {
+        throw new \BadMethodCallException('Buttons cannot have children.');
+    }
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn interface_method_override_is_flagged() {
+        let php = r#"<?php
+interface Chainable {
+    public function chain(): static;
+}
+
+class Impl implements Chainable {
+    public function chain(): self {
+        return $this;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("Chainable::chain()"));
+    }
+
     #[test]
     fn diagnostic_code_is_correct() {
         let php = r#"<?php
