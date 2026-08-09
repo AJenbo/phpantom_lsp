@@ -115,6 +115,7 @@ mod env_vars;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
+pub(crate) mod gates;
 mod helpers;
 mod higher_order_proxy;
 mod macros;
@@ -149,6 +150,9 @@ pub(crate) use config_keys::{
 };
 pub(crate) use const_eval::ClassContext;
 pub(crate) use env_vars::resolve_env_definition;
+pub(crate) use gates::{
+    LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
+};
 pub(crate) use macros::{
     LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
     extract_mixin_registrations, inject_macros, macro_closure_this_target,

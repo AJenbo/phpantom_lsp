@@ -196,7 +196,7 @@ pub fn preprocess_with_vars(
     }
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } }\n");
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
@@ -1564,12 +1564,12 @@ mod tests {
         let content = "@can('update', $post)\n<p>can</p>\n@elsecan('view', $post)\n<p>view</p>\n@endcan\n<p>after</p>";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("if (blade_directive ('update', $post)):"),
+            php.contains("if (blade_can_directive ('update', $post)):"),
             "@can should open a balanced if with its arguments type-checked: {}",
             php
         );
         assert!(
-            php.contains("elseif (blade_directive ('view', $post)):"),
+            php.contains("elseif (blade_can_directive ('view', $post)):"),
             "@elsecan should open a balanced elseif with its arguments type-checked: {}",
             php
         );

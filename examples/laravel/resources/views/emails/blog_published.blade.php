@@ -15,6 +15,13 @@
     <p>Slug: {{ $post->getSlug() }}</p>
     <p>Published: {{ $post->created_at->diffForHumans() }}</p>
 
+    {{-- `publish` is a method of PublishingPolicy, which DemoServiceProvider
+         registers for BlogPost, so the ability completes and hovers here the
+         same way it does in PHP. --}}
+    @can('publish', $post)
+        <p>You can publish this post.</p>
+    @endcan
+
     {{-- $mailFooter is not declared above and no caller passes it: the
          inline `View::composer('emails.*', …)` in DemoServiceProvider puts
          it in the scope of every view under `emails.`. --}}

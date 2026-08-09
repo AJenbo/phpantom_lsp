@@ -137,7 +137,7 @@ impl Backend {
 
         self.laravel_string_key_cache
             .write()
-            .invalidate_for_uri(uri);
+            .invalidate_for_uri(uri, content);
         self.refresh_blade_discovery(uri);
 
         // The mago-syntax parser contains `unreachable!()` and `.expect()`
@@ -175,6 +175,11 @@ impl Backend {
         // Keep the Eloquent morph map coherent with edits to the provider that
         // registers it.  Cheap no-op for files without a `morphMap(` call.
         self.refresh_laravel_morph_map(uri, content);
+
+        // Keep the authorization gate index coherent with edits to the
+        // provider that registers abilities and policies.  Cheap no-op for
+        // files that mention neither `Gate` nor `$policies`.
+        self.refresh_laravel_gates(uri, content);
 
         match result {
             Some(changed) => changed,
@@ -1246,6 +1251,12 @@ impl Backend {
                 let resolved = atom(&Self::resolve_name(&written, use_map, namespace));
                 class.laravel_mut().facade_accessor =
                     Some(crate::types::FacadeAccessor::Class(resolved));
+            }
+            // Resolve the `#[UsePolicy]` class name to an FQN so the policy is
+            // loadable cross-file.
+            if let Some(policy) = class.laravel().and_then(|l| l.policy_class.clone()) {
+                class.laravel_mut().policy_class =
+                    Some(Self::resolve_name(&policy, use_map, namespace));
             }
 
             // Resolve custom pivot class names (`->using(X::class)`) to FQNs so

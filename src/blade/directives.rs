@@ -792,18 +792,21 @@ pub fn translate_directive(directive: &str) -> String {
         "unset" => "unset".to_string(),
         // `@can`/`@cannot`/`@canany` (and their `@hasStack`/`@hasSection`/
         // `@sectionMissing` cousins) are conditionals that Laravel compiles
-        // to a real gate/environment method call inside `if (...):`. The
-        // exact method called doesn't affect type resolution, so all six
-        // share the same marker call rather than hard-coding a
+        // to a real gate/environment method call inside `if (...):`. A
+        // marker call stands in for it rather than a hard-coded
         // `\Illuminate\Contracts\Auth\Access\Gate` reference that may not
         // exist in every project's autoload map — the point is to keep the
         // arguments' expressions real PHP that gets type-checked, and to
         // open a genuine `if` so the `@endif` that always follows these
         // stays balanced.
-        "can" | "cannot" | "canany" | "hasStack" | "hasSection" | "sectionMissing" => {
-            "if (blade_directive".to_string()
-        }
-        "elsecan" | "elsecannot" | "elsecanany" => "elseif (blade_directive".to_string(),
+        //
+        // The authorization three get a marker of their own rather than
+        // sharing `blade_directive` with everything else: their first
+        // argument is an ability name, and symbol extraction recognises it
+        // by the callee it is passed to.
+        "can" | "cannot" | "canany" => "if (blade_can_directive".to_string(),
+        "elsecan" | "elsecannot" | "elsecanany" => "elseif (blade_can_directive".to_string(),
+        "hasStack" | "hasSection" | "sectionMissing" => "if (blade_directive".to_string(),
         "endsection" | "endpush" | "endprepend" | "endcomponent" | "endcomponentFirst"
         | "endslot" | "stop" | "show" | "append" | "overwrite" => "".to_string(),
         _ => format!("/* @{directive} */"),

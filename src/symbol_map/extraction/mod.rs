@@ -76,6 +76,8 @@ struct ExtractionCtx<'a> {
     /// Render sites whose receiver only a type settles, left for
     /// `Backend::typed_receiver_view_spans` to confirm.
     view_receiver_sites: Vec<ViewReceiverSite>,
+    /// The model argument of each authorization check that named one.
+    gate_subjects: Vec<crate::symbol_map::GateSubject>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -163,6 +165,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         content,
         untyped_closure_sites: Vec::new(),
         view_receiver_sites: Vec::new(),
+        gate_subjects: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -288,6 +291,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
         view_receiver_sites: ctx.view_receiver_sites,
+        gate_subjects: ctx.gate_subjects,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
     }
 }
