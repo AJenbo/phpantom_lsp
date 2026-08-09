@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786305915048,
+  "lastUpdate": 1786306900056,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17577,6 +17577,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "1242225+sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "af8bda98ab29494194167b702dfd67fb7a97947a",
+          "message": "fix(laravel): prevent migration discovery from hanging the server",
+          "timestamp": "2026-08-09T22:05:17+02:00",
+          "tree_id": "1f8d1a052dca45e341e449cf34715eb0520ac02b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/af8bda98ab29494194167b702dfd67fb7a97947a"
+        },
+        "date": 1786306895048,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.4,
             "unit": "MiB"
           }
         ]
