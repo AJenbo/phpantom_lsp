@@ -173,7 +173,7 @@ fn extract_call<'a>(
                             &func_call.argument_list,
                             0,
                             Some(1),
-                            false,
+                            AbilityRole::Check,
                             ctx.content,
                             &mut ctx.spans,
                             &mut ctx.gate_subjects,
@@ -615,7 +615,7 @@ fn emit_gate_facade_ability_spans<'a>(
             argument_list,
             0,
             None,
-            true,
+            AbilityRole::Definition,
             ctx.content,
             &mut ctx.spans,
             &mut ctx.gate_subjects,
@@ -627,11 +627,25 @@ fn emit_gate_facade_ability_spans<'a>(
             argument_list,
             0,
             Some(1),
-            false,
+            gate_ability_role(member_name),
             ctx.content,
             &mut ctx.spans,
             &mut ctx.gate_subjects,
         );
+    }
+}
+
+/// What a `Gate` method does with the ability it is handed.
+///
+/// `has()` is the framework's own "is this ability registered?" predicate, so
+/// a name it does not find is the answer the call was written to get rather
+/// than a typo.  The span is still emitted — completion, hover, and
+/// go-to-definition all work inside it — but it is not judged.
+fn gate_ability_role(member_name: &str) -> AbilityRole {
+    if member_name.eq_ignore_ascii_case("has") {
+        AbilityRole::Existence
+    } else {
+        AbilityRole::Check
     }
 }
 
@@ -678,7 +692,7 @@ fn emit_gate_ability_spans_for_method<'a>(
                 argument_list,
                 1,
                 Some(2),
-                false,
+                AbilityRole::Check,
                 ctx.content,
                 &mut ctx.spans,
                 &mut ctx.gate_subjects,
@@ -699,7 +713,7 @@ fn emit_gate_ability_spans_for_method<'a>(
             argument_list,
             0,
             None,
-            false,
+            AbilityRole::Check,
             ctx.content,
             &mut ctx.spans,
             &mut ctx.gate_subjects,
@@ -721,7 +735,7 @@ fn emit_gate_ability_spans_for_method<'a>(
         argument_list,
         0,
         Some(1),
-        false,
+        gate_ability_role(member_name),
         ctx.content,
         &mut ctx.spans,
         &mut ctx.gate_subjects,

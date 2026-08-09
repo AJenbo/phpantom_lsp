@@ -717,6 +717,40 @@ async fn the_gate_define_registration_itself_is_never_flagged() {
     );
 }
 
+/// `Gate::has()` asks whether an ability is registered, so a name it does
+/// not find is the answer rather than a mistake.  The string is still a
+/// recognised ability span (completion, hover, and go-to-definition all work
+/// inside it); it is only left out of the diagnostic.
+#[tokio::test]
+async fn gate_has_does_not_flag_an_unregistered_ability() {
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Gate;
+class Consumer {
+    public function go(): void {
+        Gate::allows('manage-billling', 'pro');
+        Gate::has('manage-billling');
+    }
+}
+";
+    let (backend, _dir, uri) = workspace(consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    let flagged = ability_diagnostics(&diags);
+    assert_eq!(
+        flagged.len(),
+        1,
+        "only the `allows()` check should be flagged, got {flagged:?}"
+    );
+    let line = flagged[0].range.start.line;
+    assert_eq!(
+        line, 5,
+        "the flagged line should be the `allows()` call, got line {line}"
+    );
+}
+
 #[tokio::test]
 async fn a_use_policy_attribute_overrides_the_convention() {
     let consumer = "\

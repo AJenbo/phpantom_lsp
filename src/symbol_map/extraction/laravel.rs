@@ -559,6 +559,19 @@ fn push_morph_alias_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<S
 /// the PHP forms.
 pub(crate) const BLADE_CAN_DIRECTIVE: &str = "blade_can_directive";
 
+/// What a recognised ability span is doing with the name it holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AbilityRole {
+    /// `Gate::define('name', …)` declares the ability, so the span is a
+    /// declaration site rather than a use of one.
+    Definition,
+    /// A check that has to name a real ability.
+    Check,
+    /// `Gate::has('name')` asks whether the ability is registered at all, so
+    /// a name that is not registered is the question rather than a mistake.
+    Existence,
+}
+
 /// Methods on Laravel's `Gate` whose first argument is an ability name (or a
 /// list of them), and whose second is the model the check is about.
 ///
@@ -678,7 +691,7 @@ pub(super) fn try_emit_gate_ability_spans(
     argument_list: &ArgumentList<'_>,
     ability_index: usize,
     model_index: Option<usize>,
-    is_definition: bool,
+    role: AbilityRole,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
     gate_subjects: &mut Vec<crate::symbol_map::GateSubject>,
@@ -692,18 +705,18 @@ pub(super) fn try_emit_gate_ability_spans(
         Expression::Array(array) => {
             for element in array.elements.iter() {
                 if let ArrayElement::Value(value) = element {
-                    push_gate_ability_span(value.value, is_definition, content, spans);
+                    push_gate_ability_span(value.value, role, content, spans);
                 }
             }
         }
         Expression::LegacyArray(array) => {
             for element in array.elements.iter() {
                 if let ArrayElement::Value(value) = element {
-                    push_gate_ability_span(value.value, is_definition, content, spans);
+                    push_gate_ability_span(value.value, role, content, spans);
                 }
             }
         }
-        expr => push_gate_ability_span(expr, is_definition, content, spans),
+        expr => push_gate_ability_span(expr, role, content, spans),
     }
     if spans.len() == first_span {
         return;
@@ -730,7 +743,7 @@ pub(super) fn try_emit_gate_ability_spans(
 /// Push a gate-ability span for a single string-literal expression.
 fn push_gate_ability_span(
     expr: &Expression<'_>,
-    is_definition: bool,
+    role: AbilityRole,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
@@ -751,8 +764,8 @@ fn push_gate_ability_span(
         kind: SymbolKind::LaravelStringKey {
             kind: crate::symbol_map::LaravelStringKind::GateAbility,
             key: ability.to_string(),
-            is_write: is_definition,
-            is_optional: false,
+            is_write: role == AbilityRole::Definition,
+            is_optional: role == AbilityRole::Existence,
         },
     });
 }
