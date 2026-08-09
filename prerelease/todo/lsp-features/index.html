@@ -1238,15 +1238,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f8-test-implementation-navigation-via-covers" class="md-nav__link">
+  <a href="#f8-implementation-test-navigation-via-covers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        F8. Test ↔ implementation navigation via <code>@covers</code>
+        F8. Implementation → test navigation via <code>@covers</code>
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="F8. Test ↔ implementation navigation via @covers">
+    <nav class="md-nav" aria-label="F8. Implementation → test navigation via @covers">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1261,21 +1261,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#from-test-subject" class="md-nav__link">
+  <a href="#the-reverse-lookup" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        From test → subject
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#from-subject-test" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        From subject → test
+        The reverse lookup
       </span>
     </span>
   </a>
@@ -1287,17 +1276,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Exposure
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#dependencies_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Dependencies
       </span>
     </span>
   </a>
@@ -2072,15 +2050,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f8-test-implementation-navigation-via-covers" class="md-nav__link">
+  <a href="#f8-implementation-test-navigation-via-covers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        F8. Test ↔ implementation navigation via <code>@covers</code>
+        F8. Implementation → test navigation via <code>@covers</code>
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="F8. Test ↔ implementation navigation via @covers">
+    <nav class="md-nav" aria-label="F8. Implementation → test navigation via @covers">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2095,21 +2073,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#from-test-subject" class="md-nav__link">
+  <a href="#the-reverse-lookup" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        From test → subject
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#from-subject-test" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        From subject → test
+        The reverse lookup
       </span>
     </span>
   </a>
@@ -2121,17 +2088,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Exposure
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#dependencies_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Dependencies
       </span>
     </span>
   </a>
@@ -2705,56 +2661,41 @@ handler, the editor falls back to selecting the word under the cursor,
 which gives <code>name</code> instead of <code>$user-&gt;name</code> — useless for the
 debugger.</p>
 <hr />
-<h2 id="f8-test-implementation-navigation-via-covers">F8. Test ↔ implementation navigation via <code>@covers</code><a class="headerlink" href="#f8-test-implementation-navigation-via-covers" title="Permanent link">&para;</a></h2>
+<h2 id="f8-implementation-test-navigation-via-covers">F8. Implementation → test navigation via <code>@covers</code><a class="headerlink" href="#f8-implementation-test-navigation-via-covers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
-<p>Provide bidirectional navigation between a test class and the class it
-tests, using PHPUnit's <code>@covers</code> / <code>@coversClass</code> / <code>#[CoversClass]</code>
-annotations as the linking mechanism.</p>
+<p>Given a class, surface the test classes that name it in their PHPUnit
+coverage metadata. The test → subject direction already works: coverage
+targets are symbol-map references, so go-to-definition, hover, and
+rename reach them the way they reach any other class, method, or
+function name.</p>
 <h3 id="why-not-path-based-mapping">Why not path-based mapping<a class="headerlink" href="#why-not-path-based-mapping" title="Permanent link">&para;</a></h3>
 <p>Pattern-based approaches (e.g. <code>src/Foo.php</code> → <code>tests/FooTest.php</code>)
 assume a project follows a specific directory convention. Many projects
 don't: tests may live under <code>tests/Feature/</code>, <code>tests/Functional/</code>,
-or in a completely separate directory structure. The <code>@covers</code> tag is
+or in a completely separate directory structure. Coverage metadata is
 an explicit, project-layout-independent link that works for any
 structure.</p>
-<h3 id="from-test-subject">From test → subject<a class="headerlink" href="#from-test-subject" title="Permanent link">&para;</a></h3>
-<p>When the cursor is in a test class, look for:
-- <code>@covers \App\Service\UserService</code> (docblock on class or method)
-- <code>@coversClass(\App\Service\UserService::class)</code> (PHPUnit 10+)
-- <code>#[CoversClass(UserService::class)]</code> (PHP 8 attribute, PHPUnit 10+)</p>
-<p>Resolve the referenced class name via the standard class loader and
-navigate to its definition. This can be exposed as a code lens
-("Go to subject") or a code action, or both.</p>
-<h3 id="from-subject-test">From subject → test<a class="headerlink" href="#from-subject-test" title="Permanent link">&para;</a></h3>
-<p>Given a class, find test classes that reference it in <code>@covers</code> /
-<code>@coversClass</code> / <code>#[CoversClass]</code>. This requires scanning test files
-for the annotation. Two approaches:</p>
+<h3 id="the-reverse-lookup">The reverse lookup<a class="headerlink" href="#the-reverse-lookup" title="Permanent link">&para;</a></h3>
+<p>Nothing indexes coverage targets today, so answering "which tests cover
+this class?" means finding every <code>#[CoversClass]</code> / <code>@covers</code> in the
+project that names it. Two approaches:</p>
 <ul>
-<li><strong>Lazy scan</strong>: When the user invokes "find tests" on a class, scan
-  files matching <code>*Test.php</code> in the project for <code>@covers</code> / <code>#[CoversClass]</code>
-  referencing the current class FQN. This is O(n) in test file count
-  but test directories are typically small.</li>
-<li><strong>Indexed</strong>: Now that full background indexing is available,
-  <code>@covers</code> annotations can be indexed during the indexing pass and
-  looked up in O(1).</li>
+<li><strong>Lazy scan</strong>: when the user asks, scan files matching <code>*Test.php</code> for
+  metadata referencing the current class FQN. O(n) in test file count,
+  but test directories are typically small, and a <code>memchr</code>-based
+  pre-filter on the class name before parsing keeps it fast.</li>
+<li><strong>Indexed</strong>: record coverage targets during the full background
+  indexing pass and keep a reverse map, evicted alongside the other
+  per-file indexes (<code>gti_index</code> is the model), so the lookup is O(1).</li>
 </ul>
-<p>The lazy approach is fine for most projects. Test directories rarely
-exceed a few hundred files, and a simple <code>memchr</code>-based string
-pre-filter on the class name before parsing keeps it fast.</p>
+<p>An index is what an always-on presentation needs: a code lens fires on
+every open document, and scanning the test tree per request is too much
+work to do on that path.</p>
 <h3 id="exposure">Exposure<a class="headerlink" href="#exposure" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Code lens</strong> on test classes: "Subject: UserService" (clickable,
-  navigates to the subject class).</li>
-<li><strong>Code lens</strong> on subject classes: "Tests: UserServiceTest" (clickable,
-  navigates to the test).</li>
-<li><strong>Code action</strong>: "Go to test" / "Go to subject" when the cursor is
-  on the class name.</li>
-</ul>
-<h3 id="dependencies_1">Dependencies<a class="headerlink" href="#dependencies_1" title="Permanent link">&para;</a></h3>
-<p>No hard dependencies. Works with the existing class loader for the
-test → subject direction. The subject → test direction benefits from,
-but does not require, the full background indexing that is now
-available.</p>
+<p>The subject side has no reference to anchor to, so unlike the test side
+it cannot ride on go-to-definition. It needs a presentation of its own,
+such as a code lens or an inlay overlay above the class declaration
+("Tests: UserServiceTest"), or a code action on the class name.</p>
 <hr />
 <h2 id="f11-vs-code-extension">F11. VS Code extension<a class="headerlink" href="#f11-vs-code-extension" title="Permanent link">&para;</a></h2>
 <table>
