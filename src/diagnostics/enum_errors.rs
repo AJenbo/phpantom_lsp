@@ -32,7 +32,7 @@ impl Backend {
                 _ => continue,
             };
 
-            let class_info = match find_class(&ctx.file.classes, class_name, &ctx.file.namespace) {
+            let class_info = match ctx.declared_class(class_name) {
                 Some(c) => c,
                 None => continue,
             };
@@ -106,24 +106,14 @@ impl Backend {
     }
 }
 
-fn find_class<'a>(
-    classes: &'a [std::sync::Arc<ClassInfo>],
-    name: &str,
-    namespace: &Option<String>,
-) -> Option<&'a std::sync::Arc<ClassInfo>> {
-    classes.iter().find(|c| {
-        if c.name == name {
-            return true;
-        }
-        if let Some(ns) = namespace {
-            let fqn = format!("{}\\{}", ns, c.name);
-            fqn == name
-        } else {
-            false
-        }
-    })
-}
-
+/// Report a backing type that is neither `int` nor `string`.
+///
+/// The parser only records `int` and `string` backings, so an invalid one
+/// is indistinguishable from a unit enum in [`ClassInfo`] and has to be
+/// read back off the source.  The grammar makes that exact rather than a
+/// search: `enum Name` is followed by `: BackingType` (when backed) before
+/// any `implements` clause or the body, so the token right after the name
+/// decides it. Anything else there, including a comment, is left alone.
 fn detect_invalid_backing_type(
     backend: &Backend,
     uri: &str,
@@ -131,21 +121,20 @@ fn detect_invalid_backing_type(
     name_end: usize,
     out: &mut Vec<Diagnostic>,
 ) -> bool {
-    let search_end = (name_end + 150).min(content.len());
-    let snippet = &content[name_end..search_end];
-
-    let colon_pos = match snippet.find(':') {
-        Some(p) => p,
-        None => return false,
+    let Some(rest) = content.get(name_end..) else {
+        return false;
     };
 
-    let brace_pos = snippet.find('{').unwrap_or(snippet.len());
-    if colon_pos >= brace_pos {
+    let after_name = rest.trim_start();
+    let Some(after_colon) = after_name.strip_prefix(':') else {
         return false;
-    }
+    };
 
-    let after_colon = &snippet[colon_pos + 1..brace_pos];
-    let type_name = after_colon.split_whitespace().next().unwrap_or("");
+    let type_text = after_colon.trim_start();
+    let type_name: String = type_text
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '\\')
+        .collect();
 
     if type_name.is_empty()
         || type_name.eq_ignore_ascii_case("int")
@@ -154,8 +143,7 @@ fn detect_invalid_backing_type(
         return false;
     }
 
-    let leading_ws = after_colon.len() - after_colon.trim_start().len();
-    let type_start = name_end + colon_pos + 1 + leading_ws;
+    let type_start = name_end + (rest.len() - type_text.len());
     let type_end = type_start + type_name.len();
 
     let range = match backend.offset_range_to_lsp_range(uri, content, type_start, type_end) {

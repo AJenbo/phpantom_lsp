@@ -43,6 +43,23 @@ impl FileDiagnosticContext {
             file: backend.file_context(uri),
         })
     }
+
+    /// The file's own `ClassInfo` for a [`SymbolKind::ClassDeclaration`]
+    /// name.
+    ///
+    /// The symbol map spells the name either way round depending on how
+    /// the declaration was written, so a short name is also matched
+    /// against the file namespace's qualification of it.
+    pub(crate) fn declared_class(&self, name: &str) -> Option<&Arc<ClassInfo>> {
+        self.file.classes.iter().find(|c| {
+            c.name == name
+                || self
+                    .file
+                    .namespace
+                    .as_ref()
+                    .is_some_and(|ns| format!("{}\\{}", ns, c.name) == name)
+        })
+    }
 }
 
 /// Compute the byte ranges of all namespace-level `use` import lines.

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::SymbolKind;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo};
 
@@ -38,13 +38,7 @@ impl Backend {
                 _ => continue,
             };
 
-            let class_info = match ctx.file.classes.iter().find(|c| {
-                c.name == *class_name
-                    || match &ctx.file.namespace {
-                        Some(ns) => format!("{}\\{}", ns, c.name) == *class_name,
-                        None => false,
-                    }
-            }) {
+            let class_info = match ctx.declared_class(class_name) {
                 Some(c) => c,
                 None => continue,
             };
@@ -64,6 +58,13 @@ impl Backend {
                     Some(t) => t,
                     None => continue,
                 };
+
+                // `never` is the bottom type, so it narrows any return type
+                // the ancestor declared. A method that only ever throws is
+                // free to say so.
+                if matches!(child_native.kind(), TypeKind::Named(n) if *n == "never") {
+                    continue;
+                }
 
                 if let Some((parent_method, source_name)) =
                     find_parent_method(class_info, &method.name, &class_loader)
@@ -88,8 +89,8 @@ impl Backend {
                             DiagnosticSeverity::ERROR,
                             "incompatible_override",
                             format!(
-                                "Declaration of {}::{}() must be compatible with {}::{}(): return type must use 'static', not 'self'",
-                                class_info.name, method.name, source_name, method.name
+                                "Declaration of {}::{}() must be compatible with {}::{}(): return type '{}' must be 'static'",
+                                class_info.name, method.name, source_name, method.name, child_native
                             ),
                         ));
                     }
@@ -100,11 +101,11 @@ impl Backend {
 }
 
 fn contains_static_type(ty: &PhpType) -> bool {
-    match ty {
-        PhpType::StaticType(_) | PhpType::ThisType(_) => true,
-        PhpType::Named(name) => *name == "static",
-        PhpType::Nullable(inner) => contains_static_type(inner),
-        PhpType::Union(types) | PhpType::Intersection(types) => {
+    match ty.kind() {
+        TypeKind::StaticType(_) | TypeKind::ThisType(_) => true,
+        TypeKind::Named(name) => *name == "static",
+        TypeKind::Nullable(inner) => contains_static_type(inner),
+        TypeKind::Union(types) | TypeKind::Intersection(types) => {
             types.iter().any(contains_static_type)
         }
         _ => false,
@@ -131,8 +132,44 @@ fn find_parent_method(
         }
     }
 
+    // A class method displaces the concrete trait method it collides with,
+    // and PHP runs no compatibility check on that pair. Only an abstract
+    // trait method states a requirement the class has to satisfy.
     for trait_name in &class.used_traits {
-        if let Some(result) = find_method_in_chain(trait_name, &lower, class_loader, &mut visited) {
+        if let Some(result) =
+            find_abstract_method_in_traits(trait_name, &lower, class_loader, &mut visited)
+        {
+            return Some(result);
+        }
+    }
+
+    None
+}
+
+fn find_abstract_method_in_traits(
+    trait_name: &str,
+    method_lower: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visited: &mut HashSet<String>,
+) -> Option<(Arc<MethodInfo>, String)> {
+    if !visited.insert(trait_name.to_string()) {
+        return None;
+    }
+
+    let trait_info = class_loader(trait_name)?;
+
+    if let Some(method) = trait_info
+        .methods
+        .iter()
+        .find(|m| m.is_abstract && m.name.to_lowercase() == *method_lower)
+    {
+        return Some((Arc::clone(method), trait_name.to_string()));
+    }
+
+    for nested in &trait_info.used_traits {
+        if let Some(result) =
+            find_abstract_method_in_traits(nested, method_lower, class_loader, visited)
+        {
             return Some(result);
         }
     }

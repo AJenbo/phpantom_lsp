@@ -192,4 +192,56 @@ enum Flags: bool {
                 "invalid_enum_backing_type".to_string()
             ))),);
     }
+
+    /// An unusable backing type leaves the enum indistinguishable from a
+    /// unit enum in `ClassInfo`, so the per-case checks have to stand
+    /// down rather than call every valued case an error.
+    #[test]
+    fn invalid_backing_type_reported_once() {
+        let php = r#"<?php
+enum Ratio: float {
+    case Half = 0.5;
+    case Whole = 1.0;
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String(
+                "invalid_enum_backing_type".to_string()
+            ))
+        );
+    }
+
+    /// The backing type is read off the source, so a multi-byte character
+    /// after the enum name must not be sliced through or mistaken for one.
+    #[test]
+    fn non_ascii_after_enum_name() {
+        let php = "<?php
+enum Colour /* ✓ αβγδε ζηθικ λμνξο πρστυ φχψω ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓ ✓ */
+{
+    case Red;
+    case Blue;
+}
+";
+        assert!(collect(php).is_empty());
+    }
+
+    /// A colon inside the body is not a backing type.
+    #[test]
+    fn colon_in_body_is_not_a_backing_type() {
+        let php = r#"<?php
+enum Level {
+    case Low;
+
+    public function label(): string {
+        return match ($this) {
+            self::Low => 'low',
+        };
+    }
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
 }

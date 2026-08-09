@@ -152,6 +152,143 @@ function foo(string $s) {
     }
 
     #[test]
+    fn null_arm_against_nullable_subject() {
+        let php = r#"<?php
+function foo(?int $n) {
+    return match ($n) {
+        1 => 'one',
+        null => 'none',
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn null_arm_against_union_with_null() {
+        let php = r#"<?php
+/** @param int|null $n */
+function foo($n) {
+    return match ($n) {
+        1 => 'one',
+        null => 'none',
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn bool_arms_against_bool_subject() {
+        let php = r#"<?php
+function foo(bool $b) {
+    return match ($b) {
+        true => 1,
+        false => 2,
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn arms_covering_each_union_member() {
+        let php = r#"<?php
+/** @param int|string $v */
+function foo($v) {
+    return match ($v) {
+        1 => 'i',
+        'a' => 's',
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    /// A union member we cannot reduce to a scalar means the subject could
+    /// hold a value outside the set we recognise, so no arm is provably
+    /// unreachable.
+    #[test]
+    fn union_with_non_scalar_member_no_diagnostic() {
+        let php = r#"<?php
+class Thing {}
+/** @param int|Thing $v */
+function foo($v) {
+    return match ($v) {
+        'nope' => 1,
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn mixed_subject_no_diagnostic() {
+        let php = r#"<?php
+/** @param mixed $v */
+function foo($v) {
+    return match ($v) {
+        1 => 'i',
+        'a' => 's',
+        null => 'n',
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn enum_subject_no_diagnostic() {
+        let php = r#"<?php
+enum Suit: string {
+    case Hearts = 'H';
+    case Spades = 'S';
+}
+function foo(Suit $s) {
+    return match ($s) {
+        Suit::Hearts => 1,
+        Suit::Spades => 2,
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
+    fn signed_int_literals_against_int_subject() {
+        let php = r#"<?php
+function foo(int $n) {
+    return match ($n) {
+        -1 => 'neg',
+        +2 => 'pos',
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    /// Indexing a union-typed array resolves to nothing today, so the
+    /// ternary keeps only its else branch and the subject comes out as the
+    /// literal `'exception'` rather than `mixed` (see B68 in
+    /// `docs/todo/bugs.md`). A literal subject must not be read as the
+    /// complete set of values the subject can hold.
+    #[test]
+    fn literal_subject_no_diagnostic() {
+        let php = r#"<?php
+/** @param array|string|null $service */
+function foo($service) {
+    $mode = \array_key_exists('mode', $service) ? $service['mode'] : 'exception';
+
+    return match ($mode) {
+        'exception' => 1,
+        null => 2,
+    };
+}
+"#;
+        assert!(collect(php).is_empty());
+    }
+
+    #[test]
     fn default_arm_no_diagnostic() {
         let php = r#"<?php
 function foo(string $s) {
