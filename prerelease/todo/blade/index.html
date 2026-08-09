@@ -1157,17 +1157,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl19-signature-covariance-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL19. Signature covariance diagnostic
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1419,10 +1408,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl22-bl23" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl22-bl23" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)
+        Step 9: Template contracts (BL10, BL11, BL22, BL23)
       </span>
     </span>
   </a>
@@ -2346,17 +2335,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl19-signature-covariance-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL19. Signature covariance diagnostic
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2608,10 +2586,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl22-bl23" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl22-bl23" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)
+        Step 9: Template contracts (BL10, BL11, BL22, BL23)
       </span>
     </span>
   </a>
@@ -3025,18 +3003,6 @@ in the indexer.</p>
 it is the PHP spelling of <code>@each</code>, so both its view arguments are render
 sites and its data argument means what <code>blade_each_directive</code>'s does
 rather than what a data array does.</p>
-<h3 id="bl19-signature-covariance-diagnostic">BL19. Signature covariance diagnostic<a class="headerlink" href="#bl19-signature-covariance-diagnostic" title="Permanent link">&para;</a></h3>
-<p><code>blade_template_contract</code> (<code>src/blade/contract.rs</code>) merges a template's
-signature with the layouts it <code>@extends</code>, nearest declaration winning,
-which lets a child narrow a layout's declared type. It does not check
-the other direction: a child that <em>widens</em> what its layout declared
-(<code>string</code> → <code>string|int</code>), or declares something outright incompatible,
-merges silently. Bladestan reports both as <code>bladestan.signatureMerge</code>.</p>
-<p>The merge already has both types in hand, so the check itself is a
-subtype comparison. What it needs is a home: the error belongs on the
-child template's own docblock, not on every call site that renders it
-(which is where Bladestan puts it), so it wants a diagnostic pass over
-the Blade file rather than a hook in the call-site collector.</p>
 <h3 id="bl22-a-template-never-learns-anything-from-the-templates-that-render-it">BL22. A template never learns anything from the templates that render it<a class="headerlink" href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" title="Permanent link">&para;</a></h3>
 <p><code>compute_blade_injected_vars</code> skips every Blade file in the caller
 snapshot (<code>if self.is_blade_file(file_uri) { continue; }</code>, and
@@ -3320,15 +3286,15 @@ directives with snippet templates.</p>
 <p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file.</p>
-<h3 id="step-9-template-contracts-bl10-bl11-bl19-bl22-bl23">Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl19-bl22-bl23" title="Permanent link">&para;</a></h3>
-<p>Call-site validation is shipped. What is left widens it (BL23 for the
-render sites whose receiver only a type settles, BL19 for the covariance
-the merge does not check, BL22 for the templates that render other
-templates) and is independent of section/stack intelligence and custom
-directive discovery, so the five can land in any order.</p>
+<h3 id="step-9-template-contracts-bl10-bl11-bl22-bl23">Step 9: Template contracts (BL10, BL11, BL22, BL23)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl22-bl23" title="Permanent link">&para;</a></h3>
+<p>Call-site validation is shipped, and so is the covariance check on the
+signature chain and the data shapes the checks used to stand down on.
+What is left is BL23 for the render sites whose receiver only a type
+settles and BL22 for the templates that render other templates, and it
+is independent of section/stack intelligence and custom directive
+discovery, so the two can land in any order.</p>
 <p><strong>Deliverable:</strong> A template with a <code>@bladestan-signature</code> docblock
-gets typed completion for its declared variables at every render site,
-and a signature that widens its layout's is flagged.</p>
+gets typed completion for its declared variables at every render site.</p>
 <h3 id="step-10-editor-tooling-parity-bl13-bl16">Step 10: Editor tooling parity (BL13-BL16)<a class="headerlink" href="#step-10-editor-tooling-parity-bl13-bl16" title="Permanent link">&para;</a></h3>
 <p>Implement directive-pair validation (BL13), then Blade-position
 translation for folding (BL14) and document symbols (BL15) — both
