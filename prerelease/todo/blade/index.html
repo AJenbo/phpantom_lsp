@@ -1179,10 +1179,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl21-each-item-and-key-variables" class="md-nav__link">
+  <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL21. <code>@each</code> item and key variables
+        BL22. A template never learns anything from the templates that render it
       </span>
     </span>
   </a>
@@ -1430,10 +1430,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)
+        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)
       </span>
     </span>
   </a>
@@ -2379,10 +2379,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl21-each-item-and-key-variables" class="md-nav__link">
+  <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL21. <code>@each</code> item and key variables
+        BL22. A template never learns anything from the templates that render it
       </span>
     </span>
   </a>
@@ -2630,10 +2630,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)
+        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)
       </span>
     </span>
   </a>
@@ -3025,8 +3025,9 @@ scanner — so that:</p>
 <h3 id="bl18-mailable-and-view-method-render-sites">BL18. Mailable and view-method render sites<a class="headerlink" href="#bl18-mailable-and-view-method-render-sites" title="Permanent link">&para;</a></h3>
 <p>Call-site validation (<code>src/diagnostics/blade_call_site.rs</code>) reaches every
 render site the symbol map records a view name for: <code>view()</code>,
-<code>View::make()</code>, <code>Route::view()</code>, and the <code>blade_view_directive</code> the
-preprocessor compiles <code>@include</code>/<code>@extends</code>/<code>@component</code>/<code>@each</code> into.
+<code>View::make()</code>, <code>Route::view()</code>, the <code>blade_view_directive</code> the
+preprocessor compiles <code>@include</code>/<code>@extends</code>/<code>@component</code> into, and the
+<code>blade_each_directive</code> it compiles <code>@each</code> into.
 Two shapes Bladestan matches are missing, because nothing indexes their
 view name in the first place — which also costs them go-to-definition,
 hover, and the unknown-view diagnostic, so this is an indexing item
@@ -3098,27 +3099,28 @@ checks fall into it today:</p>
   types rather than a <code>HashSet&lt;String&gt;</code>, which the forward walker can
   answer for the template's virtual PHP at the include's offset.</li>
 </ul>
-<h3 id="bl21-each-item-and-key-variables">BL21. <code>@each</code> item and key variables<a class="headerlink" href="#bl21-each-item-and-key-variables" title="Permanent link">&para;</a></h3>
-<p><code>@each('partials.row', $rows, 'row')</code> renders <code>partials.row</code> once per
-entry with <code>$row</code> bound to the entry and <code>$key</code> to its key, and nothing
-else in scope. The preprocessor compiles it to <code>blade_view_directive</code>
-with the collection as the data argument, so <code>collect_from_data_expr</code>
-reads a collection where it expects a data array, finds no literal
-entries, and marks the site incomplete. Two consequences:</p>
-<ul>
-<li><code>partials/row.blade.php</code> never learns about <code>$row</code> from its <code>@each</code>
-  call sites, so an unannotated partial rendered only that way gets no
-  completion or hover for the variable it exists to display.</li>
-<li>an <code>@each</code> site is never validated against the partial's contract,
-  because it is permanently incomplete.</li>
-</ul>
-<p>Bladestan's <code>getEachVariables</code> derives both names from the call: <code>$key</code>
-from the collection's key type, and the item under the name the third
-argument spells, falling back to <code>mixed</code> when the collection's type is
-not a constant array. Our foreach machinery already answers "what is one
-entry of this expression", so the same derivation belongs in
-<code>collect_data_argument</code> as an <code>@each</code>-shaped special case, keyed off the
-directive rather than off <code>blade_view_directive</code> generally.</p>
+<h3 id="bl22-a-template-never-learns-anything-from-the-templates-that-render-it">BL22. A template never learns anything from the templates that render it<a class="headerlink" href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" title="Permanent link">&para;</a></h3>
+<p><code>compute_blade_injected_vars</code> skips every Blade file in the caller
+snapshot (<code>if self.is_blade_file(file_uri) { continue; }</code>, and
+<code>view_caller_snapshot</code> filters them out again), so call-site inference
+only ever reads controllers. A partial rendered exclusively from other
+templates therefore gets nothing: neither the entries of an
+<code>@include('partials.row', ['row' =&gt; $row])</code>, nor the item and key an
+<code>@each</code> binds, reach it, and an unannotated partial has no type for the
+variable it exists to display. Only the diagnostics path, which runs on
+the rendering template itself, reads those sites today.</p>
+<p>The comment gives the two reasons: a template must not feed itself, and
+other templates' <code>@include</code>s would recurse. Both are addressable the way
+the component-tag path already does it — that one <em>does</em> read Blade
+callers, keying off <code>blade_virtual_content</code> rather than the raw source
+(the symbol map's offsets are virtual-PHP offsets, so the raw Blade
+source is the wrong thing to parse) and skipping the template's own URI.
+What is left to settle is mutual rendering: A includes B includes A
+resolves each against the other's cached scope, so the refresh pass needs
+to converge rather than oscillate.</p>
+<p>Until then a partial rendered only from templates must declare its own
+<code>@bladestan-signature</code> to get completion and hover, which is what the
+contract checks want anyway.</p>
 <hr />
 <h2 id="phase-6-editor-tooling-parity">Phase 6: Editor Tooling Parity<a class="headerlink" href="#phase-6-editor-tooling-parity" title="Permanent link">&para;</a></h2>
 <p>Other Blade-aware editors ship a full structure view, folding builder,
@@ -3380,12 +3382,13 @@ directives with snippet templates.</p>
 <p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file.</p>
-<h3 id="step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21">Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl21" title="Permanent link">&para;</a></h3>
+<h3 id="step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22">Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22" title="Permanent link">&para;</a></h3>
 <p>Call-site validation is shipped. What is left widens it (BL18 for the
 render sites nothing indexes a view name for, BL19 for the covariance
 the merge does not check, BL20 for the data shapes the checks stand down
-on, BL21 for <code>@each</code>) and is independent of section/stack intelligence
-and custom directive discovery, so the six can land in any order.</p>
+on, BL22 for the templates that render other templates) and is
+independent of section/stack intelligence and custom directive
+discovery, so the six can land in any order.</p>
 <p><strong>Deliverable:</strong> A template with a <code>@bladestan-signature</code> docblock
 gets typed completion for its declared variables at every render site,
 and a signature that widens its layout's is flagged.</p>
