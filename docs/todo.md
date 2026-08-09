@@ -25,6 +25,9 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
+| BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor)          | High       | High       |
+| BL4  | [Component tag and attribute completion](todo/blade.md#bl4-component-tag-and-attribute-completion)                         | High       | Medium     |
+| BL5  | [Go-to-definition for component tags](todo/blade.md#bl5-go-to-definition-for-component-tags)                               | Medium     | Medium     |
 | BL13 | [Mismatched and unbalanced directive diagnostics](todo/blade.md#bl13-mismatched-and-unbalanced-directive-diagnostics)       | Medium     | Low-Medium |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
@@ -51,9 +54,6 @@ within the same impact tier.
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium     |
 | BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
 | BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
-| BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor)          | High       | High       |
-| BL4  | [Component tag and attribute completion](todo/blade.md#bl4-component-tag-and-attribute-completion)                         | High       | Medium     |
-| BL5  | [Go-to-definition for component tags](todo/blade.md#bl5-go-to-definition-for-component-tags)                               | Medium     | Medium     |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
 | BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format---check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
 
@@ -104,7 +104,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B2  | [A layout's contract is enforced without the layout's own suppliers](todo/bugs.md#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers)                       | Medium-High | Low-Medium  |
 | B67 | [An inline `@php(…)` masks the rest of the template](todo/bugs.md#b67-an-inline-php-masks-the-rest-of-the-template)                                                          | Medium-High | Low         |
 | B3  | [Directive coverage gaps in `match_directive`/`translate_directive`](todo/bugs.md#b3-directive-coverage-gaps-in-match_directivetranslate_directive)                          | Low         | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |

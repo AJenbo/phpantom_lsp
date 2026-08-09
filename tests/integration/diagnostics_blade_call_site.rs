@@ -31,6 +31,26 @@ mod tests {
         <h1>{{ $title }}</h1>\n\
         <p>{{ $user->email }}</p>\n";
 
+    const VIEW_PROVIDER_LIST: &str =
+        "<?php\nreturn [\n    App\\Providers\\ViewServiceProvider::class,\n];\n";
+
+    /// A provider composing `$siteName` into the layout that declares it.
+    const LAYOUT_COMPOSER: &str = r#"<?php
+namespace App\Providers;
+
+use Illuminate\Support\Facades\View;
+
+class ViewServiceProvider
+{
+    public function boot(): void
+    {
+        View::composer('layouts.app', function ($view) {
+            $view->with('siteName', 'Acme');
+        });
+    }
+}
+"#;
+
     fn workspace(files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempDir) {
         let mut all = vec![("app/Models/User.php", USER_CLASS)];
         all.extend_from_slice(files);
@@ -253,6 +273,35 @@ mod tests {
             diags[0].1.contains("$siteName"),
             "message should name the layout's variable, got {:?}",
             diags[0].1
+        );
+    }
+
+    /// A view composer is registered on the template that reads the
+    /// variable, which is normally the layout, so the exemption it earns has
+    /// to reach the children the declaration reaches. Nothing a caller of
+    /// the child writes could clear the name otherwise.
+    #[tokio::test]
+    async fn a_layouts_composed_variable_is_not_the_childs_callers_to_pass() {
+        let (backend, dir) = workspace(&[
+            ("bootstrap/providers.php", VIEW_PROVIDER_LIST),
+            ("app/Providers/ViewServiceProvider.php", LAYOUT_COMPOSER),
+            (
+                "resources/views/layouts/app.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $siteName\n */\n@endphp\n<title>{{ $siteName }}</title>\n@yield('body')\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@extends('layouts.app')\n@php\n/**\n * @bladestan-signature\n * @var string $title\n */\n@endphp\n@section('body'){{ $title }}@endsection\n",
+            ),
+            (
+                "app/PageController.php",
+                "<?php\nnamespace App;\nclass PageController {\n    public function show(): mixed {\n        return view('page', ['title' => 'Hi']);\n    }\n}\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "the composer supplies the layout's variable, got {diags:?}"
         );
     }
 
@@ -523,6 +572,31 @@ mod tests {
             "the includer already has $user in scope; only $caption is short, got {:?}",
             diags[0].1
         );
+    }
+
+    /// A prop with a default is in the component's scope whether or not its
+    /// body ever writes the name, so a partial it includes gets it from
+    /// there.
+    #[tokio::test]
+    async fn a_defaulted_prop_is_in_scope_for_an_include_that_forwards_it() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/badge.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $size\n */\n@endphp\n<span class=\"badge-{{ $size }}\"></span>\n",
+            ),
+            (
+                "resources/views/components/card.blade.php",
+                "@props(['size' => 'md'])\n@php\n/**\n * @bladestan-signature\n * @var string $heading\n */\n@endphp\n<h2>{{ $heading }}</h2>\n@include('partials.badge')\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(
+            &backend,
+            &dir,
+            "resources/views/components/card.blade.php",
+            "blade",
+        )
+        .await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
     }
 
     /// Without a contract of its own, an including template's inbound data

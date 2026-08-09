@@ -25,15 +25,15 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Workspace symbols               | ✅       | ✅           | ✅         | ✅          | ✅          |
 | Call hierarchy                  | ❌       | ❌           | ❌         | ❌          | ✅          |
 | Semantic tokens                 | ✅       | ❌           | ✅         | ❌          | ✅          |
-| Extras<sup>2</sup>              | ✅       | 💰           | 🚧         | 🚧          | ✅          |
+| Extras<sup>2</sup>              | ✅       | 🔒           | 🚧         | 🚧          | ✅          |
 | **Diagnostics**                 |          |              |            |             |             |
 | PHPStan integration             | ✅       | ❌           | ❌         | 🚧          | 🚧          |
-| Undefined variable              | ✅       | 💰           | ✅         | ✅          | ✅          |
-| Type errors                     | ✅       | 💰           | ✅         | 🚧          | ✅          |
+| Undefined variable              | ✅       | 🔒           | ✅         | ✅          | ✅          |
+| Type errors                     | ✅       | 🔒           | ✅         | 🚧          | ✅          |
 | Unused variable                 | ✅       | ❌           | ✅         | ❌          | ✅          |
 | **Type Intelligence**           |          |              |            |             |             |
 | Generics / `@template`          | ✅       | 🚧           | ✅         | 🚧          | ✅          |
-| `@mixin` completion             | ✅       | 💰           | ✅         | ✅          | 🚧          |
+| `@mixin` completion             | ✅       | 🔒           | ✅         | ✅          | 🚧          |
 | Array / object shapes           | ✅       | ✅           | ✅         | 🚧          | 🚧          |
 | PHPStan types                   | ✅       | ❌           | 🚧         | 🚧          | 🚧          |
 | Conditional return types        | ✅       | ❌           | ✅         | 🚧          | ❌          |
@@ -42,20 +42,20 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Blade templates                 | 🚧       | ❌           | ✅         | ❌          | ✅          |
 | Other frameworks<sup>4</sup>    | 🚧       | 🚧           | 🚧         | 🚧          | 🧩          |
 | **Refactoring**                 |          |              |            |             |             |
-| Rename                          | ✅       | 💰           | 💰         | ✅          | ✅          |
-| Common refactorings<sup>3</sup> | ✅       | ❌           | 💰         | ✅          | ✅          |
+| Rename                          | ✅       | 🔒           | 🔒         | ✅          | ✅          |
+| Common refactorings<sup>3</sup> | ✅       | ❌           | 🔒         | ✅          | ✅          |
 | Extract constant                | ✅       | ❌           | ❌         | ✅          | ✅          |
 | Extract interface               | ✅       | ❌           | ❌         | ✅          | ✅          |
 | Promote constructor parameter   | ✅       | ❌           | ❌         | ❌          | ✅          |
-| Simplify expressions            | ✅       | ❌           | 💰         | ❌          | ✅          |
-| Modernize syntax<sup>5</sup>    | ✅       | ❌           | 💰         | ❌          | ✅          |
+| Simplify expressions            | ✅       | ❌           | 🔒         | ❌          | ✅          |
+| Modernize syntax<sup>5</sup>    | ✅       | ❌           | 🔒         | ❌          | ✅          |
 | **Performance**                 |          |              |            |             |             |
 | Time to ready                   | 5 s      | 1 min 25 s   | 3 min 17 s | 15 min 39 s | 17 min 55 s |
 | RAM usage                       | 360 MB   | 520 MB       | 3.9 GB     | 498 MB      | 1.7 GB      |
 | Disk cache                      | 0        | 45 MB        | 0          | 4.1 GB      | 551 MB      |
 
 <sub>
-🚧 = partial support. 🧩 = requires plugin. 💰 = paid tier.<br>
+🚧 = partial support. 🧩 = requires plugin. 🔒 = paid tier.<br>
 <sup>1</sup> Completion, hover, signature help, go-to-definition, find references, diagnostics, document symbols.<br>
 <sup>2</sup> Auto-import, go-to implementation / type-definition, smart select, folding ranges, formatting, code lens, inlay hints, type hierarchy, document links.<br>
 <sup>3</sup> Implement interface methods, extract method/function, extract/inline variable, generate constructor, generate getter/setter.<br>

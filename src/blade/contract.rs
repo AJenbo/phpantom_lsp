@@ -10,6 +10,8 @@
 //!   source supplies (a component's backing class, a provider's shared or
 //!   composed data, Blade's own component scope) are recorded separately:
 //!   they are part of the template's scope but no caller has to pass them.
+//!   Those sources are read per level of the chain, since the layout that
+//!   declares a name is usually the one a composer is registered on.
 //! * **What may I pass?** Blade hands a template's whole data array on to
 //!   every template it renders from the same data, so a name the template
 //!   itself never mentions may still be destined for a partial it
@@ -137,6 +139,8 @@ impl Backend {
         let names = self.blade_addressable_names(view_name);
         let qualify = self.blade_type_qualifier(view_name);
 
+        let layouts = self.blade_layout_chain(&source);
+
         let mut vars: Vec<(String, PhpType)> = Vec::new();
         let mut push = |name: String, ty: PhpType| {
             if vars.iter().any(|(declared, _)| declared == &name) {
@@ -150,8 +154,8 @@ impl Backend {
         // The layouts above render from the same data, so what they declare
         // the caller has to supply too. The nearest declaration wins, which
         // lets a child narrow a layout's type but never widen it.
-        for (_, layout_source) in self.blade_layout_chain(&source) {
-            for (name, ty) in signature::declarations(&layout_source) {
+        for (_, layout_source) in &layouts {
+            for (name, ty) in signature::declarations(layout_source) {
                 push(name, qualify(&ty));
             }
         }
@@ -160,14 +164,45 @@ impl Backend {
         }
 
         let mut supplied: HashSet<String> = AMBIENT_VARS.iter().map(|n| n.to_string()).collect();
-        if signature::declares_component_directive(&source) {
+        self.blade_supplied_names(&source, &names, &mut supplied);
+        // A layout's declarations reached the contract above, so its own
+        // suppliers have to reach the exemptions with them.
+        for (layout_name, layout_source) in &layouts {
+            let layout_names = self.blade_addressable_names(layout_name);
+            self.blade_supplied_names(layout_source, &layout_names, &mut supplied);
+        }
+
+        Some(TemplateContract { vars, supplied })
+    }
+
+    /// The names something other than a call site puts in one template's
+    /// scope: the variables Blade builds around a component, the props that
+    /// stand on their own, the members of the class backing the view, and
+    /// what a service provider shares or composes into it.
+    ///
+    /// Each level of an `@extends` chain has its own set, keyed to that
+    /// level's source and view names rather than the child's. A layout is
+    /// rendered from the child's data, so its declarations are the child's
+    /// callers' to satisfy, but nothing about the child matches the layout's
+    /// suppliers: a view composer is registered on the template that reads
+    /// the variable, so `View::composer('layouts.app', …)` matches
+    /// `layouts.app` and never `pages.home`. Judging the child's callers on
+    /// the declaration without the exemption leaves them a name they cannot
+    /// clear by passing it.
+    fn blade_supplied_names(
+        &self,
+        source: &str,
+        view_names: &[String],
+        supplied: &mut HashSet<String>,
+    ) {
+        if signature::declares_component_directive(source) {
             supplied.extend(COMPONENT_SCOPE_VARS.iter().map(|n| n.to_string()));
         }
         // A prop with a default value stands on its own; a bare one is the
         // caller's to supply, so it stays out of the supplied set.
         for entries in [
-            signature::extract_props(&source),
-            signature::extract_aware(&source),
+            signature::extract_props(source),
+            signature::extract_aware(source),
         ]
         .into_iter()
         .flatten()
@@ -178,7 +213,7 @@ impl Backend {
                 }
             }
         }
-        let (backing, this_class) = self.blade_backing_class_vars(&names);
+        let (backing, this_class) = self.blade_backing_class_vars(view_names);
         supplied.extend(backing.into_iter().map(|(name, _)| name));
         if this_class.is_some() {
             // A Livewire view renders with the component bound, so a
@@ -186,12 +221,10 @@ impl Backend {
             supplied.insert("this".to_string());
         }
         supplied.extend(
-            self.blade_provider_vars(&names)
+            self.blade_provider_vars(view_names)
                 .into_iter()
                 .map(|(name, _)| name),
         );
-
-        Some(TemplateContract { vars, supplied })
     }
 
     /// The names in scope in the template at `uri` when it renders another
@@ -219,19 +252,18 @@ impl Backend {
         for (name, _) in signature::declarations(&source) {
             names.insert(name);
         }
-        for (_, layout_source) in self.blade_layout_chain(&source) {
-            for (name, _) in signature::declarations(&layout_source) {
+        let layouts = self.blade_layout_chain(&source);
+        for (_, layout_source) in &layouts {
+            for (name, _) in signature::declarations(layout_source) {
                 names.insert(name);
             }
         }
         let view_names = self.view_names_for_blade_uri(uri);
-        let (backing, _) = self.blade_backing_class_vars(&view_names);
-        names.extend(backing.into_iter().map(|(name, _)| name));
-        names.extend(
-            self.blade_provider_vars(&view_names)
-                .into_iter()
-                .map(|(name, _)| name),
-        );
+        self.blade_supplied_names(&source, &view_names, &mut names);
+        for (layout_name, layout_source) in &layouts {
+            let layout_names = self.blade_addressable_names(layout_name);
+            self.blade_supplied_names(layout_source, &layout_names, &mut names);
+        }
         Some(names)
     }
 
