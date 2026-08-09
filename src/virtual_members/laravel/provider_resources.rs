@@ -574,15 +574,50 @@ fn binding_concrete(
         },
         Expression::Access(Access::ClassConstant(_)) => class_string_fqn(expr, resolved),
         Expression::ArrowFunction(arrow) => binding_concrete(Some(arrow.expression), resolved),
-        Expression::Closure(closure) => {
-            closure.body.statements.iter().find_map(|stmt| match stmt {
-                Statement::Return(ret) => binding_concrete(ret.value, resolved),
-                _ => None,
-            })
-        }
+        Expression::Closure(closure) => closure_binding_concrete(closure, resolved),
         Expression::Parenthesized(inner) => binding_concrete(Some(inner.expression), resolved),
         _ => None,
     }
+}
+
+/// The concrete class a closure factory's `return` hands back.
+///
+/// A factory often configures the instance before returning it
+/// (`$translator = new DatabaseTranslator(…); $translator->setFallback(…);
+/// return $translator;`), so a returned variable is followed back to the
+/// last value assigned to it above the return.
+fn closure_binding_concrete(
+    closure: &Closure<'_>,
+    resolved: &OwnedResolvedNames,
+) -> Option<String> {
+    let mut assignments: Vec<(&[u8], &Expression<'_>)> = Vec::new();
+    for stmt in closure.body.statements.iter() {
+        match stmt {
+            Statement::Return(ret) => {
+                if let Some(concrete) = binding_concrete(ret.value, resolved) {
+                    return Some(concrete);
+                }
+                let Some(Expression::Variable(Variable::Direct(target))) = ret.value else {
+                    return None;
+                };
+                return assignments
+                    .iter()
+                    .rev()
+                    .find(|(name, _)| *name == target.name)
+                    .and_then(|(_, rhs)| binding_concrete(Some(rhs), resolved));
+            }
+            Statement::Expression(expr_stmt) => {
+                if let Expression::Assignment(assign) = expr_stmt.expression
+                    && assign.operator.is_assign()
+                    && let Expression::Variable(Variable::Direct(lhs)) = assign.lhs
+                {
+                    assignments.push((lhs.name, assign.rhs));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The container key an `alias()` argument names.
@@ -1147,6 +1182,29 @@ mod tests {
             class ServiceProvider extends BaseServiceProvider {\n\
                 public function register(): void {\n\
                     $this->app->singleton(static::$abstract, fn () => new HubAdapter());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn binds_a_factory_that_configures_before_returning() {
+        // A factory that sets the instance up before handing it back returns
+        // a variable, not the instantiation itself; the concrete class is the
+        // last value assigned to that variable above the return.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', function ($app) {\n\
+                        $hub = new HubAdapter($app->make('sentry.loader'));\n\
+                        $hub->setFallback($app->getFallbackLocale());\n\
+                        return $hub;\n\
+                    });\n\
                 }\n\
             }\n";
         let resources = scan_sentry_provider(content);

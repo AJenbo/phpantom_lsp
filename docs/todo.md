@@ -106,6 +106,7 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B2  | [A layout's contract is enforced without the layout's own suppliers](todo/bugs.md#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers)                       | Medium-High | Low-Medium  |
+| B67 | [`Blade::anonymousComponentNamespace()` registrations are invisible](todo/bugs.md#b67-bladeanonymouscomponentnamespace-registrations-are-invisible)                          | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

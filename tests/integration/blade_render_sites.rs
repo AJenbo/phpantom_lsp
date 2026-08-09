@@ -531,6 +531,26 @@ mod tests {
         assert!(diags.is_empty(), "expected no report, got {diags:?}");
     }
 
+    /// `Mailer::send()` writes a `$message` handle into every mail view's
+    /// data before rendering, so a template that declares it is not owed
+    /// it by the mailable.
+    #[tokio::test]
+    async fn a_mail_templates_message_handle_is_not_missing() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/emails/shipped.blade.php",
+                "@php\n/**\n * @var Illuminate\\Mail\\Message $message\n */\n@endphp\n<p>Shipped</p>\n",
+            ),
+            (
+                "app/OrderShipped.php",
+                &mailable("", "new Content(view: 'emails.shipped')"),
+            ),
+        ]);
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
     #[tokio::test]
     async fn a_mailable_view_method_names_a_template() {
         let build = "<?php\nnamespace App;\nuse Illuminate\\Mail\\Mailable;\n\

@@ -508,8 +508,35 @@ impl Backend {
             };
 
         // 1. Project config files take highest precedence.
-        let snapshot = self.user_file_symbol_maps();
-        for (file_uri, _) in &snapshot {
+        //
+        // Discovered with a direct disk walk rather than through
+        // `user_file_symbol_maps`, which forces the workspace index. This
+        // build runs *inside* class loading (`patch_storage_disk_type`) and
+        // inside the blade injected-vars refresh the index itself performs,
+        // so ensuring the index here re-enters the index lock and this
+        // cache's own build lock and deadlocks. Config trees only need file
+        // contents, not symbol maps. Files that are open in the editor but
+        // not yet parsed from disk are merged from the already-parsed
+        // snapshot, without blocking on the index.
+        let workspace_root = self.workspace.workspace_root.read().clone();
+        let mut config_uris: Vec<String> = Vec::new();
+        if let Some(root) = &workspace_root {
+            let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
+            for path in crate::references::collect_php_files_gitignore(root, &vendor_dir_paths) {
+                let uri = crate::util::path_to_uri(&path);
+                if laravel_config_prefix_from_uri(&uri).is_some() {
+                    config_uris.push(uri);
+                }
+            }
+        }
+        for (uri, _) in self.user_file_symbol_maps_nonblocking() {
+            if laravel_config_prefix_from_uri(&uri).is_some() && !config_uris.contains(&uri) {
+                config_uris.push(uri);
+            }
+        }
+        // Deterministic merge order regardless of walk or map order.
+        config_uris.sort();
+        for file_uri in &config_uris {
             let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
                 continue;
             };
@@ -531,7 +558,7 @@ impl Backend {
         }
 
         // 3. Laravel framework default configs from vendor.
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
+        if let Some(root) = workspace_root {
             let framework_config = root.join("vendor/laravel/framework/config");
             if framework_config.is_dir()
                 && let Ok(entries) = std::fs::read_dir(&framework_config)

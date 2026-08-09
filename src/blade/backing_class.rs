@@ -300,9 +300,13 @@ impl Backend {
         } else if extends(COMPONENT_BASE) {
             (self.component_scope_vars(class), Some("slot"))
         } else if extends(MAILABLE_BASE) {
-            // A mailable's view is an ordinary template rendered from the
-            // data alone, so nothing arrives beyond the properties.
-            (self.class_member_vars(class, Exposure::Mailable), None)
+            // A mailable's view renders from the data alone, plus the
+            // `$message` handle `Mailer::send()` writes into every mail
+            // view's data before rendering.
+            (
+                self.class_member_vars(class, Exposure::Mailable),
+                Some("message"),
+            )
         } else {
             return None;
         };

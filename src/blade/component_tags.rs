@@ -36,7 +36,10 @@ pub(crate) struct ComponentTagCall {
 /// The bare tag names (without the `x-` prefix) a Blade file's own view
 /// names make it addressable by: `components.brand.boxes` becomes
 /// `brand.boxes` (so `<x-brand.boxes>` matches it), and a namespaced name
-/// (`mail::message`) is kept as-is (so `<x-mail::message>` matches it).
+/// drops the `components.` segment after the namespace the same way
+/// Laravel's `ComponentTagCompiler::guessViewName` inserts it —
+/// `webshop::components.brand.boxes` is what `<x-webshop::brand.boxes>`
+/// compiles to.
 ///
 /// A view name outside the `components.` namespace with no `::` is not
 /// addressable as a bare tag and contributes nothing.
@@ -47,7 +50,7 @@ pub(crate) fn component_tag_names(view_names: &[String]) -> Vec<String> {
             if let Some(bare) = name.strip_prefix("components.") {
                 Some(bare.to_string())
             } else if name.contains("::") {
-                Some(name.clone())
+                component_tag_for_view_name(name)
             } else {
                 None
             }
@@ -72,12 +75,12 @@ pub(crate) fn component_tag_for_view_name(view_name: &str) -> Option<String> {
 }
 
 /// The inverse of [`component_tag_names`]: the view name a tag written as
-/// `<x-{tag}>` resolves to.
+/// `<x-{tag}>` resolves to, per `ComponentTagCompiler::guessViewName` —
+/// the `components.` prefix goes after the namespace when there is one.
 pub(crate) fn view_name_for_component_tag(tag: &str) -> String {
-    if tag.contains("::") {
-        tag.to_string()
-    } else {
-        format!("components.{tag}")
+    match tag.split_once("::") {
+        Some((namespace, rest)) => format!("{namespace}::components.{rest}"),
+        None => format!("components.{tag}"),
     }
 }
 
@@ -350,7 +353,11 @@ mod tests {
     }
 
     #[test]
-    fn component_tag_names_keeps_a_namespaced_name_as_is() {
+    fn component_tag_names_strips_components_after_a_namespace() {
+        assert_eq!(
+            component_tag_names(&["webshop::components.brand.boxes".to_string()]),
+            vec!["webshop::brand.boxes"]
+        );
         assert_eq!(
             component_tag_names(&["mail::message".to_string()]),
             vec!["mail::message"]
@@ -369,8 +376,8 @@ mod tests {
             "components.brand.boxes"
         );
         assert_eq!(
-            view_name_for_component_tag("mail::message"),
-            "mail::message"
+            view_name_for_component_tag("webshop::brand.boxes"),
+            "webshop::components.brand.boxes"
         );
     }
 

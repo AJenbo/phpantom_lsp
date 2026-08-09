@@ -70,6 +70,16 @@ impl Backend {
         self.user_file_symbol_maps_matching(None)
     }
 
+    /// Like [`user_file_symbol_maps`], but never blocks on (or
+    /// triggers) workspace indexing — it snapshots whatever is already
+    /// parsed. For callers that can run inside the workspace index
+    /// itself (the Laravel config-tree build is reached from
+    /// `find_or_load_class` and from the blade injected-vars refresh),
+    /// where ensuring the index would re-enter its own lock.
+    pub(crate) fn user_file_symbol_maps_nonblocking(&self) -> Vec<(String, Arc<SymbolMap>)> {
+        self.user_file_symbol_maps_matching(None)
+    }
+
     pub(crate) fn user_file_symbol_maps_for_reference_keys(
         &self,
         keys: &[ReferenceIndexKey],
