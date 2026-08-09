@@ -70,7 +70,7 @@ dependency.
 
 ---
 
-## BL4. Component and view name completion
+## BL4. Component tag and attribute completion
 
 **Impact: High · Effort: Medium**
 
@@ -96,17 +96,6 @@ on whether they're anonymous or class-backed.
 Same pattern. When the user types `<livewire:`, offer completions
 from the Livewire index (`livewire_component_fqn`).
 
-### `@include('` and `@extends('` view name completion
-
-When the cursor is inside the string argument to `@include`,
-`@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`,
-`@extends`, `@extendsFirst`, `@each`, or a `view()` function call,
-offer completions from the view index (dot-notation view names).
-
-Detection: look for `@include('`, `@extends('`, or `view('` before
-the cursor and check that the cursor is inside the quotes. The
-trigger characters `'` and `"` are already registered.
-
 ### Component attribute completion
 
 When the cursor is inside a `<x-component ` tag (after the component
@@ -126,14 +115,12 @@ New file `tests/integration/completion_blade.rs`:
 
 - `<x-` triggers component name completions
 - `<livewire:` triggers Livewire component name completions
-- `@include('` triggers view name completions
 - `<x-alert ` triggers attribute completions
 - `$component->` after component instantiation
 - `$attributes->` in component templates
 
 **Deliverable:** Typing `<x-` shows available components. Typing
-`@include('` shows available views. Typing attributes inside
-`<x-alert ` shows constructor parameter names.
+attributes inside `<x-alert ` shows constructor parameter names.
 
 ---
 
@@ -342,18 +329,9 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 
 ---
 
-## BL5. Go-to-definition for view names and components
+## BL5. Go-to-definition for component tags
 
 **Impact: Medium · Effort: Medium**
-
-### View name go-to-definition
-
-Inside `@include('users.index')`, `@extends('layouts.app')`, or
-`view('welcome')`:
-
-1. Extract the view name string at the cursor position.
-2. Look up in the view index (`blade_view_path`).
-3. Return a `Location` pointing to the resolved file.
 
 ### Component tag go-to-definition
 
@@ -371,13 +349,11 @@ On `<livewire:counter>`: same pattern using the Livewire index.
 
 New file `tests/integration/definition_blade.rs`:
 
-- Go-to-definition on `@include('users.index')` → view file
-- Go-to-definition on `@extends('layouts.app')` → layout file
 - Go-to-definition on `<x-alert>` → component class
 - Go-to-definition on `<livewire:counter>` → Livewire class
 
-**Deliverable:** Ctrl-click on `@include('users.index')` jumps to
-the file.
+**Deliverable:** Ctrl-click on `<x-alert>` jumps to the component
+class.
 
 ---
 

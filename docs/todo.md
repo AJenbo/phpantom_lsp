@@ -25,6 +25,8 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
+| BL7  | [Blade directive completion](todo/blade.md#bl7-directive-name-completion)                                                  | Medium     | Low        |
+| BL13 | [Mismatched and unbalanced directive diagnostics](todo/blade.md#bl13-mismatched-and-unbalanced-directive-diagnostics)       | Medium     | Low-Medium |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | F8  | [Implementation → test navigation via `@covers`](todo/lsp-features.md#f8-implementation--test-navigation-via-covers)                                                        | Low         | Medium      |
@@ -48,13 +50,11 @@ within the same impact tier.
 | ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------- |
 |      | Clear [refactoring gate](todo/refactor.md)                                                                                | —          | —          |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium     |
-| BL13 | [Mismatched and unbalanced directive diagnostics](todo/blade.md#bl13-mismatched-and-unbalanced-directive-diagnostics)       | Medium     | Low-Medium |
 | BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
-| BL7  | [Blade directive completion](todo/blade.md#bl7-directive-name-completion)                                                  | Medium     | Low        |
 | BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
 | BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor)          | High       | High       |
-| BL4  | [Component and view name completion](todo/blade.md#bl4-component-and-view-name-completion)                                 | High       | Medium     |
-| BL5  | [Go-to-definition for view names and components](todo/blade.md#bl5-go-to-definition-for-view-names-and-components)         | Medium     | Medium     |
+| BL4  | [Component tag and attribute completion](todo/blade.md#bl4-component-tag-and-attribute-completion)                         | High       | Medium     |
+| BL5  | [Go-to-definition for component tags](todo/blade.md#bl5-go-to-definition-for-component-tags)                               | Medium     | Medium     |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
 | BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format---check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
 
