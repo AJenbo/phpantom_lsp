@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786311516487,
+  "lastUpdate": 1786312755626,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17747,6 +17747,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "74a8d97dbcd31d53acc2fd13827dca889660753a",
+          "message": "Editing a migration in an ignored directory no longer adds tables a\nrestart drops again",
+          "timestamp": "2026-08-09T23:42:42+02:00",
+          "tree_id": "0f743741c1ea1ae9511613eee57b16276565f117",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/74a8d97dbcd31d53acc2fd13827dca889660753a"
+        },
+        "date": 1786312750386,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.9,
             "unit": "MiB"
           }
         ]
