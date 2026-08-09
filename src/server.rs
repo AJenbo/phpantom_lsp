@@ -376,6 +376,16 @@ impl LanguageServer for Backend {
             // run after it: a Symfony workspace must never pay for the
             // whole-tree migration walk, let alone hang in it.
             if self.resolved_class_cache.read().is_laravel() {
+                // The macro index must be built before the schema index:
+                // `load_schema_index` takes the project's `Blueprint` macro
+                // closures so a migration calling a custom column helper
+                // (`$table->money(...)`, registered via `Blueprint::macro()`)
+                // contributes its columns.  Building it here (rather than
+                // later, alongside the other Laravel indexes) means the
+                // first schema load already sees the populated macro map
+                // instead of an empty one.
+                self.build_laravel_macro_index();
+
                 let laravel_config = self.config().laravel;
                 if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
                     let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
@@ -557,13 +567,11 @@ impl LanguageServer for Backend {
         *self.storage_disk_type_cache.write() = None;
         *self.laravel_aliases.write() = None;
 
-        // Scan project source for Laravel macro registrations so macro
-        // methods appear in completion, hover, and signature help.  Runs
-        // after the cache clear above so injected macros are never shadowed
-        // by a stale merge.
+        // Scan project source for the remaining Laravel indexes (macros
+        // were already scanned above, before the schema index load, so
+        // `Blueprint` macro columns are present from the first load).
         if self.resolved_class_cache.read().is_laravel() {
             self.build_laravel_date_class();
-            self.build_laravel_macro_index();
             self.build_provider_resources();
             self.build_laravel_command_index();
             self.build_laravel_morph_map_index();
