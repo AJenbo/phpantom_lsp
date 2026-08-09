@@ -9,6 +9,12 @@
 //! - `protected $name = 'app:sync';`
 //! - `#[AsCommand(name: 'app:sync')]`
 //!
+//! Command aliases (extra names a command answers to) are recovered from
+//! `#[Aliases([...])]`, the `aliases:` argument of `#[Signature]` /
+//! `#[AsCommand]`, the `protected $aliases` property, and Symfony's inline
+//! `'app:sync|app:s'` name form.  All of them are indexed alongside the
+//! primary name.
+//!
 //! This module scans project and vendor command classes for those literals
 //! (see [`scan_command_file`]), parses the `$signature` grammar into
 //! arguments and options ([`parse_signature`]), and stores everything in a
@@ -80,6 +86,9 @@ impl CommandSignature {
 pub(crate) struct CommandEntry {
     /// The command name, e.g. `app:sync` or `migrate`.
     pub name: String,
+    /// Alternative names the command answers to (`#[Aliases]`,
+    /// `#[Signature(aliases:)]`, `#[AsCommand(aliases:)]`).
+    pub aliases: Vec<String>,
     /// Best-effort fully-qualified class name (`App\Console\Commands\Sync`).
     pub fqn: Option<String>,
     /// URI of the file declaring the command.
@@ -118,10 +127,12 @@ impl LaravelCommandIndex {
 
     /// Rebuild the merged name → entry lookup from per-file contributions.
     ///
-    /// When two files declare the same command name, the first one
-    /// encountered wins; the ordering is deterministic only up to the
-    /// hash map iteration order, which is acceptable for a diagnostic /
-    /// navigation aid.
+    /// Primary names are inserted before aliases so a command that *is*
+    /// named `foo` always wins over one that merely answers to `foo` as an
+    /// alias, matching Artisan's own resolution.  Within each of those two
+    /// passes the first entry encountered wins; that ordering is
+    /// deterministic only up to hash map iteration order, which is
+    /// acceptable for a diagnostic / navigation aid.
     pub(crate) fn rebuild(&mut self) {
         let mut by_name = HashMap::new();
         for entries in self.by_uri.values() {
@@ -129,6 +140,15 @@ impl LaravelCommandIndex {
                 by_name
                     .entry(entry.name.clone())
                     .or_insert_with(|| entry.clone());
+            }
+        }
+        for entries in self.by_uri.values() {
+            for entry in entries {
+                for alias in &entry.aliases {
+                    by_name
+                        .entry(alias.clone())
+                        .or_insert_with(|| entry.clone());
+                }
             }
         }
         self.by_name = by_name;
@@ -474,6 +494,11 @@ fn command_from_class(
         None => Some(bytes_to_string(class.name.value)),
     };
 
+    // Alias names from #[Aliases([...])] (which wins, mirroring
+    // Illuminate\Console\Command::configureFromAttributes), the `aliases:`
+    // argument of #[Signature] / #[AsCommand], or the `$aliases` property.
+    let aliases = command_aliases(class);
+
     // The branches follow Laravel's own precedence: `Command::__construct()`
     // takes the signature whenever one is set and never reaches Symfony's
     // `getDefaultName()`; without a signature it passes `$this->name` to the
@@ -481,10 +506,12 @@ fn command_from_class(
 
     // 1. #[Signature('...')] / $signature = '...'.
     if let Some((sig, offset)) = command_signature_value(class, content) {
-        let signature = parse_signature(sig);
-        if !signature.name.is_empty() {
+        let mut signature = parse_signature(sig);
+        if let Some((name, offset, inline)) = split_piped_name(&signature.name, offset) {
+            signature.name = name.clone();
             return Some(CommandEntry {
-                name: signature.name.clone(),
+                name,
+                aliases: merge_aliases(aliases.clone(), inline),
                 fqn,
                 uri: uri.to_string(),
                 name_offset: offset,
@@ -494,11 +521,12 @@ fn command_from_class(
     }
 
     // 2. $name = '...'.
-    if let Some((name, offset)) = string_property_value(class, "name", content)
-        && !name.is_empty()
+    if let Some((raw, offset)) = string_property_value_ref(class, "name", content)
+        && let Some((name, offset, inline)) = split_piped_name(raw, offset)
     {
         return Some(CommandEntry {
             name: name.clone(),
+            aliases: merge_aliases(aliases.clone(), inline),
             fqn,
             uri: uri.to_string(),
             name_offset: offset,
@@ -510,9 +538,12 @@ fn command_from_class(
     }
 
     // 3. #[AsCommand(name: '...')] / #[AsCommand('...')].
-    if let Some((name, offset)) = as_command_name(class, content) {
+    if let Some((raw, offset)) = attribute_first_string_arg(class, b"AsCommand", content)
+        && let Some((name, offset, inline)) = split_piped_name(raw, offset)
+    {
         return Some(CommandEntry {
             name: name.clone(),
+            aliases: merge_aliases(aliases, inline),
             fqn,
             uri: uri.to_string(),
             name_offset: offset,
@@ -526,10 +557,54 @@ fn command_from_class(
     None
 }
 
-/// The first string argument of an `#[AsCommand]` attribute, with its inner
-/// byte offset.
-fn as_command_name(class: &Class<'_>, content: &str) -> Option<(String, u32)> {
-    attribute_first_string_arg(class, b"AsCommand", content).map(|(v, o)| (v.to_string(), o))
+/// Split Symfony's `name|alias1|alias2` declaration form into the primary
+/// name (with the byte offset it starts at, given the literal's own offset)
+/// and the inline aliases.  A leading `|` — `'|app:sync'` — marks the command
+/// hidden and contributes no name of its own.
+///
+/// `Symfony\Component\Console\Command\Command::__construct()` applies this to
+/// every name it is handed, and Laravel routes all three declaration surfaces
+/// through it, so the split is not specific to `#[AsCommand]`.
+///
+/// Returns `None` when no name survives, which is the caller's signal to fall
+/// through to the next declaration surface.
+fn split_piped_name(raw: &str, offset: u32) -> Option<(String, u32, Vec<String>)> {
+    if !raw.contains('|') {
+        return (!raw.is_empty()).then(|| (raw.to_string(), offset, Vec::new()));
+    }
+
+    let mut parts = raw.split('|');
+    let mut delta = 0u32;
+    let mut name = parts.next().unwrap_or_default();
+    if name.is_empty() {
+        delta = 1;
+        name = parts.next().unwrap_or_default();
+    }
+    if name.is_empty() {
+        return None;
+    }
+
+    let inline = parts
+        .filter(|alias| !alias.is_empty())
+        .map(str::to_string)
+        .collect();
+    Some((name.to_string(), offset + delta, inline))
+}
+
+/// Union of the declared aliases and the inline `name|alias` ones,
+/// order-preserving and deduplicated.
+///
+/// Symfony merges the two lists while Laravel's `setAliases()` lets the
+/// attribute overwrite the inline ones.  The index only answers "is this a
+/// name the command responds to", so taking the union avoids a false
+/// "unknown command" report under either framework version.
+fn merge_aliases(mut aliases: Vec<String>, inline: Vec<String>) -> Vec<String> {
+    for alias in inline {
+        if !aliases.contains(&alias) {
+            aliases.push(alias);
+        }
+    }
+    aliases
 }
 
 /// The first string argument of the named class attribute, with its inner
@@ -561,6 +636,139 @@ fn attribute_first_string_arg<'c>(
     None
 }
 
+/// Collect the command's alias names, mirroring
+/// `Illuminate\Console\Command`: the attribute forms (see
+/// [`attribute_aliases`]) are assigned by `configureFromAttributes()` and so
+/// override the `protected $aliases = [...]` property, which is otherwise
+/// what `setAliases()` receives.
+fn command_aliases(class: &Class<'_>) -> Vec<String> {
+    if let Some(aliases) = attribute_aliases(class) {
+        return aliases;
+    }
+    // `setAliases((array) $this->aliases)` casts, so a bare string is a
+    // one-element list here.
+    array_property_strings(class, "aliases").unwrap_or_default()
+}
+
+/// The alias names declared by class attributes: a standalone
+/// `#[Aliases([...])]` wins (mirroring the assignment order in
+/// `configureFromAttributes()`), otherwise the `aliases:` argument of
+/// `#[Signature]` / `#[AsCommand]`.
+///
+/// `None` means no alias-bearing attribute was present at all, which is
+/// distinct from an attribute whose argument could not be read statically —
+/// the latter yields `Some(vec![])` and still suppresses the property.
+fn attribute_aliases(class: &Class<'_>) -> Option<Vec<String>> {
+    let mut aliases = None;
+    for list in class.attribute_lists.iter() {
+        for attr in list.attributes.iter() {
+            let segment = last_segment(attr.name.value());
+            match segment {
+                // #[Aliases(['a', 'b'])] — the single positional argument.
+                b"Aliases" => {
+                    return Some(
+                        attr.argument_list
+                            .as_ref()
+                            .and_then(|args| args.arguments.first())
+                            .and_then(|arg| arg.value())
+                            .and_then(string_array_literal)
+                            .unwrap_or_default(),
+                    );
+                }
+                // `aliases:` named argument (positional index for
+                // Signature(sig, aliases) / AsCommand(name, desc, aliases)).
+                b"Signature" | b"AsCommand" => {
+                    let Some(arg_list) = attr.argument_list.as_ref() else {
+                        continue;
+                    };
+                    let positional_index = if segment == b"Signature" { 1 } else { 2 };
+                    let mut positional = 0usize;
+                    let mut found: Option<Vec<String>> = None;
+                    for arg in arg_list.arguments.iter() {
+                        match arg {
+                            PartialArgument::Named(named) => {
+                                if bytes_to_string(named.name.value) == "aliases" {
+                                    found = string_array_literal(named.value);
+                                }
+                            }
+                            PartialArgument::Positional(_) => {
+                                if positional == positional_index && found.is_none() {
+                                    found = arg.value().and_then(|expr| string_array_literal(expr));
+                                }
+                                positional += 1;
+                            }
+                            PartialArgument::NamedPlaceholder(_)
+                            | PartialArgument::Placeholder(_)
+                            | PartialArgument::VariadicPlaceholder(_) => {}
+                        }
+                    }
+                    if let Some(list) = found
+                        && !list.is_empty()
+                    {
+                        aliases = Some(list);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    aliases
+}
+
+/// The named array property's string elements, e.g.
+/// `protected $aliases = ['app:s'];`.
+fn array_property_strings(class: &Class<'_>, prop: &str) -> Option<Vec<String>> {
+    for member in class.members.iter() {
+        let ClassLikeMember::Property(Property::Plain(plain)) = member else {
+            continue;
+        };
+        for item in plain.items.iter() {
+            let PropertyItem::Concrete(concrete) = item else {
+                continue;
+            };
+            if trim_dollar(concrete.variable.name) != prop.as_bytes() {
+                continue;
+            }
+            return string_array_literal(concrete.value);
+        }
+    }
+    None
+}
+
+/// Collect the string literals of a `['a', 'b']` array expression, or the
+/// single element of a bare string literal (the shape `(array) $aliases`
+/// produces for `protected $aliases = 'app:s';`).
+fn string_array_literal(expr: &Expression<'_>) -> Option<Vec<String>> {
+    match expr {
+        Expression::Literal(Literal::String(s)) => s.value.map(|v| vec![bytes_to_string(v)]),
+        Expression::Array(arr) => Some(collect_array_strings(arr.elements.iter())),
+        Expression::LegacyArray(arr) => Some(collect_array_strings(arr.elements.iter())),
+        _ => None,
+    }
+}
+
+fn collect_array_strings<'a, 'b>(
+    elements: impl IntoIterator<Item = &'a ArrayElement<'b>>,
+) -> Vec<String>
+where
+    'b: 'a,
+{
+    elements
+        .into_iter()
+        .filter_map(|el| match el {
+            ArrayElement::Value(v) => Some(v.value),
+            _ => None,
+        })
+        .filter_map(|inner| {
+            if let Expression::Literal(Literal::String(s)) = inner {
+                s.value.map(bytes_to_string)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// The command signature expression and the inner byte offset of its string
 /// literal: the `#[Signature('…')]` attribute when present, else the
 /// `$signature` property.  The attribute wins because Laravel's
@@ -568,11 +776,6 @@ fn attribute_first_string_arg<'c>(
 fn command_signature_value<'c>(class: &Class<'_>, content: &'c str) -> Option<(&'c str, u32)> {
     attribute_first_string_arg(class, b"Signature", content)
         .or_else(|| string_property_value_ref(class, "signature", content))
-}
-
-/// The named string property's value (owned) plus its inner byte offset.
-fn string_property_value(class: &Class<'_>, prop: &str, content: &str) -> Option<(String, u32)> {
-    string_property_value_ref(class, prop, content).map(|(v, o)| (v.to_string(), o))
 }
 
 /// The named string property's value (borrowed) plus its inner byte offset.

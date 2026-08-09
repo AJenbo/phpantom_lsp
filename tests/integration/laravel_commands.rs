@@ -558,3 +558,143 @@ class Runner {
         "cloudflare:reload is declared, so it should not be flagged, got {command_diags:?}"
     );
 }
+
+/// Regression: a `#[Signature]` command registered via withCommands() from an
+/// arbitrary directory (here `src/Actions/`) is known. This is the real
+/// Laravel pattern `bootstrap/app.php` ->withCommands([...]) that stock
+/// phpantom 0.9.0 missed — the candidate filter in build_laravel_command_index
+/// only scanned `*Command`-named classes or `/Console/ /Commands/ /Command/`
+/// paths, so this file was never indexed and its call was falsely flagged.
+#[tokio::test]
+async fn signature_attribute_command_in_actions_folder_is_known() {
+    let action_command = "\
+<?php
+namespace App\\Actions;
+use Illuminate\\Console\\Attributes\\Signature;
+use Illuminate\\Console\\Command;
+#[Signature('app:sync-projects')]
+final class SyncProject extends Command
+{
+    protected $description = 'Wire the projects.';
+    public function handle(): void {}
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('app:sync-projects');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            // A conventionally-named command so the index is non-empty:
+            // command diagnostics are skipped wholesale when nothing was
+            // discovered.
+            ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
+            ("src/Actions/SyncProject.php", action_command),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+
+    let command_diags: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_command")
+        })
+        .collect();
+    assert!(
+        command_diags.is_empty(),
+        "app:sync-projects is registered via withCommands() in src/Actions/, so it must not be flagged, got {command_diags:?}"
+    );
+}
+
+/// Every name a command answers to is a valid `Artisan::call()` target: the
+/// `#[Aliases]` attribute, the `protected $aliases` property, and Symfony's
+/// inline `'name|alias'` form. A name none of them declares is still flagged.
+#[tokio::test]
+async fn command_aliases_are_not_flagged_as_unknown() {
+    let aliased_commands = "\
+<?php
+namespace App\\Console\\Commands;
+use Illuminate\\Console\\Attributes\\Aliases;
+use Illuminate\\Console\\Command;
+use Symfony\\Component\\Console\\Attribute\\AsCommand;
+#[Aliases(['app:b'])]
+class BuildCommand extends Command
+{
+    protected $signature = 'app:build';
+    public function handle(): void {}
+}
+class PurgeCommand extends Command
+{
+    protected $signature = 'app:purge';
+    protected $aliases = ['app:p'];
+    public function handle(): void {}
+}
+#[AsCommand(name: 'app:warm|app:w')]
+class WarmCommand extends Command
+{
+    public function handle(): void {}
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Artisan;
+class Runner {
+    public function go(): void {
+        Artisan::call('app:b');
+        Artisan::call('app:p');
+        Artisan::call('app:warm');
+        Artisan::call('app:w');
+        Artisan::call('app:nope');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("src/Console/Commands/Aliased.php", aliased_commands),
+            ("src/Runner.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+
+    let command_diags: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_command")
+        })
+        .collect();
+    assert_eq!(
+        command_diags.len(),
+        1,
+        "only app:nope is undeclared, got {command_diags:?}"
+    );
+    assert!(
+        command_diags[0].message.contains("app:nope"),
+        "expected the unknown name to be app:nope, got {command_diags:?}"
+    );
+}

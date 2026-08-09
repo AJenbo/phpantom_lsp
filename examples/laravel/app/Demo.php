@@ -601,6 +601,10 @@ class Demo
      *  4. "does:not-exist" below is flagged as an unknown command.
      *  5. Trigger completion inside the parameter array of the last call —
      *     offers `bakery` and `--fresh` / `--since` from the target signature.
+     *  6. Ctrl+Click "bakery:forecast" — a command registered by
+     *     `withCommands()` from app/Actions, outside the conventional
+     *     Console/Commands folder. "bakery:fc" is its `#[Aliases]` name and
+     *     lands on the same class.
      */
     public function artisanCommands(): void
     {
@@ -619,6 +623,14 @@ class Demo
         // `$signature` property, and inline arguments after the name are
         // fine: only the leading token is the command name.
         Artisan::call('bakery:prune-stale --days=30');
+
+        // A command `bootstrap/app.php` registers with `withCommands()` from
+        // app/Actions: neither its class name nor its folder follows the
+        // convention, and it still resolves.
+        Artisan::call('bakery:forecast', ['region' => 'north']);
+
+        // An alias declared by `#[Aliases]` names the same command.
+        Artisan::call('bakery:fc', ['region' => 'north']);
 
         // Unknown command name → `invalid_laravel_command` diagnostic.
         Artisan::call('does:not-exist');
