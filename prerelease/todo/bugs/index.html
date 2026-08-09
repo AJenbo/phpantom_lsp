@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b67-an-inline-php-masks-the-rest-of-the-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B67. An inline <code>@php(…)</code> masks the rest of the template
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1317,17 +1306,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b67-an-inline-php-masks-the-rest-of-the-template" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B67. An inline <code>@php(…)</code> masks the rest of the template
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1368,28 +1346,6 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h3 id="b67-an-inline-php-masks-the-rest-of-the-template">B67. An inline <code>@php(…)</code> masks the rest of the template<a class="headerlink" href="#b67-an-inline-php-masks-the-rest-of-the-template" title="Permanent link">&para;</a></h3>
-<p><code>mask_inert_regions</code> (<code>src/blade/signature.rs</code>) treats every <code>@php</code> as the
-opening of a block and runs <code>end_of_region(bytes, i + 4, b"@endphp")</code> on
-it. Blade has two spellings: the block form, which does close with
-<code>@endphp</code>, and the inline directive <code>@php($featured = $posts-&gt;first())</code>,
-which closes with its own parenthesis and never writes <code>@endphp</code> at all.
-An inline one therefore masks everything from itself to the <em>next</em>
-<code>@endphp</code> anywhere in the file, or to EOF when there is none.</p>
-<p>Every consumer of the masked text loses that span: <code>has_declared_signature</code>,
-<code>extract_extends</code>, <code>extract_props</code>/<code>extract_aware</code>,
-<code>referenced_component_tags</code>, and <code>scan_component_tag_calls</code>. The last is
-the one that shows: a <code>&lt;x-…&gt;</code> tag written after an inline <code>@php(…)</code> is
-invisible, so the component it names never sees the attributes that call
-site passes and reports the variables they supply as
-<code>unknown_variable</code>. <code>examples/laravel/resources/views/welcome.blade.php</code>
-has a live instance — <code>@php($bakery = …)</code> near the bottom masks every tag
-after it.</p>
-<p>Fix: only open a block when the <code>@php</code> is <em>not</em> the inline form. Blade's
-own <code>compileStatements</code> regex admits <code>[ \t]*</code> between the directive name
-and an opening <code>(</code>, so <code>@php</code> followed by optional spaces or tabs and then
-<code>(</code> is inline and masks nothing. The same shape applies to any other
-directive that has both a block and an inline form.</p>
 <h3 id="b3-directive-coverage-gaps-in-match_directivetranslate_directive">B3. Directive coverage gaps in <code>match_directive</code>/<code>translate_directive</code><a class="headerlink" href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" title="Permanent link">&para;</a></h3>
 <p>Discovered while building directive-name completion (<code>DIRECTIVE_COMPLETIONS</code>
 in <code>src/blade/directives.rs</code>) and cross-checking it against Laravel's own
