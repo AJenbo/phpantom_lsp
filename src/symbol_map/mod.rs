@@ -300,6 +300,11 @@ pub(crate) enum SymbolKind {
         /// `Config::set('services.acme.token', …)` does.  A write is a
         /// declaration site: it may name a key that exists nowhere else.
         is_write: bool,
+        /// Whether the call tolerates the key naming nothing, as one
+        /// candidate of an `@includeFirst(['custom.header', 'partials.header'])`
+        /// does: the directive renders whichever exists, so a candidate that
+        /// does not is the point rather than a mistake.
+        is_optional: bool,
     },
 
     /// The string-literal name argument inside a Laravel `::macro('name', ...)`

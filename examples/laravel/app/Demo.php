@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
@@ -424,6 +425,18 @@ class Demo
             'user' => $user,
         ]);
         View::exists('emails.blog_published');
+
+        // Response::view() renders a template straight into an HTTP
+        // response, and the factory's own first() renders whichever
+        // candidate exists — a candidate that names nothing is the point of
+        // the shape rather than a typo. Both are checked against
+        // welcome.blade.php's signature the way view() is.
+        Response::view('welcome', compact('posts', 'user'));
+        View::first(['welcome_override', 'welcome'], compact('posts', 'user'));
+
+        // A mailable names its template through the Content it returns, or
+        // through $this->view() in the older build() shape — see
+        // app/Mail/OrderShipped.php and app/Mail/BlogPublished.php.
 
         // A declared variable this call leaves out → `missing_view_variable`,
         // and a key nothing in welcome.blade.php (or anything it @includes)

@@ -36,6 +36,9 @@ const COMPONENT_BASE: &str = "Illuminate\\View\\Component";
 /// The base class every Livewire component extends.
 const LIVEWIRE_BASE: &str = "Livewire\\Component";
 
+/// The base class every mailable extends.
+const MAILABLE_BASE: &str = "Illuminate\\Mail\\Mailable";
+
 /// Where Livewire looks for component classes when the application does
 /// not configure `livewire.class_namespace`.
 const LIVEWIRE_DEFAULT_NAMESPACE: &str = "App\\Livewire";
@@ -78,6 +81,11 @@ enum Exposure {
     /// Because the filter is by declaring class, a property is skipped only
     /// when the base declares a *property* of that name.
     LivewireComponent,
+    /// A mailable merges the public properties the subclass declares
+    /// (`Mailable::buildViewData()` skips the ones `Mailable` itself
+    /// declares) and nothing else: its methods build the message rather
+    /// than naming data.
+    Mailable,
 }
 
 impl Exposure {
@@ -86,6 +94,7 @@ impl Exposure {
         match self {
             Self::BladeComponent => COMPONENT_BASE,
             Self::LivewireComponent => LIVEWIRE_BASE,
+            Self::Mailable => MAILABLE_BASE,
         }
     }
 
@@ -260,15 +269,17 @@ impl Backend {
     }
 
     /// The names the class a `view()` call sits in contributes to the
-    /// template it renders, or `None` when that class is not a component.
+    /// template it renders, or `None` when that class hands its view
+    /// nothing of its own.
     ///
     /// Laravel merges a Blade component's public members into its view's
-    /// data (`Component::data()`), and Livewire does the same for a
-    /// component's public properties plus the instance itself, so a
-    /// `render()` that passes nothing still hands the template the members
-    /// the class exposes. A plain controller's properties never reach the
-    /// view, which is why this is keyed on the base class rather than
-    /// applied to any enclosing class.
+    /// data (`Component::data()`), Livewire does the same for a component's
+    /// public properties plus the instance itself, and a mailable's
+    /// `buildViewData()` merges every public property it declares, so a
+    /// render that passes nothing still hands the template the members the
+    /// class exposes. A plain controller's properties never reach the view,
+    /// which is why this is keyed on the base class rather than applied to
+    /// any enclosing class.
     ///
     /// The member set is the one [`Self::class_member_vars`] builds for the
     /// template's own prologue, so the declaration a body is typed from and
@@ -285,15 +296,19 @@ impl Backend {
         // the component inside the template.  `livewire_scope_vars` covers
         // the other names the instance arrives under.
         let (vars, extra) = if extends(LIVEWIRE_BASE) {
-            (self.livewire_scope_vars(class), "this")
+            (self.livewire_scope_vars(class), Some("this"))
         } else if extends(COMPONENT_BASE) {
-            (self.component_scope_vars(class), "slot")
+            (self.component_scope_vars(class), Some("slot"))
+        } else if extends(MAILABLE_BASE) {
+            // A mailable's view is an ordinary template rendered from the
+            // data alone, so nothing arrives beyond the properties.
+            (self.class_member_vars(class, Exposure::Mailable), None)
         } else {
             return None;
         };
 
         let mut names: Vec<String> = vars.into_iter().map(|(name, _)| name).collect();
-        names.push(extra.to_string());
+        names.extend(extra.map(str::to_string));
         Some(names)
     }
 

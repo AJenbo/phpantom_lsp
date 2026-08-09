@@ -8,6 +8,7 @@ pub mod blade_error;
 mod blade_imports;
 mod blade_layout;
 pub mod blade_regression;
+mod blade_render_sites;
 mod blade_shared_vars;
 mod classmap_scanner;
 mod code_action_add_override;

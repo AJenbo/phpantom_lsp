@@ -48,6 +48,17 @@ pub(super) fn extract_instantiation_expr<'a>(
     }
     if let Some(ref args) = inst.argument_list {
         let class_text = expr_to_subject_text(inst.class);
+        // A mailable's `content()` returns
+        // `new Content(view: 'emails.shipped', with: [...])`, whose `view:`,
+        // `html:`, `text:`, and `markdown:` arguments each name a template.
+        // `Content` is too plain a class name to key on alone, so the short
+        // spelling is only read inside a mailable.
+        let clean_class = strip_fqn_prefix(&class_text);
+        if clean_class.eq_ignore_ascii_case("Illuminate\\Mail\\Mailables\\Content")
+            || (ctx.in_mailable && clean_class.eq_ignore_ascii_case("Content"))
+        {
+            try_emit_mailable_content_view_spans(args, ctx.content, &mut ctx.spans);
+        }
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -111,6 +122,18 @@ fn extract_call<'a>(
                             is_definition: false,
                         },
                     });
+                    // `@includeFirst` and its `@componentFirst` /
+                    // `@extendsFirst` siblings put their candidates in an
+                    // array literal, so the compiled directive names several
+                    // templates at once.
+                    if name_clean.eq_ignore_ascii_case("blade_view_directive") {
+                        try_emit_laravel_view_span_at(
+                            0,
+                            &func_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     // Detect Laravel helper calls and emit a
                     // LaravelStringKey span for the first string arg.
                     // Uses if-else to short-circuit (most function calls
@@ -119,7 +142,6 @@ fn extract_call<'a>(
                     let laravel_kind = if name_clean.eq_ignore_ascii_case("config") {
                         Some(crate::symbol_map::LaravelStringKind::Config)
                     } else if name_clean.eq_ignore_ascii_case("view")
-                        || name_clean.eq_ignore_ascii_case("blade_view_directive")
                         || name_clean.eq_ignore_ascii_case("blade_each_directive")
                     {
                         Some(crate::symbol_map::LaravelStringKind::View)
@@ -177,6 +199,31 @@ fn extract_call<'a>(
                 if is_laravel_config_repository_call(method_call.object, &member_name) {
                     try_emit_laravel_config_key_span(
                         &member_name,
+                        &method_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `$this->view('emails.shipped', [...])` in a mailable, and
+                // the view factory's own methods reached through a bare
+                // `view()` helper call.  Both are keyed on the receiver:
+                // `view`, `make`, and `first` are far too common as method
+                // names to recognise on their own.
+                if ctx.in_mailable
+                    && is_mailable_view_method(&member_name)
+                    && matches!(method_call.object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this")
+                {
+                    try_emit_laravel_string_span(
+                        crate::symbol_map::LaravelStringKind::View,
+                        &method_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                } else if is_laravel_view_factory_call(method_call.object)
+                    && let Some(index) = view_factory_method_name_index(&member_name)
+                {
+                    try_emit_laravel_view_span_at(
+                        index,
                         &method_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
@@ -368,19 +415,22 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // The `View` facade proxies the view factory, so every
+                // factory method that names a template does so here too.
                 if (clean_subject.eq_ignore_ascii_case("View")
                     || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View"))
-                    && matches!(member_name.to_ascii_lowercase().as_str(), "make" | "exists")
+                    && let Some(index) = view_factory_method_name_index(&member_name)
                 {
-                    try_emit_laravel_string_span(
-                        crate::symbol_map::LaravelStringKind::View,
+                    try_emit_laravel_view_span_at(
+                        index,
                         &static_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
                     );
                 }
                 // `Route::view('/about', 'pages.about', [...])` binds a URI
-                // straight to a template, naming the view second.
+                // straight to a template, naming the view second;
+                // `Response::view('pages.about', [...])` names it first.
                 if (clean_subject.eq_ignore_ascii_case("Route")
                     || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Route"))
                     && member_name.eq_ignore_ascii_case("view")
@@ -388,6 +438,17 @@ fn extract_call<'a>(
                     try_emit_laravel_string_span_at(
                         crate::symbol_map::LaravelStringKind::View,
                         1,
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                if (clean_subject.eq_ignore_ascii_case("Response")
+                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Response"))
+                    && member_name.eq_ignore_ascii_case("view")
+                {
+                    try_emit_laravel_string_span(
+                        crate::symbol_map::LaravelStringKind::View,
                         &static_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,

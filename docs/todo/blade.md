@@ -362,45 +362,33 @@ scanner — so that:
 - directive name completion (BL7) includes them;
 - registered component namespaces/paths extend the discovery index.
 
-### BL18. Mailable and view-method render sites
+### BL23. Render sites behind a typed receiver
 
-Call-site validation (`src/diagnostics/blade_call_site.rs`) reaches every
-render site the symbol map records a view name for: `view()`,
-`View::make()`, `Route::view()`, the `blade_view_directive` the
-preprocessor compiles `@include`/`@extends`/`@component` into, and the
-`blade_each_directive` it compiles `@each` into.
-Two shapes Bladestan matches are missing, because nothing indexes their
-view name in the first place — which also costs them go-to-definition,
-hover, and the unknown-view diagnostic, so this is an indexing item
-rather than a diagnostics one:
+The symbol map decides what is a view name syntactically, so the render
+sites it recognises by receiver are the ones a receiver's *spelling*
+settles: `$this->view('emails.shipped')` inside a class that extends a
+`Mailable`, and `view()->make(…)` / `->first(…)` off the bare helper call
+that returns the factory. A receiver whose viewness is only in its
+*type* is still missed:
 
-- `new Content(view: 'emails.orders.shipped', with: [...])` in a
-  mailable's `content()`, along with the `html:`, `text:`, and
-  `markdown:` arguments. The data argument is named (`with:`) rather
-  than positional, so `ViewCallWalker::matches` needs to pair a named
-  view argument with a named data argument instead of taking the next
-  positional one.
-- `->view('name', [...])` / `->render()` / `->first([...])` on a value
-  typed as the view factory or a mailable, which Bladestan's
-  `BladeViewMethodsMatcher` resolves by receiver type. Keying on the
-  method name alone would be far too broad, so this needs the receiver
-  resolved through the forward walker first.
+- a constructor-injected factory (`Factory $views` → `$this->views->make('x')`)
+  or one pulled from the container, which Bladestan's
+  `BladeViewMethodsMatcher` resolves by receiver type;
+- a mailable held in a local (`$mail = new OrderShipped(); $mail->view('x')`).
 
-Two more sit lower down the same slope and are cheap by comparison:
+Resolving those means asking the forward walker for the receiver's type,
+which `extract_symbol_map` cannot do: it runs during `update_ast`, before
+the file's classes are resolved, and a forward walk per method call would
+be paid on every keystroke. So this wants a lazily-computed set of extra
+view spans per file, consulted alongside the symbol map by the consumers
+that read view keys (`blade_call_site`, `call_site_inference`, the
+reference index, definition, hover) rather than a second syntactic guess
+in the indexer.
 
-- `Response::view('pages.about', [...])`, which Bladestan matches
-  alongside `View::make()`. It is a plain facade static call, so it
-  belongs next to the `View`/`Route` arms in
-  `symbol_map/extraction/expressions/calls.rs` and in
-  `is_view_render_static_call`.
-- `@includeFirst(['custom.header', 'partials.header'])`,
-  `@componentFirst`, and `@extendsFirst`, whose view names sit inside an
-  array literal rather than at an argument position, so
-  `emit_laravel_string_span` records nothing for them.
-  `signature::array_string_literals` already reads that shape for the
-  accepted-name walk and the layout chain; the indexer needs the same,
-  and `ViewCallWalker::matches` needs to pair each candidate with the
-  data argument that follows the array.
+`Factory::renderEach($view, $data, $iterator, $empty)` belongs with it:
+it is the PHP spelling of `@each`, so both its view arguments are render
+sites and its data argument means what `blade_each_directive`'s does
+rather than what a data array does.
 
 ### BL19. Signature covariance diagnostic
 
@@ -772,10 +760,10 @@ Implement go-to-definition for view names and component tags.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file.
 
-### Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)
+### Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)
 
-Call-site validation is shipped. What is left widens it (BL18 for the
-render sites nothing indexes a view name for, BL19 for the covariance
+Call-site validation is shipped. What is left widens it (BL23 for the
+render sites whose receiver only a type settles, BL19 for the covariance
 the merge does not check, BL20 for the data shapes the checks stand down
 on, BL22 for the templates that render other templates) and is
 independent of section/stack intelligence and custom directive

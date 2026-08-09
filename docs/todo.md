@@ -26,7 +26,7 @@ within the same impact tier.
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | BL19 | [Signature covariance diagnostic](todo/blade.md#bl19-signature-covariance-diagnostic)                                                                         | Low-Medium  | Low         |
-| BL18 | [Mailable and view-method render sites](todo/blade.md#bl18-mailable-and-view-method-render-sites)                                                             | Medium      | Medium      |
+| BL23 | [Render sites behind a typed receiver](todo/blade.md#bl23-render-sites-behind-a-typed-receiver)                                                               | Low-Medium  | Medium-High |
 | BL20 | [Call-site data the checks stand down on](todo/blade.md#bl20-call-site-data-the-checks-stand-down-on)                                                         | Medium      | Medium      |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |

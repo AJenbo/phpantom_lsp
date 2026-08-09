@@ -70,6 +70,7 @@ impl Backend {
                         kind: LaravelStringKind::View,
                         key,
                         is_write: false,
+                        ..
                     } => Some((span.start, key.clone())),
                     _ => None,
                 })

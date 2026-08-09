@@ -283,16 +283,22 @@ impl Backend {
             .collect();
         let mut closed = true;
         let mut seen: HashSet<String> = HashSet::new();
-        let mut queue = vec![view_name.to_string()];
+        let mut queue = vec![RenderedView {
+            name: view_name.to_string(),
+            optional: false,
+        }];
 
-        while let Some(name) = queue.pop() {
-            if !seen.insert(name.clone()) {
+        while let Some(rendered_view) = queue.pop() {
+            if !seen.insert(rendered_view.name.clone()) {
                 continue;
             }
-            let Some(source) = self.blade_view_source(&name) else {
+            let Some(source) = self.blade_view_source(&rendered_view.name) else {
                 // A name no view root holds leaves a hole in the walk: what
-                // that template reads is simply unknown.
-                closed = false;
+                // that template reads is simply unknown.  A `…First`
+                // candidate is the exception: the directive renders whichever
+                // of its candidates exists, so one that exists nowhere is
+                // never rendered and reads nothing.
+                closed &= rendered_view.optional;
                 continue;
             };
             collect_variable_names(&source, &mut names);
@@ -322,10 +328,18 @@ impl Backend {
     }
 }
 
+/// One view a template renders from its own data.
+struct RenderedView {
+    name: String,
+    /// Whether the render tolerates the name matching no template, as one
+    /// candidate of an `@includeFirst` list does.
+    optional: bool,
+}
+
 /// The view names a template renders from its own data, and whether every
 /// one of them was readable.
 struct RenderedViews {
-    names: Vec<String>,
+    names: Vec<RenderedView>,
     closed: bool,
 }
 
@@ -374,12 +388,17 @@ fn rendered_view_names(content: &str) -> RenderedViews {
         };
         // A `…First` directive takes a list of candidates and renders the
         // first that exists, so every entry is reachable.
+        let optional = shape == ViewArg::Candidates;
         let literals = match shape {
             ViewArg::Candidates => signature::array_string_literals(argument),
             ViewArg::Name => signature::leading_string_literal(argument).map(|name| vec![name]),
         };
         match literals {
-            Some(found) => names.extend(found),
+            Some(found) => names.extend(
+                found
+                    .into_iter()
+                    .map(|name| RenderedView { name, optional }),
+            ),
             None => closed = false,
         }
     }
@@ -417,7 +436,10 @@ mod tests {
 
     fn rendered(content: &str) -> (Vec<String>, bool) {
         let result = rendered_view_names(content);
-        (result.names, result.closed)
+        (
+            result.names.into_iter().map(|view| view.name).collect(),
+            result.closed,
+        )
     }
 
     #[test]

@@ -89,6 +89,11 @@ struct ExtractionCtx<'a> {
     /// decorated).  Gates recognition of `$this->call('cmd')` /
     /// `$this->callSilently('cmd')` as command-name references.
     in_console_command: bool,
+    /// Whether the members currently being extracted belong to a class that
+    /// syntactically extends `Illuminate\Mail\Mailable`.  Gates recognition
+    /// of `$this->view('emails.shipped')` and of `new Content(view: …)` as
+    /// view-name references.
+    in_mailable: bool,
     /// The `@coversDefaultClass` of the class whose members are currently
     /// being extracted.  It is what gives `@covers ::name` on a test method
     /// a subject; without one that shape names a global function.
@@ -158,6 +163,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         has_laravel_container_attrs: None,
         has_phpunit_attrs: None,
         in_console_command: false,
+        in_mailable: false,
         covers_default_class: None,
     };
 

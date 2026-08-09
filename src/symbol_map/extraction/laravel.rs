@@ -112,7 +112,19 @@ fn emit_laravel_string_span(
     let Some(first_arg) = argument_list.arguments.iter().nth(index) else {
         return;
     };
-    let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {
+    push_laravel_string_span(kind, is_write, false, first_arg.value(), content, spans);
+}
+
+/// Emit the span for one string-literal expression that names a key.
+fn push_laravel_string_span(
+    kind: crate::symbol_map::LaravelStringKind,
+    is_write: bool,
+    is_optional: bool,
+    expr: &Expression<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
         return;
     };
     let inner_start = s.span.start.offset + 1;
@@ -147,8 +159,122 @@ fn emit_laravel_string_span(
             key: normalised_key(kind.clone(), key),
             kind,
             is_write,
+            is_optional,
         },
     });
+}
+
+/// The [`try_emit_laravel_string_span_at`] variant for a view argument that
+/// may name several candidates at once.
+///
+/// `@includeFirst(['custom.header', 'partials.header'])` and its
+/// `@componentFirst` / `@extendsFirst` siblings, and the view factory's
+/// `first()`, put their names in an array literal and render whichever
+/// exists, so every entry is a template the call can reach.
+pub(super) fn try_emit_laravel_view_span_at(
+    index: usize,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let kind = crate::symbol_map::LaravelStringKind::View;
+    let Some(arg) = argument_list.arguments.iter().nth(index) else {
+        return;
+    };
+    let elements = match arg.value() {
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        expr => return push_laravel_string_span(kind, false, false, expr, content, spans),
+    };
+    // Only one candidate of the list is rendered, and which one depends on
+    // what exists on disk, so a candidate that names nothing is the shape
+    // working as intended rather than a typo.
+    for element in elements.iter() {
+        if let ArrayElement::Value(value) = element {
+            push_laravel_string_span(kind.clone(), false, true, value.value, content, spans);
+        }
+    }
+}
+
+/// The `Illuminate\Mail\Mailables\Content` constructor arguments that name a
+/// template, in the order the constructor declares them.
+///
+/// `with:` holds the data and follows them; every other argument of a
+/// `Content` is a setting rather than a view.
+const MAILABLE_CONTENT_VIEW_ARGS: [&str; 4] = ["view", "html", "text", "markdown"];
+
+/// Push a view span for every template a
+/// `new Content(view: 'emails.orders.shipped', with: […])` names.
+///
+/// A mailable's `content()` returns one of these, and any of `view:`,
+/// `html:`, `text:`, and `markdown:` names a template it renders.  The
+/// arguments are usually named, but the constructor takes them in
+/// [`MAILABLE_CONTENT_VIEW_ARGS`] order, so a positional call names the same
+/// templates.
+pub(super) fn try_emit_mailable_content_view_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for (index, argument) in argument_list.arguments.iter().enumerate() {
+        let names_view = match argument {
+            Argument::Named(named) => {
+                let name = bytes_to_str(named.name.value);
+                MAILABLE_CONTENT_VIEW_ARGS
+                    .iter()
+                    .any(|arg| name.eq_ignore_ascii_case(arg))
+            }
+            Argument::Positional(_) => index < MAILABLE_CONTENT_VIEW_ARGS.len(),
+        };
+        if names_view {
+            push_laravel_string_span(
+                crate::symbol_map::LaravelStringKind::View,
+                false,
+                false,
+                argument.value(),
+                content,
+                spans,
+            );
+        }
+    }
+}
+
+/// Whether `member_name` is a `Illuminate\Mail\Mailable` method whose first
+/// argument names a template.
+///
+/// `html()` is not among them: it takes the rendered markup itself rather
+/// than the name of a view, unlike the `Content` argument of the same name.
+pub(super) fn is_mailable_view_method(member_name: &str) -> bool {
+    matches!(
+        member_name.to_ascii_lowercase().as_str(),
+        "view" | "text" | "markdown"
+    )
+}
+
+/// The argument index at which a view-factory method names its template,
+/// or `None` when the method names none.
+///
+/// `first()` names a list of candidates rather than one template, which
+/// [`try_emit_laravel_view_span_at`] reads either way.
+pub(super) fn view_factory_method_name_index(member_name: &str) -> Option<usize> {
+    match member_name.to_ascii_lowercase().as_str() {
+        "make" | "first" | "exists" => Some(0),
+        "renderwhen" | "renderunless" => Some(1),
+        _ => None,
+    }
+}
+
+/// Whether `object` is a bare `view()` (or `\view()`) helper call, which
+/// returns the view factory itself rather than a rendered view.
+pub(super) fn is_laravel_view_factory_call(object: &Expression<'_>) -> bool {
+    let Expression::Call(Call::Function(func_call)) = object else {
+        return false;
+    };
+    let Expression::Identifier(ident) = func_call.function else {
+        return false;
+    };
+    strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("view")
+        && func_call.argument_list.arguments.is_empty()
 }
 
 /// Length of the leading command-name token when `key` carries trailing
@@ -276,6 +402,7 @@ fn push_morph_alias_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<S
             kind: crate::symbol_map::LaravelStringKind::MorphAlias,
             key: alias.to_string(),
             is_write: false,
+            is_optional: false,
         },
     });
 }
@@ -357,6 +484,7 @@ pub(super) fn try_emit_laravel_string_span_partial(
             key: normalised_key(kind.clone(), key),
             kind,
             is_write: false,
+            is_optional: false,
         },
     });
 }

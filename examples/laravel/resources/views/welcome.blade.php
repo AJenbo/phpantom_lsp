@@ -76,6 +76,12 @@
          provider shares them, or a view composer writes them. --}}
     @include('partials.sidebar')
 
+    {{-- @includeFirst renders the first candidate that exists, so a project
+         can override a partial without the caller changing. Both names are
+         navigable, and a candidate that exists nowhere is the point of the
+         directive rather than a typo, so it is not reported. --}}
+    @includeFirst(['partials.sidebar_override', 'partials.sidebar'])
+
     {{-- @each renders its partial once per entry, with the entry bound to
          the name the third argument spells and $key to its key. The types
          come from the collection: $posts is a PostCollection, so $post is a

@@ -561,11 +561,15 @@ impl Backend {
                         kind,
                         key,
                         is_write,
+                        is_optional,
                     } = &span.kind
                     {
                         // A write declares the key it names, so there is
-                        // nothing to check it against.
-                        if *is_write {
+                        // nothing to check it against, and an optional key
+                        // is one the call is written to do without: an
+                        // `@includeFirst` candidate that names nothing is
+                        // why the directive takes a list at all.
+                        if *is_write || *is_optional {
                             return None;
                         }
                         match kind {

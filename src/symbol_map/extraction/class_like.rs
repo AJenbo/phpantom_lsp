@@ -68,6 +68,12 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     // `#[AsCommand]` attribute.
     let prev_in_console_command = ctx.in_console_command;
     ctx.in_console_command = class_is_console_command(class);
+    // Whether this class is (syntactically) a mailable, so `$this->view(…)`
+    // and the `new Content(view: …)` its `content()` returns can be
+    // recognised as view names.  `view`, `text`, and `Content` are all far
+    // too plain to key on outside that context.
+    let prev_in_mailable = ctx.in_mailable;
+    ctx.in_mailable = class_extends_named(class, b"Mailable");
     let prev_covers_default_class = ctx.covers_default_class;
     ctx.covers_default_class = covers_default_class;
 
@@ -76,7 +82,23 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     }
 
     ctx.covers_default_class = prev_covers_default_class;
+    ctx.in_mailable = prev_in_mailable;
     ctx.in_console_command = prev_in_console_command;
+}
+
+/// Whether `class`'s direct `extends` clause names a class whose short name
+/// is `short`.
+fn class_extends_named(class: &Class<'_>, short: &[u8]) -> bool {
+    class.extends.as_ref().is_some_and(|ext| {
+        ext.types.iter().any(|ty| {
+            let value = ty.value();
+            let tail = match value.iter().rposition(|&b| b == b'\\') {
+                Some(idx) => &value[idx + 1..],
+                None => value,
+            };
+            tail.eq_ignore_ascii_case(short)
+        })
+    })
 }
 
 /// Whether `class` is (syntactically) an Artisan console command: it

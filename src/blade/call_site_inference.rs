@@ -864,6 +864,7 @@ enum IterationPart {
 /// / `->with()` value), the same-named variable to resolve at the
 /// call-site offset (for `compact('name')`), or one of the two variables
 /// `@each` derives from the collection it iterates.
+#[derive(Clone)]
 enum SiteEntry<'ast, 'arena> {
     Expr {
         name: String,
@@ -913,14 +914,23 @@ struct CollectCtx<'w, 'ast, 'arena> {
 }
 
 impl<'ast, 'arena> CollectCtx<'_, 'ast, 'arena> {
-    /// The draft for the view call at `offset`, created if the walker has
-    /// not reached it yet.
+    /// The draft for the view call at `offset` that names the template at
+    /// `name_range`, created if the walker has not reached it yet.
     ///
     /// A chained `->with(…)` is walked *before* the `view()` call it hangs
     /// off (the method call is the outer node), so either end of the chain
     /// may be the first to open the site.
+    ///
+    /// The name is part of the key, not just the offset: an
+    /// `@includeFirst(['custom.header', 'partials.header'])` renders whichever
+    /// of its candidates exists, so one call is a site of each template it
+    /// names, and each is judged against its own contract.
     fn site(&mut self, offset: u32, name_range: ByteRange) -> &mut SiteDraft<'ast, 'arena> {
-        if let Some(index) = self.sites.iter().position(|site| site.offset == offset) {
+        if let Some(index) = self
+            .sites
+            .iter()
+            .position(|site| site.offset == offset && site.name_range == name_range)
+        {
             return &mut self.sites[index];
         }
         self.sites.push(SiteDraft {
@@ -931,6 +941,23 @@ impl<'ast, 'arena> CollectCtx<'_, 'ast, 'arena> {
             forwards_scope: true,
         });
         self.sites.last_mut().expect("just pushed")
+    }
+
+    /// Record the same data against every template one call names.
+    fn record(
+        &mut self,
+        offset: u32,
+        name_ranges: &[ByteRange],
+        entries: Vec<SiteEntry<'ast, 'arena>>,
+        complete: bool,
+        forwards_scope: bool,
+    ) {
+        for name_range in name_ranges {
+            let site = self.site(offset, *name_range);
+            site.entries.extend(entries.iter().cloned());
+            site.complete &= complete;
+            site.forwards_scope &= forwards_scope;
+        }
     }
 }
 
@@ -944,26 +971,57 @@ struct ViewCallWalker<'a> {
 }
 
 impl ViewCallWalker<'_> {
-    /// The range of the view-name string in an argument list, along with
-    /// the index it sits at, when the list names one of the views asked
-    /// about.
+    /// The ranges of the view-name strings in an argument list, along with
+    /// the index of the argument holding them, when the list names one of
+    /// the views asked about.
     ///
     /// The name is looked for at any position rather than only the first:
     /// `Route::view('/about', 'pages.about', …)` puts the URI first, and
     /// the data argument is always the one after the name whatever the
     /// helper's shape.
-    fn matches(&self, argument_list: &ArgumentList<'_>) -> Option<(usize, ByteRange)> {
+    ///
+    /// One argument can name several templates: a `…First` directive and the
+    /// factory's `first()` take a list of candidates and render whichever
+    /// exists, so every entry of the array is one the call reaches.
+    fn matches(&self, argument_list: &ArgumentList<'_>) -> Option<(usize, Vec<ByteRange>)> {
         argument_list
             .arguments
             .iter()
             .enumerate()
             .find_map(|(index, argument)| {
-                let Expression::Literal(Literal::String(s)) = argument.value() else {
-                    return None;
-                };
-                let inner = (s.span.start.offset + 1, s.span.end.offset - 1);
-                self.offsets.contains(&inner.0).then_some((index, inner))
+                let ranges = self.matching_ranges(argument.value());
+                (!ranges.is_empty()).then_some((index, ranges))
             })
+    }
+
+    /// The view-name ranges one argument holds: the string itself, or the
+    /// entries of the candidate array a `…First` directive names.
+    fn matching_ranges(&self, expr: &Expression<'_>) -> Vec<ByteRange> {
+        let mut ranges = Vec::new();
+        match expr {
+            Expression::Literal(Literal::String(s)) => {
+                let inner = (s.span.start.offset + 1, s.span.end.offset - 1);
+                if self.offsets.contains(&inner.0) {
+                    ranges.push(inner);
+                }
+            }
+            Expression::Array(array) => {
+                for element in array.elements.iter() {
+                    if let ArrayElement::Value(value) = element {
+                        ranges.extend(self.matching_ranges(value.value));
+                    }
+                }
+            }
+            Expression::LegacyArray(array) => {
+                for element in array.elements.iter() {
+                    if let ArrayElement::Value(value) = element {
+                        ranges.extend(self.matching_ranges(value.value));
+                    }
+                }
+            }
+            _ => {}
+        }
+        ranges
     }
 }
 
@@ -982,7 +1040,7 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
         if !is_view_render_function(name) {
             return;
         }
-        let Some((index, name_range)) = self.matches(&node.argument_list) else {
+        let Some((index, name_ranges)) = self.matches(&node.argument_list) else {
             return;
         };
         let mut entries = Vec::new();
@@ -996,10 +1054,13 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
         } else {
             collect_data_argument(&node.argument_list, index + 1, &mut entries)
         };
-        let site = ctx.site(node.span().start.offset, name_range);
-        site.entries.extend(entries);
-        site.complete &= complete;
-        site.forwards_scope &= !is_each_render_function(name);
+        ctx.record(
+            node.span().start.offset,
+            &name_ranges,
+            entries,
+            complete,
+            !is_each_render_function(name),
+        );
     }
 
     fn walk_in_static_method_call(
@@ -1013,14 +1074,42 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
         if !is_view_render_static_call(node.class, bytes_to_str(method.value)) {
             return;
         }
-        let Some((index, name_range)) = self.matches(&node.argument_list) else {
+        let Some((index, name_ranges)) = self.matches(&node.argument_list) else {
             return;
         };
         let mut entries = Vec::new();
         let complete = collect_data_argument(&node.argument_list, index + 1, &mut entries);
-        let site = ctx.site(node.span().start.offset, name_range);
-        site.entries.extend(entries);
-        site.complete &= complete;
+        ctx.record(
+            node.span().start.offset,
+            &name_ranges,
+            entries,
+            complete,
+            true,
+        );
+    }
+
+    /// `new Content(view: 'emails.orders.shipped', with: […])`, the value a
+    /// mailable's `content()` returns.
+    fn walk_in_instantiation(
+        &self,
+        node: &'ast Instantiation<'arena>,
+        ctx: &mut CollectCtx<'w, 'ast, 'arena>,
+    ) {
+        let Some(argument_list) = &node.argument_list else {
+            return;
+        };
+        let Some((_, name_ranges)) = self.matches(argument_list) else {
+            return;
+        };
+        let mut entries = Vec::new();
+        let complete = collect_content_data_argument(argument_list, &mut entries);
+        ctx.record(
+            node.span().start.offset,
+            &name_ranges,
+            entries,
+            complete,
+            true,
+        );
     }
 
     fn walk_in_method_call(
@@ -1028,19 +1117,41 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
         node: &'ast MethodCall<'arena>,
         ctx: &mut CollectCtx<'w, 'ast, 'arena>,
     ) {
+        let ClassLikeMemberSelector::Identifier(method) = &node.method else {
+            return;
+        };
+        let method_name = bytes_to_str(method.value);
+
+        // A render the receiver's type decides: a mailable's
+        // `$this->view('name', […])` and the view factory's own `make()` /
+        // `first()` / `renderWhen()`.  Which of those the receiver actually
+        // is was settled when the name was indexed, so a matching name at
+        // the position the method takes one is the whole test here.
+        if let Some(name_index) = view_render_method_name_index(method_name)
+            && let Some((index, name_ranges)) = self.matches(&node.argument_list)
+            && index == name_index
+        {
+            let mut entries = Vec::new();
+            let complete = collect_data_argument(&node.argument_list, index + 1, &mut entries);
+            ctx.record(
+                node.span().start.offset,
+                &name_ranges,
+                entries,
+                complete,
+                true,
+            );
+            return;
+        }
+
         // `->with('key', $value)` / `->with(['key' => $value])` /
         // `->withKey($value)` chained onto a matching `view()` call.  The
         // receiver chain may pass through other builder methods
         // (`->layout(…)`), so scan the whole spine for the matching view
         // call.
-        let ClassLikeMemberSelector::Identifier(method) = &node.method else {
-            return;
-        };
-        let method_name = bytes_to_str(method.value);
         if !method_name.starts_with("with") && !method_name.starts_with("With") {
             return;
         }
-        let Some((offset, name_range)) = matching_view_call_in_chain(node.object, self) else {
+        let Some((offset, name_ranges)) = matching_view_call_in_chain(node.object, self) else {
             return;
         };
 
@@ -1085,9 +1196,7 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
             }
         }
 
-        let site = ctx.site(offset, name_range);
-        site.entries.extend(entries);
-        site.complete &= complete;
+        ctx.record(offset, &name_ranges, entries, complete, true);
     }
 }
 
@@ -1139,8 +1248,13 @@ fn is_each_render_function(name: &str) -> bool {
     name.eq_ignore_ascii_case("blade_each_directive")
 }
 
-/// Whether a static call renders a view: `View::make()`, or the
-/// `Route::view()` shorthand that binds a URI straight to a template.
+/// Whether a static call renders a view: the `View` facade's factory
+/// methods, the `Route::view()` shorthand that binds a URI straight to a
+/// template, or `Response::view()`.
+///
+/// `View::exists()` is left out on purpose. It names a template without
+/// rendering it, so it hands it nothing, and reading it as a render would
+/// report every variable the template declares as missing.
 fn is_view_render_static_call(class: &Expression<'_>, method: &str) -> bool {
     let Expression::Identifier(ident) = class else {
         return false;
@@ -1149,9 +1263,28 @@ fn is_view_render_static_call(class: &Expression<'_>, method: &str) -> bool {
     let is_facade = |short: &str, fqn: &str| {
         subject.eq_ignore_ascii_case(short) || subject.eq_ignore_ascii_case(fqn)
     };
-    (is_facade("View", "Illuminate\\Support\\Facades\\View") && method.eq_ignore_ascii_case("make"))
+    (is_facade("View", "Illuminate\\Support\\Facades\\View")
+        && view_render_method_name_index(method).is_some())
         || (is_facade("Route", "Illuminate\\Support\\Facades\\Route")
             && method.eq_ignore_ascii_case("view"))
+        || (is_facade("Response", "Illuminate\\Support\\Facades\\Response")
+            && method.eq_ignore_ascii_case("view"))
+}
+
+/// The argument index at which a view-rendering *method* names its
+/// template, or `None` when the method names none.
+///
+/// Covers both families the symbol map indexes by receiver type: a
+/// mailable's `view()` / `text()` / `markdown()`, and the view factory's
+/// `make()` / `first()` / `renderWhen()` / `renderUnless()`. Which of the
+/// two a receiver is was decided when the name was indexed, so the two sets
+/// need not be told apart again here.
+fn view_render_method_name_index(method: &str) -> Option<usize> {
+    match method.to_ascii_lowercase().as_str() {
+        "view" | "text" | "markdown" | "make" | "first" => Some(0),
+        "renderwhen" | "renderunless" => Some(1),
+        _ => None,
+    }
 }
 
 /// The variable a `->withSomething()` magic setter names, following
@@ -1168,9 +1301,9 @@ fn magic_with_name(method: &str) -> Option<String> {
     Some(first.to_lowercase().chain(chars).collect())
 }
 
-/// The offset and view-name range of the `view()` / `View::make()` call a
-/// method call's receiver spine ends in, when it names one of the views
-/// asked about.
+/// The offset and view-name ranges of the `view()` / `View::make()` /
+/// `$this->view()` call a method call's receiver spine ends in, when it
+/// names one of the views asked about.
 ///
 /// Walks through chained method calls (`view(…)->with(…)->with(…)`) but
 /// not through variables — a `$view = view(…); $view->with(…)` split is
@@ -1178,7 +1311,7 @@ fn magic_with_name(method: &str) -> Option<String> {
 fn matching_view_call_in_chain(
     mut expr: &Expression<'_>,
     walker: &ViewCallWalker<'_>,
-) -> Option<(u32, ByteRange)> {
+) -> Option<(u32, Vec<ByteRange>)> {
     loop {
         match expr {
             Expression::Call(Call::Function(fc)) => {
@@ -1189,8 +1322,8 @@ fn matching_view_call_in_chain(
                 if !is_view_render_function(name) {
                     return None;
                 }
-                let (_, range) = walker.matches(&fc.argument_list)?;
-                return Some((fc.span().start.offset, range));
+                let (_, ranges) = walker.matches(&fc.argument_list)?;
+                return Some((fc.span().start.offset, ranges));
             }
             Expression::Call(Call::StaticMethod(sc)) => {
                 let ClassLikeMemberSelector::Identifier(method) = &sc.method else {
@@ -1199,10 +1332,21 @@ fn matching_view_call_in_chain(
                 if !is_view_render_static_call(sc.class, bytes_to_str(method.value)) {
                     return None;
                 }
-                let (_, range) = walker.matches(&sc.argument_list)?;
-                return Some((sc.span().start.offset, range));
+                let (_, ranges) = walker.matches(&sc.argument_list)?;
+                return Some((sc.span().start.offset, ranges));
             }
             Expression::Call(Call::Method(mc)) => {
+                // `$this->view('emails.shipped')->with([…])` in a mailable
+                // renders from the link the spine passes through, not from
+                // the one it ends at.
+                if let ClassLikeMemberSelector::Identifier(method) = &mc.method
+                    && let Some(name_index) =
+                        view_render_method_name_index(bytes_to_str(method.value))
+                    && let Some((index, ranges)) = walker.matches(&mc.argument_list)
+                    && index == name_index
+                {
+                    return Some((mc.span().start.offset, ranges));
+                }
                 expr = mc.object;
             }
             Expression::Parenthesized(p) => {
@@ -1227,6 +1371,36 @@ fn collect_data_argument<'ast, 'arena>(
     match argument_list.arguments.iter().nth(index) {
         Some(arg) => collect_from_data_expr(arg.value(), entries),
         None => true,
+    }
+}
+
+/// The position `Illuminate\Mail\Mailables\Content` takes its data at when
+/// its constructor is called positionally, after `view`, `html`, `text`,
+/// and `markdown`.
+const CONTENT_WITH_INDEX: usize = 4;
+
+/// Collect variable entries from the data a `new Content(…)` passes.
+///
+/// A `Content` names its data `with:` rather than putting it after the view
+/// name, so the pairing is by argument name; the constructor still accepts
+/// it positionally, at [`CONTENT_WITH_INDEX`].
+///
+/// A mailable also hands its view every public property it declares, which
+/// no argument here names — see `Backend::component_render_scope_names`.
+fn collect_content_data_argument<'ast, 'arena>(
+    argument_list: &'ast ArgumentList<'arena>,
+    entries: &mut Vec<SiteEntry<'ast, 'arena>>,
+) -> bool {
+    for argument in argument_list.arguments.iter() {
+        if let Argument::Named(named) = argument
+            && bytes_to_str(named.name.value).eq_ignore_ascii_case("with")
+        {
+            return collect_from_data_expr(named.value, entries);
+        }
+    }
+    match argument_list.arguments.iter().nth(CONTENT_WITH_INDEX) {
+        Some(Argument::Positional(positional)) => collect_from_data_expr(positional.value, entries),
+        _ => true,
     }
 }
 

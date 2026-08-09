@@ -1119,6 +1119,41 @@ check(
         && method_exists(\Illuminate\View\Factory::class, 'getShared')
 );
 
+// ─── Mailable render sites ───────────────────────────────────────────────────
+
+// A mailable names its template through the Content its content() returns,
+// whose data argument is named `with:` rather than sitting after the view
+// name.  PHPantom pairs the two by name, so the constructor's parameter names
+// are what the demo in app/Mail/OrderShipped.php depends on.
+$contentParameters = array_map(
+    fn (ReflectionParameter $p) => $p->getName(),
+    (new ReflectionMethod(\Illuminate\Mail\Mailables\Content::class, '__construct'))->getParameters()
+);
+check(
+    'Content names its template in view/html/text/markdown and its data in with',
+    array_slice($contentParameters, 0, 5) === ['view', 'html', 'text', 'markdown', 'with']
+);
+
+// app/Mail/BlogPublished.php passes nothing to emails.blog_published, yet the
+// template declares $post and $author: a mailable merges every public property
+// it declares into the view data, skipping the ones Mailable itself declares.
+$blogPublished = new \App\Mail\BlogPublished(
+    new \App\Models\BlogPost(),
+    new \App\Models\BlogAuthor()
+);
+// `buildViewData()` is protected; since PHP 8.1 reflection reaches it without
+// being asked to.
+$buildViewData = new ReflectionMethod(\Illuminate\Mail\Mailable::class, 'buildViewData');
+$viewData = $buildViewData->invoke($blogPublished);
+check(
+    'a mailable hands its view the public properties it declares',
+    array_key_exists('post', $viewData) && array_key_exists('author', $viewData)
+);
+check(
+    'the properties Mailable itself declares stay out of the view data',
+    !array_key_exists('callbacks', $viewData) && !array_key_exists('subject', $viewData)
+);
+
 // ─── @each item and key variables ────────────────────────────────────────────
 
 // `@each('partial', $rows, 'row')` compiles to Factory::renderEach(), which
