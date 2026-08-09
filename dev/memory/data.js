@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786306900056,
+  "lastUpdate": 1786308910290,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17611,6 +17611,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a6094c816218350d9ae200ccf5b503f47d247079",
+          "message": "A branch PHPantom cannot type widens the answer instead of disappearing\nfrom it",
+          "timestamp": "2026-08-09T22:34:14+02:00",
+          "tree_id": "b47805ddee5d7ef8a0deae592a6bc1dba481db05",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a6094c816218350d9ae200ccf5b503f47d247079"
+        },
+        "date": 1786308904667,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.8,
             "unit": "MiB"
           }
         ]
