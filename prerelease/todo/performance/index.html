@@ -2106,6 +2106,7 @@ refresh, while the other eight are unchanged:</p>
 <thead>
 <tr>
 <th>Project</th>
+<th style="text-align: right;">Two refreshes ago</th>
 <th style="text-align: right;">Previous</th>
 <th style="text-align: right;">Current</th>
 </tr>
@@ -2115,11 +2116,13 @@ refresh, while the other eight are unchanged:</p>
 <td>Website</td>
 <td style="text-align: right;">8.5s</td>
 <td style="text-align: right;">11.9s</td>
+<td style="text-align: right;">11.4s</td>
 </tr>
 <tr>
 <td>Backoffice</td>
 <td style="text-align: right;">11.6s</td>
 <td style="text-align: right;">15.7s</td>
+<td style="text-align: right;">18.9s</td>
 </tr>
 </tbody>
 </table>
@@ -2128,9 +2131,16 @@ at something in the Blade pipeline (the declaration chain, provider
 resource scanning, or the per-template refresh pass) rather than at the
 type engine. <code>view()</code> call-site validation is <em>not</em> the cause: the same
 build with it reverted measures 11.87s and 15.76s.</p>
-<p>Bisect the analyse wall-clock over the commits between the two refreshes
+<p>The Current column adds the typed-receiver render-site confirmation
+work, which the Previous numbers could not include (it deadlocked on
+Backoffice until the config-tree enumeration was decoupled from the
+workspace index). Backoffice picked up another ~3s from it while Website
+stayed flat; its populate phase dominates (<code>-v</code> reports parse 1.5s,
+populate 12.2s, diagnose 7.1s), so the per-template refresh inside
+indexing is where to look first.</p>
+<p>Bisect the analyse wall-clock over the commits between the refreshes
 rather than guessing which of the Blade features landed in that window
-is responsible. Backoffice is now the first sample over the 15-second
+is responsible. Backoffice is the only sample over the 15-second
 line the triage doc calls healthy, so this is worth chasing before the
 next Blade feature adds to it.</p>
 <hr />
