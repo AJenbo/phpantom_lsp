@@ -310,14 +310,45 @@ impl Backend {
     /// Build the LSP `Command` for a code lens that navigates to a target
     /// location.
     ///
-    /// Returns a custom command handled by `workspace/executeCommand`,
-    /// which uses `window/showDocument` to navigate.  This works across
-    /// all LSP clients without editor-specific command sniffing.
+    /// LSP has no standard "go to this location" command, so the client
+    /// decides which of the two shapes it can act on:
+    ///
+    /// * A client that advertises `window.showDocument` gets the custom
+    ///   `phpantom.navigateToPrototype` command.  It comes back as a
+    ///   `workspace/executeCommand`, and the server answers it with a
+    ///   `window/showDocument` request.
+    /// * A client that does not gets `editor.action.showReferences` with
+    ///   the `(uri, position, locations)` argument triple VS Code
+    ///   established, which such clients resolve on their own without a
+    ///   round trip.  Zed is the notable one: it recognises the command
+    ///   name but never answers `window/showDocument`.
     fn build_code_lens_command(&self, title: String, uri: Url, position: Position) -> Command {
+        if self
+            .supports_show_document
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Command {
+                title,
+                command: "phpantom.navigateToPrototype".to_string(),
+                arguments: Some(vec![serde_json::json!(uri), serde_json::json!(position)]),
+            };
+        }
+
+        let location = Location {
+            uri: uri.clone(),
+            range: Range {
+                start: position,
+                end: position,
+            },
+        };
         Command {
             title,
-            command: "phpantom.navigateToPrototype".to_string(),
-            arguments: Some(vec![serde_json::json!(uri), serde_json::json!(position)]),
+            command: "editor.action.showReferences".to_string(),
+            arguments: Some(vec![
+                serde_json::json!(uri),
+                serde_json::json!(position),
+                serde_json::json!([location]),
+            ]),
         }
     }
 

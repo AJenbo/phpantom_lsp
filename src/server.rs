@@ -118,6 +118,18 @@ impl LanguageServer for Backend {
         self.supports_work_done_progress
             .store(client_supports_work_done_progress, Ordering::Release);
 
+        // Detect whether the client handles `window/showDocument`.  Code
+        // lens navigation routes through that request, so a client that
+        // does not opt in needs a lens command it can act on itself.
+        let client_supports_show_document = params
+            .capabilities
+            .window
+            .as_ref()
+            .and_then(|w| w.show_document.as_ref())
+            .is_some_and(|sd| sd.support);
+        self.supports_show_document
+            .store(client_supports_show_document, Ordering::Release);
+
         // Detect whether the client supports server-initiated semantic
         // token refreshes (`workspace/semanticTokens/refresh`).  Used to
         // re-pull tokens after background didChange parses commit a new

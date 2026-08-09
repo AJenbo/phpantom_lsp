@@ -300,10 +300,7 @@ class Handler extends Base {
 
 // ─── Code Lens Command ─────────────────────────────────────────────────────
 
-#[test]
-fn lens_command_uses_navigate_to_prototype() {
-    let backend = create_test_backend();
-    let content = r#"<?php
+const OVERRIDE_SOURCE: &str = r#"<?php
 class Parent_ {
     public function action(): void {}
 }
@@ -312,15 +309,42 @@ class Child extends Parent_ {
     public function action(): void {}
 }
 "#;
+
+#[test]
+fn lens_command_uses_navigate_to_prototype_when_client_shows_documents() {
+    let backend = create_test_backend();
+    backend.set_supports_show_document(true);
     let uri = "file:///test.php";
-    let lenses = get_code_lenses(&backend, uri, content);
+    let lenses = get_code_lenses(&backend, uri, OVERRIDE_SOURCE);
 
     assert_eq!(lenses.len(), 1);
     let cmd = lenses[0].command.as_ref().unwrap();
     assert_eq!(cmd.command, "phpantom.navigateToPrototype");
-    assert!(cmd.arguments.is_some());
     let args = cmd.arguments.as_ref().unwrap();
     assert_eq!(args.len(), 2);
+}
+
+/// A client that never answers `window/showDocument` (Zed) has to be able
+/// to act on the lens by itself, so it gets the `showReferences` triple.
+#[test]
+fn lens_command_uses_show_references_without_show_document() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let lenses = get_code_lenses(&backend, uri, OVERRIDE_SOURCE);
+
+    assert_eq!(lenses.len(), 1);
+    let cmd = lenses[0].command.as_ref().unwrap();
+    assert_eq!(cmd.command, "editor.action.showReferences");
+    let args = cmd.arguments.as_ref().unwrap();
+    assert_eq!(args.len(), 3);
+
+    serde_json::from_value::<Url>(args[0].clone()).expect("first argument is the target uri");
+    serde_json::from_value::<Position>(args[1].clone())
+        .expect("second argument is the target position");
+    let locations: Vec<Location> =
+        serde_json::from_value(args[2].clone()).expect("third argument is a location list");
+    assert_eq!(locations.len(), 1);
+    assert_eq!(locations[0].range.start.line, 2);
 }
 
 // ─── Multiple Interfaces ────────────────────────────────────────────────────

@@ -737,6 +737,14 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports `window/showDocument`.
+    ///
+    /// Set during `initialize` based on the client's
+    /// `window.showDocument.support` capability.  Code lens navigation
+    /// asks the client to open the prototype's file through that request,
+    /// so a client that does not opt in gets a lens command it can act on
+    /// by itself instead (see `code_lens::build_code_lens_command`).
+    pub(crate) supports_show_document: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports `workspace/semanticTokens/refresh`.
     ///
     /// Set during `initialize` based on the client's
@@ -996,6 +1004,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1089,6 +1098,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1717,6 +1727,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
             init_complete: Arc::clone(&self.init_complete),
             shutdown_flag: Arc::clone(&self.shutdown_flag),
@@ -1759,6 +1770,15 @@ impl Backend {
     /// `unresolved-member-access` without needing a `.phpantom.toml` file.
     pub fn set_config(&self, config: config::Config) {
         *self.workspace.config.lock() = config;
+    }
+
+    /// Record whether the client handles `window/showDocument`.
+    ///
+    /// Set from the `initialize` handshake; integration tests use it to
+    /// exercise both code lens command shapes.
+    pub fn set_supports_show_document(&self, supported: bool) {
+        self.supports_show_document
+            .store(supported, std::sync::atomic::Ordering::Release);
     }
 
     /// Set the PHP version (used by integration tests and during
