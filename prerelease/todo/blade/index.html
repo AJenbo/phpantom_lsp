@@ -1146,17 +1146,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl23-render-sites-behind-a-typed-receiver" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL23. Render sites behind a typed receiver
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1408,10 +1397,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl22-bl23" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl22" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL22, BL23)
+        Step 9: Template contracts (BL10, BL11, BL22)
       </span>
     </span>
   </a>
@@ -2324,17 +2313,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl23-render-sites-behind-a-typed-receiver" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL23. Render sites behind a typed receiver
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2586,10 +2564,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl22-bl23" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl22" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL22, BL23)
+        Step 9: Template contracts (BL10, BL11, BL22)
       </span>
     </span>
   </a>
@@ -2978,48 +2956,6 @@ scanner — so that:</p>
 <li>directive name completion (BL7) includes them;</li>
 <li>registered component namespaces/paths extend the discovery index.</li>
 </ul>
-<h3 id="bl23-render-sites-behind-a-typed-receiver">BL23. Render sites behind a typed receiver<a class="headerlink" href="#bl23-render-sites-behind-a-typed-receiver" title="Permanent link">&para;</a></h3>
-<p>The symbol map decides what is a view name syntactically, so the render
-sites it recognises by receiver are the ones a receiver's <em>spelling</em>
-settles: <code>$this-&gt;view('emails.shipped')</code> inside a class that extends a
-<code>Mailable</code>, and <code>view()-&gt;make(…)</code> / <code>-&gt;first(…)</code> off the bare helper call
-that returns the factory. A receiver whose viewness is only in its
-<em>type</em> is still missed:</p>
-<ul>
-<li>a constructor-injected factory (<code>Factory $views</code> → <code>$this-&gt;views-&gt;make('x')</code>)
-  or one pulled from the container, which Bladestan's
-  <code>BladeViewMethodsMatcher</code> resolves by receiver type;</li>
-<li>a mailable held in a local (<code>$mail = new OrderShipped(); $mail-&gt;view('x')</code>).</li>
-</ul>
-<p>Resolving those means asking the forward walker for the receiver's type,
-which <code>extract_symbol_map</code> cannot do: it runs during <code>update_ast</code>, before
-the file's classes are resolved, and a forward walk per method call would
-be paid on every keystroke. So this wants a lazily-computed set of extra
-view spans per file, consulted alongside the symbol map by the consumers
-that read view keys (<code>blade_call_site</code>, <code>call_site_inference</code>, the
-reference index, definition, hover) rather than a second syntactic guess
-in the indexer.</p>
-<p><code>Factory::renderEach($view, $data, $iterator, $empty)</code> belongs with it:
-it is the PHP spelling of <code>@each</code>, so both its view arguments are render
-sites and its data argument means what <code>blade_each_directive</code>'s does
-rather than what a data array does.</p>
-<p><strong>Acceptance tests.</strong> Bladestan's <code>view-call-site-view-methods</code> fixture
-is the behaviour spec, and every one of its cases is written against a
-typed receiver, so the whole fixture lands here. Given a template
-declaring <code>string $title</code> and <code>App\Models\User $user</code>, each of these
-passes only <code>$title</code> and must report <code>$user</code> missing:</p>
-<ul>
-<li><code>$factory-&gt;make('signed-template', ['title' =&gt; 'Hello'])</code>;</li>
-<li><code>$factory-&gt;first(['optional-override', 'signed-template'], […])</code>,
-  judged against the fallback candidate the list guarantees;</li>
-<li><code>$factory-&gt;renderWhen(true, 'signed-template', […])</code> and
-  <code>renderUnless(false, …)</code>, which name their template second;</li>
-<li><code>$mailable-&gt;markdown('signed-template', […])</code> on a <code>Mailable</code> held in a
-  parameter rather than reached through <code>$this</code>.</li>
-</ul>
-<p><code>$factory-&gt;renderEach('render-each-item', ['a', 'b'], 'item')</code> is the
-clean case: it binds <code>$item</code> and <code>$key</code> the way <code>@each</code> does, so a
-partial declaring exactly those two is satisfied and nothing is reported.</p>
 <h3 id="bl22-a-template-never-learns-anything-from-the-templates-that-render-it">BL22. A template never learns anything from the templates that render it<a class="headerlink" href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" title="Permanent link">&para;</a></h3>
 <p><code>compute_blade_injected_vars</code> skips every Blade file in the caller
 snapshot (<code>if self.is_blade_file(file_uri) { continue; }</code>, and
@@ -3303,13 +3239,13 @@ directives with snippet templates.</p>
 <p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file.</p>
-<h3 id="step-9-template-contracts-bl10-bl11-bl22-bl23">Step 9: Template contracts (BL10, BL11, BL22, BL23)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl22-bl23" title="Permanent link">&para;</a></h3>
+<h3 id="step-9-template-contracts-bl10-bl11-bl22">Step 9: Template contracts (BL10, BL11, BL22)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl22" title="Permanent link">&para;</a></h3>
 <p>Call-site validation is shipped, and so is the covariance check on the
-signature chain and the data shapes the checks used to stand down on.
-What is left is BL23 for the render sites whose receiver only a type
-settles and BL22 for the templates that render other templates, and it
-is independent of section/stack intelligence and custom directive
-discovery, so the two can land in any order.</p>
+signature chain, the data shapes the checks used to stand down on, and
+the render sites whose receiver only a type settles. What is left is
+BL22 for the templates that render other templates, and it is
+independent of section/stack intelligence and custom directive
+discovery, so it can land at any point.</p>
 <p><strong>Deliverable:</strong> A template with a <code>@bladestan-signature</code> docblock
 gets typed completion for its declared variables at every render site.</p>
 <h3 id="step-10-editor-tooling-parity-bl13-bl16">Step 10: Editor tooling parity (BL13-BL16)<a class="headerlink" href="#step-10-editor-tooling-parity-bl13-bl16" title="Permanent link">&para;</a></h3>

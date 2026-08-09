@@ -2840,11 +2840,10 @@ pattern set. Gaps by kind:</p>
   <code>Response</code> facades and on <code>redirect()</code>/<code>url()</code> helper chains
   (<code>redirect()-&gt;route('x')</code>); <code>Route::is()</code> and <code>$request-&gt;routeIs()</code>
   (glob-aware, see L14); and the <code>#[RedirectToRoute]</code> attribute.</li>
-<li><strong>View names</strong> — add <code>View::first()</code>, <code>View::renderEach()</code>,
-  <code>View::renderWhen()</code>/<code>renderUnless()</code> (view name at arg 1),
-  <code>Route::view()</code> (arg 1), <code>MailMessage::view()</code>/<code>markdown()</code>, and the
-  mailable <code>#[Content]</code> attribute (<code>view</code>/<code>markdown</code> arguments, named or
-  positional).</li>
+<li><strong>View names</strong> — add <code>MailMessage::view()</code>/<code>markdown()</code>, which is a
+  notification's mail message rather than a mailable or the view
+  factory, and the mailable <code>#[Content]</code> attribute (<code>view</code>/<code>markdown</code>
+  arguments, named or positional).</li>
 <li><strong>Translation keys</strong> — add <code>Lang::has()</code>/<code>hasForLocale()</code>. (<code>@lang</code>
   and other Blade directives arrive via the Blade preprocessor;
   see <code>blade.md</code>.)</li>
