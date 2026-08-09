@@ -1029,6 +1029,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#a44-sort-use-statements" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A44. Sort <code>use</code> statements
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a45-simplify-with-elvis-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A45. Simplify with <code>?:</code> (Elvis operator)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1811,6 +1833,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#a44-sort-use-statements" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A44. Sort <code>use</code> statements
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a45-simplify-with-elvis-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A45. Simplify with <code>?:</code> (Elvis operator)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2207,6 +2251,63 @@ this as a transformer.</p>
   update it to match.</li>
 </ul>
 <p><strong>Code action kind:</strong> <code>quickfix</code>.</p>
+<hr />
+<h3 id="a44-sort-use-statements">A44. Sort <code>use</code> statements<a class="headerlink" href="#a44-sort-use-statements" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p>Re-sort a file's existing <code>use</code> imports alphabetically, the way
+PhpStorm's "Optimize Imports" and Phpactor's import sorter do. PHPantom
+already sorts <em>new</em> candidates when offering an import (<code>import_class.rs</code>),
+and <code>analyze_use_block</code> (<code>src/completion/use_edit.rs</code>) already parses the
+existing block's entries, but nothing re-orders the block once it exists,
+so a file edited by hand or merged from two branches keeps whatever order
+it ended up in.</p>
+<ul>
+<li>Sort within each of the three PHP import kinds separately (plain
+  <code>use</code>, <code>use function</code>, <code>use const</code>); do not interleave them.</li>
+<li>Sort case-insensitively by the imported name, not by the alias — <code>use
+  Zebra\Foo as Aardvark;</code> sorts under <code>Zebra\Foo</code>, matching how a reader
+  scans the block for a namespace, not an alias.</li>
+<li>A blank line inside the block marks a group boundary a developer put
+  there on purpose (e.g. separating vendor imports from app imports);
+  sort within each group rather than collapsing the block into one.</li>
+<li>A <code>use Foo\{Bar, Baz};</code> group-use statement sorts as one entry, keyed
+  on <code>Foo</code>; do not expand it into separate statements.</li>
+<li>A comment attached to one <code>use</code> line (leading or trailing) must move
+  with it, not get orphaned by the reorder.</li>
+<li>Offer as a code action over the <code>use</code> block (<code>source.organizeImports</code>
+  kind), not as an always-on formatter step — a developer who groups
+  imports by hand for readability should not have that undone on every
+  save.</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>source.organizeImports</code>.</p>
+<hr />
+<h3 id="a45-simplify-with-elvis-operator">A45. Simplify with <code>?:</code> (Elvis operator)<a class="headerlink" href="#a45-simplify-with-elvis-operator" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p>Replace <code>$x ? $x : $y</code> with <code>$x ?: $y</code> (PHP's short ternary / "Elvis"
+operator), the mirror image of the null-coalescing simplifications
+<code>src/code_actions/simplify_null.rs</code> already offers. That module's
+<code>try_simplify_ternary</code> currently handles <code>isset($x) ? $x : $default</code> and
+<code>$x !== null ? $x : $default</code> (both → <code>??</code>) and the nullsafe patterns,
+but not the plain case where the condition and the then-branch are
+literally the same expression — its doc comment even notes short ternary
+is only handled as something to <em>leave alone</em> on the input side, not
+something to produce as output.</p>
+<ul>
+<li>Match a full ternary (<code>Conditional</code> with a <code>then</code> branch) whose
+  condition's source text equals the then-branch's source text exactly,
+  the same string-equality heuristic the existing <code>??</code> patterns use.</li>
+<li>Emit <code>&lt;condition&gt; ?: &lt;else&gt;</code>, dropping the duplicated then-branch.</li>
+<li><code>??</code> already covers the null-specific version of this
+  (<code>$x !== null ? $x : $default</code> → <code>$x ?? $default</code>); this pattern is
+  for the truthiness version (<code>$x ? $x : $default</code> → <code>$x ?: $default</code>),
+  which is a different operator with different semantics (falsy values
+  other than <code>null</code>, like <code>0</code>, <code>''</code>, or <code>false</code>, also take the
+  else-branch) and should not be conflated with it.</li>
+<li>Natural home is alongside the existing patterns in
+  <code>try_simplify_ternary</code>, reusing its cursor-position walk and
+  <code>Simplification</code> enum rather than a new module.</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
 
 
 
