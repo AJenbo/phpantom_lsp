@@ -109,6 +109,28 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "endverbatim",
     "fragment",
     "endfragment",
+    // Authorization directives
+    "can",
+    "cannot",
+    "canany",
+    "elsecan",
+    "elsecannot",
+    "elsecanany",
+    "endcan",
+    "endcannot",
+    "endcanany",
+    // Translation directives
+    "lang",
+    "endlang",
+    "choice",
+    // Raw PHP
+    "unset",
+    // JS/asset helpers
+    "js",
+    "vite",
+    "viteReactRefresh",
+    "fonts",
+    "dd",
 ];
 
 pub fn match_directive(s: &str) -> Option<&'static str> {
@@ -637,6 +659,96 @@ pub const DIRECTIVE_COMPLETIONS: &[DirectiveCompletion] = &[
         insert_text: "endfragment",
         is_snippet: false,
     },
+    DirectiveCompletion {
+        name: "can",
+        insert_text: "can('$1')\n\t$0\n@endcan",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "cannot",
+        insert_text: "cannot('$1')\n\t$0\n@endcannot",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "canany",
+        insert_text: "canany(['$1'])\n\t$0\n@endcanany",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "elsecan",
+        insert_text: "elsecan('$1')",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "elsecannot",
+        insert_text: "elsecannot('$1')",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "elsecanany",
+        insert_text: "elsecanany(['$1'])",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "endcan",
+        insert_text: "endcan",
+        is_snippet: false,
+    },
+    DirectiveCompletion {
+        name: "endcannot",
+        insert_text: "endcannot",
+        is_snippet: false,
+    },
+    DirectiveCompletion {
+        name: "endcanany",
+        insert_text: "endcanany",
+        is_snippet: false,
+    },
+    DirectiveCompletion {
+        name: "lang",
+        insert_text: "lang\n\t$0\n@endlang",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "endlang",
+        insert_text: "endlang",
+        is_snippet: false,
+    },
+    DirectiveCompletion {
+        name: "choice",
+        insert_text: "choice('$1', $2)",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "unset",
+        insert_text: "unset($1)",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "js",
+        insert_text: "js($1)",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "vite",
+        insert_text: "vite('$1')",
+        is_snippet: true,
+    },
+    DirectiveCompletion {
+        name: "viteReactRefresh",
+        insert_text: "viteReactRefresh",
+        is_snippet: false,
+    },
+    DirectiveCompletion {
+        name: "fonts",
+        insert_text: "fonts",
+        is_snippet: false,
+    },
+    DirectiveCompletion {
+        name: "dd",
+        insert_text: "dd($1)",
+        is_snippet: true,
+    },
 ];
 
 pub fn translate_directive(directive: &str) -> String {
@@ -648,12 +760,12 @@ pub fn translate_directive(directive: &str) -> String {
         "else" => "else:".to_string(),
         "endif" | "endforeach" | "endfor" | "endwhile" | "endunless" | "endisset" | "endempty"
         | "endswitch" | "endforelse" | "endsession" | "endcontext" | "enderror" | "endauth"
-        | "endguest" | "endproduction" | "endenv" | "endonce" => {
+        | "endguest" | "endproduction" | "endenv" | "endonce" | "endcan" | "endcannot"
+        | "endcanany" => {
             let mapped = match directive {
                 "endunless" | "endisset" | "endempty" | "endsession" | "endcontext"
-                | "enderror" | "endauth" | "endguest" | "endproduction" | "endenv" | "endonce" => {
-                    "endif"
-                }
+                | "enderror" | "endauth" | "endguest" | "endproduction" | "endenv" | "endonce"
+                | "endcan" | "endcannot" | "endcanany" => "endif",
                 "endforelse" => "endif",
                 other => other,
             };
@@ -672,7 +784,26 @@ pub fn translate_directive(directive: &str) -> String {
         "each" => "blade_each_directive".to_string(),
         "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" | "class"
         | "style" | "checked" | "selected" | "disabled" | "readonly" | "required" | "stack"
-        | "json" | "dump" => "blade_directive".to_string(),
+        | "json" | "dump" | "pushIf" | "pushOnce" | "prependOnce" | "lang" | "choice" | "js"
+        | "vite" | "fonts" | "dd" => "blade_directive".to_string(),
+        // `unset(...)` is a language construct, not a function — it cannot
+        // be passed as an argument to `blade_directive(...)`, so it keeps
+        // its own real name instead of the generic marker.
+        "unset" => "unset".to_string(),
+        // `@can`/`@cannot`/`@canany` (and their `@hasStack`/`@hasSection`/
+        // `@sectionMissing` cousins) are conditionals that Laravel compiles
+        // to a real gate/environment method call inside `if (...):`. The
+        // exact method called doesn't affect type resolution, so all six
+        // share the same marker call rather than hard-coding a
+        // `\Illuminate\Contracts\Auth\Access\Gate` reference that may not
+        // exist in every project's autoload map — the point is to keep the
+        // arguments' expressions real PHP that gets type-checked, and to
+        // open a genuine `if` so the `@endif` that always follows these
+        // stays balanced.
+        "can" | "cannot" | "canany" | "hasStack" | "hasSection" | "sectionMissing" => {
+            "if (blade_directive".to_string()
+        }
+        "elsecan" | "elsecannot" | "elsecanany" => "elseif (blade_directive".to_string(),
         "endsection" | "endpush" | "endprepend" | "endcomponent" | "endcomponentFirst"
         | "endslot" | "stop" | "show" | "append" | "overwrite" => "".to_string(),
         _ => format!("/* @{directive} */"),

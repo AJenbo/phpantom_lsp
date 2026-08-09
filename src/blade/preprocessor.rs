@@ -458,11 +458,25 @@ pub fn preprocess_with_vars(
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(":");
                             paren_depth = 0;
-                        } else if matches!(directive, "unless" | "isset") {
+                        } else if matches!(
+                            directive,
+                            "unless"
+                                | "isset"
+                                | "can"
+                                | "cannot"
+                                | "canany"
+                                | "elsecan"
+                                | "elsecannot"
+                                | "elsecanany"
+                                | "hasStack"
+                                | "hasSection"
+                                | "sectionMissing"
+                        ) {
                             // `translate_directive` opens an extra unmatched
-                            // `(` for both (`if(!` / `if(isset`), so the
-                            // directive's own closing paren needs a second
-                            // `)` before the `:`.
+                            // `(` for all of these (`if(!` / `if(isset` /
+                            // `if (blade_directive` / `elseif (blade_directive`),
+                            // so the directive's own closing paren needs a
+                            // second `)` before the `:`.
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs("):");
                             paren_depth = 0;
@@ -485,14 +499,11 @@ pub fn preprocess_with_vars(
                                 | "props"
                                 | "aware"
                                 | "fragment"
-                                | "hasSection"
-                                | "sectionMissing"
                                 | "includeIsolated"
                                 | "each"
                                 | "pushIf"
                                 | "pushOnce"
                                 | "prependOnce"
-                                | "hasStack"
                                 | "method"
                                 | "class"
                                 | "style"
@@ -504,10 +515,46 @@ pub fn preprocess_with_vars(
                                 | "stack"
                                 | "json"
                                 | "dump"
+                                | "unset"
+                                | "choice"
+                                | "js"
+                                | "dd"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(";");
                             paren_depth = 0;
+                        } else if directive == "lang" {
+                            // `@lang` is either a bare block opener paired
+                            // with `@endlang` (translation buffering that
+                            // always runs, so it has nothing to type-check)
+                            // or `@lang('key')` / `@lang(['key' => ...])`,
+                            // a one-shot call whose argument is a real
+                            // expression.
+                            let after_dir: String = rest_str[directive.len()..].chars().collect();
+                            if after_dir.trim_start().starts_with('(') {
+                                replacement = format!(" {} ", translate_directive(directive));
+                                next_mode = Mode::DirectiveArgs(";");
+                                paren_depth = 0;
+                            } else {
+                                replacement = "".to_string();
+                                next_mode = Mode::Html;
+                            }
+                        } else if matches!(directive, "vite" | "fonts") {
+                            // Both take an optional argument list (Laravel
+                            // defaults it to `()` when omitted), so a bare
+                            // `@vite` / `@fonts` must not enter
+                            // `DirectiveArgs`, which would otherwise consume
+                            // the rest of the template hunting for a closing
+                            // paren that was never opened.
+                            let after_dir: String = rest_str[directive.len()..].chars().collect();
+                            if after_dir.trim_start().starts_with('(') {
+                                replacement = format!(" {} ", translate_directive(directive));
+                                next_mode = Mode::DirectiveArgs(";");
+                                paren_depth = 0;
+                            } else {
+                                replacement = "".to_string();
+                                next_mode = Mode::Html;
+                            }
                         } else if matches!(
                             directive,
                             "endif"
@@ -547,6 +594,11 @@ pub fn preprocess_with_vars(
                                 | "csrf"
                                 | "parent"
                                 | "continue"
+                                | "endcan"
+                                | "endcannot"
+                                | "endcanany"
+                                | "endlang"
+                                | "viteReactRefresh"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::Html; // These don't take args and return to HTML mode immediately
@@ -1449,6 +1501,183 @@ mod tests {
         assert!(
             php.contains("blade_directive ($value);"),
             "unexpected @dump(...) translation: {}",
+            php
+        );
+    }
+
+    /// `@can`/`@cannot`/`@canany` (and their `@elsecan*` counterparts) open a
+    /// real `if`/`elseif` so the always-literal `@endif` that closes them
+    /// stays balanced, while their arguments are still type-checked.
+    #[test]
+    fn test_preprocess_can_directive_opens_a_real_if() {
+        let content = "@can('update', $post)\n<p>can</p>\n@elsecan('view', $post)\n<p>view</p>\n@endcan\n<p>after</p>";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("if (blade_directive ('update', $post)):"),
+            "@can should open a balanced if with its arguments type-checked: {}",
+            php
+        );
+        assert!(
+            php.contains("elseif (blade_directive ('view', $post)):"),
+            "@elsecan should open a balanced elseif with its arguments type-checked: {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endcan should close the if opened by @can: {}",
+            php
+        );
+        assert!(
+            !php.contains("after"),
+            "content after @endcan should be masked as HTML, not left as raw PHP: {}",
+            php
+        );
+    }
+
+    /// `@hasStack`/`@hasSection`/`@sectionMissing` are always closed by a
+    /// literal `@endif`, not a dedicated end-directive, so they must open a
+    /// real `if` too (previously they degraded to a bare comment, leaving
+    /// `@endif` dangling with no matching `if` and breaking the rest of the
+    /// virtual PHP file).
+    #[test]
+    fn test_preprocess_has_stack_and_has_section_open_a_real_if() {
+        let (php, _) = preprocess("@hasStack('scripts')\nx\n@endif\n<p>after</p>");
+        assert!(
+            php.contains("if (blade_directive ('scripts')):"),
+            "@hasStack should open a balanced if with its argument type-checked: {}",
+            php
+        );
+        assert!(
+            !php.contains("after"),
+            "content after @endif should be masked as HTML, not left as raw PHP: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@hasSection('content')\nx\n@endif\n<p>after</p>");
+        assert!(
+            php.contains("if (blade_directive ('content')):"),
+            "@hasSection should open a balanced if with its argument type-checked: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@sectionMissing('content')\nx\n@endif\n<p>after</p>");
+        assert!(
+            php.contains("if (blade_directive ('content')):"),
+            "@sectionMissing should open a balanced if with its argument type-checked: {}",
+            php
+        );
+    }
+
+    /// `@pushIf`/`@pushOnce`/`@prependOnce`/`@hasStack` used to fall through
+    /// to `translate_directive`'s default `/* @directive */` comment, which
+    /// left their arguments completely untyped.
+    #[test]
+    fn test_preprocess_push_if_and_push_once_consume_arguments() {
+        let (php, _) = preprocess("@pushIf($condition, 'scripts')\nx\n@endPushIf\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive ($condition, 'scripts');"),
+            "@pushIf should type-check its arguments: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@pushOnce('scripts')\nx\n@endPushOnce\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive ('scripts');"),
+            "@pushOnce should type-check its argument: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@prependOnce('scripts')\nx\n@endPrependOnce\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive ('scripts');"),
+            "@prependOnce should type-check its argument: {}",
+            php
+        );
+    }
+
+    /// `@lang` is optional-argument: bare it opens a translation-buffering
+    /// block paired with `@endlang` (nothing to type-check), and with an
+    /// argument it is a one-shot call whose expression should be checked.
+    #[test]
+    fn test_preprocess_lang_directive_optional_argument() {
+        let (php, _) = preprocess("@lang\n<p>x</p>\n@endlang\n<p>after</p>");
+        assert!(
+            !php.contains("after"),
+            "bare @lang/@endlang should not swallow the rest of the template into raw PHP: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@lang($key)\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive ($key);"),
+            "@lang(...) should type-check its argument: {}",
+            php
+        );
+    }
+
+    /// `@vite`/`@fonts` take an optional argument list; a bare `@vite` must
+    /// not send the scanner hunting for a closing paren that was never
+    /// opened, which would swallow the rest of the template.
+    #[test]
+    fn test_preprocess_vite_and_fonts_optional_argument() {
+        let (php, _) = preprocess("@vite\n<p>after</p>");
+        assert!(
+            !php.contains("after"),
+            "bare @vite should not swallow the rest of the template into raw PHP: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@vite(['resources/js/app.js'])\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive (['resources/js/app.js']);"),
+            "@vite(...) should type-check its argument: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@fonts\n<p>after</p>");
+        assert!(
+            !php.contains("after"),
+            "bare @fonts should not swallow the rest of the template into raw PHP: {}",
+            php
+        );
+    }
+
+    /// `@unset($var)` must compile to a real `unset(...)` statement, not a
+    /// `blade_directive(...)` call — `unset` is a language construct and
+    /// cannot be used as a function-call argument.
+    #[test]
+    fn test_preprocess_unset_directive() {
+        let (php, _) = preprocess("@unset($value)\n<p>after</p>");
+        assert!(
+            php.contains("unset ($value);"),
+            "@unset should compile to a real unset() statement: {}",
+            php
+        );
+    }
+
+    /// `@choice`/`@js`/`@dd`, previously unrecognised entirely (masked as
+    /// inert HTML), must type-check their arguments like other expression
+    /// directives.
+    #[test]
+    fn test_preprocess_choice_js_dd_directives_consume_arguments() {
+        let (php, _) = preprocess("@choice('apples', $count)\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive ('apples', $count);"),
+            "@choice should type-check its arguments: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@js($data)\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive ($data);"),
+            "@js should type-check its argument: {}",
+            php
+        );
+
+        let (php, _) = preprocess("@dd($value)\n<p>after</p>");
+        assert!(
+            php.contains("blade_directive ($value);"),
+            "@dd should type-check its argument: {}",
             php
         );
     }
