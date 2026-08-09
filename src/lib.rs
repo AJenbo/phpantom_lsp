@@ -255,6 +255,7 @@ mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
 pub mod progress;
+mod reference_counts;
 mod reference_index;
 mod references;
 mod rename;
@@ -754,6 +755,16 @@ pub struct Backend {
     /// this, editors keep showing tokens computed from the pre-edit
     /// symbol map until the next unrelated request.
     pub(crate) supports_semantic_tokens_refresh: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports `workspace/inlayHint/refresh`.
+    ///
+    /// Set during `initialize` from the client's
+    /// `workspace.inlayHint.refreshSupport` capability.  The reference
+    /// counts shown on declarations are computed in the background, so
+    /// without a refresh the editor keeps the hints it pulled before they
+    /// were ready.
+    pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
+    /// Reference counts for member declarations, feeding the inlay hints.
+    pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
     /// diagnostic handler check this flag before running diagnostics
@@ -1006,6 +1017,8 @@ impl Backend {
             ),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
@@ -1100,6 +1113,8 @@ impl Backend {
             ),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
@@ -1729,6 +1744,8 @@ impl Backend {
             ),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
+            supports_inlay_hint_refresh: Arc::clone(&self.supports_inlay_hint_refresh),
+            member_ref_counts: Arc::clone(&self.member_ref_counts),
             init_complete: Arc::clone(&self.init_complete),
             shutdown_flag: Arc::clone(&self.shutdown_flag),
             blade_virtual_content: Arc::clone(&self.blade_virtual_content),

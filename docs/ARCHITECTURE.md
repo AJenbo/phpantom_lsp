@@ -63,6 +63,7 @@ src/
 ├── composer.rs             # composer.json / PSR-4 autoload parsing
 ├── names.rs                # Name resolution (FQN, use-map, namespace)
 ├── reference_index.rs      # Workspace-wide reference index for find-references / rename
+├── reference_counts.rs     # Background-computed member reference counts for the declaration inlay hints
 │
 │   # Class & type resolution
 ├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)

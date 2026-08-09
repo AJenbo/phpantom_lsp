@@ -144,6 +144,19 @@ impl LanguageServer for Backend {
         self.supports_semantic_tokens_refresh
             .store(client_supports_semantic_tokens_refresh, Ordering::Release);
 
+        // Reference counts on declarations are computed off the request
+        // path, so the hints an editor holds are the ones from before the
+        // counts landed unless it can be asked to re-pull them.
+        let client_supports_inlay_hint_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.inlay_hint.as_ref())
+            .and_then(|ih| ih.refresh_support)
+            .unwrap_or(false);
+        self.supports_inlay_hint_refresh
+            .store(client_supports_inlay_hint_refresh, Ordering::Release);
+
         let client_supports_type_hierarchy_dynamic_registration = params
             .capabilities
             .text_document

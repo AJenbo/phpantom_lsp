@@ -13,6 +13,7 @@ use std::sync::atomic::Ordering;
 use parking_lot::RwLock;
 
 use crate::Backend;
+use crate::atom::{AtomMap, AtomSet, atom};
 use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
@@ -48,12 +49,15 @@ impl ReferenceIndexKey {
 /// entries under.
 ///
 /// Per key, only the distinct contributing URIs are kept (as the shared
-/// per-file `Arc<str>`) mapped to the number of non-declaration spans
-/// that URI contributed for that key — the two facts consumers actually
-/// read (`reference_candidate_uris_for_keys` needs the URI set,
-/// `inlay_hints::ref_count` needs the non-declaration count). The
-/// per-span `start`/`end` offsets and the raw span multiplicity are
-/// never read anywhere, so they are not stored.
+/// per-file `Arc<str>`) mapped to the number of spans in that URI that
+/// reference the key's name — the two facts consumers actually read
+/// (`reference_candidate_uris_for_keys` needs the URI set,
+/// `inlay_hints::ref_count` needs the count). Declarations and the
+/// alias keys a reference is merely searchable under contribute a URI
+/// but no count, so a class is never credited with the references to a
+/// namesake in another namespace. The per-span `start`/`end` offsets and
+/// the raw span multiplicity are never read anywhere, so they are not
+/// stored.
 ///
 /// The reverse map keeps per-file eviction proportional to that file's
 /// own contributions.  Without it, evicting a URI means scanning every
@@ -99,8 +103,19 @@ pub(crate) fn new_reference_index() -> ReferenceIndex {
 
 impl Backend {
     pub(crate) fn evict_reference_index_uri(&self, uri: &str) {
+        let track_members = !self.member_ref_counts.is_empty();
         let mut index = self.reference_index.write();
+        let dropped = if track_members {
+            member_contributions(&index, uri)
+        } else {
+            AtomMap::default()
+        };
         evict_reference_index_uri_locked(&mut index, uri);
+        drop(index);
+        for name in dropped.into_keys() {
+            self.member_ref_counts.invalidate_member(name);
+        }
+        self.forget_class_shape(uri);
     }
 
     pub(crate) fn reference_candidate_uris_for_keys(
@@ -158,9 +173,20 @@ impl Backend {
             return;
         }
 
+        // Nothing is cached until a declaration hint has been asked for,
+        // and until then the invalidation bookkeeping below is pure cost:
+        // the whole workspace index publishes through here.
+        let track_members = !self.member_ref_counts.is_empty();
+
         let mut rebuilt = Vec::with_capacity(items.len());
         for (uri, symbol_map) in items {
             if self.is_reference_indexable_uri(&uri) {
+                // A class that gains a parent, an interface, or a trait
+                // moves which accesses belong to which declaration, and
+                // that is not visible in the per-file key deltas below.
+                if track_members && self.class_shape_changed(&uri) {
+                    self.member_ref_counts.invalidate_all();
+                }
                 rebuilt.push((
                     uri.clone(),
                     self.reference_entries_for_symbol_map(&uri, &symbol_map),
@@ -183,35 +209,73 @@ impl Backend {
             .filter_map(|(idx, item)| keep[idx].then_some(item))
             .collect();
 
+        // Which member names each file contributed a reference to, so the
+        // counts cached for those members can be marked stale.  Only the
+        // members whose contribution actually changed are invalidated:
+        // editing a method body without touching an access leaves every
+        // count valid, and recomputing one is expensive.
+        let mut stale = AtomSet::default();
+
         let mut index = self.reference_index.write();
+        let mut previous = Vec::with_capacity(if track_members { rebuilt.len() } else { 0 });
         for (uri, _) in &rebuilt {
+            if track_members {
+                previous.push(member_contributions(&index, uri));
+            }
             evict_reference_index_uri_locked(&mut index, uri);
         }
-        for (uri, entries) in rebuilt {
+        for (idx, (uri, entries)) in rebuilt.into_iter().enumerate() {
+            if track_members {
+                let old = &previous[idx];
+                let new = member_contributions_of_entries(&entries);
+                stale.extend(
+                    old.iter()
+                        .filter(|(name, count)| new.get(*name) != Some(count))
+                        .map(|(name, _)| *name),
+                );
+                stale.extend(
+                    new.iter()
+                        .filter(|(name, count)| old.get(*name) != Some(count))
+                        .map(|(name, _)| *name),
+                );
+            }
+
             if entries.is_empty() {
                 continue;
             }
             let uri: Arc<str> = Arc::from(uri.as_str());
             let mut keys: HashSet<ReferenceIndexKey> = HashSet::new();
-            for (key, is_declaration) in entries {
+            for (key, counts_as_reference) in entries {
                 let count = index
                     .by_key
                     .entry(key.clone())
                     .or_default()
                     .entry(Arc::clone(&uri))
                     .or_insert(0);
-                if !is_declaration {
+                if counts_as_reference {
                     *count += 1;
                 }
                 keys.insert(key);
             }
             index.uri_keys.insert(uri, keys.into_iter().collect());
         }
+        drop(index);
+
+        for name in stale {
+            self.member_ref_counts.invalidate_member(name);
+        }
     }
 
-    /// Build the `(key, is_declaration)` pairs a file contributes to the
-    /// index. The caller interns the URI once per file and shares it
+    /// Build the `(key, counts_as_reference)` pairs a file contributes to
+    /// the index. The caller interns the URI once per file and shares it
     /// across every key, rather than allocating a fresh `String` per span.
+    ///
+    /// A span joins the index under every name it could be searched by,
+    /// but only one of those names is the symbol it actually names: a
+    /// reference to `App\Widget` is a candidate under `Widget` too, and
+    /// counting it there would credit a global `\Widget` with it.  So the
+    /// count rides on the resolved name alone, and a declaration counts
+    /// under no name at all.
     fn reference_entries_for_symbol_map(
         &self,
         uri: &str,
@@ -233,8 +297,8 @@ impl Backend {
                     | SymbolKind::MemberDeclaration { .. }
             );
 
-            for key in self.reference_keys_for_span(uri, span) {
-                entries.push((key, is_declaration));
+            for (key, is_resolved_name) in self.reference_keys_for_span(uri, span) {
+                entries.push((key, is_resolved_name && !is_declaration));
             }
         }
 
@@ -277,11 +341,14 @@ impl Backend {
         entries
     }
 
+    /// The keys a span joins the index under, each paired with whether it
+    /// is the name the span actually resolves to (see
+    /// [`reference_entries_for_symbol_map`]).
     fn reference_keys_for_span(
         &self,
         uri: &str,
         span: &crate::symbol_map::SymbolSpan,
-    ) -> Vec<ReferenceIndexKey> {
+    ) -> Vec<(ReferenceIndexKey, bool)> {
         match &span.kind {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
                 let resolved = if *is_fqn {
@@ -326,7 +393,7 @@ impl Backend {
                 function_keys(&resolved, name)
             }
             SymbolKind::ConstantReference { name } => {
-                vec![ReferenceIndexKey::Constant(name.to_string())]
+                vec![(ReferenceIndexKey::Constant(name.to_string()), true)]
             }
             SymbolKind::MemberAccess {
                 member_name,
@@ -337,16 +404,22 @@ impl Backend {
                 name: member_name,
                 is_static,
             } => {
-                vec![ReferenceIndexKey::Member {
-                    name: member_name.to_string(),
-                    is_static: *is_static,
-                }]
+                vec![(
+                    ReferenceIndexKey::Member {
+                        name: member_name.to_string(),
+                        is_static: *is_static,
+                    },
+                    true,
+                )]
             }
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                vec![ReferenceIndexKey::LaravelString {
-                    kind: kind.clone(),
-                    key: key.to_string(),
-                }]
+                vec![(
+                    ReferenceIndexKey::LaravelString {
+                        kind: kind.clone(),
+                        key: key.to_string(),
+                    },
+                    true,
+                )]
             }
             _ => Vec::new(),
         }
@@ -372,6 +445,43 @@ impl Backend {
     }
 }
 
+/// How many references to each member name a file currently contributes.
+fn member_contributions(index: &ReferenceIndexInner, uri: &str) -> AtomMap<u32> {
+    let mut counts = AtomMap::default();
+    let Some(keys) = index.uri_keys.get(uri) else {
+        return counts;
+    };
+    for key in keys {
+        let ReferenceIndexKey::Member { name, .. } = key else {
+            continue;
+        };
+        let count = index
+            .by_key
+            .get(key)
+            .and_then(|entries| entries.get(uri))
+            .copied()
+            .unwrap_or(0);
+        *counts.entry(atom(name)).or_insert(0) += count;
+    }
+    counts
+}
+
+/// The same tally, taken from the entries a file is about to be indexed
+/// under rather than from the index itself.
+fn member_contributions_of_entries(entries: &[(ReferenceIndexKey, bool)]) -> AtomMap<u32> {
+    let mut counts = AtomMap::default();
+    for (key, counts_as_reference) in entries {
+        let ReferenceIndexKey::Member { name, .. } = key else {
+            continue;
+        };
+        let entry = counts.entry(atom(name)).or_insert(0);
+        if *counts_as_reference {
+            *entry += 1;
+        }
+    }
+    counts
+}
+
 fn evict_reference_index_uri_locked(index: &mut ReferenceIndexInner, uri: &str) {
     let Some(keys) = index.uri_keys.remove(uri) else {
         return;
@@ -390,28 +500,33 @@ fn normalize_symbol_name(name: impl AsRef<str>) -> String {
     strip_fqn_prefix(name.as_ref()).to_string()
 }
 
-fn class_keys(resolved: &str, source_name: &str) -> Vec<ReferenceIndexKey> {
+fn class_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, bool)> {
     symbol_name_keys(resolved, source_name)
         .into_iter()
-        .map(ReferenceIndexKey::Class)
+        .map(|(name, is_resolved)| (ReferenceIndexKey::Class(name), is_resolved))
         .collect()
 }
 
-fn function_keys(resolved: &str, source_name: &str) -> Vec<ReferenceIndexKey> {
+fn function_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, bool)> {
     symbol_name_keys(resolved, source_name)
         .into_iter()
-        .map(ReferenceIndexKey::Function)
+        .map(|(name, is_resolved)| (ReferenceIndexKey::Function(name), is_resolved))
         .collect()
 }
 
-fn symbol_name_keys(resolved: &str, source_name: &str) -> Vec<String> {
+/// Every name a symbol reference can be searched by, each flagged with
+/// whether it is the name the reference resolves to.
+fn symbol_name_keys(resolved: &str, source_name: &str) -> Vec<(String, bool)> {
+    let resolved = normalize_symbol_name(resolved);
     let mut keys = vec![
-        normalize_symbol_name(resolved),
         normalize_symbol_name(source_name),
+        short_name(&resolved).to_string(),
     ];
-    keys.push(short_name(resolved).to_string());
     keys.sort();
     keys.dedup();
+    keys.retain(|name| *name != resolved);
+    let mut keys: Vec<(String, bool)> = keys.into_iter().map(|name| (name, false)).collect();
+    keys.push((resolved, true));
     keys
 }
 

@@ -38,6 +38,11 @@ impl Backend {
             self.handle_inlay_hints(&uri, content, range)
         });
 
+        // Declarations whose reference count is missing or stale were
+        // queued while the hints were built; they are counted off the
+        // request path and delivered by a refresh.
+        self.schedule_member_ref_counts();
+
         Ok(result.flatten())
     }
 
@@ -176,14 +181,19 @@ impl Backend {
                     continue;
                 }
 
-                let ref_count = self.ref_count(&ReferenceIndexKey::Member {
-                    name: method.name.to_string(),
-                    is_static: method.is_static,
-                });
+                let Some(ref_count) = self.member_ref_count_cached(
+                    uri,
+                    method.name_offset,
+                    class_fqn,
+                    method.name,
+                    method.is_static,
+                ) else {
+                    continue;
+                };
                 push_count_hint(
                     hints,
                     line_end_position(content, method.name_offset as usize),
-                    reference_label(ref_count),
+                    reference_label(ref_count as usize),
                 );
             }
 
@@ -198,14 +208,23 @@ impl Backend {
                     continue;
                 }
 
-                let ref_count = self.ref_count(&ReferenceIndexKey::Member {
-                    name: prop.name.to_string(),
-                    is_static: prop.is_static,
-                });
+                let member = match prop.name.strip_prefix('$') {
+                    Some(stripped) => crate::atom::atom(stripped),
+                    None => prop.name,
+                };
+                let Some(ref_count) = self.member_ref_count_cached(
+                    uri,
+                    prop.name_offset,
+                    class_fqn,
+                    member,
+                    prop.is_static,
+                ) else {
+                    continue;
+                };
                 push_count_hint(
                     hints,
                     line_end_position(content, prop.name_offset as usize),
-                    reference_label(ref_count),
+                    reference_label(ref_count as usize),
                 );
             }
 
@@ -219,14 +238,19 @@ impl Backend {
                     continue;
                 }
 
-                let ref_count = self.ref_count(&ReferenceIndexKey::Member {
-                    name: constant.name.to_string(),
-                    is_static: true,
-                });
+                let Some(ref_count) = self.member_ref_count_cached(
+                    uri,
+                    constant.name_offset,
+                    class_fqn,
+                    constant.name,
+                    true,
+                ) else {
+                    continue;
+                };
                 push_count_hint(
                     hints,
                     line_end_position(content, constant.name_offset as usize),
-                    reference_label(ref_count),
+                    reference_label(ref_count as usize),
                 );
             }
         }
@@ -995,6 +1019,46 @@ fn is_obvious_single_param(call_expression: &str, _param_name: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Open a file and return its hints once the member reference counts
+    /// the first request queued have been computed.
+    fn declaration_hints(backend: &Backend, uri: &str, content: &str) -> Vec<InlayHint> {
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+        backend.update_ast(uri, content);
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: content.lines().count() as u32,
+                character: 0,
+            },
+        };
+        backend.handle_inlay_hints(uri, content, range);
+        backend.compute_pending_member_ref_counts();
+        backend
+            .handle_inlay_hints(uri, content, range)
+            .unwrap_or_default()
+    }
+
+    /// The label of the hint on `line`, if any.
+    fn hint_on_line(hints: &[InlayHint], line: u32) -> Option<String> {
+        hints
+            .iter()
+            .find(|hint| hint.position.line == line)
+            .map(|hint| match &hint.label {
+                InlayHintLabel::String(label) => label.clone(),
+                InlayHintLabel::LabelParts(parts) => {
+                    parts.iter().map(|part| part.value.as_str()).collect()
+                }
+            })
+    }
+
     #[test]
     fn declaration_count_hints_skip_magic_methods() {
         let backend = Backend::new_test();
@@ -1006,29 +1070,79 @@ class User {
 }
 "#;
 
-        backend.update_ast(uri, content);
-        backend.workspace_indexed.store(true, Ordering::Release);
-
-        let hints = backend
-            .handle_inlay_hints(
-                uri,
-                content,
-                Range {
-                    start: Position {
-                        line: 0,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: 5,
-                        character: 0,
-                    },
-                },
-            )
-            .unwrap_or_default();
+        let hints = declaration_hints(&backend, uri, content);
 
         assert!(hints.iter().any(|hint| hint.position.line == 1));
         assert!(hints.iter().any(|hint| hint.position.line == 3));
         assert!(!hints.iter().any(|hint| hint.position.line == 2));
+    }
+
+    #[test]
+    fn member_count_ignores_a_member_of_the_same_name_on_another_class() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+class User {
+    public int $id = 0;
+    public function save(): void {}
+}
+class Order {
+    public int $id = 0;
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    echo $order->id;
+    $order->save();
+}
+"#;
+
+        let hints = declaration_hints(&backend, uri, content);
+
+        assert_eq!(hint_on_line(&hints, 2).as_deref(), Some(" 0 references"));
+        assert_eq!(hint_on_line(&hints, 3).as_deref(), Some(" 0 references"));
+        assert_eq!(hint_on_line(&hints, 6).as_deref(), Some(" 1 reference"));
+        assert_eq!(hint_on_line(&hints, 7).as_deref(), Some(" 1 reference"));
+    }
+
+    #[test]
+    fn member_count_includes_references_through_a_subclass() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+class Model {
+    public function save(): void {}
+}
+class Order extends Model {
+}
+function persist(Order $order, Model $model): void {
+    $order->save();
+    $model->save();
+}
+"#;
+
+        let hints = declaration_hints(&backend, uri, content);
+
+        assert_eq!(hint_on_line(&hints, 2).as_deref(), Some(" 2 references"));
+    }
+
+    #[test]
+    fn class_count_ignores_a_class_of_the_same_name_in_another_namespace() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+class Widget {}
+namespace App;
+class Widget {}
+function build(): void {
+    $first = new \App\Widget();
+    $second = new \App\Widget();
+}
+"#;
+
+        let hints = declaration_hints(&backend, uri, content);
+
+        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 0 references"));
+        assert_eq!(hint_on_line(&hints, 3).as_deref(), Some(" 2 references"));
     }
 
     #[test]

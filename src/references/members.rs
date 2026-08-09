@@ -168,6 +168,33 @@ impl Backend {
         push_unique_location(locations, &parsed_uri, start, end);
     }
 
+    /// Count the references to a member declaration, scoped to the class
+    /// hierarchy that declares it.
+    ///
+    /// This is the same search Find References runs on the declaration, so
+    /// the number matches what the user sees when they follow the hint.
+    pub(crate) fn member_declaration_reference_count(
+        &self,
+        uri: &str,
+        offset: u32,
+        member_name: &str,
+        is_static: bool,
+    ) -> usize {
+        let mode = ReferenceSearchMode::References;
+        let hierarchy =
+            self.resolve_member_declaration_hierarchy(uri, offset, member_name, is_static, mode);
+        let declaration_scope =
+            self.resolve_member_declaration_scope(uri, offset, member_name, is_static, mode);
+        self.find_member_references(
+            member_name,
+            is_static,
+            false,
+            hierarchy.as_ref(),
+            declaration_scope.as_ref(),
+        )
+        .len()
+    }
+
     /// Find all references to a member (method, property, or constant)
     /// across all files.
     ///
