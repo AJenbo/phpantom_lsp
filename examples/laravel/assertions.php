@@ -1119,6 +1119,36 @@ check(
         && method_exists(\Illuminate\View\Factory::class, 'getShared')
 );
 
+// ─── @each item and key variables ────────────────────────────────────────────
+
+// `@each('partial', $rows, 'row')` compiles to Factory::renderEach(), which
+// renders the partial once per entry with only two variables in scope: the
+// entry, under the name the third argument spells, and $key.  PHPantom types
+// both from the collection, so a partial declaring them is checked against
+// what the directive actually iterates.
+$renderEach = new ReflectionMethod(\Illuminate\View\Factory::class, 'renderEach');
+check(
+    'Factory::renderEach() names the iteration variable in its third argument',
+    array_map(
+        fn (ReflectionParameter $p) => $p->getName(),
+        $renderEach->getParameters()
+    ) === ['view', 'data', 'iterator', 'empty']
+);
+
+// The item's type is the collection's element type and $key's is its key
+// type, exactly as a foreach over the same collection binds them.
+$collection = new \App\Models\PostCollection([new \App\Models\BlogPost()]);
+foreach ($collection as $key => $post) {
+    check(
+        'iterating a PostCollection yields BlogPost entries',
+        $post instanceof \App\Models\BlogPost
+    );
+    check(
+        'a PostCollection entry key is an array key',
+        is_int($key) || is_string($key)
+    );
+}
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

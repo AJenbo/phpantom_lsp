@@ -8,6 +8,9 @@ use crate::atom::{atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
+use crate::type_engine::variable::foreach_resolution::{
+    is_unsubstituted_template_param, resolve_iterable_element_via_class,
+};
 use crate::types::ResolvedType;
 
 // ─── Control flow handling ──────────────────────────────────────────────────
@@ -1291,6 +1294,19 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
     Some(PhpType::named(atom(&name)))
 }
 
+/// The pieces of a forward-walk context the shared iterable element/key
+/// derivation reads.
+fn iterable_ctx<'a>(
+    ctx: &'a ForwardWalkCtx<'_>,
+) -> crate::type_engine::variable::foreach_resolution::IterableCtx<'a> {
+    crate::type_engine::variable::foreach_resolution::IterableCtx {
+        current_class: ctx.current_class,
+        all_classes: ctx.all_classes,
+        class_loader: ctx.class_loader,
+        resolved_class_cache: ctx.resolved_class_cache,
+    }
+}
+
 /// Bind a foreach value variable from the iterable's element type.
 ///
 /// Resolution strategy:
@@ -1340,7 +1356,7 @@ pub(crate) fn bind_foreach_value<'b>(
             }
 
             // Strategy 2: class-based fallback for bare collection names.
-            let element_via_class = resolve_iterable_element_via_class(it, ctx);
+            let element_via_class = resolve_iterable_element_via_class(it, &iterable_ctx(ctx));
             if let Some(element_type) = element_via_class
                 && !is_unsubstituted_template_param(&element_type)
             {
@@ -1390,7 +1406,8 @@ pub(crate) fn bind_foreach_value<'b>(
                         return;
                     }
                     // Try class-based element extraction on each member.
-                    if let Some(element_type) = resolve_iterable_element_via_class(member, ctx)
+                    if let Some(element_type) =
+                        resolve_iterable_element_via_class(member, &iterable_ctx(ctx))
                         && !is_unsubstituted_template_param(&element_type)
                     {
                         let resolved =
@@ -1434,31 +1451,10 @@ pub(crate) fn bind_foreach_value<'b>(
         // destructured variable's type from that element type using shape
         // keys or positional indices.
         let element_type: Option<PhpType> = iter_type.as_ref().and_then(|it| {
-            // Try direct value type extraction first (handles tuple-style
-            // shapes by unioning their positional value types).
-            if let Some(vt) = it.iterable_element_type() {
-                return Some(vt);
-            }
-            // Try class-based iterable element extraction.
-            if let Some(et) = resolve_iterable_element_via_class(it, ctx)
-                && !is_unsubstituted_template_param(&et)
-            {
-                return Some(et);
-            }
-            // Try union members individually.
-            if let TypeKind::Union(members) = it.kind() {
-                for member in members {
-                    if let Some(vt) = member.extract_value_type(false) {
-                        return Some(vt.clone());
-                    }
-                    if let Some(et) = resolve_iterable_element_via_class(member, ctx)
-                        && !is_unsubstituted_template_param(&et)
-                    {
-                        return Some(et);
-                    }
-                }
-            }
-            None
+            crate::type_engine::variable::foreach_resolution::iteration_value_type(
+                it,
+                &iterable_ctx(ctx),
+            )
         });
 
         if let Some(ref elem_type) = element_type {
@@ -1570,91 +1566,6 @@ pub(crate) fn extract_foreach_destr_key(key_expr: &Expression<'_>) -> Option<Str
     }
 }
 
-/// Check whether a `PhpType` looks like an unsubstituted template
-/// parameter (e.g. `TValue`, `TKey`, `TModel`).  These are bare named
-/// types whose name starts with `T` followed by an uppercase letter
-/// and are not known PHP built-in types.
-pub(crate) fn is_unsubstituted_template_param(ty: &PhpType) -> bool {
-    let name = match ty.kind() {
-        TypeKind::Named(n) => n.as_str(),
-        _ => return false,
-    };
-    let bytes = name.as_bytes();
-    bytes.len() >= 2 && bytes[0] == b'T' && bytes[1].is_ascii_uppercase()
-}
-
-/// Resolve the element type of an iterable via class inheritance.
-///
-/// When the iterable type is a bare class name (e.g. `OrderProductCollection`),
-/// this resolves it to `ClassInfo`, merges the full inheritance chain, and
-/// extracts the element type from `@extends` / `@implements` generics using
-/// [`extract_iterable_element_type_from_class`].
-pub(crate) fn resolve_iterable_element_via_class(
-    iter_type: &PhpType,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<PhpType> {
-    // Accept bare class names, whether or not wrapped in `Nullable` (e.g.
-    // `?SimpleXMLElement`, the return type of `SimpleXMLElement::children()`).
-    // `base_name` unwraps `Nullable`/`Generic` to the underlying class name.
-    // Bare generic types like `Collection<int, User>` are handled by
-    // extract_value_type above, so this only needs the name for the
-    // `class_loader` fallback below; `type_hint_to_classes_typed` handles
-    // the full (possibly nullable) type itself.
-    let class_name = iter_type.base_name()?;
-
-    // Resolve the class name to ClassInfo.
-    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-        iter_type,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-
-    if classes.is_empty() {
-        // Try direct class loader as fallback (handles FQN names).
-        let cls = (ctx.class_loader)(class_name)?;
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            &cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        return super::super::foreach_resolution::extract_iterable_element_type_from_class(
-            &merged,
-            ctx.class_loader,
-        );
-    }
-
-    for cls in &classes {
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        let element_type =
-            super::super::foreach_resolution::extract_iterable_element_type_from_class(
-                &merged,
-                ctx.class_loader,
-            );
-        if let Some(ref et) = element_type {
-            // When the extracted type is an unsubstituted template parameter
-            // (e.g. `TModel`), resolve it through the class's template bounds
-            // (e.g. `@template TModel of BlogAuthor` → `BlogAuthor`).
-            if let Some(name) = et.base_name()
-                && merged
-                    .template_params
-                    .iter()
-                    .any(|p| p.as_ref() as &str == name)
-                && let Some(bound) = merged.template_param_bounds.get(&crate::atom::atom(name))
-            {
-                return Some(bound.clone());
-            }
-            return element_type;
-        }
-    }
-
-    None
-}
-
 /// Bind a foreach key variable.
 pub(crate) fn bind_foreach_key<'b>(
     key_expr: &'b Expression<'b>,
@@ -1664,117 +1575,31 @@ pub(crate) fn bind_foreach_key<'b>(
 ) {
     if let Expression::Variable(Variable::Direct(dv)) = key_expr {
         let var_name = bytes_to_str(dv.name).to_string();
-        if let Some(it) = iter_type {
-            // Strategy 1: extract from the type's own generic parameters.
-            let key_php_type = it.extract_key_type(false);
-            if let Some(kt) = key_php_type {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    kt,
-                    &ctx.current_class.name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-                if !resolved.is_empty() {
-                    scope.set(
-                        &var_name,
-                        ResolvedType::from_classes_with_hint(resolved, kt.clone()),
-                    );
-                } else {
-                    scope.set(&var_name, vec![ResolvedType::from_type_string(kt.clone())]);
-                }
-                return;
-            }
-
-            // Strategy 2: class-based fallback for bare collection names.
-            // When the iterable is `PhpType::named("Finder")` (no generics),
-            // look at the class's implements_generics / extends_generics to
-            // find the key type (e.g. IteratorAggregate<non-empty-string, SplFileInfo>).
-            if let Some(key_type) = resolve_iterable_key_via_class(it, ctx)
-                && !is_unsubstituted_template_param(&key_type)
-            {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    &key_type,
-                    &ctx.current_class.name,
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-                if !resolved.is_empty() {
-                    scope.set(
-                        &var_name,
-                        ResolvedType::from_classes_with_hint(resolved, key_type),
-                    );
-                } else {
-                    scope.set(&var_name, vec![ResolvedType::from_type_string(key_type)]);
-                }
-                return;
-            }
-        }
-        // Default: key is int|string.
-        scope.set(
-            &var_name,
-            vec![ResolvedType::from_type_string(PhpType::union(vec![
-                PhpType::int(),
-                PhpType::string(),
-            ]))],
-        );
-    }
-}
-
-/// Resolve the iterable **key** type from a class's `implements_generics`
-/// / `extends_generics`.  Mirrors `resolve_iterable_element_via_class`.
-pub(crate) fn resolve_iterable_key_via_class(
-    iter_type: &PhpType,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<PhpType> {
-    // See `resolve_iterable_element_via_class`: unwrap `Nullable`/`Generic`
-    // via `base_name` so `?SimpleXMLElement`-style iterable types resolve.
-    let class_name = iter_type.base_name()?;
-
-    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-        iter_type,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-
-    if classes.is_empty() {
-        let cls = (ctx.class_loader)(class_name)?;
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            &cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        return super::super::foreach_resolution::extract_iterable_key_type_from_class(
-            &merged,
+        // A bare `list<T>` says nothing about its keys, and neither does an
+        // untyped iterable: both leave the key `int|string`.
+        let key_type = iter_type.as_ref().and_then(|it| {
+            crate::type_engine::variable::foreach_resolution::iteration_key_type(
+                it,
+                &iterable_ctx(ctx),
+            )
+        });
+        let key_type =
+            key_type.unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
+        let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &key_type,
+            &ctx.current_class.name,
+            ctx.all_classes,
             ctx.class_loader,
         );
-    }
-
-    for cls in &classes {
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        let key_type = super::super::foreach_resolution::extract_iterable_key_type_from_class(
-            &merged,
-            ctx.class_loader,
-        );
-        if let Some(ref kt) = key_type {
-            if let Some(name) = kt.base_name()
-                && merged
-                    .template_params
-                    .iter()
-                    .any(|p| p.as_ref() as &str == name)
-                && let Some(bound) = merged.template_param_bounds.get(&crate::atom::atom(name))
-            {
-                return Some(bound.clone());
-            }
-            return key_type;
+        if !resolved.is_empty() {
+            scope.set(
+                &var_name,
+                ResolvedType::from_classes_with_hint(resolved, key_type),
+            );
+        } else {
+            scope.set(&var_name, vec![ResolvedType::from_type_string(key_type)]);
         }
     }
-
-    None
 }
 
 /// Process a `while` loop.

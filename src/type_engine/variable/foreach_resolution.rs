@@ -31,6 +31,206 @@ pub(crate) fn resolve_expression_type<'b>(
     Some(ResolvedType::types_joined(&resolved))
 }
 
+/// The context pieces deriving an iterable's element and key types needs.
+///
+/// The derivation is asked for from contexts of different shapes — the
+/// forward walker binding a `foreach`, and Blade's `@each` call-site
+/// inference asking what one entry of a collection is — so it reads the
+/// four pieces both carry rather than either whole context.
+pub(crate) struct IterableCtx<'a> {
+    pub current_class: &'a ClassInfo,
+    pub all_classes: &'a [Arc<ClassInfo>],
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
+}
+
+impl<'a> IterableCtx<'a> {
+    pub(crate) fn from_var_ctx(ctx: &'a VarResolutionCtx<'_>) -> Self {
+        Self {
+            current_class: ctx.current_class,
+            all_classes: ctx.all_classes,
+            class_loader: ctx.class_loader,
+            resolved_class_cache: ctx.resolved_class_cache,
+        }
+    }
+}
+
+/// The type `foreach ($expr as $value)` binds, given the iterable's own
+/// resolved type.
+///
+/// Tries the type's own generic parameters (or, for a tuple-style shape,
+/// the union of its positional values), then the generics of the class it
+/// names, then each member of a union individually.
+pub(crate) fn iteration_value_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -> Option<PhpType> {
+    if let Some(vt) = iter_type.iterable_element_type() {
+        return Some(vt);
+    }
+    if let Some(et) = resolve_iterable_element_via_class(iter_type, ctx)
+        && !is_unsubstituted_template_param(&et)
+    {
+        return Some(et);
+    }
+    if let TypeKind::Union(members) = iter_type.kind() {
+        for member in members {
+            if let Some(vt) = member.extract_value_type(false) {
+                return Some(vt.clone());
+            }
+            if let Some(et) = resolve_iterable_element_via_class(member, ctx)
+                && !is_unsubstituted_template_param(&et)
+            {
+                return Some(et);
+            }
+        }
+    }
+    None
+}
+
+/// The type `foreach ($expr as $key => $value)` binds `$key` to, given
+/// the iterable's own resolved type.
+///
+/// `None` when the iterable says nothing about its keys — a `list<T>` has
+/// no key slot of its own, and the caller falls back to `int|string`.
+pub(crate) fn iteration_key_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -> Option<PhpType> {
+    if let Some(kt) = iter_type.extract_key_type(false) {
+        return Some(kt.clone());
+    }
+    let key_type = resolve_iterable_key_via_class(iter_type, ctx)?;
+    (!is_unsubstituted_template_param(&key_type)).then_some(key_type)
+}
+
+/// Resolve the element type of an iterable via class inheritance.
+///
+/// When the iterable type is a bare class name (e.g. `OrderProductCollection`),
+/// this resolves it to `ClassInfo`, merges the full inheritance chain, and
+/// extracts the element type from `@extends` / `@implements` generics using
+/// [`extract_iterable_element_type_from_class`].
+pub(crate) fn resolve_iterable_element_via_class(
+    iter_type: &PhpType,
+    ctx: &IterableCtx<'_>,
+) -> Option<PhpType> {
+    // Accept bare class names, whether or not wrapped in `Nullable` (e.g.
+    // `?SimpleXMLElement`, the return type of `SimpleXMLElement::children()`).
+    // `base_name` unwraps `Nullable`/`Generic` to the underlying class name.
+    // Bare generic types like `Collection<int, User>` are handled by the
+    // caller's own generic extraction, so this only needs the name for the
+    // `class_loader` fallback below; `type_hint_to_classes_typed` handles
+    // the full (possibly nullable) type itself.
+    let class_name = iter_type.base_name()?;
+
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        iter_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+
+    if classes.is_empty() {
+        // Try direct class loader as fallback (handles FQN names).
+        let cls = (ctx.class_loader)(class_name)?;
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        return extract_iterable_element_type_from_class(&merged, ctx.class_loader);
+    }
+
+    for cls in &classes {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        let element_type = extract_iterable_element_type_from_class(&merged, ctx.class_loader);
+        if let Some(ref et) = element_type {
+            // When the extracted type is an unsubstituted template parameter
+            // (e.g. `TModel`), resolve it through the class's template bounds
+            // (e.g. `@template TModel of BlogAuthor` → `BlogAuthor`).
+            if let Some(bound) = template_bound(et, &merged) {
+                return Some(bound);
+            }
+            return element_type;
+        }
+    }
+
+    None
+}
+
+/// Resolve the iterable **key** type from a class's `implements_generics`
+/// / `extends_generics`.  Mirrors [`resolve_iterable_element_via_class`].
+pub(crate) fn resolve_iterable_key_via_class(
+    iter_type: &PhpType,
+    ctx: &IterableCtx<'_>,
+) -> Option<PhpType> {
+    // See `resolve_iterable_element_via_class`: unwrap `Nullable`/`Generic`
+    // via `base_name` so `?SimpleXMLElement`-style iterable types resolve.
+    let class_name = iter_type.base_name()?;
+
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        iter_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+
+    if classes.is_empty() {
+        let cls = (ctx.class_loader)(class_name)?;
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        return extract_iterable_key_type_from_class(&merged, ctx.class_loader);
+    }
+
+    for cls in &classes {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        let key_type = extract_iterable_key_type_from_class(&merged, ctx.class_loader);
+        if let Some(ref kt) = key_type {
+            if let Some(bound) = template_bound(kt, &merged) {
+                return Some(bound);
+            }
+            return key_type;
+        }
+    }
+
+    None
+}
+
+/// The bound a class declares for `ty`, when `ty` is one of the class's
+/// own template parameters (`@template TModel of BlogAuthor` → `BlogAuthor`).
+fn template_bound(ty: &PhpType, class: &ClassInfo) -> Option<PhpType> {
+    let name = ty.base_name()?;
+    if !class
+        .template_params
+        .iter()
+        .any(|p| p.as_ref() as &str == name)
+    {
+        return None;
+    }
+    class
+        .template_param_bounds
+        .get(&crate::atom::atom(name))
+        .cloned()
+}
+
+/// Check whether a `PhpType` looks like an unsubstituted template
+/// parameter (e.g. `TValue`, `TKey`, `TModel`).  These are bare named
+/// types whose name starts with `T` followed by an uppercase letter
+/// and are not known PHP built-in types.
+pub(crate) fn is_unsubstituted_template_param(ty: &PhpType) -> bool {
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
+        _ => return false,
+    };
+    let bytes = name.as_bytes();
+    bytes.len() >= 2 && bytes[0] == b'T' && bytes[1].is_ascii_uppercase()
+}
+
 /// Known interface/class names whose generic parameters describe
 /// iteration types in PHP's `foreach`.
 const ITERABLE_IFACE_NAMES: &[&str] = &[

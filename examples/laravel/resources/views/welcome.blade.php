@@ -76,6 +76,14 @@
          provider shares them, or a view composer writes them. --}}
     @include('partials.sidebar')
 
+    {{-- @each renders its partial once per entry, with the entry bound to
+         the name the third argument spells and $key to its key. The types
+         come from the collection: $posts is a PostCollection, so $post is a
+         BlogPost inside partials/post_row.blade.php. --}}
+    <table>
+        @each('partials.post_row', $posts, 'post')
+    </table>
+
     {{-- The <x-alert> component view is where $attributes and $slot come
          from: resources/views/components/alert.blade.php --}}
     <x-alert class="mt-4">{{ __('messages.welcome') }}</x-alert>

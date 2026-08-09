@@ -504,4 +504,137 @@ mod tests {
             diags[0].1
         );
     }
+
+    /// `@each` binds the entry under the name its third argument spells,
+    /// with the collection's element type, so a partial declaring that
+    /// variable is satisfied.  `$key` comes free with it.
+    #[tokio::test]
+    async fn each_binds_the_item_under_the_name_it_spells() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User $row\n */\n@endphp\n<td>{{ $row->email }}</td>\n",
+            ),
+            (
+                "resources/views/table.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var array<int, \\App\\Models\\User> $users\n */\n@endphp\n@each('partials.row', $users, 'row')\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    /// The item's type is the collection's element type, so a collection of
+    /// the wrong thing is reported against the partial's declaration.
+    #[tokio::test]
+    async fn each_reports_an_item_type_the_partial_does_not_accept() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User $row\n */\n@endphp\n<td>{{ $row->email }}</td>\n",
+            ),
+            (
+                "resources/views/table.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var array<int, string> $names\n */\n@endphp\n@each('partials.row', $names, 'row')\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert!(
+            diags[0].1.contains("$row") && diags[0].1.contains("string"),
+            "message should name the item and the element type, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// `$key` is Blade's to bind, so a partial with no use for it is not
+    /// being handed something unwanted.
+    #[tokio::test]
+    async fn each_does_not_report_its_key_as_unknown() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $row\n */\n@endphp\n<td>{{ $row }}</td>\n",
+            ),
+            (
+                "resources/views/table.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var array<int, string> $names\n */\n@endphp\n@each('partials.row', $names, 'row')\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    /// `$key` carries the collection's key type, so a partial declaring it
+    /// as something the keys are not is reported.
+    #[tokio::test]
+    async fn each_types_its_key_from_the_collections_keys() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $row\n * @var string $key\n */\n@endphp\n<td>{{ $key }}: {{ $row }}</td>\n",
+            ),
+            (
+                "resources/views/table.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var array<int, string> $names\n */\n@endphp\n@each('partials.row', $names, 'row')\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+        assert!(
+            diags[0].1.contains("$key"),
+            "message should name the key, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// An `@each` partial sees only the item and the key, so a variable the
+    /// surrounding template holds does not excuse the call from passing it.
+    #[tokio::test]
+    async fn each_does_not_forward_the_surrounding_templates_scope() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $row\n * @var string $caption\n */\n@endphp\n<td>{{ $caption }}: {{ $row }}</td>\n",
+            ),
+            (
+                "resources/views/table.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var array<int, string> $names\n * @var string $caption\n */\n@endphp\n@each('partials.row', $names, 'row')\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$caption"),
+            "message should name the variable the partial is short of, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// An item name built at runtime binds a variable whose name cannot be
+    /// known, so nothing about what the partial is short of follows.
+    #[tokio::test]
+    async fn a_dynamic_each_item_name_stands_the_missing_check_down() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/row.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $row\n */\n@endphp\n<td>{{ $row }}</td>\n",
+            ),
+            (
+                "resources/views/table.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var array<int, string> $names\n * @var string $itemName\n */\n@endphp\n@each('partials.row', $names, $itemName)\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
 }

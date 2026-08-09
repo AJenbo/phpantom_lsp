@@ -120,6 +120,7 @@ fn extract_call<'a>(
                         Some(crate::symbol_map::LaravelStringKind::Config)
                     } else if name_clean.eq_ignore_ascii_case("view")
                         || name_clean.eq_ignore_ascii_case("blade_view_directive")
+                        || name_clean.eq_ignore_ascii_case("blade_each_directive")
                     {
                         Some(crate::symbol_map::LaravelStringKind::View)
                     } else if name_clean.eq_ignore_ascii_case("route")

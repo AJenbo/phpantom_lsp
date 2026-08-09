@@ -143,9 +143,12 @@ pub fn translate_directive(directive: &str) -> String {
         "break" => "break;".to_string(),
         "default" => "default:".to_string(),
         "extends" | "extendsFirst" | "include" | "includeIf" | "includeWhen" | "includeUnless"
-        | "includeFirst" | "component" | "componentFirst" | "each" => {
-            "blade_view_directive".to_string()
-        }
+        | "includeFirst" | "component" | "componentFirst" => "blade_view_directive".to_string(),
+        // `@each` renders its partial once per entry of a collection, with
+        // only the item and the key in scope.  The arguments after the view
+        // name therefore mean something entirely different from every other
+        // render directive's data array, so it gets a marker of its own.
+        "each" => "blade_each_directive".to_string(),
         "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" | "class"
         | "style" | "checked" | "selected" | "disabled" | "readonly" | "required" | "stack"
         | "json" | "dump" => "blade_directive".to_string(),

@@ -366,8 +366,9 @@ scanner — so that:
 
 Call-site validation (`src/diagnostics/blade_call_site.rs`) reaches every
 render site the symbol map records a view name for: `view()`,
-`View::make()`, `Route::view()`, and the `blade_view_directive` the
-preprocessor compiles `@include`/`@extends`/`@component`/`@each` into.
+`View::make()`, `Route::view()`, the `blade_view_directive` the
+preprocessor compiles `@include`/`@extends`/`@component` into, and the
+`blade_each_directive` it compiles `@each` into.
 Two shapes Bladestan matches are missing, because nothing indexes their
 view name in the first place — which also costs them go-to-definition,
 hover, and the unknown-view diagnostic, so this is an indexing item
@@ -443,28 +444,31 @@ checks fall into it today:
   types rather than a `HashSet<String>`, which the forward walker can
   answer for the template's virtual PHP at the include's offset.
 
-### BL21. `@each` item and key variables
+### BL22. A template never learns anything from the templates that render it
 
-`@each('partials.row', $rows, 'row')` renders `partials.row` once per
-entry with `$row` bound to the entry and `$key` to its key, and nothing
-else in scope. The preprocessor compiles it to `blade_view_directive`
-with the collection as the data argument, so `collect_from_data_expr`
-reads a collection where it expects a data array, finds no literal
-entries, and marks the site incomplete. Two consequences:
+`compute_blade_injected_vars` skips every Blade file in the caller
+snapshot (`if self.is_blade_file(file_uri) { continue; }`, and
+`view_caller_snapshot` filters them out again), so call-site inference
+only ever reads controllers. A partial rendered exclusively from other
+templates therefore gets nothing: neither the entries of an
+`@include('partials.row', ['row' => $row])`, nor the item and key an
+`@each` binds, reach it, and an unannotated partial has no type for the
+variable it exists to display. Only the diagnostics path, which runs on
+the rendering template itself, reads those sites today.
 
-- `partials/row.blade.php` never learns about `$row` from its `@each`
-  call sites, so an unannotated partial rendered only that way gets no
-  completion or hover for the variable it exists to display.
-- an `@each` site is never validated against the partial's contract,
-  because it is permanently incomplete.
+The comment gives the two reasons: a template must not feed itself, and
+other templates' `@include`s would recurse. Both are addressable the way
+the component-tag path already does it — that one *does* read Blade
+callers, keying off `blade_virtual_content` rather than the raw source
+(the symbol map's offsets are virtual-PHP offsets, so the raw Blade
+source is the wrong thing to parse) and skipping the template's own URI.
+What is left to settle is mutual rendering: A includes B includes A
+resolves each against the other's cached scope, so the refresh pass needs
+to converge rather than oscillate.
 
-Bladestan's `getEachVariables` derives both names from the call: `$key`
-from the collection's key type, and the item under the name the third
-argument spells, falling back to `mixed` when the collection's type is
-not a constant array. Our foreach machinery already answers "what is one
-entry of this expression", so the same derivation belongs in
-`collect_data_argument` as an `@each`-shaped special case, keyed off the
-directive rather than off `blade_view_directive` generally.
+Until then a partial rendered only from templates must declare its own
+`@bladestan-signature` to get completion and hover, which is what the
+contract checks want anyway.
 
 ---
 
@@ -768,13 +772,14 @@ Implement go-to-definition for view names and component tags.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file.
 
-### Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL21)
+### Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)
 
 Call-site validation is shipped. What is left widens it (BL18 for the
 render sites nothing indexes a view name for, BL19 for the covariance
 the merge does not check, BL20 for the data shapes the checks stand down
-on, BL21 for `@each`) and is independent of section/stack intelligence
-and custom directive discovery, so the six can land in any order.
+on, BL22 for the templates that render other templates) and is
+independent of section/stack intelligence and custom directive
+discovery, so the six can land in any order.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
 gets typed completion for its declared variables at every render site,

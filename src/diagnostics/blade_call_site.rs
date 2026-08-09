@@ -93,6 +93,9 @@ impl Backend {
         } else {
             Some(HashSet::new())
         };
+        // What a render that forwards nothing inherits, so a site can stand
+        // in for the file-wide answer without cloning it.
+        let no_inherited = HashSet::new();
 
         let file_ctx = self.file_context(uri);
         let class_loader = self.class_loader(&file_ctx);
@@ -155,7 +158,13 @@ impl Backend {
             }
 
             // ── Missing ──────────────────────────────────────────────
-            if let Some(inherited) = &inherited {
+            // An `@each` partial sees only the item and the key, so what
+            // the surrounding template holds does not reach it.
+            let site_inherited = match site.forwards_scope {
+                true => inherited.as_ref(),
+                false => Some(&no_inherited),
+            };
+            if let Some(inherited) = site_inherited {
                 // A component's `render()` hands its template every public
                 // member of the class, so those are not the call's to pass.
                 let from_class = self.component_render_scope(
@@ -199,7 +208,7 @@ impl Backend {
                 continue;
             }
             for var in &site.vars {
-                if accepted.names.contains(&var.name) {
+                if accepted.names.contains(&var.name) || var.framework_bound {
                     continue;
                 }
                 let Some(range) = self.offset_range_to_lsp_range(

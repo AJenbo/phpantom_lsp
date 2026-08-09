@@ -238,7 +238,9 @@ fn detect_laravel_string_key_context(
         match func_name.to_ascii_lowercase().as_str() {
             "route" | "to_route" => (Some(LaravelStringKind::Route), None),
             "config" => (Some(LaravelStringKind::Config), None),
-            "view" | "blade_view_directive" => (Some(LaravelStringKind::View), None),
+            "view" | "blade_view_directive" | "blade_each_directive" => {
+                (Some(LaravelStringKind::View), None)
+            }
             "__" | "trans" | "trans_choice" => (Some(LaravelStringKind::Trans), None),
             // auth('guard') helper accepts a guard name
             "auth" => (Some(LaravelStringKind::Config), Some("auth.guards.")),
@@ -679,6 +681,22 @@ mod tests {
         let ctx = ctx.expect("should detect to_route() context");
         assert!(matches!(ctx.kind, LaravelStringKind::Route));
         assert_eq!(ctx.prefix, "ho");
+    }
+
+    /// The preprocessor compiles Blade's render directives into marker
+    /// calls, so completion inside `@include('` and `@each('` reaches the
+    /// view index through those names.
+    #[test]
+    fn detects_the_blade_render_directive_markers() {
+        for marker in ["blade_view_directive", "blade_each_directive"] {
+            let content = format!("<?php\n{marker} ('partials.');\n");
+            let line_text = content.lines().nth(1).unwrap();
+            let col = line_text.find("partials.").unwrap() as u32 + 9;
+            let ctx = detect_laravel_string_key_context(&content, Position::new(1, col));
+            let ctx = ctx.unwrap_or_else(|| panic!("should detect {marker} context"));
+            assert!(matches!(ctx.kind, LaravelStringKind::View));
+            assert_eq!(ctx.prefix, "partials.");
+        }
     }
 
     #[test]

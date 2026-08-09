@@ -174,7 +174,7 @@ pub fn preprocess_with_vars(
     }
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} }\n");
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
@@ -1808,6 +1808,23 @@ mod tests {
         assert!(
             php.contains("function blade_view_directive"),
             "prologue should declare blade_view_directive: {}",
+            php
+        );
+        assert!(
+            php.contains("function blade_each_directive"),
+            "prologue should declare blade_each_directive: {}",
+            php
+        );
+    }
+
+    /// `@each` gets a marker of its own: the arguments after its view name
+    /// are a collection and an item name, not a data array.
+    #[test]
+    fn test_preprocess_each_uses_its_own_marker() {
+        let (php, _) = preprocess("@each('partials.row', $rows, 'row')\n");
+        assert!(
+            php.contains("blade_each_directive ('partials.row', $rows, 'row');"),
+            "@each should compile to a blade_each_directive call: {}",
             php
         );
     }

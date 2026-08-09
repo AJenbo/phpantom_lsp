@@ -61,7 +61,10 @@ enum ViewArg {
 /// satisfy. Only one of a `…First` directive's candidates is rendered, but
 /// which one depends on what exists on disk, so every one of them is
 /// reachable and all are collected.
-const RENDER_DIRECTIVES: [(&str, usize, ViewArg); 11] = [
+///
+/// `@each` is not: its partial is rendered with the item and the key alone,
+/// so a name only that partial reads never arrives through here.
+const RENDER_DIRECTIVES: [(&str, usize, ViewArg); 10] = [
     ("extends", 0, ViewArg::Name),
     ("extendsFirst", 0, ViewArg::Candidates),
     ("include", 0, ViewArg::Name),
@@ -72,7 +75,6 @@ const RENDER_DIRECTIVES: [(&str, usize, ViewArg); 11] = [
     ("includeUnless", 1, ViewArg::Name),
     ("component", 0, ViewArg::Name),
     ("componentFirst", 0, ViewArg::Candidates),
-    ("each", 0, ViewArg::Name),
 ];
 
 /// What a template promises its callers.
@@ -357,7 +359,7 @@ fn rendered_view_names(content: &str) -> RenderedViews {
             open += 1;
         }
         if bytes.get(open) != Some(&b'(') {
-            // `@each` and friends always take arguments; without them the
+            // `@include` and friends always take arguments; without them the
             // directive is not a render at all.
             continue;
         }
@@ -420,10 +422,22 @@ mod tests {
 
     #[test]
     fn collects_the_views_a_template_renders_from_its_own_data() {
-        let blade = "@extends('layouts.app')\n@include('partials.header')\n@each('rows.item', $rows, 'row')\n";
+        let blade = "@extends('layouts.app')\n@include('partials.header')\n";
         let (mut names, closed) = rendered(blade);
         names.sort();
-        assert_eq!(names, vec!["layouts.app", "partials.header", "rows.item"]);
+        assert_eq!(names, vec!["layouts.app", "partials.header"]);
+        assert!(closed);
+    }
+
+    /// `@each` renders its partial with the item and the key alone, so the
+    /// partial's names are not the surrounding template's to accept.
+    #[test]
+    fn each_does_not_pass_the_templates_own_data_on() {
+        let (names, closed) = rendered("@each('rows.item', $rows, 'row')\n");
+        assert!(
+            names.is_empty(),
+            "expected no rendered views, got {names:?}"
+        );
         assert!(closed);
     }
 

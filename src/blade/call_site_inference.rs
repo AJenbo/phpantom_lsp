@@ -54,6 +54,11 @@ pub(crate) struct PassedVar {
     pub(crate) key_range: ByteRange,
     /// The expression that produced the value.
     pub(crate) value_range: ByteRange,
+    /// Whether Blade binds the variable itself rather than the call site
+    /// naming it, as `@each` does with `$key`.  Its type is still the
+    /// call's to answer for, but a template with no use for it is not
+    /// being handed something unwanted.
+    pub(crate) framework_bound: bool,
 }
 
 /// One resolved `view()` / `View::make()` / `@include` call site.
@@ -67,6 +72,11 @@ pub(crate) struct ResolvedViewCall {
     /// whose data is a variable passes an unknown set, and neither a
     /// missing nor an unwanted name can be concluded from it.
     pub(crate) complete: bool,
+    /// Whether the render hands the template the scope it is written in on
+    /// top of [`Self::vars`], as `@include` does. False for `@each`, whose
+    /// partial sees only the item and the key however much the surrounding
+    /// template holds.
+    pub(crate) forwards_scope: bool,
 }
 
 /// The variables injected into one template's virtual-PHP prologue:
@@ -657,6 +667,7 @@ impl Backend {
 
                 let mut vars: Vec<PassedVar> = Vec::new();
                 for entry in site.entries {
+                    let framework_bound = entry.framework_bound();
                     let (name, key_range, value_range, ty) = match entry {
                         SiteEntry::Expr {
                             name,
@@ -685,6 +696,16 @@ impl Backend {
                             .unwrap_or_else(PhpType::mixed);
                             (name, key_range, key_range, ty)
                         }
+                        SiteEntry::Iteration {
+                            name,
+                            key_range,
+                            collection,
+                            part,
+                        } => {
+                            let span = collection.span();
+                            let ty = each_variable_type(collection, part, &var_ctx);
+                            (name, key_range, (span.start.offset, span.end.offset), ty)
+                        }
                     };
                     // Render FQNs so the injected `@var` resolves from the
                     // template's namespace-less context.
@@ -700,12 +721,14 @@ impl Backend {
                         ty,
                         key_range,
                         value_range,
+                        framework_bound,
                     });
                 }
                 result.push(ResolvedViewCall {
                     name_range: site.name_range,
                     vars,
                     complete: site.complete,
+                    forwards_scope: site.forwards_scope,
                 });
             }
             result
@@ -830,9 +853,17 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BladeDirectiveColle
     }
 }
 
-/// One variable passed at a call site: either the value expression
-/// (array entry / `->with()` value) or, for `compact('name')`, the
-/// same-named variable to resolve at the call-site offset.
+/// Which of the two variables an `@each` binds an entry describes.
+#[derive(Clone, Copy, PartialEq)]
+enum IterationPart {
+    Item,
+    Key,
+}
+
+/// One variable passed at a call site: the value expression (array entry
+/// / `->with()` value), the same-named variable to resolve at the
+/// call-site offset (for `compact('name')`), or one of the two variables
+/// `@each` derives from the collection it iterates.
 enum SiteEntry<'ast, 'arena> {
     Expr {
         name: String,
@@ -843,6 +874,27 @@ enum SiteEntry<'ast, 'arena> {
         name: String,
         key_range: ByteRange,
     },
+    Iteration {
+        name: String,
+        key_range: ByteRange,
+        collection: &'ast Expression<'arena>,
+        part: IterationPart,
+    },
+}
+
+impl SiteEntry<'_, '_> {
+    /// Whether Blade names the variable itself.  Only `@each`'s `$key`
+    /// does: its name comes from the directive rather than from anything
+    /// the call site writes.
+    fn framework_bound(&self) -> bool {
+        matches!(
+            self,
+            SiteEntry::Iteration {
+                part: IterationPart::Key,
+                ..
+            }
+        )
+    }
 }
 
 /// One call site as the walker finds it, before its entries are resolved.
@@ -853,6 +905,7 @@ struct SiteDraft<'ast, 'arena> {
     name_range: ByteRange,
     entries: Vec<SiteEntry<'ast, 'arena>>,
     complete: bool,
+    forwards_scope: bool,
 }
 
 struct CollectCtx<'w, 'ast, 'arena> {
@@ -875,6 +928,7 @@ impl<'ast, 'arena> CollectCtx<'_, 'ast, 'arena> {
             name_range,
             entries: Vec::new(),
             complete: true,
+            forwards_scope: true,
         });
         self.sites.last_mut().expect("just pushed")
     }
@@ -932,10 +986,20 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
             return;
         };
         let mut entries = Vec::new();
-        let complete = collect_data_argument(&node.argument_list, index + 1, &mut entries);
+        // `@each` names its partial first and then a collection and an item
+        // name, so the argument after the view name is not a data array and
+        // the two variables the partial receives are derived rather than
+        // listed.  A match on any later argument (the optional empty-view
+        // name) says nothing about what the partial is handed.
+        let complete = if is_each_render_function(name) {
+            index == 0 && collect_each_arguments(&node.argument_list, &mut entries)
+        } else {
+            collect_data_argument(&node.argument_list, index + 1, &mut entries)
+        };
         let site = ctx.site(node.span().start.offset, name_range);
         site.entries.extend(entries);
         site.complete &= complete;
+        site.forwards_scope &= !is_each_render_function(name);
     }
 
     fn walk_in_static_method_call(
@@ -1027,15 +1091,52 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
     }
 }
 
+/// The type one of `@each`'s two variables has, derived from the
+/// collection the directive iterates.
+///
+/// The derivation is the same one `foreach ($collection as $key => $item)`
+/// uses, so a `Collection<int, User>`, an `array<string, Row>`, and a
+/// class whose `@implements IteratorAggregate` says what it holds all
+/// answer the way they do in a loop.  A collection that says nothing about
+/// its entries leaves the item `mixed` and the key `int|string`, matching
+/// what PHP guarantees about iterating anything at all.
+fn each_variable_type(
+    collection: &Expression<'_>,
+    part: IterationPart,
+    var_ctx: &VarResolutionCtx<'_>,
+) -> PhpType {
+    use crate::type_engine::variable::foreach_resolution as iter;
+
+    let derived = iter::resolve_expression_type(collection, var_ctx).and_then(|collection_ty| {
+        let iter_ctx = iter::IterableCtx::from_var_ctx(var_ctx);
+        match part {
+            IterationPart::Item => iter::iteration_value_type(&collection_ty, &iter_ctx),
+            IterationPart::Key => iter::iteration_key_type(&collection_ty, &iter_ctx),
+        }
+    });
+    derived.unwrap_or_else(|| match part {
+        IterationPart::Item => PhpType::mixed(),
+        IterationPart::Key => PhpType::union(vec![PhpType::int(), PhpType::string()]),
+    })
+}
+
 /// Whether a helper function renders a view named by one of its string
 /// arguments.
 ///
 /// `blade_view_directive` is what the preprocessor compiles Blade's own
-/// `@include` family, `@extends`, `@component`, and `@each` into, so a
-/// template rendering another template is judged by the same rules a
-/// controller is.
+/// `@include` family, `@extends`, and `@component` into, so a template
+/// rendering another template is judged by the same rules a controller
+/// is.  `@each` compiles to [`is_each_render_function`]'s marker instead,
+/// because its arguments do not describe a data array.
 fn is_view_render_function(name: &str) -> bool {
-    name.eq_ignore_ascii_case("view") || name.eq_ignore_ascii_case("blade_view_directive")
+    name.eq_ignore_ascii_case("view")
+        || name.eq_ignore_ascii_case("blade_view_directive")
+        || is_each_render_function(name)
+}
+
+/// Whether the call is the preprocessor's compilation of `@each`.
+fn is_each_render_function(name: &str) -> bool {
+    name.eq_ignore_ascii_case("blade_each_directive")
 }
 
 /// Whether a static call renders a view: `View::make()`, or the
@@ -1127,6 +1228,49 @@ fn collect_data_argument<'ast, 'arena>(
         Some(arg) => collect_from_data_expr(arg.value(), entries),
         None => true,
     }
+}
+
+/// Collect the two variables an `@each` binds: the entry, under the name
+/// the third argument spells, and `$key`.
+///
+/// `@each('partials.row', $rows, 'row')` renders `partials.row` once per
+/// entry of `$rows` with `$row` and `$key` in scope and nothing else, so
+/// both are derived from the collection rather than read off a data array.
+///
+/// Returns whether the pair was readable: an `@each` short of arguments,
+/// or one whose item name is not a plain string literal, binds a name that
+/// cannot be known.
+fn collect_each_arguments<'ast, 'arena>(
+    argument_list: &'ast ArgumentList<'arena>,
+    entries: &mut Vec<SiteEntry<'ast, 'arena>>,
+) -> bool {
+    let mut args = argument_list.arguments.iter().skip(1);
+    let (Some(collection), Some(item)) = (args.next(), args.next()) else {
+        return false;
+    };
+    let Expression::Literal(Literal::String(s)) = item.value() else {
+        return false;
+    };
+    let Some(name) = string_literal_contents(s) else {
+        return false;
+    };
+    // The item name is the only text at the call site that names either
+    // variable, so it is where a diagnostic about the pair points.
+    let key_range = (s.span.start.offset + 1, s.span.end.offset - 1);
+    let collection = collection.value();
+    entries.push(SiteEntry::Iteration {
+        name,
+        key_range,
+        collection,
+        part: IterationPart::Item,
+    });
+    entries.push(SiteEntry::Iteration {
+        name: "key".to_string(),
+        key_range,
+        collection,
+        part: IterationPart::Key,
+    });
+    true
 }
 
 /// Collect entries from a data expression: an array literal with

@@ -4331,3 +4331,35 @@ async fn test_goto_definition_blade_extends_directive() {
         target_uri
     );
 }
+
+#[tokio::test]
+async fn test_goto_definition_blade_each_directive() {
+    let blade_table = "<table>\n    @each('partials.row', $rows, 'row')\n</table>";
+    let blade_partial = "<td>{{ $row }}</td>";
+
+    let (backend, dir) = make_workspace(&[
+        ("resources/views/table.blade.php", blade_table),
+        ("resources/views/partials/row.blade.php", blade_partial),
+    ]);
+
+    // Cursor on "partials.row" in @each('partials.row', …) — line 1, char 14.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "resources/views/table.blade.php",
+        blade_table,
+        1,
+        14,
+    )
+    .await;
+
+    let result = result.expect("@each('partials.row', …) should resolve to blade template");
+    let target_uri = definition_uri(&result);
+    assert!(
+        target_uri
+            .as_str()
+            .ends_with("/resources/views/partials/row.blade.php"),
+        "Should jump to partials/row.blade.php, got: {}",
+        target_uri
+    );
+}
