@@ -123,6 +123,26 @@ fn push_undeclared(declared: &mut InjectedVars, vars: InjectedVars) {
     }
 }
 
+/// Deduplicate and union one variable's types across every call site that
+/// passed it. Sorts the deduplicated members by their rendered form first,
+/// so the result does not depend on the order the call sites were visited
+/// in (the snapshot they come from is built from a `HashMap`, whose
+/// iteration order varies across runs).
+fn join_call_site_types(types: Vec<PhpType>) -> PhpType {
+    let mut unique: Vec<PhpType> = Vec::new();
+    for ty in types {
+        if !unique.iter().any(|u| u.equivalent(&ty)) {
+            unique.push(ty);
+        }
+    }
+    unique.sort_by_key(|a| a.to_string());
+    if unique.len() == 1 {
+        unique.pop().unwrap()
+    } else {
+        PhpType::union(unique)
+    }
+}
+
 impl Backend {
     /// Compute the variables to inject into a Blade template's virtual
     /// PHP: the members of the class backing a component view (see
@@ -314,20 +334,7 @@ impl Backend {
 
         let mut result: Vec<(String, String)> = merged
             .into_iter()
-            .map(|(name, types)| {
-                let mut unique: Vec<PhpType> = Vec::new();
-                for ty in types {
-                    if !unique.iter().any(|u| u.equivalent(&ty)) {
-                        unique.push(ty);
-                    }
-                }
-                let joined = if unique.len() == 1 {
-                    unique.pop().unwrap()
-                } else {
-                    PhpType::union(unique)
-                };
-                (name, joined.to_string())
-            })
+            .map(|(name, types)| (name, join_call_site_types(types).to_string()))
             .collect();
         // Deterministic prologue ordering so re-preprocessing an
         // unchanged template produces identical virtual PHP.
@@ -376,7 +383,8 @@ impl Backend {
     fn view_caller_snapshot(&self) -> ViewCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         let maps = self.symbol_maps.read();
-        maps.iter()
+        let mut snapshot: ViewCallerSnapshot = maps
+            .iter()
             .filter(|(uri, map)| {
                 !uri.starts_with("phpantom-stub://")
                     && !uri.starts_with("phpantom-stub-fn://")
@@ -394,7 +402,12 @@ impl Backend {
                         }))
             })
             .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
-            .collect()
+            .collect();
+        // Deterministic order so the whole inference pass (and its
+        // per-name type unions) is reproducible across runs, not just
+        // the caller's `HashMap` iteration order.
+        snapshot.sort_by(|(a, _), (b, _)| a.cmp(b));
+        snapshot
     }
 
     /// Every known Blade file's raw source, for the component-tag scan in
@@ -1759,4 +1772,28 @@ fn is_variable_name(value: &str) -> bool {
     !value.is_empty()
         && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !value.starts_with(|c: char| c.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_call_site_types;
+    use crate::atom::atom;
+    use crate::php_type::PhpType;
+
+    /// The joined union's member order must not depend on the order the
+    /// call sites were visited in, since that order comes from a
+    /// `HashMap` snapshot and varies across runs.
+    #[test]
+    fn union_order_is_independent_of_visit_order() {
+        let a = PhpType::named(atom("App\\Item"));
+        let b = PhpType::literal_string_raw("fallback");
+
+        let forward = join_call_site_types(vec![a.clone(), b.clone()]).to_string();
+        let backward = join_call_site_types(vec![b, a]).to_string();
+
+        assert_eq!(
+            forward, backward,
+            "joining the same types in reverse order must produce the same union string"
+        );
+    }
 }
