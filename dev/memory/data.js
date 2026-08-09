@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786235989433,
+  "lastUpdate": 1786237733683,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16693,6 +16693,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "13e5a73fe92103b2b20cf604f97c2c40f90a851c",
+          "message": "A component no longer excuses its callers from passing what its\nframework base class happens to declare",
+          "timestamp": "2026-08-09T02:52:10+02:00",
+          "tree_id": "a4712fb4f3406dcb7227771bf2ee9e1409175fa2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/13e5a73fe92103b2b20cf604f97c2c40f90a851c"
+        },
+        "date": 1786237729257,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.3,
             "unit": "MiB"
           }
         ]
