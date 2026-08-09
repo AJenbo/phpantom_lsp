@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786293060201,
+  "lastUpdate": 1786293500135,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17305,6 +17305,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fb1988ed5ef287942395aec6dc9d80453ce0619e",
+          "message": "Every Blade directive Laravel ships is now recognised, and one where its\narguments were going untyped is type-checked",
+          "timestamp": "2026-08-09T18:21:39+02:00",
+          "tree_id": "4cf3346f409a72102dd95fe6e001d870f4bc6f65",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fb1988ed5ef287942395aec6dc9d80453ce0619e"
+        },
+        "date": 1786293495842,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74,
             "unit": "MiB"
           }
         ]
