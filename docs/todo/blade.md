@@ -390,6 +390,24 @@ it is the PHP spelling of `@each`, so both its view arguments are render
 sites and its data argument means what `blade_each_directive`'s does
 rather than what a data array does.
 
+**Acceptance tests.** Bladestan's `view-call-site-view-methods` fixture
+is the behaviour spec, and every one of its cases is written against a
+typed receiver, so the whole fixture lands here. Given a template
+declaring `string $title` and `App\Models\User $user`, each of these
+passes only `$title` and must report `$user` missing:
+
+- `$factory->make('signed-template', ['title' => 'Hello'])`;
+- `$factory->first(['optional-override', 'signed-template'], […])`,
+  judged against the fallback candidate the list guarantees;
+- `$factory->renderWhen(true, 'signed-template', […])` and
+  `renderUnless(false, …)`, which name their template second;
+- `$mailable->markdown('signed-template', […])` on a `Mailable` held in a
+  parameter rather than reached through `$this`.
+
+`$factory->renderEach('render-each-item', ['a', 'b'], 'item')` is the
+clean case: it binds `$item` and `$key` the way `@each` does, so a
+partial declaring exactly those two is satisfied and nothing is reported.
+
 ### BL22. A template never learns anything from the templates that render it
 
 `compute_blade_injected_vars` skips every Blade file in the caller

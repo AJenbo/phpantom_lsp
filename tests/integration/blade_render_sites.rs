@@ -28,6 +28,7 @@ mod tests {
         class Mailable {\n\
         \x20   public array $callbacks = [];\n\
         \x20   public function view(string $view, array $data = []): static { return $this; }\n\
+        \x20   public function markdown(string $view, array $data = []): static { return $this; }\n\
         \x20   public function with(array|string $key, mixed $value = null): static { return $this; }\n\
         }\n";
 
@@ -362,6 +363,50 @@ mod tests {
                 .is_some_and(|uri| uri.ends_with("/resources/views/emails/shipped.blade.php")),
             "the Content view: argument should reach the template, got {target:?}"
         );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "expected a clean call site, got {diags:?}"
+        );
+    }
+
+    /// The constructor takes its view name first and its data fifth, so a
+    /// `Content` written positionally down to the view name names the same
+    /// template a `view:` argument does, and a `with:` after it is still
+    /// the data paired with it.
+    #[tokio::test]
+    async fn a_positional_content_view_argument_names_a_template() {
+        let (backend, dir) = workspace(&[
+            ("resources/views/emails/shipped.blade.php", TITLED),
+            (
+                "app/OrderShipped.php",
+                &mailable("", "new Content('emails.shipped', with: ['titel' => 'Hi'])"),
+            ),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/OrderShipped.php", "php", 6, 30).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/emails/shipped.blade.php")),
+            "a positional Content view argument should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
+        assert_eq!(diags.len(), 2, "got {diags:?}");
+        assert!(
+            diags.iter().any(
+                |(code, message)| code == "missing_view_variable" && message.contains("$title")
+            ),
+            "got {diags:?}"
+        );
+        assert!(
+            diags.iter().any(
+                |(code, message)| code == "unknown_view_variable" && message.contains("$titel")
+            ),
+            "the typo in with: should be reported, got {diags:?}"
+        );
     }
 
     #[tokio::test]
@@ -462,6 +507,45 @@ mod tests {
         );
     }
 
+    /// `markdown()` names a template the same way `view()` does, and takes
+    /// its data in the same place.
+    #[tokio::test]
+    async fn a_mailable_markdown_method_names_a_template() {
+        let build = "<?php\nnamespace App;\nuse Illuminate\\Mail\\Mailable;\n\
+            class OrderShipped extends Mailable {\n\
+            \x20   public function build(): static {\n\
+            \x20       return $this->markdown('emails.shipped', ['titel' => 'Hi']);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/emails/shipped.blade.php", TITLED),
+            ("app/OrderShipped.php", build),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/OrderShipped.php", "php", 5, 36).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/emails/shipped.blade.php")),
+            "$this->markdown() in a mailable should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
+        assert_eq!(diags.len(), 2, "got {diags:?}");
+        assert!(
+            diags.iter().any(
+                |(code, message)| code == "missing_view_variable" && message.contains("$title")
+            ),
+            "got {diags:?}"
+        );
+        assert!(
+            diags.iter().any(
+                |(code, message)| code == "unknown_view_variable" && message.contains("$titel")
+            ),
+            "got {diags:?}"
+        );
+    }
+
     /// The same method name on a class that is not a mailable is an
     /// ordinary method call, not a render.
     #[tokio::test]
@@ -545,6 +629,35 @@ mod tests {
             diags.is_empty(),
             "expected a clean call site, got {diags:?}"
         );
+    }
+
+    /// `renderUnless()` is `renderWhen()` with the condition inverted, so
+    /// it names its template second and takes its data third as well.
+    #[tokio::test]
+    async fn the_facades_render_unless_names_its_second_argument() {
+        let controller = "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\View;\n\
+            class PageController {\n\
+            \x20   public function show(bool $ok): mixed {\n\
+            \x20       return View::renderUnless($ok, 'pages.about', []);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/pages/about.blade.php", TITLED),
+            ("app/PageController.php", controller),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/PageController.php", "php", 5, 45).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/pages/about.blade.php")),
+            "View::renderUnless() should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
     }
 
     /// `View::exists()` names a template without rendering it, so it hands
