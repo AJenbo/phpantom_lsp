@@ -2273,6 +2273,10 @@ impl Backend {
     /// so only candidates are parsed.
     pub(crate) fn build_laravel_gate_index(&self) {
         let mut index = crate::virtual_members::laravel::LaravelGateIndex::default();
+        // Read from `composer.json` during init and not recoverable from the
+        // provider scan below, so it has to survive the fresh index.
+        index
+            .set_runtime_permission_package(self.laravel_gates.read().runtime_permission_package());
         let mut scanned = 0usize;
 
         for fqn in self.laravel_provider_fqns() {

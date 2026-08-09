@@ -60,6 +60,66 @@ fn a_computed_ability_name_is_skipped() {
 }
 
 #[test]
+fn a_gate_before_callback_is_recorded() {
+    let content = "<?php\n\
+        use Illuminate\\Support\\Facades\\Gate;\n\
+        class AuthServiceProvider {\n\
+            public function boot(): void {\n\
+                Gate::before(fn ($user, $ability) => $user->hasPermissionTo($ability));\n\
+            }\n\
+        }\n";
+    let scan = scan(content);
+    assert!(scan.before_callback);
+    assert!(scan.definitions.is_empty());
+    // The file contributes the fact that it opens the ability space, so it
+    // must be kept rather than dropped as empty.
+    assert!(!scan.is_empty());
+}
+
+#[test]
+fn a_file_without_a_before_callback_records_none() {
+    let content = "<?php\n\
+        use Illuminate\\Support\\Facades\\Gate;\n\
+        Gate::define('update-post', fn () => true);\n";
+    assert!(!scan(content).before_callback);
+}
+
+#[test]
+fn a_before_callback_opens_the_ability_space_only_for_project_code() {
+    let content = "<?php\n\
+        use Illuminate\\Support\\Facades\\Gate;\n\
+        Gate::before(fn () => null);\n";
+
+    let mut vendor_only = LaravelGateIndex::default();
+    vendor_only.set_file(
+        "file:///app/vendor/acme/auth/src/AuthServiceProvider.php".to_string(),
+        scan(content),
+    );
+    vendor_only.rebuild();
+    assert!(!vendor_only.ability_space_is_open());
+
+    let mut project = LaravelGateIndex::default();
+    project.set_file(
+        "file:///app/src/Providers/AuthServiceProvider.php".to_string(),
+        scan(content),
+    );
+    project.rebuild();
+    assert!(project.ability_space_is_open());
+}
+
+#[test]
+fn a_permission_package_opens_the_ability_space_on_its_own() {
+    let mut index = LaravelGateIndex::default();
+    assert!(!index.ability_space_is_open());
+    index.set_runtime_permission_package(true);
+    assert!(index.ability_space_is_open());
+    // Rebuilding the file scans must not lose the manifest-derived signal.
+    index.rebuild();
+    assert!(index.ability_space_is_open());
+    assert!(index.runtime_permission_package());
+}
+
+#[test]
 fn an_unrelated_gate_class_is_not_read_as_the_facade() {
     // A local `Gate` in the current namespace resolves to `App\Gate`, not the
     // facade, so its `define()` call registers nothing.

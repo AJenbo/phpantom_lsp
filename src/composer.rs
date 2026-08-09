@@ -1144,6 +1144,42 @@ pub(crate) fn is_laravel_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Packages that answer authorization checks from a runtime permission
+/// table rather than from `Gate::define()` calls or policy classes.
+///
+/// Each of these seeds its permissions in the database and hands the gate a
+/// catch-all callback (`$gate->before(…)`) that resolves any ability name
+/// against those rows, so the abilities an application checks appear nowhere
+/// in its source.  A project depending on one has an open ability space.
+const RUNTIME_PERMISSION_PACKAGES: &[&str] = &[
+    "spatie/laravel-permission",
+    "silber/bouncer",
+    "santigarcor/laratrust",
+    "zizaco/entrust",
+    "kodeine/laravel-acl",
+    "ultraware/roles",
+    "jeremykenedy/laravel-roles",
+];
+
+/// Detect whether the project depends on a package that authorizes through a
+/// runtime permission table.
+///
+/// Static scanning cannot enumerate what such a package accepts, so a
+/// diagnostic that judges an ability name against the abilities found in
+/// source has nothing to judge against and must stand down.  See
+/// [`RUNTIME_PERMISSION_PACKAGES`].
+pub(crate) fn has_runtime_permission_package(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            RUNTIME_PERMISSION_PACKAGES
+                .iter()
+                .any(|known| name.eq_ignore_ascii_case(known))
+        })
+}
+
 pub(crate) fn explicit_dependency_names(package: &ComposerPackage) -> HashSet<String> {
     package
         .require
@@ -1237,6 +1273,29 @@ mod tests {
     fn non_laravel_project_is_not_detected() {
         let p = pkg(r#"{"require": {"php": "^8.2", "symfony/console": "^7.0"}}"#);
         assert!(!is_laravel_project(&p));
+    }
+
+    // ── has_runtime_permission_package ──────────────────────────────
+
+    #[test]
+    fn detects_a_runtime_permission_package() {
+        let p = pkg(
+            r#"{"require": {"laravel/framework": "^11.0", "spatie/laravel-permission": "^6.0"}}"#,
+        );
+        assert!(has_runtime_permission_package(&p));
+    }
+
+    #[test]
+    fn detects_a_runtime_permission_package_in_require_dev() {
+        let p = pkg(r#"{"require-dev": {"silber/bouncer": "^1.0"}}"#);
+        assert!(has_runtime_permission_package(&p));
+    }
+
+    #[test]
+    fn a_plain_laravel_project_has_no_runtime_permission_package() {
+        let p =
+            pkg(r#"{"require": {"laravel/framework": "^11.0", "spatie/laravel-data": "^4.0"}}"#);
+        assert!(!has_runtime_permission_package(&p));
     }
 
     // ── unescape_php_single_quoted ──────────────────────────────────

@@ -91,12 +91,16 @@ pub(crate) struct PolicyRegistration {
 pub(crate) struct GateScan {
     pub definitions: Vec<GateDefinition>,
     pub policies: Vec<PolicyRegistration>,
+    /// Whether the file registers a `Gate::before()` callback.  Such a
+    /// callback answers checks by its own rules, so the abilities it accepts
+    /// are not written anywhere the scan can read.
+    pub before_callback: bool,
 }
 
 impl GateScan {
     /// Whether the file contributes nothing at all to the index.
     pub(crate) fn is_empty(&self) -> bool {
-        self.definitions.is_empty() && self.policies.is_empty()
+        self.definitions.is_empty() && self.policies.is_empty() && !self.before_callback
     }
 }
 
@@ -181,6 +185,15 @@ fn collect_gate_call(
     content: &str,
     scan: &mut GateScan,
 ) {
+    // `Gate::before()` runs ahead of every check and may grant any ability it
+    // likes — typically from a permission table nothing in source describes.
+    // Recording that a file registers one is the whole contribution; the
+    // callback names no ability to index.
+    if method.eq_ignore_ascii_case("before") {
+        scan.before_callback = true;
+        return;
+    }
+
     let mut args = arguments.arguments.iter();
     let (Some(first), second) = (args.next(), args.next()) else {
         return;
@@ -398,6 +411,14 @@ pub(crate) struct LaravelGateIndex {
     abilities: HashMap<String, GateAbilityTarget>,
     /// Model FQN → the FQN of the policy registered for it.
     policies: HashMap<String, String>,
+    /// Whether a project file registers a `Gate::before()` callback.  Derived
+    /// from `by_uri` by [`Self::rebuild`]; a vendor package's own callback
+    /// governs that package's checks, not the application's.
+    project_before_callback: bool,
+    /// Whether `composer.json` lists a package that authorizes from a runtime
+    /// permission table.  Set from the manifest rather than derived from the
+    /// file scans, so [`Self::rebuild`] leaves it alone.
+    runtime_permission_package: bool,
 }
 
 impl LaravelGateIndex {
@@ -420,8 +441,10 @@ impl LaravelGateIndex {
     pub(crate) fn rebuild(&mut self) {
         let mut abilities: HashMap<String, GateAbilityTarget> = HashMap::new();
         let mut policies: HashMap<String, String> = HashMap::new();
+        let mut project_before_callback = false;
 
         for (uri, scan) in self.by_uri.iter() {
+            project_before_callback |= scan.before_callback && !uri.contains("/vendor/");
             for definition in &scan.definitions {
                 abilities
                     .entry(definition.name.clone())
@@ -440,11 +463,36 @@ impl LaravelGateIndex {
 
         self.abilities = abilities;
         self.policies = policies;
+        self.project_before_callback = project_before_callback;
     }
 
     /// Whether `uri` currently contributes any registrations.
     pub(crate) fn has_uri(&self, uri: &str) -> bool {
         self.by_uri.contains_key(uri)
+    }
+
+    /// Record whether `composer.json` lists a runtime-permission package.
+    ///
+    /// Read from the manifest at startup, so a rebuild of the file scans must
+    /// carry it across rather than recompute it.
+    pub(crate) fn set_runtime_permission_package(&mut self, present: bool) {
+        self.runtime_permission_package = present;
+    }
+
+    /// Whether `composer.json` listed a runtime-permission package.
+    pub(crate) fn runtime_permission_package(&self) -> bool {
+        self.runtime_permission_package
+    }
+
+    /// Whether the set of valid ability names is open rather than enumerable.
+    ///
+    /// Two things open it: a `Gate::before()` callback in project code, and a
+    /// dependency on a package that resolves abilities from a database
+    /// permission table.  Either way the abilities an application checks are
+    /// never written in source, so the enumerated set covers none of them and
+    /// an ability missing from it says nothing about whether it is real.
+    pub(crate) fn ability_space_is_open(&self) -> bool {
+        self.project_before_callback || self.runtime_permission_package
     }
 
     /// Where `Gate::define()` declared an ability, if it did.

@@ -905,6 +905,112 @@ class Consumer {
     );
 }
 
+/// A permission package resolves any ability name against rows in the
+/// database, so nothing in source names the abilities the application checks.
+/// The one hand-written `Gate::define()` and the policy classes still make the
+/// enumerated set non-empty, which is exactly why emptiness cannot be the test.
+#[tokio::test]
+async fn a_permission_package_dependency_leaves_abilities_alone() {
+    const PERMISSION_COMPOSER_JSON: &str = r#"{
+    "require": { "laravel/framework": "^11.0", "spatie/laravel-permission": "^6.0" },
+    "autoload": { "psr-4": { "App\\": "src/" } }
+}"#;
+
+    let consumer = "\
+<?php
+namespace App;
+use App\\Models\\Post;
+use Illuminate\\Support\\Facades\\Gate;
+class Consumer {
+    public function go($user, Post $post): void {
+        Gate::allows('dashboard.index');
+        $user->can('orders.index');
+        $user->can('publish', $post);
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        PERMISSION_COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", PROVIDERS_PHP),
+            ("src/Providers/AuthServiceProvider.php", AUTH_PROVIDER_PHP),
+            ("src/Models/Post.php", POST_PHP),
+            ("src/Models/Video.php", VIDEO_PHP),
+            ("src/Policies/PostPolicy.php", POST_POLICY_PHP),
+            ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    assert!(
+        ability_diagnostics(&diags).is_empty(),
+        "a database-backed permission table makes the ability space open, got {:?}",
+        ability_diagnostics(&diags)
+    );
+}
+
+/// The same reasoning without the package: a project that registers its own
+/// `Gate::before()` callback authorizes by rules of its own, so an ability the
+/// scan does not recognise proves nothing.
+#[tokio::test]
+async fn a_gate_before_callback_leaves_abilities_alone() {
+    let provider = "\
+<?php
+namespace App\\Providers;
+use Illuminate\\Support\\Facades\\Gate;
+use Illuminate\\Support\\ServiceProvider;
+class AuthServiceProvider extends ServiceProvider
+{
+    public function boot(): void
+    {
+        Gate::define('manage-billing', fn ($user) => true);
+
+        Gate::before(function ($user, string $ability) {
+            return $user->hasPermissionTo($ability) ?: null;
+        });
+    }
+}
+";
+    let consumer = "\
+<?php
+namespace App;
+use Illuminate\\Support\\Facades\\Gate;
+class Consumer {
+    public function go(): void {
+        Gate::allows('anything-the-table-grants');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("bootstrap/providers.php", PROVIDERS_PHP),
+            ("src/Providers/AuthServiceProvider.php", provider),
+            ("src/Consumer.php", consumer),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, consumer).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
+    assert!(
+        ability_diagnostics(&diags).is_empty(),
+        "a Gate::before() callback makes the ability space open, got {:?}",
+        ability_diagnostics(&diags)
+    );
+}
+
 /// The registered-provider list is written by hand, so it may name a class
 /// that no longer exists, and two providers may share a file.  Neither may
 /// derail the scan or scan the same file twice.

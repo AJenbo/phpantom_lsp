@@ -40,6 +40,17 @@ impl Backend {
             .unwrap_or(false);
         self.resolved_class_cache.write().set_laravel(is_laravel);
 
+        // A permission package answers authorization checks from the database,
+        // so the abilities this project uses are not written in its source and
+        // the unknown-ability diagnostic has nothing to judge them against.
+        let runtime_permissions = composer_json
+            .as_ref()
+            .map(composer::has_runtime_permission_package)
+            .unwrap_or(false);
+        self.laravel_gates
+            .write()
+            .set_runtime_permission_package(runtime_permissions);
+
         let (mappings, vendor_dir) = match &composer_json {
             Some(pkg) => {
                 let mappings = composer::extract_psr4_mappings_from_package(pkg);
@@ -339,6 +350,10 @@ impl Backend {
         // Laravel/Illuminate, so Laravel-specific resolution runs there while
         // pure non-Laravel workspaces skip it.
         let mut any_laravel = false;
+        // Likewise for a runtime-permission dependency: one subproject
+        // authorizing from the database opens the ability space workspace-wide,
+        // since the gate index that judges abilities is shared.
+        let mut any_runtime_permissions = false;
 
         for (sub_idx, (sub_root, vendor_dir)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -366,11 +381,11 @@ impl Backend {
             }
             skip_dirs.insert(sub_root.clone());
 
-            if !any_laravel
+            if (!any_laravel || !any_runtime_permissions)
                 && let Some(pkg) = composer::read_composer_package(sub_root)
-                && composer::is_laravel_project(&pkg)
             {
-                any_laravel = true;
+                any_laravel |= composer::is_laravel_project(&pkg);
+                any_runtime_permissions |= composer::has_runtime_permission_package(&pkg);
             }
 
             // ── PSR-4 mappings ──────────────────────────────────────
@@ -429,6 +444,9 @@ impl Backend {
         }
 
         self.resolved_class_cache.write().set_laravel(any_laravel);
+        self.laravel_gates
+            .write()
+            .set_runtime_permission_package(any_runtime_permissions);
 
         // Re-sort PSR-4 mappings by prefix length descending so
         // longest-prefix-first matching works.

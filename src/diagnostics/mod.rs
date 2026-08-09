@@ -695,7 +695,16 @@ impl Backend {
         // authorizes entirely through runtime-registered callbacks, or one
         // that is not really using Laravel's gate), not that every ability
         // referenced is wrong.
-        let gate_abilities: HashSet<String> = if has_gate_ability {
+        //
+        // A `Gate::before()` callback, or a package that answers checks from a
+        // permission table, grants abilities that appear nowhere in source.  A
+        // single unrelated `Gate::define()` call is enough to make the
+        // enumerated set non-empty, so emptiness alone does not catch this: the
+        // ability space is open and the whole check has to stand down —
+        // including the walk of every policy class that would enumerate it.
+        let gate_ability_space_is_open =
+            has_gate_ability && self.laravel_gates.read().ability_space_is_open();
+        let gate_abilities: HashSet<String> = if has_gate_ability && !gate_ability_space_is_open {
             self.cached_gate_abilities().into_iter().collect()
         } else {
             HashSet::new()
@@ -707,7 +716,8 @@ impl Backend {
                 // it reports which model rather than the shared
                 // "Unknown <kind>: '<key>'" message the others share.
                 LaravelStringKind::GateAbility => {
-                    if !gate_abilities.is_empty()
+                    if !gate_ability_space_is_open
+                        && !gate_abilities.is_empty()
                         && let Some(message) =
                             self.gate_ability_problem(uri, content, key, *start, &gate_abilities)
                         && let Some(range) = self.offset_range_to_lsp_range(
