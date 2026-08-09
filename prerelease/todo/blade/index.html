@@ -1146,10 +1146,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl18-mailable-and-view-method-render-sites" class="md-nav__link">
+  <a href="#bl23-render-sites-behind-a-typed-receiver" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL18. Mailable and view-method render sites
+        BL23. Render sites behind a typed receiver
       </span>
     </span>
   </a>
@@ -1430,10 +1430,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)
+        Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)
       </span>
     </span>
   </a>
@@ -2346,10 +2346,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#bl18-mailable-and-view-method-render-sites" class="md-nav__link">
+  <a href="#bl23-render-sites-behind-a-typed-receiver" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        BL18. Mailable and view-method render sites
+        BL23. Render sites behind a typed receiver
       </span>
     </span>
   </a>
@@ -2630,10 +2630,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22" class="md-nav__link">
+  <a href="#step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)
+        Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)
       </span>
     </span>
   </a>
@@ -3022,45 +3022,31 @@ scanner — so that:</p>
 <li>directive name completion (BL7) includes them;</li>
 <li>registered component namespaces/paths extend the discovery index.</li>
 </ul>
-<h3 id="bl18-mailable-and-view-method-render-sites">BL18. Mailable and view-method render sites<a class="headerlink" href="#bl18-mailable-and-view-method-render-sites" title="Permanent link">&para;</a></h3>
-<p>Call-site validation (<code>src/diagnostics/blade_call_site.rs</code>) reaches every
-render site the symbol map records a view name for: <code>view()</code>,
-<code>View::make()</code>, <code>Route::view()</code>, the <code>blade_view_directive</code> the
-preprocessor compiles <code>@include</code>/<code>@extends</code>/<code>@component</code> into, and the
-<code>blade_each_directive</code> it compiles <code>@each</code> into.
-Two shapes Bladestan matches are missing, because nothing indexes their
-view name in the first place — which also costs them go-to-definition,
-hover, and the unknown-view diagnostic, so this is an indexing item
-rather than a diagnostics one:</p>
+<h3 id="bl23-render-sites-behind-a-typed-receiver">BL23. Render sites behind a typed receiver<a class="headerlink" href="#bl23-render-sites-behind-a-typed-receiver" title="Permanent link">&para;</a></h3>
+<p>The symbol map decides what is a view name syntactically, so the render
+sites it recognises by receiver are the ones a receiver's <em>spelling</em>
+settles: <code>$this-&gt;view('emails.shipped')</code> inside a class that extends a
+<code>Mailable</code>, and <code>view()-&gt;make(…)</code> / <code>-&gt;first(…)</code> off the bare helper call
+that returns the factory. A receiver whose viewness is only in its
+<em>type</em> is still missed:</p>
 <ul>
-<li><code>new Content(view: 'emails.orders.shipped', with: [...])</code> in a
-  mailable's <code>content()</code>, along with the <code>html:</code>, <code>text:</code>, and
-  <code>markdown:</code> arguments. The data argument is named (<code>with:</code>) rather
-  than positional, so <code>ViewCallWalker::matches</code> needs to pair a named
-  view argument with a named data argument instead of taking the next
-  positional one.</li>
-<li><code>-&gt;view('name', [...])</code> / <code>-&gt;render()</code> / <code>-&gt;first([...])</code> on a value
-  typed as the view factory or a mailable, which Bladestan's
-  <code>BladeViewMethodsMatcher</code> resolves by receiver type. Keying on the
-  method name alone would be far too broad, so this needs the receiver
-  resolved through the forward walker first.</li>
+<li>a constructor-injected factory (<code>Factory $views</code> → <code>$this-&gt;views-&gt;make('x')</code>)
+  or one pulled from the container, which Bladestan's
+  <code>BladeViewMethodsMatcher</code> resolves by receiver type;</li>
+<li>a mailable held in a local (<code>$mail = new OrderShipped(); $mail-&gt;view('x')</code>).</li>
 </ul>
-<p>Two more sit lower down the same slope and are cheap by comparison:</p>
-<ul>
-<li><code>Response::view('pages.about', [...])</code>, which Bladestan matches
-  alongside <code>View::make()</code>. It is a plain facade static call, so it
-  belongs next to the <code>View</code>/<code>Route</code> arms in
-  <code>symbol_map/extraction/expressions/calls.rs</code> and in
-  <code>is_view_render_static_call</code>.</li>
-<li><code>@includeFirst(['custom.header', 'partials.header'])</code>,
-  <code>@componentFirst</code>, and <code>@extendsFirst</code>, whose view names sit inside an
-  array literal rather than at an argument position, so
-  <code>emit_laravel_string_span</code> records nothing for them.
-  <code>signature::array_string_literals</code> already reads that shape for the
-  accepted-name walk and the layout chain; the indexer needs the same,
-  and <code>ViewCallWalker::matches</code> needs to pair each candidate with the
-  data argument that follows the array.</li>
-</ul>
+<p>Resolving those means asking the forward walker for the receiver's type,
+which <code>extract_symbol_map</code> cannot do: it runs during <code>update_ast</code>, before
+the file's classes are resolved, and a forward walk per method call would
+be paid on every keystroke. So this wants a lazily-computed set of extra
+view spans per file, consulted alongside the symbol map by the consumers
+that read view keys (<code>blade_call_site</code>, <code>call_site_inference</code>, the
+reference index, definition, hover) rather than a second syntactic guess
+in the indexer.</p>
+<p><code>Factory::renderEach($view, $data, $iterator, $empty)</code> belongs with it:
+it is the PHP spelling of <code>@each</code>, so both its view arguments are render
+sites and its data argument means what <code>blade_each_directive</code>'s does
+rather than what a data array does.</p>
 <h3 id="bl19-signature-covariance-diagnostic">BL19. Signature covariance diagnostic<a class="headerlink" href="#bl19-signature-covariance-diagnostic" title="Permanent link">&para;</a></h3>
 <p><code>blade_template_contract</code> (<code>src/blade/contract.rs</code>) merges a template's
 signature with the layouts it <code>@extends</code>, nearest declaration winning,
@@ -3382,9 +3368,9 @@ directives with snippet templates.</p>
 <p>Implement go-to-definition for view names and component tags.</p>
 <p><strong>Deliverable:</strong> Ctrl-click on <code>@include('users.index')</code> jumps to
 the file.</p>
-<h3 id="step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22">Step 9: Template contracts (BL10, BL11, BL18, BL19, BL20, BL22)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl18-bl19-bl20-bl22" title="Permanent link">&para;</a></h3>
-<p>Call-site validation is shipped. What is left widens it (BL18 for the
-render sites nothing indexes a view name for, BL19 for the covariance
+<h3 id="step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23">Step 9: Template contracts (BL10, BL11, BL19, BL20, BL22, BL23)<a class="headerlink" href="#step-9-template-contracts-bl10-bl11-bl19-bl20-bl22-bl23" title="Permanent link">&para;</a></h3>
+<p>Call-site validation is shipped. What is left widens it (BL23 for the
+render sites whose receiver only a type settles, BL19 for the covariance
 the merge does not check, BL20 for the data shapes the checks stand down
 on, BL22 for the templates that render other templates) and is
 independent of section/stack intelligence and custom directive
