@@ -7,32 +7,6 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-### B67. An inline `@php(…)` masks the rest of the template
-
-`mask_inert_regions` (`src/blade/signature.rs`) treats every `@php` as the
-opening of a block and runs `end_of_region(bytes, i + 4, b"@endphp")` on
-it. Blade has two spellings: the block form, which does close with
-`@endphp`, and the inline directive `@php($featured = $posts->first())`,
-which closes with its own parenthesis and never writes `@endphp` at all.
-An inline one therefore masks everything from itself to the *next*
-`@endphp` anywhere in the file, or to EOF when there is none.
-
-Every consumer of the masked text loses that span: `has_declared_signature`,
-`extract_extends`, `extract_props`/`extract_aware`,
-`referenced_component_tags`, and `scan_component_tag_calls`. The last is
-the one that shows: a `<x-…>` tag written after an inline `@php(…)` is
-invisible, so the component it names never sees the attributes that call
-site passes and reports the variables they supply as
-`unknown_variable`. `examples/laravel/resources/views/welcome.blade.php`
-has a live instance — `@php($bakery = …)` near the bottom masks every tag
-after it.
-
-Fix: only open a block when the `@php` is *not* the inline form. Blade's
-own `compileStatements` regex admits `[ \t]*` between the directive name
-and an opening `(`, so `@php` followed by optional spaces or tabs and then
-`(` is inline and masks nothing. The same shape applies to any other
-directive that has both a block and an inline form.
-
 ### B3. Directive coverage gaps in `match_directive`/`translate_directive`
 
 Discovered while building directive-name completion (`DIRECTIVE_COMPLETIONS`

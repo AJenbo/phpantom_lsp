@@ -431,6 +431,53 @@ mod tests {
         );
     }
 
+    /// The inline `@php(…)` directive closes with its own parenthesis and
+    /// never writes `@endphp`, so a tag written after it is still a call
+    /// site of the component it names.
+    #[tokio::test]
+    async fn a_tag_after_an_inline_php_directive_is_still_a_call_site() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes :hairAnalysis=\"$model\" />\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $hairAnalysis->name }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        // No `@endphp` follows, so mistaking the inline directive for a
+        // block opener blanks the rest of the file, tag included.
+        let page_source = "@php\n/** @var \\App\\Item $item */\n@endphp\n@php($model = $item)\n<x-brand.boxes :hairAnalysis=\"$model\" />\n";
+        open(&backend, &page_uri, "blade", page_source).await;
+        open(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("Item"),
+            "$hairAnalysis should be typed Item from the tag's bound attribute, got: {}",
+            hover
+        );
+    }
+
     /// A plain string attribute on an `<x-…>` tag still declares the
     /// variable (as `string`), so the component body does not report it
     /// as undefined.

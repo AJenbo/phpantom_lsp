@@ -301,7 +301,7 @@ pub(crate) fn mask_inert_regions(content: &str, mask_php_blocks: bool) -> Cow<'_
         } else if !escaped && bytes[i..].starts_with(b"@verbatim") {
             Some(end_of_region(bytes, i + 9, b"@endverbatim"))
         } else if mask_php_blocks && !escaped && bytes[i..].starts_with(b"@php") {
-            Some(end_of_region(bytes, i + 4, b"@endphp"))
+            php_region(bytes, i)
         } else {
             None
         };
@@ -322,6 +322,39 @@ pub(crate) fn mask_inert_regions(content: &str, mask_php_blocks: bool) -> Cow<'_
     // Only whole inert regions were overwritten with ASCII spaces, so the
     // result is still valid UTF-8.
     Cow::Owned(String::from_utf8(out).unwrap_or_else(|_| content.to_string()))
+}
+
+/// The end offset (exclusive) of the inert region a `@php` at `at` opens,
+/// or `None` when it opens none.
+///
+/// Blade spells `@php` two ways. The block form runs to its `@endphp`.
+/// The inline form, `@php($featured = $posts->first())`, is a single
+/// statement closed by its own parenthesis and never writes `@endphp` at
+/// all, so treating it as a block opener would blank the template from
+/// there to the next `@endphp` anywhere in the file, or to end of input
+/// when there is none. Blade's own `compileStatements` regex allows spaces
+/// and tabs between a directive name and its opening `(`.
+fn php_region(bytes: &[u8], at: usize) -> Option<usize> {
+    let after = at + 4;
+    // `@phpinfo(…)` is a call written in template text, not the directive.
+    if bytes
+        .get(after)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        return None;
+    }
+    let mut i = after;
+    while matches!(bytes.get(i), Some(b' ' | b'\t')) {
+        i += 1;
+    }
+    if bytes.get(i) == Some(&b'(') {
+        // The statement is inert to Blade like a block is, but only as far
+        // as its own closing parenthesis. An unterminated one is a syntax
+        // error mid-edit, so it masks nothing rather than the rest of the
+        // file.
+        return matching_paren(bytes, i).map(|end| end + 1);
+    }
+    Some(end_of_region(bytes, after, b"@endphp"))
 }
 
 /// The end offset (exclusive) of a region that opened at `from`, i.e. just
@@ -697,6 +730,46 @@ mod tests {
     fn escaped_php_opens_no_block() {
         let blade = "@@php @extends('layout') @@endphp";
         assert_eq!(mask_inert_regions(blade, true), blade);
+    }
+
+    /// The inline `@php(…)` closes with its own parenthesis and never
+    /// writes `@endphp`, so it must mask itself and nothing beyond.
+    #[test]
+    fn an_inline_php_directive_masks_only_itself() {
+        let blade = "@php($featured = $posts->first())\n<x-card :post=\"$featured\" />\n@php\n$stale = 1;\n@endphp\n<x-footer />\n";
+        let masked = mask_inert_regions(blade, true);
+        assert_eq!(masked.len(), blade.len());
+        assert!(!masked.contains("$featured = "));
+        assert!(masked.contains("<x-card :post=\"$featured\" />"));
+        assert!(!masked.contains("$stale"));
+        assert!(masked.contains("<x-footer />"));
+    }
+
+    #[test]
+    fn an_inline_php_directive_is_inert_like_a_block() {
+        // Blade allows spaces and tabs before the opening parenthesis.
+        assert!(extract_props("@php ($label = \"@props(['x'])\")\n").is_none());
+        assert!(extract_extends("@php($x = \"@extends('layouts.app')\")\n").is_empty());
+    }
+
+    /// With no `@endphp` anywhere, an inline directive mistaken for a block
+    /// opener would blank the rest of the file.
+    #[test]
+    fn an_inline_php_directive_does_not_run_to_end_of_file() {
+        let blade = "@php($bakery = 1)\n@props(['caption' => ''])\n";
+        assert_eq!(
+            props(blade),
+            vec![("caption".to_string(), Some("''".to_string()))]
+        );
+    }
+
+    #[test]
+    fn a_php_prefixed_call_is_not_the_directive() {
+        let blade = "@phpinfo()\n@props(['caption' => ''])\n";
+        assert_eq!(
+            props(blade),
+            vec![("caption".to_string(), Some("''".to_string()))]
+        );
     }
 
     #[test]
