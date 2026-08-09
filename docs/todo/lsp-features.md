@@ -227,67 +227,49 @@ debugger.
 
 ---
 
-## F8. Test ↔ implementation navigation via `@covers`
+## F8. Implementation → test navigation via `@covers`
 
 **Impact: Low · Effort: Medium**
 
-Provide bidirectional navigation between a test class and the class it
-tests, using PHPUnit's `@covers` / `@coversClass` / `#[CoversClass]`
-annotations as the linking mechanism.
+Given a class, surface the test classes that name it in their PHPUnit
+coverage metadata. The test → subject direction already works: coverage
+targets are symbol-map references, so go-to-definition, hover, and
+rename reach them the way they reach any other class, method, or
+function name.
 
 ### Why not path-based mapping
 
 Pattern-based approaches (e.g. `src/Foo.php` → `tests/FooTest.php`)
 assume a project follows a specific directory convention. Many projects
 don't: tests may live under `tests/Feature/`, `tests/Functional/`,
-or in a completely separate directory structure. The `@covers` tag is
+or in a completely separate directory structure. Coverage metadata is
 an explicit, project-layout-independent link that works for any
 structure.
 
-### From test → subject
+### The reverse lookup
 
-When the cursor is in a test class, look for:
-- `@covers \App\Service\UserService` (docblock on class or method)
-- `@coversClass(\App\Service\UserService::class)` (PHPUnit 10+)
-- `#[CoversClass(UserService::class)]` (PHP 8 attribute, PHPUnit 10+)
+Nothing indexes coverage targets today, so answering "which tests cover
+this class?" means finding every `#[CoversClass]` / `@covers` in the
+project that names it. Two approaches:
 
-Resolve the referenced class name via the standard class loader and
-navigate to its definition. This can be exposed as a code lens
-("Go to subject") or a code action, or both.
+- **Lazy scan**: when the user asks, scan files matching `*Test.php` for
+  metadata referencing the current class FQN. O(n) in test file count,
+  but test directories are typically small, and a `memchr`-based
+  pre-filter on the class name before parsing keeps it fast.
+- **Indexed**: record coverage targets during the full background
+  indexing pass and keep a reverse map, evicted alongside the other
+  per-file indexes (`gti_index` is the model), so the lookup is O(1).
 
-### From subject → test
-
-Given a class, find test classes that reference it in `@covers` /
-`@coversClass` / `#[CoversClass]`. This requires scanning test files
-for the annotation. Two approaches:
-
-- **Lazy scan**: When the user invokes "find tests" on a class, scan
-  files matching `*Test.php` in the project for `@covers` / `#[CoversClass]`
-  referencing the current class FQN. This is O(n) in test file count
-  but test directories are typically small.
-- **Indexed**: Now that full background indexing is available,
-  `@covers` annotations can be indexed during the indexing pass and
-  looked up in O(1).
-
-The lazy approach is fine for most projects. Test directories rarely
-exceed a few hundred files, and a simple `memchr`-based string
-pre-filter on the class name before parsing keeps it fast.
+An index is what an always-on presentation needs: a code lens fires on
+every open document, and scanning the test tree per request is too much
+work to do on that path.
 
 ### Exposure
 
-- **Code lens** on test classes: "Subject: UserService" (clickable,
-  navigates to the subject class).
-- **Code lens** on subject classes: "Tests: UserServiceTest" (clickable,
-  navigates to the test).
-- **Code action**: "Go to test" / "Go to subject" when the cursor is
-  on the class name.
-
-### Dependencies
-
-No hard dependencies. Works with the existing class loader for the
-test → subject direction. The subject → test direction benefits from,
-but does not require, the full background indexing that is now
-available.
+The subject side has no reference to anchor to, so unlike the test side
+it cannot ride on go-to-definition. It needs a presentation of its own,
+such as a code lens or an inlay overlay above the class declaration
+("Tests: UserServiceTest"), or a code action on the class name.
 
 ---
 

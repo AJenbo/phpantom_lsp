@@ -4569,8 +4569,61 @@ class LazyInitNarrowingDemo
     }
 }
 
+// ── PHPUnit coverage metadata (go-to-definition) ────────────────────────────
+// `@covers` and `@uses` name the code a test exercises.  Ctrl+Click any target
+// to jump to it.  `@coversDefaultClass` gives a bare `::member` its subject,
+// and it reaches the docblocks of the class's methods as well.
+//
+// PHPUnit 10 replaced these annotations with attributes.  Those navigate the
+// same way once PHPUnit is installed, including the targets it spells as
+// strings: `#[CoversClass(CoverageCalculator::class)]`,
+// `#[CoversMethod(CoverageCalculator::class, 'add')]`, and
+// `#[CoversFunction('coverageTaxRate')]`.
+
+/**
+ * @coversDefaultClass \Demo\CoverageCalculator
+ *
+ * @covers ::add                          CoverageCalculator::add()
+ * @uses \Demo\CoverageLedger             CoverageLedger
+ */
+class CoverageDefaultClassDemo
+{
+    /**
+     * @covers ::subtract                 CoverageCalculator::subtract()
+     */
+    public function demo(): void
+    {
+    }
+}
+
+/**
+ * Without a default class in scope, `::name` names a global function.
+ *
+ * @covers ::coverageTaxRate              coverageTaxRate()
+ * @covers \Demo\CoverageCalculator::add  CoverageCalculator::add()
+ */
+class CoverageFunctionTargetDemo
+{
+}
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
+
+// ── PHPUnit coverage metadata scaffolding ───────────────────────────────────
+
+class CoverageCalculator
+{
+    public function add(int $a, int $b): int { return $a + $b; }
+
+    public function subtract(int $a, int $b): int { return $a - $b; }
+}
+
+class CoverageLedger
+{
+    public function total(): int { return 0; }
+}
+
+function coverageTaxRate(): float { return 0.25; }
 
 // ── ReflectionClass<T> instantiation scaffolding ────────────────────────────
 

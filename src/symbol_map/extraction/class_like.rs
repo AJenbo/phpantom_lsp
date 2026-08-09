@@ -40,10 +40,12 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
         }
     }
 
+    let mut covers_default_class = None;
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, class)
     {
         let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        covers_default_class = found.covers_default_class;
         let scope_end = class.right_brace.end.offset;
         for (name, name_offset, bound, variance) in found.templates {
             ctx.template_defs.push(TemplateParamDef {
@@ -66,11 +68,14 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     // `#[AsCommand]` attribute.
     let prev_in_console_command = ctx.in_console_command;
     ctx.in_console_command = class_is_console_command(class);
+    let prev_covers_default_class = ctx.covers_default_class;
+    ctx.covers_default_class = covers_default_class;
 
     for member in class.members.iter() {
         extract_from_class_member(member, ctx);
     }
 
+    ctx.covers_default_class = prev_covers_default_class;
     ctx.in_console_command = prev_in_console_command;
 }
 
@@ -293,6 +298,17 @@ pub(super) fn extract_from_attribute_lists<'a>(
                         &mut ctx.spans,
                     );
                 }
+
+                // PHPUnit coverage attributes: #[CoversMethod(Foo::class,
+                // 'bar')], #[CoversFunction('baz')] — the target is a
+                // string literal, so nothing else makes it navigable.
+                try_emit_coverage_attribute_spans(
+                    class_name,
+                    arg_list,
+                    &mut ctx.has_phpunit_attrs,
+                    ctx.content,
+                    &mut ctx.spans,
+                );
             }
         }
     }
@@ -533,7 +549,13 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
     let method_docblock = get_docblock_text_with_offset(ctx.trivias, ctx.content, method);
     let mut docblock_params: Vec<(String, u32)> = Vec::new();
     if let Some((doc_text, doc_offset)) = method_docblock {
-        let found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+        let covers_default_class = ctx.covers_default_class;
+        let found = extract_docblock_symbols_covering(
+            doc_text,
+            doc_offset,
+            &mut ctx.spans,
+            covers_default_class,
+        );
         docblock_params = found.param_vars;
         // Method-level template params: scope extends from the docblock to
         // the end of the method body (or the end of the docblock for

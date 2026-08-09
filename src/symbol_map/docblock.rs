@@ -160,6 +160,11 @@ pub(super) struct DocblockSymbols {
     /// The variables an inline `@var Type $name` declares, in the same shape
     /// as [`Self::param_vars`].
     pub var_vars: Vec<(String, u32)>,
+    /// The class named by PHPUnit's `@coversDefaultClass`, if this docblock
+    /// carries one.  A test class's default flows down to the docblocks of
+    /// its methods, where `@covers ::name` then means "that class's method"
+    /// rather than "the global function".
+    pub covers_default_class: Option<crate::atom::Atom>,
 }
 
 /// Where a docblock walk writes what it finds.
@@ -175,7 +180,27 @@ pub(super) fn extract_docblock_symbols(
     base_offset: u32,
     spans: &mut Vec<SymbolSpan>,
 ) -> DocblockSymbols {
-    let mut found = DocblockSymbols::default();
+    extract_docblock_symbols_covering(docblock, base_offset, spans, None)
+}
+
+/// [`extract_docblock_symbols`] for a docblock that sits inside a class
+/// carrying `@coversDefaultClass`.
+///
+/// `inherited_default` is that class's default; a `@coversDefaultClass` in
+/// this docblock itself takes precedence over it.
+pub(super) fn extract_docblock_symbols_covering(
+    docblock: &str,
+    base_offset: u32,
+    spans: &mut Vec<SymbolSpan>,
+    inherited_default: Option<crate::atom::Atom>,
+) -> DocblockSymbols {
+    let mut found = DocblockSymbols {
+        // Read up-front rather than when the tag is walked: PHPUnit does not
+        // care whether `@coversDefaultClass` precedes or follows the
+        // `@covers ::member` tags it gives a subject to.
+        covers_default_class: find_covers_default_class(docblock).or(inherited_default),
+        ..DocblockSymbols::default()
+    };
     let mut sink = DocblockSink {
         spans,
         found: &mut found,
@@ -257,9 +282,23 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
         TagValue::Template(value) => emit_template_tag_symbols(value, docblock, base_offset, sink),
 
         // ── Tags the grammar keeps as free text ─────────────────────
-        TagValue::Generic(text) if tag_kind(tag) == TagKind::See => {
-            emit_see_tag_symbol(&text.value, docblock, base_offset, sink.spans);
-        }
+        TagValue::Generic(text) => match tag_kind(tag) {
+            TagKind::See => emit_see_tag_symbol(&text.value, docblock, base_offset, sink.spans),
+            // `@coversDefaultClass` only ever names a class, so the plain
+            // `@see` shape covers it; the default it establishes was read
+            // before the walk started.
+            TagKind::Covers | TagKind::Uses | TagKind::CoversDefaultClass => {
+                let default_class = sink.found.covers_default_class;
+                emit_covers_tag_symbol(
+                    &text.value,
+                    docblock,
+                    base_offset,
+                    default_class,
+                    sink.spans,
+                );
+            }
+            _ => {}
+        },
         _ => {}
     }
 
@@ -369,6 +408,113 @@ fn emit_see_tag_symbol(
 
     let offset = text.span.start.offset + (raw.len() - trimmed.len()) as u32;
     emit_see_reference(reference, offset, spans);
+}
+
+// ─── PHPUnit coverage metadata ──────────────────────────────────────────────
+
+const COVERS_DEFAULT_CLASS_TAG: &str = "@coversDefaultClass";
+
+/// The class named by a `@coversDefaultClass` tag in `docblock`.
+///
+/// Read straight off the raw text rather than the PHPDoc CST so that the
+/// answer is available before the tag walk begins, whichever order the tags
+/// were written in.  The `contains` check keeps docblocks without the tag —
+/// which is nearly all of them — to a single substring search.
+fn find_covers_default_class(docblock: &str) -> Option<crate::atom::Atom> {
+    let index = docblock.find(COVERS_DEFAULT_CLASS_TAG)?;
+    let after_tag = &docblock[index + COVERS_DEFAULT_CLASS_TAG.len()..];
+    // A tag's value ends at the newline; without this a bare
+    // `@coversDefaultClass` would adopt the next line's `*` or tag name.
+    let line = after_tag.split(['\n', '\r']).next()?;
+    let name = line.split_whitespace().next()?;
+    if name.is_empty() || name == "*" {
+        return None;
+    }
+    Some(crate::atom::atom(name))
+}
+
+/// Emit the symbol a PHPUnit `@covers` / `@uses` / `@coversDefaultClass` tag
+/// references.
+///
+/// Like `@see`, these tags reach us as free text, so the reference is the
+/// first whitespace-delimited token.
+fn emit_covers_tag_symbol(
+    text: &Text<'_>,
+    docblock: &str,
+    base_offset: u32,
+    default_class: Option<crate::atom::Atom>,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let start = text.span.start.offset.saturating_sub(base_offset) as usize;
+    let end = (text.span.end.offset.saturating_sub(base_offset) as usize).min(docblock.len());
+    let Some(raw) = docblock.get(start..end) else {
+        return;
+    };
+    let trimmed = raw.trim_start();
+    let Some(reference) = trimmed.split_whitespace().next() else {
+        return;
+    };
+
+    let offset = text.span.start.offset + (raw.len() - trimmed.len()) as u32;
+    emit_covers_reference(reference, offset, default_class, spans);
+}
+
+/// Emit the spans for one PHPUnit coverage target.
+///
+/// Everything that names a class (`Foo`, `\App\Foo`, `Foo::bar`) has the same
+/// shape as an `@see` reference and is handed to that emitter.  What is unique
+/// to `@covers` is the leading-`::` form: `@covers ::name` is a *global
+/// function*, unless a `@coversDefaultClass` is in scope, in which case it is
+/// that class's method.
+fn emit_covers_reference(
+    reference: &str,
+    file_offset: u32,
+    default_class: Option<crate::atom::Atom>,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    // PHPUnit accepts the target with or without a trailing `()`.
+    let reference = reference.strip_suffix("()").unwrap_or(reference);
+
+    let Some(member) = reference.strip_prefix("::") else {
+        // `Foo::<public>` and friends are PHPUnit 4's member-visibility
+        // selectors, not member names.  Keep the class navigable and drop
+        // the selector.
+        if let Some((class_part, member_part)) = reference.split_once("::")
+            && member_part.starts_with('<')
+        {
+            emit_see_reference(class_part, file_offset, spans);
+            return;
+        }
+        emit_see_reference(reference, file_offset, spans);
+        return;
+    };
+
+    if member.is_empty() || member.starts_with('<') {
+        return;
+    }
+
+    let member_start = file_offset + 2;
+    let member_end = member_start + member.len() as u32;
+    let kind = match default_class {
+        Some(class) => SymbolKind::MemberAccess {
+            subject_text: SubjectText::owned(class.to_string()),
+            member_name: crate::atom::atom(member),
+            is_static: true,
+            is_method_call: false,
+            is_docblock_reference: true,
+            is_array_callable: false,
+        },
+        None => SymbolKind::FunctionCall {
+            name: crate::atom::atom(member.trim_start_matches('\\')),
+            is_definition: false,
+        },
+    };
+
+    spans.push(SymbolSpan {
+        start: member_start,
+        end: member_end,
+        kind,
+    });
 }
 
 /// The name and `$` offset of a variable token, with the `$` stripped from the

@@ -8,8 +8,8 @@
 use mago_syntax::cst::*;
 
 use super::docblock::{
-    class_ref_span, class_ref_span_ctx, extract_docblock_symbols, get_docblock_text_with_offset,
-    is_navigable_type,
+    class_ref_span, class_ref_span_ctx, extract_docblock_symbols,
+    extract_docblock_symbols_covering, get_docblock_text_with_offset, is_navigable_type,
 };
 use super::{
     CallSite, ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap,
@@ -81,17 +81,25 @@ struct ExtractionCtx<'a> {
     /// Whether the file imports from `Illuminate\Container\Attributes\`
     /// (checked once lazily, cached for all attribute inspections).
     has_laravel_container_attrs: Option<bool>,
+    /// Whether the file imports from `PHPUnit\Framework\Attributes\`, cached
+    /// the same way as [`Self::has_laravel_container_attrs`].
+    has_phpunit_attrs: Option<bool>,
     /// Whether the members currently being extracted belong to a class that
     /// syntactically extends an Artisan console command (or is `#[AsCommand]`
     /// decorated).  Gates recognition of `$this->call('cmd')` /
     /// `$this->callSilently('cmd')` as command-name references.
     in_console_command: bool,
+    /// The `@coversDefaultClass` of the class whose members are currently
+    /// being extracted.  It is what gives `@covers ::name` on a test method
+    /// a subject; without one that shape names a global function.
+    covers_default_class: Option<crate::atom::Atom>,
 }
 
 mod class_like;
 mod expressions;
 mod keywords;
 mod laravel;
+mod phpunit;
 mod statements;
 mod subject_text;
 
@@ -99,6 +107,7 @@ use class_like::*;
 use expressions::*;
 use keywords::*;
 use laravel::*;
+use phpunit::*;
 use statements::*;
 use subject_text::*;
 
@@ -147,7 +156,9 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
+        has_phpunit_attrs: None,
         in_console_command: false,
+        covers_default_class: None,
     };
 
     for stmt in program.statements.iter() {

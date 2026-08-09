@@ -80,6 +80,14 @@ pub enum TagKind {
     See,
     /// `@link`
     Link,
+    /// PHPUnit's `@covers` — names the code unit a test exercises.
+    Covers,
+    /// PHPUnit's `@coversDefaultClass` — the class a bare `::member`
+    /// reference in a sibling `@covers` tag belongs to.
+    CoversDefaultClass,
+    /// PHPUnit's `@uses` — names a code unit a test executes but does not
+    /// measure coverage for.
+    Uses,
     /// Any other tag; match on [`super::parser::TagInfo::name`].
     Other,
 }
@@ -186,6 +194,9 @@ fn tag_kind_from_name(name: &[u8]) -> TagKind {
         b"deprecated" => TagKind::Deprecated,
         b"see" => TagKind::See,
         b"link" => TagKind::Link,
+        b"covers" => TagKind::Covers,
+        b"coversdefaultclass" => TagKind::CoversDefaultClass,
+        b"uses" => TagKind::Uses,
         _ => TagKind::Other,
     }
 }
