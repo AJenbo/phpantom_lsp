@@ -828,10 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b67-bladeanonymouscomponentnamespace-registrations-are-invisible" class="md-nav__link">
+  <a href="#b67-an-inline-php-masks-the-rest-of-the-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B67. <code>Blade::anonymousComponentNamespace()</code> registrations are invisible
+        B67. An inline <code>@php(…)</code> masks the rest of the template
       </span>
     </span>
   </a>
@@ -1328,10 +1328,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b67-bladeanonymouscomponentnamespace-registrations-are-invisible" class="md-nav__link">
+  <a href="#b67-an-inline-php-masks-the-rest-of-the-template" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B67. <code>Blade::anonymousComponentNamespace()</code> registrations are invisible
+        B67. An inline <code>@php(…)</code> masks the rest of the template
       </span>
     </span>
   </a>
@@ -1390,29 +1390,28 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h3 id="b67-bladeanonymouscomponentnamespace-registrations-are-invisible">B67. <code>Blade::anonymousComponentNamespace()</code> registrations are invisible<a class="headerlink" href="#b67-bladeanonymouscomponentnamespace-registrations-are-invisible" title="Permanent link">&para;</a></h3>
-<p><code>Blade::anonymousComponentNamespace('components', 'webshop')</code> makes
-<code>&lt;x-webshop::pages.boxes&gt;</code> resolve to the plain view <code>components.pages.boxes</code>
-against the configured view roots
-(<code>ComponentTagCompiler::guessAnonymousComponentUsingNamespaces</code> runs
-<code>guessViewName</code> with the registered directory as the prefix).
-<code>Blade::anonymousComponentPath()</code> is the same mechanism keyed by directory.</p>
-<p>PHPantom models neither registration. <code>component_tag_names</code> /
-<code>view_name_for_component_tag</code> (<code>src/blade/component_tags.rs</code>) only know the
-un-registered fallback (<code>ns::X</code> ↔ <code>ns::components.X</code>), so a component
-addressed through a registered prefix matches none of its <code>&lt;x-…&gt;</code> call
-sites: the attributes those tags pass are never inferred, and a variable
-the component reads from them is reported <code>unknown_variable</code> even though
-<code>AnonymousComponent::data()</code> supplies it at runtime. One live instance in
-the Website sample (<code>$kerastaseHairAnalysis</code> in
-<code>components/pages/brand/pro-hair-care/kerastase-boxes.blade.php</code>, called as
-<code>&lt;x-webshop::pages.brand.pro-hair-care.kerastase-boxes&gt;</code> from two
-templates).</p>
-<p>Fix: extract <code>anonymousComponentNamespace()</code> / <code>anonymousComponentPath()</code>
-registrations in <code>provider_resources.rs</code> the way <code>componentNamespace()</code>
-already is (<code>component_namespace_args</code>), and consult them in the tag ↔
-view-name mapping, which today is a pure function of the view name and
-needs the <code>Backend</code>'s registrations to do this.</p>
+<h3 id="b67-an-inline-php-masks-the-rest-of-the-template">B67. An inline <code>@php(…)</code> masks the rest of the template<a class="headerlink" href="#b67-an-inline-php-masks-the-rest-of-the-template" title="Permanent link">&para;</a></h3>
+<p><code>mask_inert_regions</code> (<code>src/blade/signature.rs</code>) treats every <code>@php</code> as the
+opening of a block and runs <code>end_of_region(bytes, i + 4, b"@endphp")</code> on
+it. Blade has two spellings: the block form, which does close with
+<code>@endphp</code>, and the inline directive <code>@php($featured = $posts-&gt;first())</code>,
+which closes with its own parenthesis and never writes <code>@endphp</code> at all.
+An inline one therefore masks everything from itself to the <em>next</em>
+<code>@endphp</code> anywhere in the file, or to EOF when there is none.</p>
+<p>Every consumer of the masked text loses that span: <code>has_declared_signature</code>,
+<code>extract_extends</code>, <code>extract_props</code>/<code>extract_aware</code>,
+<code>referenced_component_tags</code>, and <code>scan_component_tag_calls</code>. The last is
+the one that shows: a <code>&lt;x-…&gt;</code> tag written after an inline <code>@php(…)</code> is
+invisible, so the component it names never sees the attributes that call
+site passes and reports the variables they supply as
+<code>unknown_variable</code>. <code>examples/laravel/resources/views/welcome.blade.php</code>
+has a live instance — <code>@php($bakery = …)</code> near the bottom masks every tag
+after it.</p>
+<p>Fix: only open a block when the <code>@php</code> is <em>not</em> the inline form. Blade's
+own <code>compileStatements</code> regex admits <code>[ \t]*</code> between the directive name
+and an opening <code>(</code>, so <code>@php</code> followed by optional spaces or tabs and then
+<code>(</code> is inline and masks nothing. The same shape applies to any other
+directive that has both a block and an inline form.</p>
 <h3 id="b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers">B2. A layout's contract is enforced without the layout's own suppliers<a class="headerlink" href="#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers" title="Permanent link">&para;</a></h3>
 <p><code>blade_template_contract</code> (<code>src/blade/contract.rs</code>) merges the layouts a
 template <code>@extends</code> into the contract call sites are judged against, so a
