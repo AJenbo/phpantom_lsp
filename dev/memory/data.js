@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786309057618,
+  "lastUpdate": 1786311189999,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17679,6 +17679,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "eedf8638528bda331a1d78647609b383bb9d281d",
+          "message": "A `Blueprint` macro's columns are no longer missing until you edit a\nmigration",
+          "timestamp": "2026-08-09T23:16:25+02:00",
+          "tree_id": "9d3e83d7dac15d26b1019b54508ac2fd0a573f33",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/eedf8638528bda331a1d78647609b383bb9d281d"
+        },
+        "date": 1786311185147,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.4,
             "unit": "MiB"
           }
         ]
