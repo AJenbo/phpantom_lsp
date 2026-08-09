@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786241263629,
+  "lastUpdate": 1786242770590,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16795,6 +16795,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1a00142015708c7b0bf71945521ffbb448b2abe4",
+          "message": "A mailable's template is a render site like any other",
+          "timestamp": "2026-08-09T04:15:51+02:00",
+          "tree_id": "57db4f38e537aa654f77da9b3488da0c1710d4d9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1a00142015708c7b0bf71945521ffbb448b2abe4"
+        },
+        "date": 1786242766579,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.3,
             "unit": "MiB"
           }
         ]
