@@ -839,17 +839,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A layout's contract is enforced without the layout's own suppliers
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1339,17 +1328,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A layout's contract is enforced without the layout's own suppliers
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1412,31 +1390,6 @@ own <code>compileStatements</code> regex admits <code>[ \t]*</code> between the 
 and an opening <code>(</code>, so <code>@php</code> followed by optional spaces or tabs and then
 <code>(</code> is inline and masks nothing. The same shape applies to any other
 directive that has both a block and an inline form.</p>
-<h3 id="b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers">B2. A layout's contract is enforced without the layout's own suppliers<a class="headerlink" href="#b2-a-layouts-contract-is-enforced-without-the-layouts-own-suppliers" title="Permanent link">&para;</a></h3>
-<p><code>blade_template_contract</code> (<code>src/blade/contract.rs</code>) merges the layouts a
-template <code>@extends</code> into the contract call sites are judged against, so a
-variable only <code>layouts/app.blade.php</code> declares is one every caller of
-<code>pages.home</code> has to pass. The <code>supplied</code> set that exempts a variable from
-the missing check is built from the <em>child</em> alone:
-<code>declares_component_directive</code>, <code>extract_props</code>, <code>extract_aware</code>,
-<code>blade_backing_class_vars</code>, and <code>blade_provider_vars</code> all run against the
-child's source and the child's view names.</p>
-<p>A view composer is normally registered on the template that reads the
-variable, which is the layout. <code>View::composer('layouts.app', …)</code> sharing
-<code>$title</code> types the layout's <code>$title</code> correctly, because
-<code>blade_provider_vars</code> matches the registered pattern against
-<code>layouts.app</code>, but nothing matches it against <code>pages.home</code>, so every page
-extending that layout reports "View 'pages.home' expects $title of type
-string, which is not passed" at every one of its call sites. Nothing the
-caller can write clears it. The same hole drops a layout's own <code>@props</code>
-defaults and, for a layout that is itself a component, its backing class
-members.</p>
-<p>Fix: build <code>supplied</code> over the whole chain the way <code>vars</code> already is. For
-each level the layout walk yields, add that template's props and aware
-defaults, its component scope, its backing class members, and its
-provider vars. <code>blade_layout_chain</code> returns the view name alongside the
-source, so the names each level needs are already in hand.
-<code>blade_rendering_scope</code> has the same shape and needs the same fix.</p>
 <h3 id="b3-directive-coverage-gaps-in-match_directivetranslate_directive">B3. Directive coverage gaps in <code>match_directive</code>/<code>translate_directive</code><a class="headerlink" href="#b3-directive-coverage-gaps-in-match_directivetranslate_directive" title="Permanent link">&para;</a></h3>
 <p>Discovered while building directive-name completion (<code>DIRECTIVE_COMPLETIONS</code>
 in <code>src/blade/directives.rs</code>) and cross-checking it against Laravel's own
