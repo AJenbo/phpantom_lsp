@@ -1153,6 +1153,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d16-unreachable_match_arm-ignores-literal-subject-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D16. <code>unreachable_match_arm</code> ignores literal subject types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1838,6 +1849,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d16-unreachable_match_arm-ignores-literal-subject-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D16. <code>unreachable_match_arm</code> ignores literal subject types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2127,6 +2149,25 @@ all parameters are used. Users can now silence false positives with
 <li>Parameters in abstract methods and interface method signatures
   (no body to check).</li>
 </ul>
+<hr />
+<h2 id="d16-unreachable_match_arm-ignores-literal-subject-types">D16. <code>unreachable_match_arm</code> ignores literal subject types<a class="headerlink" href="#d16-unreachable_match_arm-ignores-literal-subject-types" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><code>scalar_type_label</code> in <code>src/diagnostics/match_type_errors.rs</code> answers
+<code>None</code> for a literal type (<code>'exception'</code>, <code>42</code>), so a subject the
+resolver typed as one exact value never reaches the arm check and no
+arm is ever reported unreachable. The comment there explains why: a
+literal was as often what survived after resolution lost an
+alternative it could not type as it was a genuine one-value subject,
+and taking the claim without that evidence produced false positives.</p>
+<p>The resolver no longer loses those alternatives. An unresolvable
+branch now widens the union it belongs to instead of dropping out of
+it, so a literal that reaches this diagnostic is a claim the resolver
+stands behind.</p>
+<p><strong>Fix:</strong> Give <code>TypeKind::Literal</code> its scalar kind in
+<code>scalar_type_label</code> and check the resulting arms. Cover the case the
+old comment was guarding against with a test: a subject whose other
+branch cannot be typed must still produce no diagnostic, because it
+now resolves to <code>mixed</code> rather than to the surviving literal.</p>
 
 
 
