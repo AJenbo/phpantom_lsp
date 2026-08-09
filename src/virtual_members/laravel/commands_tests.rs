@@ -369,6 +369,111 @@ fn index_resolves_alias_names() {
 }
 
 #[test]
+fn indexes_aliases_property() {
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+
+class SyncCommand extends Command
+{
+    protected $signature = 'app:sync';
+    protected $aliases = ['app:s', 'sync'];
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Console/Commands/SyncCommand.php");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "app:sync");
+    assert_eq!(entries[0].aliases, vec!["app:s", "sync"]);
+}
+
+/// `configureFromAttributes()` assigns over the property, so an attribute
+/// alias list replaces `$aliases` rather than merging with it.
+#[test]
+fn attribute_aliases_override_the_aliases_property() {
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Attributes\Aliases;
+use Illuminate\Console\Command;
+
+#[Aliases(['from:attribute'])]
+class SyncCommand extends Command
+{
+    protected $signature = 'app:sync';
+    protected $aliases = ['from:property'];
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Console/Commands/SyncCommand.php");
+    assert_eq!(entries[0].aliases, vec!["from:attribute"]);
+}
+
+/// Symfony splits `name|alias1|alias2` in `Command::__construct()`, so the
+/// primary name must not be indexed with the pipes still in it.
+#[test]
+fn splits_symfony_piped_command_names() {
+    let content = r#"<?php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Symfony\Component\Console\Attribute\AsCommand;
+
+#[AsCommand(name: 'app:sync|app:s|sync')]
+class SyncCommand extends Command
+{
+}
+
+class PurgeCommand extends Command
+{
+    protected $name = 'app:purge|app:p';
+}
+"#;
+    let entries = scan_command_file(content, "file:///app/Console/Commands/Piped.php");
+    assert_eq!(entries.len(), 2);
+    let by_name = |n: &str| entries.iter().find(|e| e.name == n).unwrap();
+    assert_eq!(by_name("app:sync").aliases, vec!["app:s", "sync"]);
+    assert_eq!(by_name("app:purge").aliases, vec!["app:p"]);
+}
+
+/// A leading `|` marks the command hidden; the name follows it, and the
+/// reported offset must still point at the name inside the literal.
+#[test]
+fn leading_pipe_marks_hidden_without_swallowing_the_name() {
+    let content =
+        "<?php #[AsCommand(name: '|app:sync|app:s')] class SyncCommand extends Command {}";
+    let entries = scan_command_file(content, "file:///app/Console/Commands/SyncCommand.php");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "app:sync");
+    assert_eq!(entries[0].aliases, vec!["app:s"]);
+    let offset = entries[0].name_offset as usize;
+    assert_eq!(&content[offset..offset + "app:sync".len()], "app:sync");
+}
+
+/// A command that really *is* named `b:run` must win over one that merely
+/// answers to `b:run` as an alias, whichever order the files hash into.
+#[test]
+fn primary_names_win_over_aliases() {
+    let mut index = LaravelCommandIndex::default();
+    index.set_file(
+        "file:///a.php".to_string(),
+        scan_command_file(
+            "<?php #[Signature('a:run', aliases: ['b:run'])] class ARun extends Command { }",
+            "file:///a.php",
+        ),
+    );
+    index.set_file(
+        "file:///b.php".to_string(),
+        scan_command_file(
+            "<?php class BCommand extends Command { protected $signature = 'b:run'; }",
+            "file:///b.php",
+        ),
+    );
+    index.rebuild();
+
+    assert_eq!(index.get("b:run").unwrap().uri, "file:///b.php");
+}
+
+#[test]
 fn index_dedupes_and_looks_up() {
     let mut index = LaravelCommandIndex::default();
     index.set_file(

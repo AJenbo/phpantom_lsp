@@ -2117,16 +2117,22 @@ impl Backend {
     /// [`laravel_commands`](Backend::laravel_commands) index.
     ///
     /// Candidate files are those declaring a class whose short name ends in
-    /// `Command` (the near-universal Laravel/Symfony convention) or which
-    /// live under a `Console/`, `Commands/` or `Command/` directory (so
-    /// commands with unconventional names are still found), or any other
-    /// non-vendor project class (so commands registered via `withCommands()`
-    /// in `bootstrap/app.php` from arbitrary directories — e.g.
-    /// `app/Actions/Sync` — are indexed too).  Each candidate is
-    /// read once,
-    /// gated by a cheap byte pre-filter for a `signature`/`AsCommand`/`$name`
-    /// declaration before parsing, then scanned by
-    /// [`scan_command_file`](crate::virtual_members::laravel::scan_command_file).
+    /// `Command` (the near-universal Laravel/Symfony convention), those living
+    /// under a `Console/`, `Commands/` or `Command/` directory (so commands
+    /// with unconventional names are still found), and every other non-vendor
+    /// project class.  That last group is what makes `withCommands()` work:
+    /// `bootstrap/app.php` can register a command directory anywhere (say
+    /// `app/Actions/Sync`), and the registration is not statically recoverable
+    /// in general, so project classes are all offered as candidates rather
+    /// than guessed at.  Vendor classes keep the narrow filter, which is where
+    /// the bulk of the classmap lives.
+    ///
+    /// Each candidate is read once, gated by a cheap byte pre-filter for a
+    /// `signature`/`AsCommand`/`$name` declaration before parsing, then
+    /// scanned by
+    /// [`scan_command_file`](crate::virtual_members::laravel::scan_command_file),
+    /// whose extends-`Command` / attribute checks decide whether the file
+    /// really declares a command.
     pub(crate) fn build_laravel_command_index(&self) {
         let mut candidate_uris: std::collections::HashSet<String> =
             std::collections::HashSet::new();
@@ -2134,17 +2140,10 @@ impl Backend {
             let idx = self.symbols.fqn_uri_index.read();
             for (fqn, uri) in idx.iter() {
                 let short = fqn.rsplit('\\').next().unwrap_or(fqn);
-                if short.ends_with("Command")
+                if !uri.contains("/vendor/")
+                    || short.ends_with("Command")
                     || crate::virtual_members::laravel::is_command_directory_uri(uri)
                 {
-                    candidate_uris.insert(uri.to_string());
-                } else if !uri.contains("/vendor/") {
-                    // A project class registered as a command outside the
-                    // conventional locations — e.g. `withCommands()` in
-                    // bootstrap/app.php pointing at an arbitrary directory
-                    // such as app/Actions/Sync.  scan_command_file's
-                    // extends-Command / attribute checks decide whether the
-                    // file really declares a command.
                     candidate_uris.insert(uri.to_string());
                 }
             }
