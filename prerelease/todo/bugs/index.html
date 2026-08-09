@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,37 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b68-an-unresolvable-branch-drops-out-of-a-union-instead-of-widening-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B68. An unresolvable branch drops out of a union instead of widening it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1282,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1298,25 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b68-an-unresolvable-branch-drops-out-of-a-union-instead-of-widening-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B68. An unresolvable branch drops out of a union instead of widening it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1274,7 +1346,35 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>No outstanding items.</p>
+<h3 id="b68-an-unresolvable-branch-drops-out-of-a-union-instead-of-widening-it">B68. An unresolvable branch drops out of a union instead of widening it<a class="headerlink" href="#b68-an-unresolvable-branch-drops-out-of-a-union-instead-of-widening-it" title="Permanent link">&para;</a></h3>
+<p>Indexing a union-typed array resolves to nothing rather than to <code>mixed</code>,
+and a branch that resolves to nothing contributes nothing to the union
+built from it. The result is not a wider type but a <em>narrower</em> one: the
+surviving branch alone, stated with the confidence of a complete answer.</p>
+<p><code>YamlFileLoader::parseDefinition()</code> in <code>symfony/dependency-injection</code>
+holds a live instance. Its <code>$service</code> parameter is <code>array|string|null</code>, so</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$decorationOnInvalid = \array_key_exists(&#39;decoration_on_invalid&#39;, $service)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    ? $service[&#39;decoration_on_invalid&#39;]</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    : &#39;exception&#39;;</span>
+</code></pre></div>
+<p>should give <code>mixed</code>, since one branch is an index into a union PHPantom
+cannot index. Instead <code>$service['decoration_on_invalid']</code> resolves to
+nothing, the ternary keeps only its else branch, and <code>$decorationOnInvalid</code>
+comes out as the literal type <code>'exception'</code> — a claim that the variable
+holds exactly that one string. Declaring the parameter plain <code>array</code> gives
+the correct <code>mixed</code>, so the trigger is the union, not the ternary.</p>
+<p>Every consumer inherits the over-claim. Hover names one value the variable
+often does not hold, completion offers that value's members, and a
+diagnostic that reads the type as the complete set of what a subject can
+hold will contradict the code: <code>unreachable_match_arm</code> had to stop trusting
+literal types at all (<code>scalar_type_label</code> in
+<code>src/diagnostics/match_type_errors.rs</code>) to avoid calling the <code>null</code> arm of
+that same <code>match ($decorationOnInvalid)</code> unreachable.</p>
+<p>Fix: index a union member-wise and union the results, so <code>array</code> yields its
+element type, <code>string</code> yields <code>string</code>, and <code>null</code> yields <code>null</code>. Then, in
+the resolver generally, distinguish "this expression is <code>mixed</code>" from "this
+expression did not resolve": a branch that fails to resolve must widen the
+union it belongs to rather than silently vanish from it.</p>
 
 
 
