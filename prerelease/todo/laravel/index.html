@@ -1312,17 +1312,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l26-gate-ability-and-policy-strings" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L26. Gate ability and policy strings
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l27-legacy-controllermethod-action-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1426,6 +1415,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L44. Sibling resource registrations and degenerate resource names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. <code>-&gt;can()</code> on a user model the receiver does not name
       </span>
     </span>
   </a>
@@ -2016,17 +2016,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l26-gate-ability-and-policy-strings" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L26. Gate ability and policy strings
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l27-legacy-controllermethod-action-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2130,6 +2119,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L44. Sibling resource registrations and degenerate resource names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. <code>-&gt;can()</code> on a user model the receiver does not name
       </span>
     </span>
   </a>
@@ -2835,29 +2835,6 @@ declared under <code>filesystems.disks.*</code>. The config scanner already pars
 <code>config/*.php</code>; expose the children of <code>filesystems.disks</code> as the
 candidate set for completion, go-to-definition (jump to the disk's entry
 in <code>config/filesystems.php</code>), and an unknown-disk diagnostic.</p>
-<h4 id="l26-gate-ability-and-policy-strings">L26. Gate ability and policy strings<a class="headerlink" href="#l26-gate-ability-and-policy-strings" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
-<p>The Laravel LSP covers auth strings (completion, hover, diagnostics,
-links) by booting and asking the <code>Gate</code> for its abilities and policy
-map. The statically recoverable equivalents:</p>
-<ul>
-<li><strong>Gate definitions:</strong> scan <code>Gate::define('name', …)</code> in service
-  provider <code>boot()</code> methods — same shape as the existing macro scanner,
-  including the closure signature for hover.</li>
-<li><strong>Policies:</strong> the <code>$policies</code> array in <code>AuthServiceProvider</code>, the
-  <code>#[UsePolicy]</code> model attribute, and the default discovery convention
-  (<code>App\Models\Foo</code> → <code>App\Policies\FooPolicy</code>). Public methods of the
-  policy become abilities valid for that model.</li>
-<li><strong>Trigger contexts:</strong> <code>Gate::allows()/denies()/check()/any()/none()/
-  authorize()/inspect()/has()</code> (string and array arguments),
-  <code>$user-&gt;can()/cannot()/canAny()</code>, controller <code>$this-&gt;authorize()</code>,
-  <code>Route::can()</code>, the <code>can:ability,Model</code> middleware parameter, and
-  (via the Blade preprocessor) <code>@can</code>/<code>@cannot</code>/<code>@canany</code>.</li>
-<li><strong>Model-aware validation:</strong> when the second argument is a
-  <code>Model::class</code> literal or a typed variable, verify the ability exists
-  <em>for that model's policy</em>, not just anywhere — distinguishing "unknown
-  ability" from "ability not defined for this model."</li>
-</ul>
 <h4 id="l27-legacy-controllermethod-action-strings">L27. Legacy <code>Controller@method</code> action strings<a class="headerlink" href="#l27-legacy-controllermethod-action-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Effort: Low</strong></p>
 <p>We already complete and resolve the modern <code>[Controller::class,
@@ -3033,6 +3010,34 @@ than fixed because it makes the unknown-route diagnostic disagree with the
 framework in both directions.</p>
 <p><strong>Where to look:</strong> <code>virtual_members/laravel/route_names.rs</code>, alongside the
 existing <code>resource_registration</code> handling.</p>
+<h4 id="l46-can-on-a-user-model-the-receiver-does-not-name">L46. <code>-&gt;can()</code> on a user model the receiver does not name<a class="headerlink" href="#l46-can-on-a-user-model-the-receiver-does-not-name" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
+<p>Authorization abilities are recognized on <code>Gate::allows()</code>,
+<code>$this-&gt;authorize()</code>, the <code>can:</code> middleware parameter, and Blade's <code>@can</code>,
+but the most common spelling of all, <code>$user-&gt;can('update', $post)</code>, is
+only recognized when the receiver plainly reads as the authenticated user:
+a variable or property whose name ends in <code>user</code>, or any <code>user()</code> call
+(<code>auth()-&gt;user()</code>, <code>Auth::user()</code>, <code>$request-&gt;user()</code>).</p>
+<p>An application whose user model is not called <code>User</code> writes the same check
+and gets nothing. <code>$customer-&gt;can('update', $routine)</code>,
+<code>$member-&gt;canAny([…])</code>, and <code>$account-&gt;cannot(…)</code> are all invisible: no
+completion inside the string, no hover, no go-to-definition, and no
+unknown-ability diagnostic. In a production codebase where every
+authorization call is written that way, the whole feature is inert.</p>
+<p>The receiver's <em>type</em> is what settles this, and <code>can()</code> is far too ordinary
+a method name to claim on the name alone, so the fix is the mechanism main
+already uses for render sites whose receiver only a type settles: emit a
+candidate site during extraction and confirm it in a later, type-aware
+pass, the way <code>ViewReceiverSite</code> /
+<code>Backend::typed_receiver_view_spans</code> does. A receiver that resolves to the
+configured auth model (or to <code>Illuminate\Contracts\Auth\Access\Authorizable</code>)
+makes the call an authorization check; anything else leaves it alone. The
+existing name heuristic stays as the cheap path that needs no type
+resolution at all.</p>
+<p><strong>Where to look:</strong> <code>receiver_is_user_like</code> in
+<code>symbol_map/extraction/laravel.rs</code> and its completion-side twin in
+<code>completion/laravel_string_keys.rs</code>; <code>ViewReceiverSite</code> in
+<code>symbol_map/mod.rs</code> for the confirm-later shape.</p>
 
 
 
