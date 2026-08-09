@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786245541756,
+  "lastUpdate": 1786247269004,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -16931,6 +16931,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4259ce2be0848c05771dfced585e1427049dc9e1",
+          "message": "A render site is recognised by what its receiver is, not only by how it\nis spelled",
+          "timestamp": "2026-08-09T05:28:51+02:00",
+          "tree_id": "6d08ded64e9ee6c5484eef227e330031583109aa",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4259ce2be0848c05771dfced585e1427049dc9e1"
+        },
+        "date": 1786247264457,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.7,
             "unit": "MiB"
           }
         ]
