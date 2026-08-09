@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786293500135,
+  "lastUpdate": 1786294048532,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -17339,6 +17339,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2c5f5870bd6b7d57ba09a0744867fcd9e4bd1620",
+          "message": "Fix code lenses not opening the file in some editors",
+          "timestamp": "2026-08-09T18:30:49+02:00",
+          "tree_id": "acae3ba02e339617f8616dc38fcd65d0fffc82fe",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2c5f5870bd6b7d57ba09a0744867fcd9e4bd1620"
+        },
+        "date": 1786294042116,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.5,
             "unit": "MiB"
           }
         ]
