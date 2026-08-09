@@ -1,8 +1,33 @@
 # PHPantom — Blade
 
-This document is the implementation plan for Laravel Blade template
-support in PHPantom. For Eloquent model support see `laravel.md`.
-For general architecture see `ARCHITECTURE.md`.
+Known gaps and planned features in PHPantom's Laravel Blade template
+support. For Eloquent model support see `laravel.md`. For the shipped
+preprocessor pipeline and module layout see `ARCHITECTURE.md`.
+
+The strategy, implemented in `src/blade/`: preprocess `.blade.php`
+files (recognised by URI suffix, or by a `did_open` `languageId` of
+`"blade"`) into valid virtual PHP, feed the virtual PHP through the
+existing pipeline (parser, resolver, completion, definition), and map
+response positions back to the original Blade file through a source
+map. Every item below builds on that pipeline.
+
+Items are ordered by **impact** (descending), then **effort** (ascending)
+within the same impact tier, with a dependent item placed after its
+dependency.
+
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
+| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+
+---
+
+## Out of scope (and why)
+
+| Item | Reason |
+|------|--------|
+| Editor-side Blade language registration | The tree-sitter grammar, `.blade.php` file association, and `languageId: "blade"` wiring belong to editor extensions, not the server. Zed's official PHP extension (which absorbed PHPantom's plain-PHP wiring; this repo no longer bundles `zed-extension/`) will not grow Blade support — that registration belongs to the planned `zed-laravel` extension. On VS Code, Blade extensions already set `languageId` to `"blade"`, so PHPantom's integration needs to register for both `"php"` and `"blade"`. Neovim's `lspconfig` can be configured to send `.blade.php` files with the correct `languageId`. |
+| Rendering or booting to resolve templates | Consistent with `laravel.md`: we never run PHP or boot a Laravel application. |
 
 ---
 
@@ -15,17 +40,16 @@ For general architecture see `ARCHITECTURE.md`.
   `src/blade/signature.rs` — `@bladestan-signature` docblock, first
   docblock before template code, `@props`/`@aware`, Blade's own
   component scope, the backing component class, and the layouts the
-  template `@extends`. The template
-  declares what it expects; call sites are then
-  *validated* against that contract (`src/blade/contract.rs` and
-  `src/diagnostics/blade_call_site.rs`), exactly as a function
-  signature works. Inferring types *from* call sites inverts the contract and
-  produces "true for one caller" types, so it is not the foundation —
-  the shipped call-site inference fallback for unannotated projects
-  is layered strictly below every declared source. Projects running
-  Bladestan (a PHPStan extension for Blade template analysis) get the
-  full contract model in both the editor and CI from the same
-  annotations.
+  template `@extends`. The template declares what it expects; call
+  sites are then *validated* against that contract
+  (`src/blade/contract.rs` and `src/diagnostics/blade_call_site.rs`),
+  exactly as a function signature works. Inferring types *from* call
+  sites inverts the contract and produces "true for one caller" types,
+  so it is not the foundation — the shipped call-site inference
+  fallback for unannotated projects is layered strictly below every
+  declared source. Projects running Bladestan (a PHPStan extension for
+  Blade template analysis) get the full contract model in both the
+  editor and CI from the same annotations.
 - **Discovery is just directory walks.** Walking the configured view
   roots and the directories the component namespaces live in
   (`src/blade/discovery.rs`) is the full extent of external Blade file
@@ -46,50 +70,86 @@ For general architecture see `ARCHITECTURE.md`.
 
 ---
 
-## Overview
+## BL4. Component and view name completion
 
-Blade templates (`.blade.php`) mix HTML, Blade directives, component
-tags (`<x-alert>`, `<livewire:counter>`), and embedded PHP. The
-mago-syntax parser only understands pure PHP. The strategy:
+**Impact: High · Effort: Medium**
 
-1. Preprocess `.blade.php` files into valid PHP.
-2. Feed the virtual PHP through the existing pipeline (parser,
-   resolver, completion, definition).
-3. Map LSP response positions back to the original Blade file via a
-   source map.
+### `<x-` completion
+
+When the user types `<x-` in a Blade file, offer completions from:
+
+- the component index (`blade_component_fqn` in
+  `src/blade/discovery.rs`: class-based components, kebab-case names)
+- Anonymous component templates: view names whose key
+  starts with `"components."`, with the prefix stripped and dots
+  preserved (e.g. `"components.forms.input"` → `"forms.input"`)
+
+Detection: check if the characters before the cursor match
+`<x-` (possibly with a partial name typed). This is a Blade-level
+context check done before the normal PHP completion pipeline.
+
+Items should use `CompletionItemKind::Module` or `::Class` depending
+on whether they're anonymous or class-backed.
+
+### `<livewire:` completion
+
+Same pattern. When the user types `<livewire:`, offer completions
+from the Livewire index (`livewire_component_fqn`).
+
+### `@include('` and `@extends('` view name completion
+
+When the cursor is inside the string argument to `@include`,
+`@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`,
+`@extends`, `@extendsFirst`, `@each`, or a `view()` function call,
+offer completions from the view index (dot-notation view names).
+
+Detection: look for `@include('`, `@extends('`, or `view('` before
+the cursor and check that the cursor is inside the quotes. The
+trigger characters `'` and `"` are already registered.
+
+### Component attribute completion
+
+When the cursor is inside a `<x-component ` tag (after the component
+name, before `>` or `/>`), resolve the component class and offer its
+constructor parameter names as kebab-case attribute completions.
+
+Offer both plain and `:` prefixed variants:
+- `message` (string literal)
+- `:message` (PHP expression)
+
+For Livewire components, offer the class's public property names as
+attribute completions.
+
+### Tests
+
+New file `tests/integration/completion_blade.rs`:
+
+- `<x-` triggers component name completions
+- `<livewire:` triggers Livewire component name completions
+- `@include('` triggers view name completions
+- `<x-alert ` triggers attribute completions
+- `$component->` after component instantiation
+- `$attributes->` in component templates
+
+**Deliverable:** Typing `<x-` shows available components. Typing
+`@include('` shows available views. Typing attributes inside
+`<x-alert ` shows constructor parameter names.
 
 ---
 
-## Phase 1: Blade-to-PHP Preprocessor
+## BL3. `<x-component>` tag parsing in preprocessor
 
-The core preprocessor is implemented in `src/blade/`. It transforms
-Blade templates into virtual PHP line-by-line, with a source map for
-coordinate translation. The LSP pipeline (`with_file_content`,
-`update_ast`, `did_close`) transparently handles Blade files.
+**Impact: High · Effort: High**
 
----
+The preprocessor already tracks HTML tag state so that a bound
+attribute's expression (`:attr="$expr"`) survives into the virtual PHP
+as a `blade_directive(...)` call, and `src/blade/component_tags.rs`
+scans tags in the raw Blade source as call sites for signature
+inference. What is missing is translating the tag itself into PHP: the
+component class is never instantiated in the virtual PHP, so
+`$component->` has nothing to resolve against.
 
-## Phase 2: Component Support
-
-### BL1. Blade-aware code actions
-
-Code actions are currently disabled for `.blade.php` files because
-text edits target virtual PHP coordinates and actions like "Import
-class" insert `use` statements at the top of the file rather than
-inside a `@php` / `<?php` block. Re-enable code actions with:
-
-- Range translation (virtual PHP → Blade) for all text edits.
-- Blade-aware code generation (e.g. insert `use` inside `@php`).
-- Filtering out actions that don't make sense in Blade context.
-
-### BL3. `<x-component>` tag parsing in preprocessor
-
-New file: `src/blade/components.rs`
-
-The preprocessor detects `<x-name ...>` and `</x-name>` tags and
-converts them to PHP.
-
-#### BL3a. Opening tags
+### Opening tags
 
 Parse `<x-component-name attr="val" :attr="$expr" ...>` or
 `<x-component-name ... />` (self-closing).
@@ -117,28 +177,16 @@ For `<x-dynamic-component :component="$name" ...>`, emit
 `echo $name;` so the expression gets parsed, but do not try to
 resolve a target component.
 
-#### BL3b. Closing tags
+### Closing tags
 
 `</x-name>` becomes a comment: `/* /x-name */`
 
-#### BL3c. Named slots
+### Named slots
 
-`<x-slot:title>` → `$title = new \Illuminate\Support\HtmlString('');`
+`<x-slot:title>` → `$title = new \Illuminate\View\ComponentSlot();`
 `</x-slot>` → comment
 
-#### BL3d. Implicit component variables
-
-When inside a component tag region (between opening and closing tags),
-inject:
-
-```php
-/** @var \Illuminate\View\ComponentAttributeBag $attributes */
-$attributes = new \Illuminate\View\ComponentAttributeBag([]);
-/** @var \Illuminate\Support\HtmlString $slot */
-$slot = new \Illuminate\Support\HtmlString('');
-```
-
-### 11. `<livewire:component>` tag parsing
+### `<livewire:component>` tag parsing
 
 Parse `<livewire:name :attr="$expr" ...>` or
 `<livewire:name ... />`.
@@ -154,56 +202,9 @@ Parse `<livewire:name :attr="$expr" ...>` or
 Livewire attribute names use camelCase on the class, so apply the
 same kebab-to-camelCase conversion.
 
-### BL4. Component and view name completion
+### Tests
 
-#### BL4a. `<x-` completion
-
-When the user types `<x-` in a Blade file, offer completions from:
-
-- the component index (class-based components, kebab-case names)
-- Anonymous component templates: view names whose key
-  starts with `"components."`, with the prefix stripped and dots
-  preserved (e.g. `"components.forms.input"` → `"forms.input"`)
-
-Detection: check if the characters before the cursor match
-`<x-` (possibly with a partial name typed). This is a Blade-level
-context check done before the normal PHP completion pipeline.
-
-Items should use `CompletionItemKind::Module` or `::Class` depending
-on whether they're anonymous or class-backed.
-
-#### BL4b. `<livewire:` completion
-
-Same pattern. When the user types `<livewire:`, offer completions
-from the Livewire index.
-
-#### BL4c. `@include('` and `@extends('` view name completion
-
-When the cursor is inside the string argument to `@include`,
-`@includeIf`, `@includeWhen`, `@includeUnless`, `@includeFirst`,
-`@extends`, `@extendsFirst`, `@each`, or a `view()` function call,
-offer completions from the view index (dot-notation view names).
-
-Detection: look for `@include('`, `@extends('`, or `view('` before
-the cursor and check that the cursor is inside the quotes. The
-trigger characters `'` and `"` are already registered.
-
-#### BL4d. Component attribute completion
-
-When the cursor is inside a `<x-component ` tag (after the component
-name, before `>` or `/>`), resolve the component class and offer its
-constructor parameter names as kebab-case attribute completions.
-
-Offer both plain and `:` prefixed variants:
-- `message` (string literal)
-- `:message` (PHP expression)
-
-For Livewire components, offer the class's public property names as
-attribute completions.
-
-### 14. Tests
-
-Create `tests/blade_components.rs`:
+New file `tests/integration/blade_components.rs`:
 
 - `<x-alert>` resolves to `App\View\Components\Alert`
 - `<x-forms.input>` resolves to `App\View\Components\Forms\Input`
@@ -215,58 +216,14 @@ Create `tests/blade_components.rs`:
 - Attribute parsing: string, expression, Alpine passthrough, bare,
   short syntax
 
-Extend `tests/completion_blade.rs`:
-
-- `<x-` triggers component name completions
-- `<livewire:` triggers Livewire component name completions
-- `@include('` triggers view name completions
-- `<x-alert ` triggers attribute completions
-- `$component->` after component instantiation
-- `$attributes->` in component templates
+**Deliverable:** `$component->` after `<x-alert>` produces
+completions from the Alert class.
 
 ---
 
-## Phase 3: Cross-File View Intelligence
+## BL7. Directive name completion
 
-### BL5. Go-to-definition for view names and components
-
-#### BL5a. View name go-to-definition
-
-Inside `@include('users.index')`, `@extends('layouts.app')`, or
-`view('welcome')`:
-
-1. Extract the view name string at the cursor position.
-2. Look up in the view index (`blade_view_path`).
-3. Return a `Location` pointing to the resolved file.
-
-#### BL5b. Component tag go-to-definition
-
-On `<x-alert>`:
-
-1. Extract the component name.
-2. Look up in the component index to get the FQN.
-3. Use `find_or_load_class` + `fqn_uri_index` to find the
-   source file.
-4. Return a `Location` pointing to the class definition.
-
-On `<livewire:counter>`:
-
-1. Same pattern using the Livewire index.
-
-### 18. Tests
-
-Create `tests/definition_blade.rs`:
-
-- Go-to-definition on `@include('users.index')` → view file
-- Go-to-definition on `@extends('layouts.app')` → layout file
-- Go-to-definition on `<x-alert>` → component class
-- Go-to-definition on `<livewire:counter>` → Livewire class
-
----
-
-## Phase 4: Blade Directive Completion
-
-### BL7. Directive name completion
+**Impact: Medium · Effort: Low**
 
 When the user types `@` in a Blade file (outside `{{ }}`, `@php`
 blocks, and string literals), offer completions for all known Blade
@@ -278,27 +235,17 @@ Each completion inserts a snippet with tab stops:
 @if ($1)
     $0
 @endif
-```
 
-```
 @foreach ($1 as $2)
     $0
 @endforeach
-```
 
-```
 @include('$1')
-```
 
-```
 @props([$1])
-```
 
-```
 @inject('$1', '$2')
-```
 
-```
 @php
 $0
 @endphp
@@ -309,43 +256,57 @@ Detection: The `@` trigger character is already registered. In
 an HTML/directive context (not inside `{{ }}`, not inside a `@php`
 block, not inside a string literal).
 
-### 20. Tests
+### Tests
 
-Extend `tests/completion_blade.rs`:
+Extend `tests/integration/completion_blade.rs`:
 
 - `@` triggers directive name completions
 - `@if` partial triggers filtered directive completions
 - No directive completion inside `{{ }}` or `@php` blocks
 
+**Deliverable:** Typing `@` in a Blade file shows all known
+directives with snippet templates.
+
 ---
 
-## Phase 5: Template Contracts and Cross-File Flow
+## BL13. Mismatched and unbalanced directive diagnostics
 
-This phase aligns PHPantom's Blade understanding with Bladestan (a
-PHPStan extension for statically analyzing Blade templates). The two
-tools share one contract model: the same annotation gives autocomplete
-and hover in the editor (PHPantom) and type checking in CI (Bladestan).
-Where Bladestan defines a concept (signature chain, covariant merging,
-call-site validation), we implement the same semantics so the
-ecosystem converges on one way to type a template.
+**Impact: Medium · Effort: Low-Medium**
 
-### BL10. Cross-file `@section` / `@stack` name intelligence
+`translate_directive` (`src/blade/directives.rs`) maps each directive
+to PHP independently by name, with no check that a closing directive
+matches the block it opened. `@foreach ($items as $item) ... @endif`
+currently translates silently instead of producing a diagnostic.
 
-`@section`/`@hasSection`/`@sectionMissing`/`@yield` and
-`@push`/`@prepend`/`@stack` name arguments are cross-file string
-keys: yields and stacks are declared in layouts, filled in children.
-Index section and stack names per template (alongside the discovery
-index in `src/blade/discovery.rs`, recording the `@extends` target),
-then provide:
+- Track a stack of open control directives (`if`, `foreach`, `for`,
+  `while`, `switch`, `unless`, `isset`, `empty`, `once`, `verbatim`,
+  `fragment`, component/slot tags) during preprocessing, alongside the
+  existing source map.
+- When a closing directive doesn't match the top of the stack (or the
+  stack is empty), emit a diagnostic at the closing directive's Blade
+  position: "Expected `@endX`, found `@endY`" or "Unexpected `@endY`
+  with no matching `@y`".
+- Flag unclosed directives at end-of-file (stack non-empty when the
+  file ends).
+- Matches the mismatched-closing-directive inspection other Blade-aware
+  editors already ship.
 
-- completion of section/stack names inside child templates from the
-  resolved layout chain, and vice versa in layouts from known
-  children;
-- go-to-definition between `@section('x')` and its `@yield('x')`;
-- an unknown-section diagnostic when a child fills a section its
-  layout chain never yields (dynamic names skip, as always).
+No dependency on component parsing (BL3) — this operates on the raw
+directive token stream and can land independently.
 
-### BL11. Custom directive discovery
+### Tests
+
+New file `tests/integration/diagnostics_blade.rs`:
+
+- `@foreach(...) @endif` → mismatched-directive diagnostic
+- `@if(...)` with no `@endif` before EOF → unclosed-directive diagnostic
+- correctly paired directives → no diagnostic
+
+---
+
+## BL11. Custom directive discovery
+
+**Impact: Medium · Effort: Low-Medium**
 
 `Blade::directive('datetime', …)`, `Blade::if('env', …)`, and
 component namespace registrations (`Blade::componentNamespace()`,
@@ -362,8 +323,87 @@ scanner — so that:
 - directive name completion (BL7) includes them;
 - registered component namespaces/paths extend the discovery index.
 
+---
 
-### BL22. A template never learns anything from the templates that render it
+## BL1. Blade-aware code actions
+
+**Impact: Medium · Effort: Medium**
+
+Code actions are currently disabled for `.blade.php` files because
+text edits target virtual PHP coordinates and actions like "Import
+class" insert `use` statements at the top of the file rather than
+inside a `@php` / `<?php` block. Re-enable code actions with:
+
+- Range translation (virtual PHP → Blade) for all text edits.
+- Blade-aware code generation (e.g. insert `use` inside `@php`).
+- Filtering out actions that don't make sense in Blade context.
+
+**Deliverable:** Code actions are re-enabled for `.blade.php` files.
+
+---
+
+## BL5. Go-to-definition for view names and components
+
+**Impact: Medium · Effort: Medium**
+
+### View name go-to-definition
+
+Inside `@include('users.index')`, `@extends('layouts.app')`, or
+`view('welcome')`:
+
+1. Extract the view name string at the cursor position.
+2. Look up in the view index (`blade_view_path`).
+3. Return a `Location` pointing to the resolved file.
+
+### Component tag go-to-definition
+
+On `<x-alert>`:
+
+1. Extract the component name.
+2. Look up in the component index to get the FQN.
+3. Use `find_or_load_class` + `fqn_uri_index` to find the
+   source file.
+4. Return a `Location` pointing to the class definition.
+
+On `<livewire:counter>`: same pattern using the Livewire index.
+
+### Tests
+
+New file `tests/integration/definition_blade.rs`:
+
+- Go-to-definition on `@include('users.index')` → view file
+- Go-to-definition on `@extends('layouts.app')` → layout file
+- Go-to-definition on `<x-alert>` → component class
+- Go-to-definition on `<livewire:counter>` → Livewire class
+
+**Deliverable:** Ctrl-click on `@include('users.index')` jumps to
+the file.
+
+---
+
+## BL10. Cross-file `@section` / `@stack` name intelligence
+
+**Impact: Medium · Effort: Medium**
+
+`@section`/`@hasSection`/`@sectionMissing`/`@yield` and
+`@push`/`@prepend`/`@stack` name arguments are cross-file string
+keys: yields and stacks are declared in layouts, filled in children.
+Index section and stack names per template (alongside the discovery
+index in `src/blade/discovery.rs`, recording the `@extends` target),
+then provide:
+
+- completion of section/stack names inside child templates from the
+  resolved layout chain, and vice versa in layouts from known
+  children;
+- go-to-definition between `@section('x')` and its `@yield('x')`;
+- an unknown-section diagnostic when a child fills a section its
+  layout chain never yields (dynamic names skip, as always).
+
+---
+
+## BL22. A template never learns anything from the templates that render it
+
+**Impact: Medium · Effort: Medium**
 
 `compute_blade_injected_vars` skips every Blade file in the caller
 snapshot (`if self.is_blade_file(file_uri) { continue; }`, and
@@ -391,46 +431,9 @@ contract checks want anyway.
 
 ---
 
-## Phase 6: Editor Tooling Parity
+## BL14. Folding ranges for Blade files
 
-Other Blade-aware editors ship a full structure view, folding builder,
-and formatter alongside their directive inspections.
-`document_symbols.rs`, `folding.rs`, and `formatting.rs` have no Blade
-awareness at all today, unlike `inlay_hints.rs` and `semantic_tokens.rs`,
-which both check `is_blade_file` and translate positions through
-`BladeSourceMap`. These items close that gap.
-
-### BL13. Mismatched and unbalanced directive diagnostics
-
-`translate_directive` (`src/blade/directives.rs`) maps each directive
-to PHP independently by name, with no check that a closing directive
-matches the block it opened. `@foreach ($items as $item) ... @endif`
-currently translates silently instead of producing a diagnostic.
-
-- Track a stack of open control directives (`if`, `foreach`, `for`,
-  `while`, `switch`, `unless`, `isset`, `empty`, `once`, `verbatim`,
-  `fragment`, component/slot tags) during preprocessing, alongside the
-  existing source map.
-- When a closing directive doesn't match the top of the stack (or the
-  stack is empty), emit a diagnostic at the closing directive's Blade
-  position: "Expected `@endX`, found `@endY`" or "Unexpected `@endY`
-  with no matching `@y`".
-- Flag unclosed directives at end-of-file (stack non-empty when the
-  file ends).
-- Matches the mismatched-closing-directive inspection other Blade-aware
-  editors already ship.
-
-No dependency on component parsing (BL3) — this operates on the raw directive token stream and can land
-independently.
-
-#### Tests
-
-New file `tests/diagnostics_blade.rs`:
-- `@foreach(...) @endif` → mismatched-directive diagnostic
-- `@if(...)` with no `@endif` before EOF → unclosed-directive diagnostic
-- correctly paired directives → no diagnostic
-
-### BL14. Folding ranges for Blade files
+**Impact: Low-Medium · Effort: Low**
 
 `textDocument/foldingRange` on a `.blade.php` file currently returns
 ranges in virtual-PHP coordinates, which don't line up with the
@@ -446,14 +449,19 @@ source map.
 - Matches the folding behaviour other Blade-aware editors already
   provide.
 
-#### Tests
+### Tests
 
-New file `tests/folding_blade.rs`:
+New file `tests/integration/folding_blade.rs`:
+
 - `@foreach`/`@endforeach` folds
 - `<x-alert>`...`</x-alert>` folds
 - fold ranges land on the correct Blade lines, not virtual-PHP lines
 
-### BL15. Document outline (symbols) for Blade files
+---
+
+## BL15. Document outline (symbols) for Blade files
+
+**Impact: Low-Medium · Effort: Medium**
 
 A `.blade.php` file today reports no outline, or an outline positioned
 in virtual-PHP coordinates, because `document_symbols.rs` never
@@ -464,19 +472,24 @@ translates through the source map.
 - Build a Blade-native symbol tree on top of the translated PHP
   symbols: `@section`s and `@push`/`@stack` blocks as top-level
   symbols, `<x-component>` tags as child symbols showing the resolved
-  component FQN once component parsing (BL3) lands — degrade to the bare tag name if the component
-  doesn't resolve.
+  component FQN once component parsing (BL3) lands — degrade to the
+  bare tag name if the component doesn't resolve.
 - Matches the structure-view behaviour other Blade-aware editors
   already provide.
 
-#### Tests
+### Tests
 
-New file `tests/document_symbols_blade.rs`:
+New file `tests/integration/document_symbols_blade.rs`:
+
 - `@section('content')` appears as an outline entry
 - `<x-alert>` appears as an outline entry with the resolved FQN once
   component parsing (BL3) is in place
 
-### BL16. Blade-aware formatting
+---
+
+## BL16. Blade-aware formatting
+
+**Impact: Low-Medium · Effort: High**
 
 `formatting.rs` has no Blade awareness. `mago`'s formatter runs against
 the virtual PHP buffer generated for `.blade.php` files, and its output
@@ -502,7 +515,7 @@ markup.
   Blade formatter, which is why the external-tool path above should
   land first.
 
-#### Feasibility research: proxying `blade-formatter` vs. a native basic formatter
+### Feasibility research: proxying `blade-formatter` vs. a native basic formatter
 
 Investigated `blade-formatter` (the `shufo/blade-formatter` npm
 package) as a possible thing to shell out to.
@@ -598,13 +611,17 @@ entirely), it can become the default rather than staying a fallback.
 See BL17 below for exposing it as a standalone CI check once it
 reaches that bar.
 
-#### Tests
+### Tests
 
 - `formatting` on a `.blade.php` file returns no edits (short-term
   behaviour) rather than corrupting the file, until the long-term
   model lands.
 
-### BL17. `format --check` CLI subcommand for CI
+---
+
+## BL17. `format --check` CLI subcommand for CI
+
+**Impact: Low-Medium · Effort: Low-Medium** (depends on BL16)
 
 Filed while researching BL16: once the native Blade formatter (and,
 more generally, PHPantom's resolved formatting strategy — external
@@ -631,7 +648,7 @@ the LSP connection at all.
   external tool, which `--check` should honour identically to
   `format` without `--check`).
 
-#### Tests
+### Tests
 
 - `format --check` on an already-formatted project exits 0 with no
   output.
@@ -639,106 +656,3 @@ the LSP connection at all.
   exits non-zero and names the file.
 - `format` (no `--check`) rewrites the file in place and a second run
   is a no-op.
-
----
-
-## Implementation Sequence
-
-Phase 1 is complete (steps 1-3): the preprocessor, LSP pipeline
-integration, source mapping, `$loop`/`@session`/`@error`/`@context`
-implicit variables, stub directives, verbatim regions, `languageId`
-check, and code action suppression are all shipped.
-
-The remaining steps build on the existing preprocessor:
-
-### Step 4: Blade-aware code actions (BL1)
-
-Translate every text edit back to Blade coordinates, generate
-Blade-shaped code (a `use` statement belongs inside `@php`), and drop
-the actions that make no sense in a template.
-
-**Deliverable:** Code actions are re-enabled for `.blade.php` files.
-
-### Step 5: Component tag parsing (BL3, items 11-12)
-
-Implement `src/blade/components.rs`. Parse `<x-...>` and
-`<livewire:...>` tags. Handle `@props`, `@aware`, named slots.
-
-**Deliverable:** `$component->` after `<x-alert>` produces
-completions from the Alert class. `$attributes->` works in component
-templates.
-
-### Step 6: Name completions (BL4)
-
-Implement `<x-`, `<livewire:`, `@include('`, and component attribute
-completions.
-
-**Deliverable:** Typing `<x-` shows available components. Typing
-`@include('` shows available views. Typing attributes inside
-`<x-alert ` shows constructor parameter names.
-
-### Step 7: Directive completion (BL7)
-
-Implement `@` directive name completion with snippets.
-
-**Deliverable:** Typing `@` in a Blade file shows all known
-directives with snippet templates.
-
-### Step 8: Cross-file intelligence (BL5)
-
-Implement go-to-definition for view names and component tags.
-
-**Deliverable:** Ctrl-click on `@include('users.index')` jumps to
-the file.
-
-### Step 9: Template contracts (BL10, BL11, BL22)
-
-Call-site validation is shipped, and so is the covariance check on the
-signature chain, the data shapes the checks used to stand down on, and
-the render sites whose receiver only a type settles. What is left is
-BL22 for the templates that render other templates, and it is
-independent of section/stack intelligence and custom directive
-discovery, so it can land at any point.
-
-**Deliverable:** A template with a `@bladestan-signature` docblock
-gets typed completion for its declared variables at every render site.
-
-### Step 10: Editor tooling parity (BL13-BL16)
-
-Implement directive-pair validation (BL13), then Blade-position
-translation for folding (BL14) and document symbols (BL15) — both
-follow the same `php_to_blade` pattern already used by inlay hints
-and semantic tokens. Formatting (BL16) starts with disabling the
-feature safely for `.blade.php` and defers the full indentation
-model.
-
-**Deliverable:** `@foreach ... @endif` is flagged as a diagnostic.
-Folding and the outline view work correctly on `.blade.php` files.
-`textDocument/formatting` no longer risks corrupting a Blade file.
-
----
-
-## Editor Integration Notes
-
-### File extension detection
-
-The server activates Blade preprocessing when:
-- The URI ends with `.blade.php`, OR
-- The `languageId` in `did_open` is `"blade"`.
-
-### Zed extension
-
-PHPantom's plain-PHP wiring has merged into Zed's official PHP
-extension, so this repo no longer bundles its own `zed-extension/`.
-That extension will not grow Blade support. The Blade language
-registration (tree-sitter grammar, `.blade.php` association,
-`languageId: "blade"` wiring) belongs to the separate `zed-laravel`
-extension — see planned `zed-laravel` extension.
-
-### Other editors
-
-- **VS Code:** Extensions like Laravel Blade Snippets set
-  `languageId` to `"blade"`. PHPantom's VS Code integration would
-  need to register for both `"php"` and `"blade"` language IDs.
-- **Neovim:** `lspconfig` can be configured to send `.blade.php`
-  files to PHPantom with the correct `languageId`.
