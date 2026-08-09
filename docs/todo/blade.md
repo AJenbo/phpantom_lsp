@@ -390,21 +390,6 @@ it is the PHP spelling of `@each`, so both its view arguments are render
 sites and its data argument means what `blade_each_directive`'s does
 rather than what a data array does.
 
-### BL19. Signature covariance diagnostic
-
-`blade_template_contract` (`src/blade/contract.rs`) merges a template's
-signature with the layouts it `@extends`, nearest declaration winning,
-which lets a child narrow a layout's declared type. It does not check
-the other direction: a child that *widens* what its layout declared
-(`string` → `string|int`), or declares something outright incompatible,
-merges silently. Bladestan reports both as `bladestan.signatureMerge`.
-
-The merge already has both types in hand, so the check itself is a
-subtype comparison. What it needs is a home: the error belongs on the
-child template's own docblock, not on every call site that renders it
-(which is where Bladestan puts it), so it wants a diagnostic pass over
-the Blade file rather than a hook in the call-site collector.
-
 ### BL22. A template never learns anything from the templates that render it
 
 `compute_blade_injected_vars` skips every Blade file in the caller
@@ -733,17 +718,17 @@ Implement go-to-definition for view names and component tags.
 **Deliverable:** Ctrl-click on `@include('users.index')` jumps to
 the file.
 
-### Step 9: Template contracts (BL10, BL11, BL19, BL22, BL23)
+### Step 9: Template contracts (BL10, BL11, BL22, BL23)
 
-Call-site validation is shipped. What is left widens it (BL23 for the
-render sites whose receiver only a type settles, BL19 for the covariance
-the merge does not check, BL22 for the templates that render other
-templates) and is independent of section/stack intelligence and custom
-directive discovery, so the five can land in any order.
+Call-site validation is shipped, and so is the covariance check on the
+signature chain and the data shapes the checks used to stand down on.
+What is left is BL23 for the render sites whose receiver only a type
+settles and BL22 for the templates that render other templates, and it
+is independent of section/stack intelligence and custom directive
+discovery, so the two can land in any order.
 
 **Deliverable:** A template with a `@bladestan-signature` docblock
-gets typed completion for its declared variables at every render site,
-and a signature that widens its layout's is flagged.
+gets typed completion for its declared variables at every render site.
 
 ### Step 10: Editor tooling parity (BL13-BL16)
 

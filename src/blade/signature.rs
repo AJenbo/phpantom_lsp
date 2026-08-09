@@ -343,7 +343,14 @@ fn end_of_region(bytes: &[u8], from: usize, terminator: &[u8]) -> usize {
 /// marker. The marker may sit anywhere in the block, so a leading
 /// description line is fine.
 fn find_explicit_signature_docblock(masked: &str) -> Option<std::ops::Range<usize>> {
-    let mut from = 0;
+    find_explicit_signature_docblock_from(masked, 0)
+}
+
+/// As [`find_explicit_signature_docblock`], starting the scan at `from`.
+fn find_explicit_signature_docblock_from(
+    masked: &str,
+    mut from: usize,
+) -> Option<std::ops::Range<usize>> {
     while let Some(range) = next_docblock(masked, from) {
         if masked[range.clone()].contains("@bladestan-signature") {
             return Some(range);
@@ -351,6 +358,65 @@ fn find_explicit_signature_docblock(masked: &str) -> Option<std::ops::Range<usiz
         from = range.end;
     }
     None
+}
+
+/// The byte range of every docblock the template marks
+/// `@bladestan-signature`, in source order.
+///
+/// A template has one contract, so a second marked block is a mistake
+/// rather than an addition: [`extract`] reads the first and nothing else.
+pub(crate) fn explicit_signature_docblocks(content: &str) -> Vec<std::ops::Range<usize>> {
+    let masked = mask_inert_regions(content, false);
+    let mut blocks = Vec::new();
+    let mut from = 0;
+    while let Some(range) = find_explicit_signature_docblock_from(&masked, from) {
+        from = range.end;
+        blocks.push(range);
+    }
+    blocks
+}
+
+/// The byte range of the `@var` tag declaring `name` in the docblock the
+/// template writes its signature in.
+///
+/// The range covers the tag alone, not the line it sits on, so a
+/// diagnostic about one declaration underlines that declaration.
+pub(crate) fn declaration_span(content: &str, name: &str) -> Option<std::ops::Range<usize>> {
+    let (block, _) = signature_docblock(content)?;
+    let mut offset = block.start;
+    for line in content[block.clone()].split_inclusive('\n') {
+        let Some(tag) = line.find("@var") else {
+            offset += line.len();
+            continue;
+        };
+        // A closure type writes its own parameter names, so the declared
+        // variable is the last `$name` on the line, not the first.
+        if last_variable_name(line).is_some_and(|declared| declared == name) {
+            let end = line.trim_end().len();
+            return Some(offset + tag..offset + end);
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// The name of the last `$identifier` in `line`.
+fn last_variable_name(line: &str) -> Option<&str> {
+    let bytes = line.as_bytes();
+    let mut found = None;
+    let mut i = 0;
+    while let Some(at) = line[i..].find('$') {
+        let start = i + at + 1;
+        let mut end = start;
+        while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+            end += 1;
+        }
+        if end > start && !bytes[start].is_ascii_digit() {
+            found = Some(&line[start..end]);
+        }
+        i = start.max(end);
+    }
+    found
 }
 
 /// The byte range of the first docblock in the file, provided nothing but
@@ -911,6 +977,45 @@ mod tests {
         assert_eq!(
             extract_extends("{{-- @extends('layouts.stale') --}}\n@extends('layouts.app')\n"),
             ["layouts.app"]
+        );
+    }
+
+    #[test]
+    fn every_marked_docblock_is_collected() {
+        let blade = "@php\n/**\n * @bladestan-signature\n * @var string $name\n */\n@endphp\n@php\n/**\n * @bladestan-signature\n * @var int $age\n */\n@endphp\n";
+        let blocks = explicit_signature_docblocks(blade);
+        assert_eq!(blocks.len(), 2);
+        assert!(blade[blocks[0].clone()].contains("$name"));
+        assert!(blade[blocks[1].clone()].contains("$age"));
+        // A block that is inert to Blade declares nothing to duplicate.
+        assert_eq!(
+            explicit_signature_docblocks(&format!("{{{{--{blade}--}}}}")).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_declarations_span_covers_its_own_tag() {
+        let blade = "@php\n/**\n * @bladestan-signature\n * @var string $title\n * @var int $count\n */\n@endphp\n";
+        assert_eq!(
+            &blade[declaration_span(blade, "count").unwrap()],
+            "@var int $count"
+        );
+        assert_eq!(
+            &blade[declaration_span(blade, "title").unwrap()],
+            "@var string $title"
+        );
+        assert!(declaration_span(blade, "missing").is_none());
+    }
+
+    /// A closure type writes parameter names of its own, and the declared
+    /// variable is the one at the end of the tag.
+    #[test]
+    fn a_declarations_span_is_not_claimed_by_a_closure_parameter() {
+        let blade = "@php\n/**\n * @bladestan-signature\n * @var \\Closure(\\App\\Models\\User $user): string $callback\n * @var \\App\\Models\\User $user\n */\n@endphp\n";
+        assert_eq!(
+            &blade[declaration_span(blade, "user").unwrap()],
+            "@var \\App\\Models\\User $user"
         );
     }
 

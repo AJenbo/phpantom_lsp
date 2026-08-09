@@ -294,7 +294,7 @@ mod tests {
                 ),
                 (
                     "resources/views/livewire/order-list.blade.php",
-                    "{{ $selected->reference }}\n{{ $page }}\n{{ $_instance }}\n{{ $this->page }}\n",
+                    "{{ $selected->reference }}\n{{ $page }}\n{{ $_instance }}\n{{ $this->page }}\n{{ $__livewire }}\n",
                 ),
             ],
         );
@@ -320,6 +320,13 @@ mod tests {
         assert!(
             this_member.contains("int"),
             "$this->page reads the component's own property, got: {this_member}"
+        );
+        // Livewire binds the instance under both of its own names, not
+        // just `$this`.
+        let aliased = hover_text(&backend, &uri, 4, 7).await;
+        assert!(
+            aliased.contains("App\\Livewire") && aliased.contains("OrderList"),
+            "$__livewire is the component too, got: {aliased}"
         );
         assert!(
             undefined_variables(&backend, &uri).is_empty(),

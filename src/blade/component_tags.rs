@@ -452,6 +452,24 @@ mod tests {
         assert_eq!(calls[0].literal[0].1, PhpType::string());
     }
 
+    /// A utility class carrying an arbitrary value (`max-h-[80vh]`) puts
+    /// brackets inside a quoted attribute value. The scan tracks quotes, so
+    /// neither the attribute nor the rest of the tag is cut short by them.
+    #[test]
+    fn a_bracket_in_a_quoted_attribute_value_does_not_truncate_the_tag() {
+        let calls = scan_component_tag_calls(
+            r#"<x-modal class="max-h-[80vh]" title="Save" /><x-alert type="danger" />"#,
+            &["modal".to_string(), "alert".to_string()],
+        );
+        assert_eq!(calls.len(), 2, "both tags must be seen");
+        assert_eq!(names(&calls[0].literal), vec!["class", "title"]);
+        assert_eq!(
+            calls[0].literal[0].1,
+            PhpType::literal_string_value("max-h-[80vh]")
+        );
+        assert_eq!(names(&calls[1].literal), vec!["type"]);
+    }
+
     #[test]
     fn a_component_tag_inside_a_comment_is_ignored() {
         let calls = scan_component_tag_calls(

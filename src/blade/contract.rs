@@ -258,7 +258,10 @@ impl Backend {
     /// The docblock is read from raw source, so a short name means whatever
     /// the template's own imports say it does; a caller comparing against
     /// it has neither those imports nor the template's namespace.
-    fn blade_type_qualifier(&self, view_name: &str) -> impl Fn(&PhpType) -> PhpType + '_ {
+    pub(crate) fn blade_type_qualifier(
+        &self,
+        view_name: &str,
+    ) -> impl Fn(&PhpType) -> PhpType + '_ {
         let uri = self
             .blade_view_path(view_name)
             .and_then(|path| tower_lsp::lsp_types::Url::from_file_path(path).ok());
