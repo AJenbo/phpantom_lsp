@@ -50,6 +50,12 @@
             <p>By {{ $post->author->name }}</p>
             <span>{{ $post->created_at->diffForHumans() }}</span>
 
+            {{-- partials/post_teaser.blade.php declares nothing at all, so
+                 this directive is the only thing that says what its $teaser
+                 is: a partial rendered from templates is typed by the
+                 templates that render it. --}}
+            @include('partials.post_teaser', ['teaser' => $post])
+
             {{-- $loop variable is injected automatically in foreach/forelse --}}
             @if($loop->first)
                 <span class="badge">Featured</span>

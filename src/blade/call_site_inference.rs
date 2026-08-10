@@ -4,7 +4,8 @@
 //! or plain `@var` docblocks), infer the variables a template receives
 //! from the call sites that reference it: `view()`/`View::make()` calls
 //! (literal array keys, `compact()` arguments, `->with()` chains — see
-//! [`extract_call_site_vars`]) and, for a component, the attributes each
+//! [`extract_call_site_vars`]), the `@include`/`@each` family in the
+//! templates that render it, and, for a component, the attributes each
 //! `<x-…>` tag passes (see [`super::component_tags`]). The inferred set
 //! is injected into the template's virtual-PHP prologue as `@var`
 //! docblock declarations (see `preprocess_with_vars`), so every
@@ -21,7 +22,7 @@
 //! entirely. Types are "true for the callers we found": multiple call
 //! sites union per variable, and dynamic view names contribute nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
@@ -36,6 +37,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap};
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::types::ClassInfo;
+use crate::virtual_members::laravel::canonical_view_name;
 
 /// A variable passed to a template at one call site: the name (without
 /// `$`) and the expression's resolved type.
@@ -235,19 +237,19 @@ impl Backend {
 
         // Find every file whose symbol map contains a View string key
         // matching one of this template's names.
+        let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
+            .iter()
+            .map(
+                |name| crate::reference_index::ReferenceIndexKey::LaravelString {
+                    kind: LaravelStringKind::View,
+                    key: name.clone(),
+                },
+            )
+            .collect();
         let own_snapshot;
         let snapshot = match shared {
             Some(shared) => shared.as_slice(),
             None => {
-                let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
-                    .iter()
-                    .map(
-                        |name| crate::reference_index::ReferenceIndexKey::LaravelString {
-                            kind: LaravelStringKind::View,
-                            key: name.clone(),
-                        },
-                    )
-                    .collect();
                 // Never trigger (or wait on) workspace indexing from here:
                 // this runs while a Blade file is being opened or a
                 // controller saved, and a keystroke must not pay for a
@@ -258,16 +260,38 @@ impl Backend {
                 own_snapshot.as_slice()
             }
         };
+        // A shared snapshot holds every file in the workspace that renders
+        // any view, so the ones that name *this* template are picked out of
+        // it the same way the per-template snapshot was built: by asking the
+        // reference index.  Without it, every template would read every
+        // other template's spans.  `None` while the index is still being
+        // built, which falls back to reading the snapshot whole.
+        let candidates = shared.and_then(|_| self.reference_candidate_uris_for_keys(&keys));
 
         // Union the variables from every call site, per name.
         let mut merged: HashMap<String, Vec<PhpType>> = HashMap::new();
-        for (file_uri, symbol_map) in snapshot {
-            // A template must not feed itself (`@include` spans inside
-            // the template's own virtual PHP), and other templates'
-            // `@include`s would recurse — skip Blade files entirely.
-            if self.is_blade_file(file_uri) {
+        for (file_uri, snapshot_map) in snapshot {
+            // A template must not feed itself: a recursive `@include` names
+            // the template the spans it would be read from belong to.
+            if file_uri == uri {
                 continue;
             }
+            if let Some(candidates) = &candidates
+                && !candidates.contains(file_uri.as_str())
+            {
+                continue;
+            }
+            // A Blade caller's map indexes its virtual PHP, and the refresh
+            // pass rewrites that as it re-infers templates, so the
+            // snapshot's copy can describe a text that no longer exists.
+            let is_blade = self.is_blade_file(file_uri);
+            let symbol_map = match is_blade {
+                true => match self.symbol_maps.read().get(file_uri) {
+                    Some(map) => Arc::clone(map),
+                    None => continue,
+                },
+                false => Arc::clone(snapshot_map),
+            };
             // A render site whose receiver only a type settles is not in
             // the map, so ask for the file's confirmed extras — but only
             // when a candidate names one of *this* template's views, since
@@ -283,7 +307,7 @@ impl Backend {
                 .iter()
                 .any(|site| view_names.contains(&site.key));
             let extra = if has_candidate {
-                self.typed_receiver_view_spans_for(file_uri, symbol_map)
+                self.typed_receiver_view_spans_for(file_uri, &symbol_map)
             } else {
                 Arc::new(Vec::new())
             };
@@ -303,7 +327,10 @@ impl Backend {
             if offsets.is_empty() {
                 continue;
             }
-            let Some(content) = self.get_file_content(file_uri) else {
+            // Read only once the caller is known to name this template: a
+            // Blade caller's text is its whole virtual PHP, which is far too
+            // much to copy for every template in the project.
+            let Some(content) = self.caller_source(file_uri, is_blade, &symbol_map) else {
                 continue;
             };
             for site in self.extract_call_site_vars(file_uri, &content, &offsets) {
@@ -423,7 +450,7 @@ impl Backend {
         // templates.
         let shared = self.view_caller_snapshot();
         let shared_blade = self.blade_caller_snapshot();
-        for uri in blade_uris {
+        for uri in self.blade_render_order(blade_uris) {
             let Some(content) = self.get_file_content(&uri) else {
                 continue;
             };
@@ -431,10 +458,132 @@ impl Backend {
         }
     }
 
+    /// The templates of a refresh pass, ordered so that a template is
+    /// re-inferred after every template that renders it.
+    ///
+    /// A partial's inferred types are read out of the rendering template's
+    /// virtual PHP, so that template's own scope has to be settled first:
+    /// an `@include('partials.row', ['row' => $row])` inside a
+    /// `@foreach ($rows as $row)` only types `$row` once the rendering
+    /// template knows what `$rows` holds.
+    ///
+    /// Templates that render each other have no such order.  Each is read
+    /// against the other's scope as the previous pass left it, and the tie
+    /// is broken by URI so that the pass is reproducible rather than
+    /// oscillating between two answers.
+    fn blade_render_order(&self, mut uris: Vec<String>) -> Vec<String> {
+        // The snapshot comes from a `HashMap`, so the tie-break is only a
+        // tie-break once the input itself is in a fixed order.
+        uris.sort_unstable();
+
+        let mut rendered_by_name: HashMap<String, usize> = HashMap::new();
+        for (index, uri) in uris.iter().enumerate() {
+            for name in self.view_names_for_blade_uri(uri) {
+                rendered_by_name.insert(canonical_view_name(&name).into_owned(), index);
+            }
+        }
+
+        let anonymous = self.anonymous_component_namespaces();
+        let mut renders: Vec<Vec<usize>> = vec![Vec::new(); uris.len()];
+        let mut renderers: Vec<usize> = vec![0; uris.len()];
+        for (index, uri) in uris.iter().enumerate() {
+            for name in self.blade_rendered_view_names(uri, &anonymous) {
+                let Some(&target) = rendered_by_name.get(canonical_view_name(&name).as_ref())
+                else {
+                    continue;
+                };
+                if target == index || renders[index].contains(&target) {
+                    continue;
+                }
+                renders[index].push(target);
+                renderers[target] += 1;
+            }
+        }
+
+        let mut order: Vec<usize> = Vec::with_capacity(uris.len());
+        let mut ready: VecDeque<usize> = (0..uris.len())
+            .filter(|index| renderers[*index] == 0)
+            .collect();
+        while let Some(index) = ready.pop_front() {
+            order.push(index);
+            for target in std::mem::take(&mut renders[index]) {
+                renderers[target] -= 1;
+                if renderers[target] == 0 {
+                    ready.push_back(target);
+                }
+            }
+        }
+        // A template rendered from a cycle never runs out of renderers, so
+        // whatever the walk did not reach follows it in URI order.
+        let placed: HashSet<usize> = order.iter().copied().collect();
+        order.extend((0..uris.len()).filter(|index| !placed.contains(index)));
+
+        order
+            .into_iter()
+            .map(|index| std::mem::take(&mut uris[index]))
+            .collect()
+    }
+
+    /// The view names one Blade template renders: the ones its compiled
+    /// `@include` / `@each` / `@extends` family names, and the ones the
+    /// component each `<x-…>` tag addresses is addressable by.
+    fn blade_rendered_view_names(
+        &self,
+        uri: &str,
+        anonymous: &[crate::blade::component_tags::AnonymousNamespace],
+    ) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .symbol_maps
+            .read()
+            .get(uri)
+            .map(|map| {
+                map.spans
+                    .iter()
+                    .filter_map(|span| match &span.kind {
+                        SymbolKind::LaravelStringKey {
+                            kind: LaravelStringKind::View,
+                            key,
+                            ..
+                        } => Some(key.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(content) = self.get_file_content_arc(uri) {
+            for tag in crate::blade::component_tags::referenced_component_tags(&content) {
+                names.extend(crate::blade::component_tags::view_names_for_component_tag(
+                    &tag, anonymous,
+                ));
+            }
+        }
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
+    /// The text one caller file's symbol map offsets index: a Blade
+    /// template's virtual PHP, and any other file's own source.
+    ///
+    /// `None` for a Blade caller whose map and virtual PHP disagree, which
+    /// drops the caller rather than reading its offsets against the wrong
+    /// buffer: re-inferring a template rewrites its prologue, so the map a
+    /// reader holds may have been built for a shorter text than the one the
+    /// pass has since written.
+    fn caller_source(&self, uri: &str, is_blade: bool, map: &SymbolMap) -> Option<String> {
+        if !is_blade {
+            return self.get_file_content(uri);
+        }
+        let content = self.blade_virtual_content.read().get(uri).cloned()?;
+        map.matches_source(&content).then_some(content)
+    }
+
     /// Every parsed user file that renders at least one Blade view, with
-    /// its symbol map.  Non-Blade only: a template must not feed itself
-    /// (`@include` spans sit inside its own virtual PHP), and other
-    /// templates' `@include`s would recurse.
+    /// its symbol map.
+    ///
+    /// Templates count as callers: an `@include` is a render site like any
+    /// other, and the offsets its spans carry index the template's virtual
+    /// PHP, which is what [`Self::caller_source`] hands back for one.
     fn view_caller_snapshot(&self) -> ViewCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         let maps = self.symbol_maps.read();
@@ -444,7 +593,6 @@ impl Backend {
                 !uri.starts_with("phpantom-stub://")
                     && !uri.starts_with("phpantom-stub-fn://")
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
-                    && !self.is_blade_file(uri)
                     && (!map.view_receiver_sites.is_empty()
                         || map.spans.iter().any(|span| {
                             matches!(
@@ -489,6 +637,20 @@ impl Backend {
         self.reinfer_and_reparse_blade_with(uri, content, None, None)
     }
 
+    /// Re-infer one template and pass what it holds on to the templates it
+    /// renders, for the open of a Blade file.
+    ///
+    /// The renders matter as much as the template itself here: a partial
+    /// preprocessed before the page that `@include`s it was ever parsed read
+    /// its own scope off a page that did not exist yet, and opening the page
+    /// is the point that answer becomes available.
+    pub(crate) fn reinfer_blade_and_its_renders(&self, uri: &str, content: &str) {
+        if self.reinfer_and_reparse_blade(uri, content) {
+            self.schedule_diagnostics(uri.to_string());
+        }
+        self.refresh_blade_render_targets(vec![uri.to_string()]);
+    }
+
     /// Recompute one template's inferred variable set; when it differs
     /// from the cached set, overwrite the cache and re-parse the
     /// template (`update_ast` reads the cache, so it must be written
@@ -525,7 +687,7 @@ impl Backend {
     /// template parsed for the first time later runs inference itself.
     pub(crate) fn refresh_blade_inference_for_caller(&self, caller_uri: &str) {
         if self.is_blade_file(caller_uri) {
-            self.refresh_blade_component_inference_for_caller(caller_uri);
+            self.refresh_blade_render_targets(vec![caller_uri.to_string()]);
             self.refresh_blade_layout_children(caller_uri);
             return;
         }
@@ -552,6 +714,7 @@ impl Backend {
         names.sort_unstable();
         names.dedup();
 
+        let mut changed: Vec<String> = Vec::new();
         for name in names {
             for location in crate::virtual_members::laravel::resolve_laravel_string_key(
                 self,
@@ -571,43 +734,49 @@ impl Backend {
                     continue;
                 };
                 if self.reinfer_and_reparse_blade(&template_uri, &content) {
-                    self.schedule_diagnostics(template_uri);
+                    self.schedule_diagnostics(template_uri.clone());
+                    changed.push(template_uri);
                 }
             }
         }
+        // A template whose own scope moved hands different data to the
+        // partials it renders, so the edit follows the renders down.
+        self.refresh_blade_render_targets(changed);
     }
 
     /// The Blade-caller equivalent of [`Self::refresh_blade_inference_for_caller`]:
-    /// re-run component-tag inference for the templates a *Blade* file's own
-    /// `<x-…>` tags reference, after it was edited or saved, so an updated
-    /// attribute is reflected without waiting for the referenced
-    /// component's own next parse.
-    fn refresh_blade_component_inference_for_caller(&self, caller_uri: &str) {
-        let Some(content) = self.get_file_content(caller_uri) else {
-            return;
-        };
-        let tags = crate::blade::component_tags::referenced_component_tags(&content);
-        if tags.is_empty() {
+    /// re-run inference for the templates a *Blade* file renders — the
+    /// partials its `@include` family names and the components its `<x-…>`
+    /// tags address — so an updated attribute or `@include` array reaches
+    /// them without waiting for their own next parse.
+    ///
+    /// The walk follows whatever changed: a partial handed a new type passes
+    /// different data on to the partials *it* renders.  Each template is
+    /// visited once, which is what keeps two templates that render each
+    /// other from handing the work back and forth.
+    fn refresh_blade_render_targets(&self, from: Vec<String>) {
+        if from.is_empty() {
             return;
         }
-
         let anonymous = self.anonymous_component_namespaces();
-        for tag in tags {
-            for view_name in
-                crate::blade::component_tags::view_names_for_component_tag(&tag, &anonymous)
-            {
+        let mut visited: HashSet<String> = from.iter().cloned().collect();
+        let mut pending = from;
+        while let Some(caller_uri) = pending.pop() {
+            for name in self.blade_rendered_view_names(&caller_uri, &anonymous) {
                 for location in crate::virtual_members::laravel::resolve_laravel_string_key(
                     self,
                     &LaravelStringKind::View,
-                    &view_name,
-                    caller_uri,
+                    &name,
+                    &caller_uri,
                 ) {
                     let template_uri = location.uri.to_string();
-                    if template_uri == caller_uri
-                        || !self
-                            .blade_virtual_content
-                            .read()
-                            .contains_key(&template_uri)
+                    if !visited.insert(template_uri.clone()) {
+                        continue;
+                    }
+                    if !self
+                        .blade_virtual_content
+                        .read()
+                        .contains_key(&template_uri)
                     {
                         continue;
                     }
@@ -615,7 +784,8 @@ impl Backend {
                         continue;
                     };
                     if self.reinfer_and_reparse_blade(&template_uri, &template_content) {
-                        self.schedule_diagnostics(template_uri);
+                        self.schedule_diagnostics(template_uri.clone());
+                        pending.push(template_uri);
                     }
                 }
             }

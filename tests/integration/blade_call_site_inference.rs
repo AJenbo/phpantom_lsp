@@ -848,4 +848,270 @@ mod tests {
             "expected $item typed from the injected factory's call site, got {hover}"
         );
     }
+
+    /// An `@include('partials.row', ['row' => $item])` types `$row` inside
+    /// the partial, the same way a controller's `view()` call does.
+    #[tokio::test]
+    async fn include_directive_types_the_partials_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                ("resources/views/page.blade.php", "\n"),
+                (
+                    "resources/views/partials/row.blade.php",
+                    "{{ $row->name }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let partial_uri =
+            Url::from_file_path(root.join("resources/views/partials/row.blade.php")).unwrap();
+
+        let page_source = "@php\n/** @var \\App\\Item $item */\n@endphp\n@include('partials.row', ['row' => $item])\n";
+        open(&backend, &page_uri, "blade", page_source).await;
+        open(
+            &backend,
+            &partial_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/partials/row.blade.php")).unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &partial_uri, 0, 5).await;
+        assert!(
+            hover.contains("Item"),
+            "$row should be typed Item from the @include that renders it, got: {}",
+            hover
+        );
+    }
+
+    /// A partial opened before the page that renders it picks the type up
+    /// when the page is opened: the page was not parsed when the partial
+    /// first looked for its call sites.
+    #[tokio::test]
+    async fn a_partial_opened_first_learns_from_the_page_opened_after_it() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                ("resources/views/page.blade.php", "\n"),
+                (
+                    "resources/views/partials/row.blade.php",
+                    "{{ $row->name }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let partial_uri =
+            Url::from_file_path(root.join("resources/views/partials/row.blade.php")).unwrap();
+
+        open(
+            &backend,
+            &partial_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/partials/row.blade.php")).unwrap(),
+        )
+        .await;
+        let page_source = "@php\n/** @var \\App\\Item $item */\n@endphp\n@include('partials.row', ['row' => $item])\n";
+        open(&backend, &page_uri, "blade", page_source).await;
+
+        let hover = hover_type(&backend, &partial_uri, 0, 5).await;
+        assert!(
+            hover.contains("Item"),
+            "$row should be typed Item once the including page is parsed, got: {}",
+            hover
+        );
+    }
+
+    /// `@each` binds the item under the name its third argument spells and
+    /// the key beside it, so both are typed from the collection the
+    /// rendering template iterates.
+    #[tokio::test]
+    async fn each_directive_types_the_partials_item_and_key() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                ("resources/views/page.blade.php", "\n"),
+                (
+                    "resources/views/partials/line.blade.php",
+                    "{{ $line->name }}\n{{ $key }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let partial_uri =
+            Url::from_file_path(root.join("resources/views/partials/line.blade.php")).unwrap();
+
+        let page_source = "@php\n/** @var array<int, \\App\\Item> $items */\n@endphp\n@each('partials.line', $items, 'line')\n";
+        open(&backend, &page_uri, "blade", page_source).await;
+        open(
+            &backend,
+            &partial_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/partials/line.blade.php")).unwrap(),
+        )
+        .await;
+
+        let item_hover = hover_type(&backend, &partial_uri, 0, 5).await;
+        assert!(
+            item_hover.contains("Item"),
+            "$line should be typed Item from the @each collection, got: {}",
+            item_hover
+        );
+        let key_hover = hover_type(&backend, &partial_uri, 1, 5).await;
+        assert!(
+            key_hover.contains("int"),
+            "$key should be typed int from the @each collection, got: {}",
+            key_hover
+        );
+    }
+
+    /// A template that renders itself feeds only what its own callers pass:
+    /// its recursive `@include` names the very spans its scope would be read
+    /// from, so it is skipped rather than read back into it.
+    #[tokio::test]
+    async fn a_recursive_include_does_not_feed_the_template_itself() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                ("resources/views/page.blade.php", "\n"),
+                (
+                    "resources/views/menu.blade.php",
+                    "{{ $node->name }}\n@include('menu', ['node' => $node])\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let menu_uri = Url::from_file_path(root.join("resources/views/menu.blade.php")).unwrap();
+
+        let page_source =
+            "@php\n/** @var \\App\\Item $item */\n@endphp\n@include('menu', ['node' => $item])\n";
+        open(&backend, &page_uri, "blade", page_source).await;
+        open(
+            &backend,
+            &menu_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/menu.blade.php")).unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &menu_uri, 0, 5).await;
+        assert!(
+            hover.contains("Item"),
+            "$node should keep the type the page passes, got: {}",
+            hover
+        );
+    }
+
+    /// Two templates that render each other settle instead of handing the
+    /// work back and forth: each is read against the other's scope as it
+    /// stands, and the nesting one passes the other does not grow a level
+    /// per pass.
+    #[tokio::test]
+    async fn templates_that_render_each_other_settle() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "resources/views/left.blade.php",
+                    "@include('right', ['x' => [$y]])\n{{ $y }}\n",
+                ),
+                (
+                    "resources/views/right.blade.php",
+                    "@include('left', ['y' => [$x]])\n{{ $x }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        for name in ["left", "right"] {
+            let path = format!("resources/views/{name}.blade.php");
+            let uri = Url::from_file_path(root.join(&path)).unwrap();
+            open(
+                &backend,
+                &uri,
+                "blade",
+                &std::fs::read_to_string(root.join(&path)).unwrap(),
+            )
+            .await;
+        }
+
+        // Reaching this line at all is the point: an inference that fed
+        // itself would never return.  The type is whatever the other
+        // template held when it was last read, so only its shape is
+        // asserted.
+        let left_uri = Url::from_file_path(root.join("resources/views/left.blade.php")).unwrap();
+        let hover = hover_type(&backend, &left_uri, 1, 4).await;
+        assert!(
+            hover.contains("$y"),
+            "hover on $y should describe the variable, got: {}",
+            hover
+        );
+    }
+
+    /// A controller's data reaches the partial two renders down: the page it
+    /// renders passes the item on with `@include`.
+    #[tokio::test]
+    async fn a_controllers_data_reaches_a_partial_through_the_page() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nclass Controller {\n    public function show(): mixed {\n        return view('page', ['item' => new Item()]);\n    }\n}\n",
+                ),
+                (
+                    "resources/views/page.blade.php",
+                    "@include('partials.row', ['row' => $item])\n",
+                ),
+                (
+                    "resources/views/partials/row.blade.php",
+                    "{{ $row->name }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let partial_uri =
+            Url::from_file_path(root.join("resources/views/partials/row.blade.php")).unwrap();
+
+        for (uri, path, language) in [
+            (&controller_uri, "app/Controller.php", "php"),
+            (&page_uri, "resources/views/page.blade.php", "blade"),
+            (
+                &partial_uri,
+                "resources/views/partials/row.blade.php",
+                "blade",
+            ),
+        ] {
+            open(
+                &backend,
+                uri,
+                language,
+                &std::fs::read_to_string(root.join(path)).unwrap(),
+            )
+            .await;
+        }
+
+        let hover = hover_type(&backend, &partial_uri, 0, 5).await;
+        assert!(
+            hover.contains("Item"),
+            "$row should be typed Item through the page that includes the partial, got: {}",
+            hover
+        );
+    }
 }

@@ -669,17 +669,13 @@ impl LanguageServer for Backend {
         // lazily parse other files.
         if self.is_blade_file(&uri) {
             if self.sync_ast_updates {
-                if self.reinfer_and_reparse_blade(&uri, &text) {
-                    self.schedule_diagnostics(uri.clone());
-                }
+                self.reinfer_blade_and_its_renders(&uri, &text);
             } else {
                 let backend = self.clone_for_blocking();
                 let blade_uri = uri.clone();
                 let content = Arc::clone(&text);
                 tokio::task::spawn_blocking(move || {
-                    if backend.reinfer_and_reparse_blade(&blade_uri, &content) {
-                        backend.schedule_diagnostics(blade_uri);
-                    }
+                    backend.reinfer_blade_and_its_renders(&blade_uri, &content);
                 });
             }
         }
