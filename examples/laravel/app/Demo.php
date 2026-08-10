@@ -469,6 +469,36 @@ class Demo
     }
 
 
+    // ── Laravel Path Helpers ────────────────────────────────────────────────
+
+    /**
+     * Path helpers anchor their argument to a conventional directory under the
+     * project root, so the file each one names is navigable and the segments
+     * leading to it complete from the real directory listing.
+     *
+     * Try:
+     *  1. Ctrl+Click "routes/web.php" to jump to that file.
+     *  2. Trigger completion inside `resource_path('|')` — offers the entries
+     *     of resources/, directories first; pick one and keep typing to walk
+     *     down into it.
+     *  3. Note that `database_path('factories')` is not a link: an editor
+     *     cannot open a folder as a document. Directories complete, they
+     *     just do not jump.
+     */
+    public function laravelPathHelpers(): void
+    {
+        base_path('routes/web.php');              // → routes/web.php
+        app_path('Models/Bakery.php');            // → app/Models/Bakery.php
+        config_path('app.php');                   // → config/app.php
+        lang_path('en/messages.php');             // → lang/en/messages.php
+        resource_path('views/welcome.blade.php'); // → resources/views/welcome.blade.php
+
+        // public_path() and storage_path() work the same way; this demo
+        // project ships no public/ or storage/ directory to point them at.
+        database_path('factories');               // a directory — completes, no link
+    }
+
+
     // ── Laravel View, Route & Translation Navigation ───────────────────────
 
     /**

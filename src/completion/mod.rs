@@ -22,6 +22,8 @@
 ///   completion inside method arguments like `with('`, `where('`, etc.
 /// - **command_params**: Artisan command parameter completion (own
 ///   `argument()`/`option()` calls and `Artisan::call()` parameter arrays)
+/// - **laravel_paths**: Path-segment completion inside Laravel's path helpers
+///   (`base_path('|')`, `resource_path('|')`, …)
 /// - **laravel_request_keys**: Request input field name completion inside
 ///   `$request->input('`, `->has('`, `$request['`, etc., driven by the
 ///   validation rules in scope
@@ -76,6 +78,7 @@ pub(crate) mod builder;
 pub(crate) mod command_params;
 pub(crate) mod eloquent_string;
 pub(crate) mod handler;
+pub(crate) mod laravel_paths;
 pub(crate) mod laravel_request_keys;
 pub(crate) mod laravel_route_controller;
 pub(crate) mod laravel_route_params;
