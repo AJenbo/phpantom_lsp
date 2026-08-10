@@ -794,12 +794,19 @@ impl LanguageServer for Backend {
                     // (the semanticTokens request usually races ahead of
                     // this background parse), so ask for a re-pull.
                     Ok(true) => {
-                        if refresh_backend
-                            .supports_semantic_tokens_refresh
-                            .load(Ordering::Acquire)
-                            && let Some(ref client) = refresh_backend.client
-                        {
-                            let _ = client.semantic_tokens_refresh().await;
+                        if let Some(ref client) = refresh_backend.client {
+                            if refresh_backend
+                                .supports_semantic_tokens_refresh
+                                .load(Ordering::Acquire)
+                            {
+                                let _ = client.semantic_tokens_refresh().await;
+                            }
+                            if refresh_backend
+                                .supports_inlay_hint_refresh
+                                .load(Ordering::Acquire)
+                            {
+                                let _ = client.inlay_hint_refresh().await;
+                            }
                         }
                     }
                     Ok(false) => {}
