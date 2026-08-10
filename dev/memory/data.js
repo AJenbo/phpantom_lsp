@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786341027000,
+  "lastUpdate": 1786383898876,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18053,6 +18053,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "e90ef1bcf6579bbb97a11105a14195e5a3cbcf36",
+          "message": "fix: store @phpstan-type aliases from trait and enum docblocks\n\nThe trait and enum branches of the class parser were setting\ntype_aliases to AtomMap::default(), discarding the aliases that\nextract_class_docblock() had already parsed. This caused any\n@phpstan-type alias defined on a trait or enum to be reported as\n\"Class not found\" by the unknown_class diagnostic.\n\nClasses and interfaces already stored doc_info.type_aliases correctly;\nthis fix brings traits and enums in line.",
+          "timestamp": "2026-08-10T12:28:18-05:00",
+          "tree_id": "a0ea75117fe55cfce21c371b69c70f7d72f7539b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e90ef1bcf6579bbb97a11105a14195e5a3cbcf36"
+        },
+        "date": 1786383892217,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.6,
             "unit": "MiB"
           }
         ]
