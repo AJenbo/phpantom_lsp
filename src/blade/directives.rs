@@ -752,6 +752,19 @@ pub const DIRECTIVE_COMPLETIONS: &[DirectiveCompletion] = &[
 ];
 
 pub fn translate_directive(directive: &str) -> String {
+    // A section or stack name is a cross-file key, so these lower to
+    // markers of their own for symbol extraction to recognise them by (see
+    // `crate::blade::blocks`).  `@hasSection` and its cousins compile to a
+    // condition, and Laravel always follows them with an `@endif`, so the
+    // marker opens a real `if` for that `@endif` to close.
+    if let Some(entry) = super::blocks::named_block_directive(directive) {
+        let marker = entry.marker();
+        return if entry.opens_condition() {
+            format!("if ({marker}")
+        } else {
+            marker.to_string()
+        };
+    }
     match directive {
         "php" | "endphp" => "".to_string(),
         "if" | "elseif" | "foreach" | "for" | "while" | "switch" | "case" => directive.to_string(),
@@ -782,10 +795,9 @@ pub fn translate_directive(directive: &str) -> String {
         // name therefore mean something entirely different from every other
         // render directive's data array, so it gets a marker of its own.
         "each" => "blade_each_directive".to_string(),
-        "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" | "class"
-        | "style" | "checked" | "selected" | "disabled" | "readonly" | "required" | "stack"
-        | "json" | "dump" | "pushIf" | "pushOnce" | "prependOnce" | "lang" | "choice" | "js"
-        | "vite" | "fonts" | "dd" => "blade_directive".to_string(),
+        "slot" | "props" | "aware" | "class" | "style" | "checked" | "selected" | "disabled"
+        | "readonly" | "required" | "json" | "dump" | "lang" | "choice" | "js" | "vite"
+        | "fonts" | "dd" => "blade_directive".to_string(),
         // `unset(...)` is a language construct, not a function — it cannot
         // be passed as an argument to `blade_directive(...)`, so it keeps
         // its own real name instead of the generic marker.
@@ -806,7 +818,6 @@ pub fn translate_directive(directive: &str) -> String {
         // by the callee it is passed to.
         "can" | "cannot" | "canany" => "if (blade_can_directive".to_string(),
         "elsecan" | "elsecannot" | "elsecanany" => "elseif (blade_can_directive".to_string(),
-        "hasStack" | "hasSection" | "sectionMissing" => "if (blade_directive".to_string(),
         "endsection" | "endpush" | "endprepend" | "endcomponent" | "endcomponentFirst"
         | "endslot" | "stop" | "show" | "append" | "overwrite" => "".to_string(),
         _ => format!("/* @{directive} */"),
@@ -861,6 +872,22 @@ mod tests {
                 match_directive(name),
                 Some(name),
                 "directive {name:?} did not match its own bare name"
+            );
+        }
+    }
+
+    /// A directive that names a section or a stack has to lower to the
+    /// marker call its table entry names, since symbol extraction reads
+    /// the name off that callee and nothing else links the two tables.
+    #[test]
+    fn every_named_block_directive_lowers_to_its_own_marker() {
+        for entry in crate::blade::blocks::NAMED_BLOCK_DIRECTIVES {
+            let translated = translate_directive(entry.name);
+            assert!(
+                translated.contains(entry.marker()),
+                "@{} lowers to {translated:?}, which does not call {}",
+                entry.name,
+                entry.marker()
             );
         }
     }

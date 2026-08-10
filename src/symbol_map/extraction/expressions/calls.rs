@@ -134,6 +134,15 @@ fn extract_call<'a>(
                             &mut ctx.spans,
                         );
                     }
+                    // `@yield`/`@section`/`@stack`/`@push` and their
+                    // helpers lower to markers of their own, so the
+                    // section or stack they name is extracted here.
+                    try_emit_blade_block_span(
+                        name_clean,
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
                     // Detect Laravel helper calls and emit a
                     // LaravelStringKey span for the first string arg.
                     // Uses if-else to short-circuit (most function calls

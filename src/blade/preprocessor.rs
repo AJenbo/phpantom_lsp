@@ -271,7 +271,7 @@ pub fn preprocess_with_vars(
     }
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} }\n");
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
@@ -2046,7 +2046,7 @@ mod tests {
             php
         );
         assert!(
-            php.contains("blade_directive ('scripts');"),
+            php.contains("blade_stack_directive ('scripts');"),
             "unexpected @stack(...) translation: {}",
             php
         );
@@ -2129,7 +2129,7 @@ mod tests {
     fn test_preprocess_has_stack_and_has_section_open_a_real_if() {
         let (php, _) = preprocess("@hasStack('scripts')\nx\n@endif\n<p>after</p>");
         assert!(
-            php.contains("if (blade_directive ('scripts')):"),
+            php.contains("if (blade_stack_directive ('scripts')):"),
             "@hasStack should open a balanced if with its argument type-checked: {}",
             php
         );
@@ -2141,14 +2141,14 @@ mod tests {
 
         let (php, _) = preprocess("@hasSection('content')\nx\n@endif\n<p>after</p>");
         assert!(
-            php.contains("if (blade_directive ('content')):"),
+            php.contains("if (blade_section_directive ('content')):"),
             "@hasSection should open a balanced if with its argument type-checked: {}",
             php
         );
 
         let (php, _) = preprocess("@sectionMissing('content')\nx\n@endif\n<p>after</p>");
         assert!(
-            php.contains("if (blade_directive ('content')):"),
+            php.contains("if (blade_section_directive ('content')):"),
             "@sectionMissing should open a balanced if with its argument type-checked: {}",
             php
         );
@@ -2161,21 +2161,21 @@ mod tests {
     fn test_preprocess_push_if_and_push_once_consume_arguments() {
         let (php, _) = preprocess("@pushIf($condition, 'scripts')\nx\n@endPushIf\n<p>after</p>");
         assert!(
-            php.contains("blade_directive ($condition, 'scripts');"),
+            php.contains("blade_push_if_directive ($condition, 'scripts');"),
             "@pushIf should type-check its arguments: {}",
             php
         );
 
         let (php, _) = preprocess("@pushOnce('scripts')\nx\n@endPushOnce\n<p>after</p>");
         assert!(
-            php.contains("blade_directive ('scripts');"),
+            php.contains("blade_stack_directive ('scripts');"),
             "@pushOnce should type-check its argument: {}",
             php
         );
 
         let (php, _) = preprocess("@prependOnce('scripts')\nx\n@endPrependOnce\n<p>after</p>");
         assert!(
-            php.contains("blade_directive ('scripts');"),
+            php.contains("blade_stack_directive ('scripts');"),
             "@prependOnce should type-check its argument: {}",
             php
         );

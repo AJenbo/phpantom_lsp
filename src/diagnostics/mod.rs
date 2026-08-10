@@ -205,6 +205,7 @@
 mod argument_count;
 mod blade_call_site;
 mod blade_directives;
+mod blade_sections;
 mod blade_signature;
 pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
@@ -485,6 +486,10 @@ impl Backend {
                 "blade_directive_balance",
                 self.collect_blade_directive_diagnostics(uri_str, out)
             );
+            step!(
+                "blade_section",
+                self.collect_blade_section_diagnostics(uri_str, out)
+            );
         }
     }
 
@@ -609,6 +614,11 @@ impl Backend {
                             LaravelStringKind::Command => has_command = true,
                             LaravelStringKind::MorphAlias => has_morph_alias = true,
                             LaravelStringKind::GateAbility => has_gate_ability = true,
+                            // A section or stack name is judged against the
+                            // templates that render the one it is written
+                            // in, which the Blade pass below has and this
+                            // one does not.
+                            LaravelStringKind::Section | LaravelStringKind::Stack => return None,
                         }
                         Some((kind.clone(), key.clone(), span.start, span.end))
                     } else {
@@ -801,6 +811,7 @@ impl Backend {
                         "invalid_laravel_command",
                     )
                 }
+                LaravelStringKind::Section | LaravelStringKind::Stack => continue,
                 LaravelStringKind::MorphAlias => {
                     let Some(aliases) = &morph_aliases else {
                         continue;

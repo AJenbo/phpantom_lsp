@@ -475,7 +475,7 @@ impl Backend {
             }
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                self.hover_laravel_string_key(kind, key)
+                self.hover_laravel_string_key(kind, key, uri)
             }
 
             SymbolKind::CommandOwnParam { name, is_option } => {
@@ -495,13 +495,17 @@ impl Backend {
         &self,
         kind: &crate::symbol_map::LaravelStringKind,
         key: &str,
+        uri: &str,
     ) -> Option<Hover> {
         use crate::symbol_map::LaravelStringKind;
 
         let (label, detail) = match kind {
+            LaravelStringKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
+            LaravelStringKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
             LaravelStringKind::Route => {
-                let locations =
-                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
+                    self, kind, key, uri,
+                );
                 let detail = if let Some(loc) = locations.first() {
                     let path = loc.uri.path();
                     let short_path = path
@@ -516,8 +520,9 @@ impl Backend {
                 ("Route", detail)
             }
             LaravelStringKind::Config => {
-                let locations =
-                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
+                    self, kind, key, uri,
+                );
                 let detail = if let Some(loc) = locations.first() {
                     let path = loc.uri.path();
                     let short_path = path
@@ -532,8 +537,9 @@ impl Backend {
                 ("Config", detail)
             }
             LaravelStringKind::View => {
-                let locations =
-                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
+                    self, kind, key, uri,
+                );
                 let detail = if let Some(loc) = locations.first() {
                     let path = loc.uri.path();
                     // Show the path relative to the workspace root so
@@ -554,8 +560,9 @@ impl Backend {
                 ("View", detail)
             }
             LaravelStringKind::Trans => {
-                let locations =
-                    crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key);
+                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
+                    self, kind, key, uri,
+                );
                 let detail = if let Some(loc) = locations.first() {
                     let path = loc.uri.path();
                     let short_path = path
@@ -619,6 +626,42 @@ impl Backend {
         };
 
         Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))
+    }
+
+    /// Describe where the other half of a Blade section or stack name is:
+    /// what renders the name a template fills, or what fills the name a
+    /// layout renders.
+    fn blade_block_detail(
+        &self,
+        uri: &str,
+        kind: &crate::symbol_map::LaravelStringKind,
+        name: &str,
+    ) -> String {
+        use crate::blade::blocks::{BlockKind, BlockRole};
+        use crate::symbol_map::LaravelStringKind;
+
+        let kind = match kind {
+            LaravelStringKind::Stack => BlockKind::Stack,
+            _ => BlockKind::Section,
+        };
+        let (role, locations) = self.blade_block_pairing(uri, kind, name);
+        let Some(first) = locations.first() else {
+            return match role {
+                BlockRole::Declare => "Nothing found that fills it".to_string(),
+                BlockRole::Fill | BlockRole::Check => "Nothing found that renders it".to_string(),
+            };
+        };
+        let path = self
+            .workspace_relative_path(first.uri.as_str())
+            .unwrap_or_else(|| first.uri.path().to_string());
+        let opening = match role {
+            BlockRole::Declare => "Filled by",
+            BlockRole::Fill | BlockRole::Check => "Rendered by",
+        };
+        match locations.len() {
+            1 => format!("{opening} `{path}`"),
+            more => format!("{opening} `{path}` and {} more", more - 1),
+        }
     }
 
     /// Describe where an authorization ability comes from: the

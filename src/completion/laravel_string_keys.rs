@@ -639,6 +639,12 @@ impl Backend {
                 aliases
             }
             LaravelStringKind::GateAbility => self.cached_gate_abilities(),
+            // Section and stack names are completed from the raw template
+            // instead (`crate::completion::handler::blade_block_name`):
+            // what a name may be depends on the layouts above the file,
+            // and the edit has to land in Blade coordinates rather than
+            // the virtual PHP this detection reads.
+            LaravelStringKind::Section | LaravelStringKind::Stack => Vec::new(),
         };
 
         // For config-backed attributes like #[Database('mysql')], filter
@@ -692,6 +698,9 @@ impl Backend {
                     LaravelStringKind::Command => CompletionItemKind::VALUE,
                     LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
                     LaravelStringKind::GateAbility => CompletionItemKind::METHOD,
+                    LaravelStringKind::Section | LaravelStringKind::Stack => {
+                        CompletionItemKind::VALUE
+                    }
                 };
                 CompletionItem {
                     label: name.clone(),

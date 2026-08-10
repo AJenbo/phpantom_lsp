@@ -8,6 +8,9 @@
 
 @extends('welcome')
 
+{{-- The name is checked against the layouts this view extends: Ctrl+Click
+     it to reach the @yield in welcome.blade.php, and a name none of them
+     render is reported. Try: type a name inside @section(''). --}}
 @section('content')
     <h1>{{ __('messages.welcome') }} - Admin</h1>
 
@@ -46,3 +49,7 @@
         <p>{{ trans('pagination.next') }}</p>
     @endif
 @endsection
+
+@push('scripts')
+    <script>console.log('pushed onto the layout stack')</script>
+@endpush

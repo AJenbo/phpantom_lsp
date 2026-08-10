@@ -156,6 +156,17 @@ impl Backend {
             return Ok(Some(self.complete_blade_directive(&prefix)));
         }
 
+        // ── Blade section / stack name completion ───────────────────────
+        // Inside `@yield('|')`, `@section('|')`, `@push('|')` and their
+        // helpers, the names come from the templates that render this one
+        // (or the ones it renders), and the edit is in Blade coordinates —
+        // so this too runs before the virtual-PHP swap below.
+        if self.is_blade_file(&uri)
+            && let Some(response) = self.blade_block_name_completion(&uri, position)
+        {
+            return Ok(Some(response));
+        }
+
         // Get file content for offset calculation.  For Blade files,
         // use the virtual PHP content and translate the cursor position
         // so that variable resolution walks the preprocessed AST.

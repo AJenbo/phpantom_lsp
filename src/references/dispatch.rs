@@ -353,6 +353,7 @@ impl Backend {
                     self,
                     kind,
                     key,
+                    uri,
                     &snapshot,
                     include_declaration,
                 )

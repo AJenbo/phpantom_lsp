@@ -82,6 +82,38 @@ pub(super) fn try_emit_laravel_string_span_at(
     emit_laravel_string_span(kind, false, index, argument_list, content, spans);
 }
 
+/// Emit the section- or stack-name span for one of the marker calls the
+/// Blade preprocessor lowers `@yield`, `@section`, `@stack`, `@push` and
+/// their helpers to, when `name` is one of them.
+///
+/// `@pushIf` is the odd one out: Laravel folds everything before the last
+/// comma into the condition, so the stack it pushes to is the last
+/// argument rather than the first, and it lowers to a marker of its own to
+/// say so.
+pub(super) fn try_emit_blade_block_span(
+    name: &str,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    use crate::blade::blocks::{PUSH_IF_MARKER, SECTION_MARKER, STACK_MARKER};
+    use crate::symbol_map::LaravelStringKind;
+
+    let (kind, index) = if name.eq_ignore_ascii_case(SECTION_MARKER) {
+        (LaravelStringKind::Section, 0)
+    } else if name.eq_ignore_ascii_case(STACK_MARKER) {
+        (LaravelStringKind::Stack, 0)
+    } else if name.eq_ignore_ascii_case(PUSH_IF_MARKER) {
+        (
+            LaravelStringKind::Stack,
+            argument_list.arguments.len().saturating_sub(1),
+        )
+    } else {
+        return;
+    };
+    emit_laravel_string_span(kind, false, index, argument_list, content, spans);
+}
+
 /// Emit the config-key span for a call on the config repository, marking
 /// `Config::set('…')` as a write: it declares the key it names, so the key
 /// need not exist in any `config/*.php` file.

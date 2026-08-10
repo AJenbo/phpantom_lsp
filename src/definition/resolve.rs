@@ -404,7 +404,7 @@ impl Backend {
             }
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                let locs = laravel::resolve_laravel_string_key(self, kind, key);
+                let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);
                 if locs.is_empty() { None } else { Some(locs) }
             }
 

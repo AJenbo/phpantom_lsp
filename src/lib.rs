@@ -333,6 +333,11 @@ pub(crate) struct LaravelStringKeyCache {
     /// because consumers look up a single name in one of its three maps and
     /// cloning the whole index per lookup would be waste.
     pub blade_discovery: Option<std::sync::Arc<crate::blade::discovery::BladeDiscovery>>,
+    /// The section and stack names every template of the project writes,
+    /// with what each one extends and includes.  Shared behind an `Arc`
+    /// because an edit updates the entry of the one template that changed
+    /// rather than replacing the whole index.
+    pub blade_blocks: Option<std::sync::Arc<crate::blade::block_index::BladeBlockIndex>>,
     pub config_trees: Option<
         Vec<(
             String,
@@ -371,6 +376,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub trans_keys: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
     pub blade_discovery: parking_lot::Mutex<()>,
+    pub blade_blocks: parking_lot::Mutex<()>,
     pub shared_view_vars: parking_lot::Mutex<()>,
     pub gate_abilities: parking_lot::Mutex<()>,
 }

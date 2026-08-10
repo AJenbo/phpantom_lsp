@@ -383,6 +383,13 @@ pub(crate) enum LaravelStringKind {
     /// `Relation::getMorphedModel('post')`, and for the `$types` argument of
     /// the `whereHasMorph()` family.
     MorphAlias,
+    /// A Blade section name: the string `@yield('content')` renders and
+    /// `@section('content')` fills. Emitted for the marker calls the Blade
+    /// preprocessor lowers those directives to.
+    Section,
+    /// A Blade stack name, the `@stack`/`@push` counterpart of
+    /// [`Self::Section`].
+    Stack,
     /// An authorization ability name: the string a `Gate::allows()`,
     /// `$user->can()`, `$this->authorize()`, `can:` middleware parameter, or
     /// Blade `@can` directive checks.  Resolves against `Gate::define()`

@@ -404,7 +404,7 @@ fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
 }
 
 /// The argument text between a directive's parentheses.
-fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
+pub(crate) fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
     content
         .get(args.start + 1..args.end - 1)
         .unwrap_or_default()
@@ -417,7 +417,7 @@ fn inside<'a>(content: &'a str, args: &Span) -> &'a str {
 /// glued to a preceding word is not a directive: an `@production` in
 /// `admin@production.example` compiles to nothing, and `@@if` is the escape
 /// for a literal `@if`.
-fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
+pub(crate) fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
     let bytes = content.as_bytes();
     if at > 0 && (bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1])) {
         return None;

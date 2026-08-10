@@ -124,6 +124,103 @@ attributes inside `<x-alert ` shows constructor parameter names.
 
 ---
 
+## BL11. Custom directive discovery
+
+**Impact: Medium · Effort: Low-Medium**
+
+`Blade::directive('datetime', …)`, `Blade::if('env', …)`, and
+component namespace registrations (`Blade::componentNamespace()`,
+`Blade::anonymousComponentPath()`) in app and package service
+providers declare project-specific directives. Scan literal
+registrations — the same provider-scanning shape as the macro
+scanner — so that:
+
+- known custom directives stop degrading to comments in the
+  preprocessor and instead map to expression-preserving PHP (their
+  argument is still type-checked);
+- `Blade::if('admin')` synthesizes the full family (`@admin`,
+  `@elseadmin`, `@endadmin`, `@unlessadmin`);
+- directive name completion (`DIRECTIVE_COMPLETIONS` in
+  `src/blade/directives.rs`) includes them;
+- registered component namespaces/paths extend the discovery index.
+
+---
+
+## BL1. Blade-aware code actions
+
+**Impact: Medium · Effort: Medium**
+
+Code actions are currently disabled for `.blade.php` files because
+text edits target virtual PHP coordinates and actions like "Import
+class" insert `use` statements at the top of the file rather than
+inside a `@php` / `<?php` block. Re-enable code actions with:
+
+- Range translation (virtual PHP → Blade) for all text edits.
+- Blade-aware code generation (e.g. insert `use` inside `@php`).
+- Filtering out actions that don't make sense in Blade context.
+
+**Deliverable:** Code actions are re-enabled for `.blade.php` files.
+
+---
+
+## BL5. Go-to-definition for component tags
+
+**Impact: Medium · Effort: Medium**
+
+### Component tag go-to-definition
+
+On `<x-alert>`:
+
+1. Extract the component name.
+2. Look up in the component index to get the FQN.
+3. Use `find_or_load_class` + `fqn_uri_index` to find the
+   source file.
+4. Return a `Location` pointing to the class definition.
+
+On `<livewire:counter>`: same pattern using the Livewire index.
+
+### Tests
+
+New file `tests/integration/definition_blade.rs`:
+
+- Go-to-definition on `<x-alert>` → component class
+- Go-to-definition on `<livewire:counter>` → Livewire class
+
+**Deliverable:** Ctrl-click on `<x-alert>` jumps to the component
+class.
+
+---
+
+## BL22. A template never learns anything from the templates that render it
+
+**Impact: Medium · Effort: Medium**
+
+`compute_blade_injected_vars` skips every Blade file in the caller
+snapshot (`if self.is_blade_file(file_uri) { continue; }`, and
+`view_caller_snapshot` filters them out again), so call-site inference
+only ever reads controllers. A partial rendered exclusively from other
+templates therefore gets nothing: neither the entries of an
+`@include('partials.row', ['row' => $row])`, nor the item and key an
+`@each` binds, reach it, and an unannotated partial has no type for the
+variable it exists to display. Only the diagnostics path, which runs on
+the rendering template itself, reads those sites today.
+
+The comment gives the two reasons: a template must not feed itself, and
+other templates' `@include`s would recurse. Both are addressable the way
+the component-tag path already does it — that one *does* read Blade
+callers, keying off `blade_virtual_content` rather than the raw source
+(the symbol map's offsets are virtual-PHP offsets, so the raw Blade
+source is the wrong thing to parse) and skipping the template's own URI.
+What is left to settle is mutual rendering: A includes B includes A
+resolves each against the other's cached scope, so the refresh pass needs
+to converge rather than oscillate.
+
+Until then a partial rendered only from templates must declare its own
+`@bladestan-signature` to get completion and hover, which is what the
+contract checks want anyway.
+
+---
+
 ## BL23. Unbalanced component tag diagnostics
 
 **Impact: Low-Medium · Effort: Low**

@@ -557,6 +557,7 @@ impl Backend {
                 self,
                 &LaravelStringKind::View,
                 name,
+                caller_uri,
             ) {
                 let template_uri = location.uri.to_string();
                 if !self
@@ -599,6 +600,7 @@ impl Backend {
                     self,
                     &LaravelStringKind::View,
                     &view_name,
+                    caller_uri,
                 ) {
                     let template_uri = location.uri.to_string();
                     if template_uri == caller_uri

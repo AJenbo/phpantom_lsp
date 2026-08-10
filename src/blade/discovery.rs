@@ -131,7 +131,10 @@ impl Backend {
                 return;
             }
         }
-        self.laravel_string_key_cache.write().blade_discovery = None;
+        let mut cache = self.laravel_string_key_cache.write();
+        cache.blade_discovery = None;
+        // The block index is keyed by the very names that just changed.
+        cache.blade_blocks = None;
     }
 
     /// The template file a view name renders, as recorded by the index.

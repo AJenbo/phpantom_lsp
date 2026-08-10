@@ -17,13 +17,25 @@ use tower_lsp::lsp_types::Location;
 /// `definition/resolve.rs` only need one import and one call site.  Adding a
 /// new Laravel navigation feature only requires a new match arm here, not a
 /// new `pub(crate) use` in the parent module.
+///
+/// `uri` is the file the key was written in.  Most kinds name something the
+/// project holds exactly one of and ignore it; a Blade section or stack name
+/// only means anything relative to the template that wrote it, since its
+/// other half is in whatever renders that template.
 pub(crate) fn resolve_laravel_string_key(
     backend: &crate::Backend,
     kind: &crate::symbol_map::LaravelStringKind,
     key: &str,
+    uri: &str,
 ) -> Vec<Location> {
     use crate::symbol_map::LaravelStringKind;
     match kind {
+        LaravelStringKind::Section => {
+            backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Section, key)
+        }
+        LaravelStringKind::Stack => {
+            backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Stack, key)
+        }
         LaravelStringKind::Config => resolve_config_key_declaration(backend, key)
             .into_iter()
             .collect(),
@@ -163,6 +175,7 @@ pub(crate) fn find_laravel_string_key_references(
     backend: &crate::Backend,
     kind: &crate::symbol_map::LaravelStringKind,
     key: &str,
+    uri: &str,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
     include_declaration: bool,
 ) -> Vec<Location> {
@@ -170,6 +183,23 @@ pub(crate) fn find_laravel_string_key_references(
     let mut locations = match kind {
         LaravelStringKind::Config => {
             find_all_config_references(backend, key, snapshot, include_declaration)
+        }
+        // Two unrelated pages that both fill `content` fill two different
+        // sections, so the span index's project-wide answer is the wrong
+        // one: only the templates that render each other share a name.
+        LaravelStringKind::Section => {
+            return backend.blade_block_references(
+                uri,
+                crate::blade::blocks::BlockKind::Section,
+                key,
+            );
+        }
+        LaravelStringKind::Stack => {
+            return backend.blade_block_references(
+                uri,
+                crate::blade::blocks::BlockKind::Stack,
+                key,
+            );
         }
         LaravelStringKind::View
         | LaravelStringKind::Route
@@ -180,7 +210,7 @@ pub(crate) fn find_laravel_string_key_references(
     };
 
     if include_declaration && kind != &LaravelStringKind::Config {
-        for decl in resolve_laravel_string_key(backend, kind, key) {
+        for decl in resolve_laravel_string_key(backend, kind, key, uri) {
             crate::references::push_unique_location(
                 &mut locations,
                 &decl.uri,

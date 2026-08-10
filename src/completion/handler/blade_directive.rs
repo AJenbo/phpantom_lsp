@@ -32,6 +32,54 @@ impl Backend {
             .map(|s| s.to_string())
     }
 
+    /// Complete the section or stack name the cursor is writing in `uri`'s
+    /// raw Blade source, against the templates that render it.
+    ///
+    /// Reads the raw buffer for the same reason directive-name completion
+    /// does: the name is usually in a string literal the user has not
+    /// closed yet, which Blade preprocessing does not preserve, and the
+    /// edit it produces has to be in the template's own coordinates rather
+    /// than the virtual PHP's.
+    pub(super) fn blade_block_name_completion(
+        &self,
+        uri: &str,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        let content = self.get_file_content(uri)?;
+        let offset = position_to_byte_offset(&content, position);
+        let ctx = crate::blade::blocks::block_name_at(&content, offset)?;
+        let prefix = content.get(ctx.name_start..offset)?.to_lowercase();
+
+        let edit_range = tower_lsp::lsp_types::Range {
+            start: crate::text_position::offset_to_position(&content, ctx.name_start),
+            end: position,
+        };
+        let items = self
+            .blade_block_name_candidates(uri, &content, ctx.kind, ctx.role)
+            .into_iter()
+            .filter(|name| prefix.is_empty() || name.to_lowercase().starts_with(&prefix))
+            .enumerate()
+            .map(|(index, name)| CompletionItem {
+                label: name.clone(),
+                kind: Some(CompletionItemKind::VALUE),
+                detail: Some(format!("Blade {}", ctx.kind.label())),
+                sort_text: Some(format!("{index:05}")),
+                filter_text: Some(name.clone()),
+                text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(
+                    tower_lsp::lsp_types::TextEdit {
+                        range: edit_range,
+                        new_text: name,
+                    },
+                )),
+                ..CompletionItem::default()
+            })
+            .collect();
+        // Always short-circuits: inside a section or stack name nothing
+        // else completion offers applies, so an empty list beats falling
+        // through to class and variable names.
+        Some(CompletionResponse::Array(items))
+    }
+
     /// Build the directive-name completion list for an already-typed
     /// `prefix` (the text after `@`, matched case-insensitively).
     pub(super) fn complete_blade_directive(&self, prefix: &str) -> CompletionResponse {

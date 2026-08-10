@@ -141,6 +141,7 @@ impl Backend {
             .write()
             .invalidate_for_uri(uri, content);
         self.refresh_blade_discovery(uri);
+        self.refresh_blade_block_index(uri, content);
 
         // The mago-syntax parser contains `unreachable!()` and `.expect()`
         // calls that can panic on malformed PHP (e.g. partially-written

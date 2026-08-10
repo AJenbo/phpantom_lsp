@@ -166,6 +166,13 @@
         <pre>Debug mode is on (env: {{ config('app.env') }})</pre>
     @endif
 
+    {{-- A section's two halves live in different files: this renders what
+         a child fills. Ctrl+Click the name to jump to every child that
+         fills it, and typing a name inside @yield('') offers the ones the
+         children already write. --}}
     @yield('content')
+
+    {{-- The same for stacks: children @push here. --}}
+    @stack('scripts')
 </body>
 </html>

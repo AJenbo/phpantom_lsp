@@ -29,7 +29,7 @@ enum Mode {
 /// Whether `content[..offset]` leaves the scanner in [`Mode::Html`], i.e.
 /// `offset` itself sits in template markup rather than inside one of the
 /// spans [`Mode`] tracks.
-fn is_html_position(content: &str, offset: usize) -> bool {
+pub(crate) fn is_html_position(content: &str, offset: usize) -> bool {
     let mut mode = Mode::Html;
     let mut in_string: Option<char> = None;
     let mut escaped = false;
