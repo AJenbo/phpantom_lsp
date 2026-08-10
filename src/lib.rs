@@ -243,6 +243,11 @@ mod hover;
 mod indexing;
 pub(crate) mod inheritance;
 mod inlay_hints;
+/// LSP JSON-RPC dispatch for the wasm build, which has no tower-lsp transport.
+/// Kept free of any target-specific code so the marshalling in `wasm_wasi` is
+/// the only thing a future non-WASI wasm target would have to replace.
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+mod lsp_dispatch;
 mod mago;
 #[cfg(feature = "mem-audit")]
 mod mem_audit;
@@ -263,6 +268,7 @@ mod resolution;
 pub(crate) mod return_collection;
 pub(crate) mod scope_collector;
 mod selection_range;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod self_update;
 mod semantic_tokens;
 mod server;
@@ -279,6 +285,10 @@ mod type_hierarchy;
 pub mod types;
 mod util;
 pub(crate) mod virtual_members;
+/// The exported wasm entry points. WASI only: the bare `wasm32-unknown-unknown`
+/// target miscompiles the completion path (see `docs/wasm.md`).
+#[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+mod wasm_wasi;
 mod workspace_env;
 mod workspace_symbols;
 

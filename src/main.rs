@@ -1,13 +1,19 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
 
 use clap::Parser;
 use clap::builder::Styles;
 use clap::builder::styling::AnsiColor;
+#[cfg(not(target_arch = "wasm32"))]
 use phpantom_lsp::Backend;
+#[cfg(not(target_arch = "wasm32"))]
 use phpantom_lsp::LSP_CONCURRENCY;
+#[cfg(not(target_arch = "wasm32"))]
 use phpantom_lsp::PARSE_WORKER_STACK_SIZE;
 use phpantom_lsp::config;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpListener;
+#[cfg(not(target_arch = "wasm32"))]
 use tower_lsp::{LspService, Server};
 
 const STYLES: Styles = Styles::styled()
@@ -134,6 +140,9 @@ enum Command {
     /// Downloads the latest release from GitHub and replaces the current
     /// binary.  Use --check to see if an update is available without
     /// installing it.
+    // There is no binary to replace in a wasm module, and the HTTP client it
+    // downloads through does not build for wasm.
+    #[cfg(not(target_arch = "wasm32"))]
     Update {
         /// Check for updates but do not install them.
         ///
@@ -190,6 +199,7 @@ impl From<FormatArg> for phpantom_lsp::analyse::OutputFormat {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     // Tune the allocator before the runtime spawns any threads so freed
     // parse data is returned to the OS after indexing rather than held
@@ -207,6 +217,18 @@ fn main() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(PARSE_WORKER_STACK_SIZE)
+        .build()
+        .expect("failed to build Tokio runtime");
+    runtime.block_on(async_main());
+}
+
+// wasm has no threads, so there is no allocator to tune, no multi-threaded
+// runtime to build, and no worker stacks to size. The CLI subcommands still
+// run on a current-thread runtime.
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
         .build()
         .expect("failed to build Tokio runtime");
     runtime.block_on(async_main());
@@ -239,6 +261,7 @@ async fn async_main() {
                 }
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         Some(Command::Update { check, no_confirm }) => {
             use phpantom_lsp::self_update::{self, UpdateStatus};
             match self_update::run(check, no_confirm) {
@@ -331,6 +354,15 @@ async fn async_main() {
             let exit_code = phpantom_lsp::fix::run(options).await;
             std::process::exit(exit_code);
         }
+        // The wasm build drives the server through the exported `lsp_handle`
+        // entry point instead (see `wasm_wasi`), so it carries no stdio or TCP
+        // transport.
+        #[cfg(target_arch = "wasm32")]
+        None => {
+            eprintln!("Error: the stdio/TCP LSP transport is not available in the wasm build");
+            std::process::exit(1);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         None => {
             tracing_subscriber::fmt()
                 .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -391,6 +423,7 @@ async fn async_main() {
 ///
 /// Accepts either a full address like `127.0.0.1:9257` or just a port number
 /// like `9257`. When only a port is given, defaults to `127.0.0.1`.
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_tcp_address(input: &str) -> SocketAddr {
     if let Ok(addr) = input.parse::<SocketAddr>() {
         return addr;

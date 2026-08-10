@@ -46,6 +46,12 @@ allocator built the binary before assuming a regression — macOS and
 Windows use the system allocator in both CI and locally already, so
 they need no special steps.
 
+### Building for the browser
+
+PHPantom also compiles to WebAssembly, which is how the PHPStan playground
+runs it client-side. See [wasm.md](wasm.md) for the build command, the host
+interface, and what the wasm build leaves out.
+
 ## Testing
 
 Run the full test suite:
@@ -68,6 +74,11 @@ php -d zend.assertions=1 examples/demo.php
 php -l examples/laravel/app/Demo.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 ```
+
+CI additionally builds the WebAssembly target and runs
+`scripts/wasm-smoke-test.mjs` against it, which is worth running locally
+if your change touches dependencies, `Cargo.toml`, or anything in the
+per-file request path. See [wasm.md](wasm.md).
 
 All eight must pass with zero warnings and zero failures, except the
 final `analyze` run: `app/Demo.php` carries three deliberate mistakes,

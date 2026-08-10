@@ -17,7 +17,8 @@ serde_json = "1.0"
 sqlparser = "0.62"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tokio = { version = "1.39", features = ["full"] }
+# tokio is declared per-target below: "full" on native, a slim feature set on
+# wasm (which has no sockets, so "net" would pull in mio and fail to build).
 mago-syntax = "=1.46.0"
 mago-allocator = "=1.46.0"
 mago-database = "=1.46.0"
@@ -37,11 +38,6 @@ parking_lot = "0.12"
 tempfile = "3"
 toml = "1"
 etcetera = "0.11"
-ureq = "3"
-tar = "0.4"
-flate2 = "1"
-self-replace = "1"
-zip = "2"
 
 # musl's built-in malloc is very slow under the multi-threaded,
 # allocation-heavy load of parallel indexing and parse workers (4-6x
@@ -60,6 +56,19 @@ mimalloc = { version = "0.1.47", optional = true }
 libmimalloc-sys = { version = "0.1", optional = true, features = ["extended"] }
 libc = { version = "0.2", optional = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.39", features = ["full"] }
+# `self_update` only: downloads a release archive and swaps the running binary.
+# None of it applies to (or builds for) a wasm module.
+ureq = "3"
+tar = "0.4"
+flate2 = "1"
+self-replace = "1"
+zip = "2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1.39", features = ["sync", "macros", "rt", "time"] }
+
 [build-dependencies]
 ureq = "3"
 tar = "0.4"
@@ -76,6 +85,18 @@ mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys", "dep:libc"]
 # installs a counting global allocator that adds two atomics to every
 # allocation, so it must never be enabled in a shipped build.
 mem-audit = []
+
+# Download size is what matters in the browser, so the wasm module is built for
+# size rather than speed. A separate profile keeps this away from the native
+# release build, where `opt-level = "s"` would cost real analysis throughput.
+#
+#   cargo rustc --lib --crate-type cdylib \
+#       --profile wasm-release --target wasm32-wasip1
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "thin"
+strip = true
 
 [dev-dependencies]
 datatest-stable = "0.3"
