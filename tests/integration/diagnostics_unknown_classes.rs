@@ -545,6 +545,31 @@ class MyProvider {
         );
     }
 
+    #[test]
+    fn no_diagnostic_for_type_alias_with_covariant_generic_param() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = concat!(
+            "<?php\n",
+            "namespace App\\Resource;\n",
+            "\n",
+            "/**\n",
+            " * @phpstan-type ColumnSchema array{name: string, type: string}\n",
+            " */\n",
+            "trait HasColumns {\n",
+            "    /** @param array<int, covariant ColumnSchema> $columns */\n",
+            "    public function setColumns($columns): void {}\n",
+            "}\n",
+        );
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            !diags.iter().any(|d| d.message.contains("ColumnSchema")),
+            "should not flag @phpstan-type alias ColumnSchema used with covariant keyword, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     // ── Attribute suppression ───────────────────────────────────────
 
     #[test]
