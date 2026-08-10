@@ -290,11 +290,19 @@ fn check_scope(
                 continue;
             }
 
-            // Skip $loop in Blade files — it's injected by the
-            // preprocessor for every @foreach/@forelse and may not
-            // be explicitly referenced in the template body.
-            if var_name == "$loop" && crate::blade::is_blade_file(ctx.uri) {
-                continue;
+            // Skip the variables the Blade preprocessor synthesizes:
+            // `$loop` for every @foreach/@forelse, `$component` for every
+            // component tag, and the ones a component tag binds its
+            // arguments to.  None is written by the author, and a
+            // template is under no obligation to read them.
+            if crate::blade::is_blade_file(ctx.uri) {
+                let bare_name = var_name.trim_start_matches('$');
+                if bare_name == "loop"
+                    || bare_name == crate::blade::COMPONENT_VAR
+                    || bare_name.starts_with(crate::blade::preprocessor::ARGUMENT_VAR_PREFIX)
+                {
+                    continue;
+                }
             }
 
             // Skip variables referenced by compact().

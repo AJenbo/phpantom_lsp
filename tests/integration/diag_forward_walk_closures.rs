@@ -777,3 +777,45 @@ class Cases {
          inline iterator_to_array() argument, got: {unresolved:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A block comment between two annotated assignments
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Reassigning a variable under a fresh `@var` is how a script narrows it
+/// a second time, so the annotation written closest to the code wins. An
+/// ordinary `/* … */` comment in between must not send the search for it
+/// back to the annotation the reassignment replaced.
+#[test]
+fn a_block_comment_does_not_revive_a_superseded_var_docblock() {
+    let backend = create_test_backend();
+
+    let uri = "file:///superseded_var.php";
+    let text = r#"<?php
+class Reader { public function read(): string { return ''; } }
+class Writer { public function write(): string { return ''; } }
+
+function handle(): void {
+    /** @var Reader $stream */
+    $stream = null;
+    $stream->read();
+
+    /* swap it out */
+    /** @var Writer $stream */
+    $stream = null;
+    $stream->write();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the nearest @var is the one that applies, got: {diags:?}"
+    );
+
+    let stale = text.replace("$stream->write();", "$stream->read();");
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &stale);
+    assert!(
+        diags.iter().any(|d| d.message.contains("Writer")),
+        "the superseded type must not still answer for the variable, got: {diags:?}"
+    );
+}

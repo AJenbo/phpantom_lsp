@@ -24,6 +24,18 @@ pub const PROLOGUE_LINES: u32 = 6;
 /// analysable code.
 pub const WRAPPER_FUNCTION: &str = "__blade_template";
 
+/// The variable a component tag binds its instance to, matching the name
+/// Blade's own compiled output uses.
+///
+/// No caller assigns it and a template that renders a component may never
+/// read it, so it is exempt from the unused-variable diagnostic the way
+/// `$loop` is.
+pub const COMPONENT_VAR: &str = "component";
+
+/// What Laravel instantiates for a component tag that names a template
+/// with no class of its own.
+pub const ANONYMOUS_COMPONENT: &str = "Illuminate\\View\\AnonymousComponent";
+
 /// Prefix of the class the preprocessor wraps a template's body in when
 /// the template renders with a component instance bound to `$this`.
 const SCOPE_CLASS_PREFIX: &str = "__blade_scope_";

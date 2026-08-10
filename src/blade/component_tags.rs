@@ -247,11 +247,17 @@ fn strip_tag_prefix<'a>(tag: &'a str, prefix: &str) -> Option<&'a str> {
     tag.strip_prefix(prefix)?.strip_prefix("::")
 }
 
-/// Every distinct tag name referenced by an `<x-…>` occurrence in
-/// `content`. Used in the reverse direction from [`scan_component_tag_calls`]:
-/// given a file that was just edited, which components does it call?
-pub(crate) fn referenced_component_tags(content: &str) -> Vec<String> {
-    if !content.contains("<x-") {
+/// The prefixes a component tag is written under, longest first so
+/// neither shadows the other.
+const TAG_PREFIXES: [&str; 2] = ["<livewire:", "<x-"];
+
+/// Every distinct component tag referenced by an occurrence in `content`,
+/// with the prefix it was written under (`x-alert`, `livewire:counter`).
+///
+/// Closing tags are skipped: an opening tag is what names a component, and
+/// a self-closing one has no closing tag to find it by.
+pub(crate) fn referenced_tags(content: &str) -> Vec<String> {
+    if !TAG_PREFIXES.iter().any(|p| content.contains(p)) {
         return Vec::new();
     }
     let masked = mask_inert_regions(content, true);
@@ -259,24 +265,37 @@ pub(crate) fn referenced_component_tags(content: &str) -> Vec<String> {
     let mut tags = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i..].starts_with(b"<x-") {
-            let name_start = i + 3;
-            let mut j = name_start;
-            while j < bytes.len() && is_tag_name_char(bytes[j]) {
-                j += 1;
-            }
-            if j > name_start {
-                let name = masked[name_start..j].to_string();
-                if !tags.contains(&name) {
-                    tags.push(name);
-                }
-            }
-            i = j.max(name_start + 1);
-        } else {
+        let Some(prefix) = TAG_PREFIXES
+            .iter()
+            .find(|prefix| bytes[i..].starts_with(prefix.as_bytes()))
+        else {
             i += 1;
+            continue;
+        };
+        let name_start = i + prefix.len();
+        let mut j = name_start;
+        while j < bytes.len() && is_tag_name_char(bytes[j]) {
+            j += 1;
         }
+        if j > name_start {
+            let tag = format!("{}{}", &prefix[1..], &masked[name_start..j]);
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+        i = j.max(name_start);
     }
     tags
+}
+
+/// Every distinct tag name referenced by an `<x-…>` occurrence in
+/// `content`. Used in the reverse direction from [`scan_component_tag_calls`]:
+/// given a file that was just edited, which components does it call?
+pub(crate) fn referenced_component_tags(content: &str) -> Vec<String> {
+    referenced_tags(content)
+        .into_iter()
+        .filter_map(|tag| tag.strip_prefix("x-").map(str::to_string))
+        .collect()
 }
 
 /// The `<x-…>` openings that could name one of `tag_names`, for the
@@ -312,9 +331,17 @@ pub(crate) fn may_contain_component_tag(content: &str, needles: &[String]) -> bo
 /// sequence includes them all; skipping a non-matching tag's bound
 /// attributes here would desynchronise this scan's count against that
 /// sequence.
+///
+/// `arguments` is the same partition the preprocessor applied to this
+/// file: a bound attribute naming a parameter of the call its tag makes
+/// is that call's argument, not a `blade_directive` of its own, so it is
+/// not in the sequence to be counted. Both sides read the tag's target
+/// from one place (a template's [`crate::blade::call_site_inference::BladeScope`]),
+/// so the two cannot disagree about which attributes are arguments.
 pub(crate) fn scan_component_tag_calls(
     content: &str,
     tag_names: &[String],
+    arguments: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Vec<ComponentTagCall> {
     if tag_names.is_empty() || !content.contains("<x-") {
         return Vec::new();
@@ -350,7 +377,8 @@ pub(crate) fn scan_component_tag_calls(
         let is_match = tag_name
             .strip_prefix("x-")
             .is_some_and(|bare| tag_names.iter().any(|n| n == bare));
-        let (end, call) = scan_tag_attributes(&masked, j, &mut bound_index);
+        let consumed = arguments(tag_name).unwrap_or_default();
+        let (end, call) = scan_tag_attributes(&masked, j, &consumed, &mut bound_index);
         if is_match {
             results.push(call);
         }
@@ -383,6 +411,7 @@ fn is_attr_name_char(b: u8) -> bool {
 fn scan_tag_attributes(
     masked: &str,
     start: usize,
+    consumed: &[String],
     bound_index: &mut usize,
 ) -> (usize, ComponentTagCall) {
     let bytes = masked.as_bytes();
@@ -390,6 +419,17 @@ fn scan_tag_attributes(
     let mut call = ComponentTagCall::default();
     let literal = &mut call.literal;
     let bound = &mut call.bound;
+    // A parameter can only be filled once, so a name an earlier attribute
+    // of this tag already claimed is back to being ordinary markup — the
+    // same rule `OpenComponentCall::take` applies on the emitting side.
+    let mut unclaimed: Vec<&str> = consumed.iter().map(String::as_str).collect();
+    let mut is_argument = |name: &str| match unclaimed.iter().position(|param| *param == name) {
+        Some(index) => {
+            unclaimed.remove(index);
+            true
+        }
+        None => false,
+    };
 
     loop {
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
@@ -420,7 +460,14 @@ fn scan_tag_attributes(
                 j += 1;
             }
             if j > name_start {
-                bound.push((masked[name_start..j].to_string(), *bound_index));
+                let name = masked[name_start..j].to_string();
+                if is_argument(&name) {
+                    // The tag's own call carries this one, so it is not in
+                    // the `blade_directive` sequence at all.
+                    i = j;
+                    continue;
+                }
+                bound.push((name, *bound_index));
             }
             *bound_index += 1;
             i = j;
@@ -478,7 +525,7 @@ fn scan_tag_attributes(
             // An unquoted bound value is never recognised by the
             // preprocessor either; only a quoted one produced a
             // `blade_directive` call to correlate against.
-            if quoted {
+            if quoted && !is_argument(&name) {
                 bound.push((name, *bound_index));
                 *bound_index += 1;
             }
@@ -506,7 +553,7 @@ fn scan_tag_attributes(
 /// Blade exposes it as (`Illuminate\Support\Str::camel`). A PHP variable
 /// name cannot contain a hyphen, so only the camelCase form of a
 /// hyphenated attribute is ever accessible inside the template.
-fn camel_case_attr_name(name: &str) -> String {
+pub(crate) fn camel_case_attr_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut upper_next = false;
     for ch in name.chars() {
@@ -530,6 +577,12 @@ mod tests {
 
     fn names(vars: &[(String, PhpType)]) -> Vec<&str> {
         vars.iter().map(|(n, _)| n.as_str()).collect()
+    }
+
+    /// A project whose tags name no component the preprocessor could
+    /// build, so no attribute of theirs is an argument.
+    fn no_arguments(_tag: &str) -> Option<Vec<String>> {
+        None
     }
 
     /// The registrations a project with no `anonymousComponent…` call has.
@@ -685,8 +738,11 @@ mod tests {
 
     #[test]
     fn scans_a_literal_string_attribute() {
-        let calls =
-            scan_component_tag_calls(r#"<x-alert type="danger" />"#, &["alert".to_string()]);
+        let calls = scan_component_tag_calls(
+            r#"<x-alert type="danger" />"#,
+            &["alert".to_string()],
+            &no_arguments,
+        );
         assert_eq!(calls.len(), 1);
         assert_eq!(names(&calls[0].literal), vec!["type"]);
         assert_eq!(
@@ -697,7 +753,11 @@ mod tests {
 
     #[test]
     fn scans_a_bare_boolean_attribute() {
-        let calls = scan_component_tag_calls(r#"<x-alert disabled />"#, &["alert".to_string()]);
+        let calls = scan_component_tag_calls(
+            r#"<x-alert disabled />"#,
+            &["alert".to_string()],
+            &no_arguments,
+        );
         assert_eq!(
             calls[0].literal,
             vec![("disabled".to_string(), PhpType::bool())]
@@ -706,8 +766,11 @@ mod tests {
 
     #[test]
     fn camel_cases_a_hyphenated_attribute_name() {
-        let calls =
-            scan_component_tag_calls(r#"<x-alert hair-analysis="x" />"#, &["alert".to_string()]);
+        let calls = scan_component_tag_calls(
+            r#"<x-alert hair-analysis="x" />"#,
+            &["alert".to_string()],
+            &no_arguments,
+        );
         assert_eq!(names(&calls[0].literal), vec!["hairAnalysis"]);
     }
 
@@ -716,6 +779,7 @@ mod tests {
         let calls = scan_component_tag_calls(
             r#"<x-alert :hairAnalysis="$model->hairAnalysis" />"#,
             &["alert".to_string()],
+            &no_arguments,
         );
         assert_eq!(calls[0].bound, vec![("hairAnalysis".to_string(), 0)]);
     }
@@ -725,6 +789,7 @@ mod tests {
         let calls = scan_component_tag_calls(
             r#"<div :class="$active"></div><x-alert :message="$msg" />"#,
             &["alert".to_string()],
+            &no_arguments,
         );
         // The `<div>` binding is index 0; `alert`'s own binding must
         // therefore be index 1, or the caller correlates it against the
@@ -734,13 +799,21 @@ mod tests {
 
     #[test]
     fn a_shorthand_bound_attribute_is_named_after_its_variable() {
-        let calls = scan_component_tag_calls(r#"<x-alert :$message />"#, &["alert".to_string()]);
+        let calls = scan_component_tag_calls(
+            r#"<x-alert :$message />"#,
+            &["alert".to_string()],
+            &no_arguments,
+        );
         assert_eq!(calls[0].bound, vec![("message".to_string(), 0)]);
     }
 
     #[test]
     fn a_non_matching_tag_contributes_nothing() {
-        let calls = scan_component_tag_calls(r#"<x-widget foo="bar" />"#, &["alert".to_string()]);
+        let calls = scan_component_tag_calls(
+            r#"<x-widget foo="bar" />"#,
+            &["alert".to_string()],
+            &no_arguments,
+        );
         assert!(calls.is_empty());
     }
 
@@ -749,6 +822,7 @@ mod tests {
         let calls = scan_component_tag_calls(
             r#"<x-alert title="Hello {{ $name }}" />"#,
             &["alert".to_string()],
+            &no_arguments,
         );
         assert_eq!(calls[0].literal[0].1, PhpType::string());
     }
@@ -761,6 +835,7 @@ mod tests {
         let calls = scan_component_tag_calls(
             r#"<x-modal class="max-h-[80vh]" title="Save" /><x-alert type="danger" />"#,
             &["modal".to_string(), "alert".to_string()],
+            &no_arguments,
         );
         assert_eq!(calls.len(), 2, "both tags must be seen");
         assert_eq!(names(&calls[0].literal), vec!["class", "title"]);
@@ -776,6 +851,7 @@ mod tests {
         let calls = scan_component_tag_calls(
             r#"{{-- <x-alert type="danger" /> --}}"#,
             &["alert".to_string()],
+            &no_arguments,
         );
         assert!(calls.is_empty());
     }

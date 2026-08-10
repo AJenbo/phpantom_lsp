@@ -49,8 +49,76 @@ enum CapturedDirective {
     Inject,
 }
 
+/// Resolves the class a component tag names, so the preprocessor can bind
+/// `$component` to it and check the tag's attributes against the call the
+/// framework makes with them.
+///
+/// The preprocessor never reaches into the project index itself: it runs
+/// on every keystroke and from the parallel index workers, where building
+/// the Blade discovery index would put a workspace walk on the edit path.
+/// The caller passes in whatever index it already has, and a tag it cannot
+/// answer for degrades to a comment.
+pub trait ComponentResolver {
+    /// The class an `<x-…>` tag names: the component class behind a
+    /// class-based component, or `Illuminate\View\AnonymousComponent` for
+    /// a tag that names a template with no class of its own.
+    fn x_component(&self, tag: &str) -> Option<ComponentTarget>;
+
+    /// The class a `<livewire:…>` tag names.
+    fn livewire_component(&self, name: &str) -> Option<ComponentTarget>;
+}
+
+/// The class a component tag names, and what the tag's attributes are to
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentTarget {
+    /// Fully qualified class name, without a leading `\`.
+    pub fqn: String,
+    pub binding: ComponentBinding,
+}
+
+/// How a resolved component tag reaches its class.
+///
+/// Laravel partitions a tag's attributes by the signature it is about to
+/// call: the ones naming a parameter are its arguments and the rest go to
+/// the component's attribute bag (`ComponentTagCompiler::partitionDataAndAttributes`).
+/// Reproducing that split is what lets the attributes be checked as the
+/// arguments they are without an attribute meant for the bag being read as
+/// one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentBinding {
+    /// `$component = new \Fqn(heading: 'Latest', post: $post);` — a Blade
+    /// component's attributes are its constructor's arguments.
+    Construct(Vec<ComponentParameter>),
+    /// `$component = new \Fqn(); $component->mount(post: $post);` — a
+    /// Livewire component is built by the container and handed its
+    /// attributes through `mount()`.
+    Mount(Vec<ComponentParameter>),
+    /// `/** @var \Fqn $component */ $component = null;` — the class is
+    /// known but the tag's attributes are arguments to nothing: an
+    /// anonymous component's attributes are its *view's* variables rather
+    /// than a signature's.
+    Declare,
+}
+
+/// One parameter a component tag's attributes can fill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentParameter {
+    /// The parameter name (no `$`), which an attribute has to camel-case
+    /// to in order to fill it.
+    pub name: String,
+    /// What the call passes when no attribute fills this parameter:
+    /// `null` for a nullable one and `resolve(\Foo::class)` for one the
+    /// container can build, which is how Laravel itself fills a
+    /// constructor the tag left incomplete.  `None` when the parameter
+    /// has a default (the call just omits it) or when nothing stands in
+    /// for it, which is the case Laravel fails on and the missing-argument
+    /// diagnostic is right to report.
+    pub fallback: Option<String>,
+}
+
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
-    preprocess_with_vars(content, &[], TemplateKind::View, None)
+    preprocess_with_vars(content, &[], TemplateKind::View, None, None)
 }
 
 /// The variables Blade puts in a component view's scope on top of the data
@@ -136,11 +204,18 @@ fn is_php_variable_name(name: &str) -> bool {
 /// allows neither `$this = …` nor `global $this`, so the body is wrapped in
 /// a method of a synthesized subclass of that class instead of in a plain
 /// function.
+///
+/// `components` resolves the `<x-…>` and `<livewire:…>` tags the template
+/// renders to the classes behind them, so that `$component` after a tag
+/// carries that class's members and the tag's attributes are checked as
+/// the arguments the framework passes them as.  Without one (or for a tag
+/// it cannot answer for) the tag degrades to a comment.
 pub fn preprocess_with_vars(
     content: &str,
     injected_vars: &[(String, String)],
     kind: TemplateKind,
     this_class: Option<&str>,
+    components: Option<&dyn ComponentResolver>,
 ) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
@@ -276,6 +351,14 @@ pub fn preprocess_with_vars(
     // at end of line instead of being closed off. Set when the attribute
     // opens; see `bound_attr_spans_lines`.
     let mut bound_attr_multiline = false;
+    // What closes the expression currently open in `Mode::BoundAttr`:
+    // `);` for the `blade_directive(` call an ordinary bound attribute
+    // becomes, and `;` for one that is an argument of the surrounding
+    // tag's component call and is bound to a variable for it.
+    let mut bound_attr_suffix = ");";
+    // The component call the surrounding tag opened, if any; see
+    // `OpenComponentCall`.
+    let mut open_call: Option<OpenComponentCall> = None;
 
     let lines: Vec<&str> = content.lines().collect();
 
@@ -316,7 +399,7 @@ pub fn preprocess_with_vars(
                         &mut adjustments,
                     );
                     let start_suffix = utf16_count(&processed) as u32;
-                    processed.push_str(");");
+                    processed.push_str(bound_attr_suffix);
                     let end_suffix = utf16_count(&processed) as u32;
                     adjustments.push((current_utf16_col, start_suffix));
                     adjustments.push((current_utf16_col, end_suffix));
@@ -406,6 +489,43 @@ pub fn preprocess_with_vars(
                 } else if remaining.starts_with(&['<', '?']) {
                     match_len = 2;
                     next_mode = Mode::RawPhp(false);
+                } else if html_attr_string.is_none()
+                    && let Some(tag) = component_tag_at(remaining)
+                {
+                    // A Blade component tag. Only the tag *name* is
+                    // consumed here: the attribute list keeps flowing
+                    // through the HTML scanner, so a bound attribute's
+                    // expression stays where the template wrote it and the
+                    // markup around it still becomes what it always did.
+                    match_len = tag.len;
+                    // A tag opening inside another tag is malformed markup;
+                    // leaving the outer call to be closed by the first `>`
+                    // keeps the emitted PHP balanced.
+                    let target = open_call
+                        .is_none()
+                        .then(|| tag.resolve(components))
+                        .flatten();
+                    let (text, call) =
+                        tag.emit(target, &remaining[tag.len..], &lines[line_idx + 1..]);
+                    replacement = text;
+                    if call.is_some() {
+                        open_call = call;
+                    }
+                    // The tag's `<` went into the replacement instead of
+                    // reaching the tag-state tracker below, so mark the
+                    // tag open by hand — otherwise `:attr="$expr"` inside
+                    // a component tag would not be at attribute position.
+                    in_html_tag = true;
+                } else if open_call.is_some()
+                    && html_attr_string.is_none()
+                    && (remaining.starts_with(&['>']) || remaining.starts_with(&['/', '>']))
+                {
+                    // The tag closes, which is where the call it makes is
+                    // emitted: everything between the tag's name and here
+                    // is markup that became statements.
+                    match_len = if remaining[0] == '/' { 2 } else { 1 };
+                    replacement = open_call.take().expect("call is open").close();
+                    in_html_tag = false;
                 } else if remaining.starts_with(&['@']) {
                     let rest_str: String = remaining[1..].iter().collect();
                     if let Some(directive) = match_directive(&rest_str) {
@@ -657,29 +777,60 @@ pub fn preprocess_with_vars(
                 {
                     // A Blade component bound attribute at attribute
                     // position: `:name="$expr"`, `:name='$expr'`, or the
-                    // `:$var` shorthand. The expression becomes a real PHP
-                    // argument so its variables are seen; the rest of the
-                    // tag stays masked. A leading `::` is an escaped literal
-                    // colon and is left alone.
-                    if remaining.get(1) == Some(&'$')
+                    // `:$var` shorthand. The expression stays where the
+                    // template wrote it, either as an argument of the
+                    // component call the tag opened or, when it names no
+                    // parameter of it, as a `blade_directive(...)` call of
+                    // its own so its variables are still seen. The rest of
+                    // the tag stays masked. A leading `::` is an escaped
+                    // literal colon and is left alone.
+                    let shorthand = remaining.get(1) == Some(&'$')
                         && remaining
                             .get(2)
-                            .is_some_and(|c| c.is_ascii_alphabetic() || *c == '_')
-                    {
-                        match_len = 1;
-                        replacement = " blade_directive(".to_string();
-                        next_mode = Mode::BoundAttr(None);
-                        bound_attr_multiline = false;
-                    } else if let Some(open_len) = bound_attr_open_len(remaining) {
-                        let quote = remaining[open_len - 1];
-                        match_len = open_len;
-                        replacement = " blade_directive(".to_string();
-                        next_mode = Mode::BoundAttr(Some(quote));
-                        bound_attr_multiline = bound_attr_spans_lines(
-                            quote,
-                            &remaining[open_len..],
-                            &lines[line_idx + 1..],
+                            .is_some_and(|c| c.is_ascii_alphabetic() || *c == '_');
+                    // `:$name` names the variable it passes; `:name="…"`
+                    // has its name between the `:` and the `="`.
+                    let name_span = if shorthand {
+                        Some(
+                            2..2 + remaining[2..]
+                                .iter()
+                                .take_while(|c| c.is_ascii_alphanumeric() || **c == '_')
+                                .count(),
+                        )
+                    } else {
+                        bound_attr_open_len(remaining).map(|open_len| 1..open_len - 2)
+                    };
+
+                    if let Some(name_span) = name_span {
+                        let name = super::component_tags::camel_case_attr_name(
+                            &remaining[name_span].iter().collect::<String>(),
                         );
+                        let argument = open_call
+                            .as_mut()
+                            .and_then(|call| call.take(&name))
+                            .map(|variable| format!(" {variable} = "));
+                        let (prefix, suffix) = match &argument {
+                            Some(prefix) => (prefix.as_str(), ";"),
+                            None => (" blade_directive(", ");"),
+                        };
+                        replacement = prefix.to_string();
+                        bound_attr_suffix = suffix;
+
+                        if shorthand {
+                            match_len = 1;
+                            next_mode = Mode::BoundAttr(None);
+                            bound_attr_multiline = false;
+                        } else {
+                            let open_len = bound_attr_open_len(remaining).expect("name parsed");
+                            let quote = remaining[open_len - 1];
+                            match_len = open_len;
+                            next_mode = Mode::BoundAttr(Some(quote));
+                            bound_attr_multiline = bound_attr_spans_lines(
+                                quote,
+                                &remaining[open_len..],
+                                &lines[line_idx + 1..],
+                            );
+                        }
                     }
                 }
             } else if mode == Mode::Comment {
@@ -911,7 +1062,7 @@ pub fn preprocess_with_vars(
                 &mut adjustments,
             );
             if !bound_attr_multiline {
-                processed.push_str(");");
+                processed.push_str(bound_attr_suffix);
                 adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
                 mode = Mode::Html;
                 in_string = None;
@@ -953,7 +1104,14 @@ pub fn preprocess_with_vars(
     // out to be unreachable: leaving `blade_directive(` open would swallow
     // the wrapper's closing brace.
     if let Mode::BoundAttr(_) = mode {
-        virtual_php.push_str(");\n");
+        virtual_php.push_str(bound_attr_suffix);
+        virtual_php.push('\n');
+    }
+
+    // And for a component tag whose `>` the template never reaches.
+    if let Some(call) = open_call.take() {
+        virtual_php.push_str(&call.close());
+        virtual_php.push('\n');
     }
 
     // Close the wrapper function, and the class holding it when the body
@@ -1117,6 +1275,376 @@ fn build_inject_statement(raw: &str) -> String {
     format!(" ${variable} = app({service}); ")
 }
 
+/// The prefixes a component tag is written under: `<x-…>` names a Blade
+/// component and `<livewire:…>` a Livewire one, each resolved through its
+/// own index.
+const TAG_PREFIXES: [&str; 2] = ["x-", "livewire:"];
+
+/// A `<x-…>` / `<livewire:…>` tag opening (or its closing counterpart)
+/// found at the current scan position.
+struct ComponentTag {
+    /// Characters from the `<` up to (not including) the first character
+    /// after the tag name — the attribute list is left to the HTML
+    /// scanner.
+    len: usize,
+    /// Which index resolves [`Self::name`].
+    prefix: &'static str,
+    /// The name as written, without the prefix (`alert`, `forms.input`,
+    /// `pkg::calendar`, `counter`).
+    name: String,
+    closing: bool,
+}
+
+impl ComponentTag {
+    /// The class this tag names, or `None` for a closing tag, one Blade
+    /// claims for itself, or one no index answers for.
+    fn resolve(&self, components: Option<&dyn ComponentResolver>) -> Option<ComponentTarget> {
+        if self.closing || self.is_reserved() {
+            return None;
+        }
+        let resolver = components?;
+        match self.prefix {
+            "livewire:" => resolver.livewire_component(&self.name),
+            _ => resolver.x_component(&self.name),
+        }
+    }
+
+    /// The PHP this tag becomes, and the call its attributes fill.
+    ///
+    /// A tag whose class resolves binds `$component` to it, the variable
+    /// Blade's own compiled output uses, so `$component->` inside the tag
+    /// body carries the component's members.  When the class also has a
+    /// signature the attributes are arguments to, the whole call is
+    /// emitted where the tag *closes*, since everything between the tag's
+    /// name and its `>` is markup the scanner turns into statements — a
+    /// `{{ }}` echo, a directive, a bound attribute the attribute bag
+    /// takes — and none of those can sit in an argument list.  A bound
+    /// attribute that is an argument is bound to a variable where it is
+    /// written, so hovering the expression still lands on the template's
+    /// own text, and the call passes that variable.
+    ///
+    /// Everything else (a closing tag, a component no index knows,
+    /// `<x-dynamic-component>`, a `<x-slot>`) becomes a comment naming the
+    /// tag: a bound attribute's expression is emitted by the HTML scanner
+    /// either way, so nothing the type engine could use is lost.
+    ///
+    /// `rest` is the remainder of the line after the tag name and
+    /// `following` the lines after it, which the attribute list may run
+    /// into.
+    fn emit(
+        &self,
+        target: Option<ComponentTarget>,
+        rest: &[char],
+        following: &[&str],
+    ) -> (String, Option<OpenComponentCall>) {
+        let Some(target) = target else {
+            return (
+                format!(
+                    " /* {slash}{prefix}{name} */ ",
+                    slash = if self.closing { "/" } else { "" },
+                    prefix = self.prefix,
+                    name = self.name,
+                ),
+                None,
+            );
+        };
+        let fqn = target.fqn.trim_matches('\\');
+        let var = super::COMPONENT_VAR;
+        let (parameters, mount) = match &target.binding {
+            ComponentBinding::Construct(parameters) => (parameters, false),
+            ComponentBinding::Mount(parameters) => (parameters, true),
+            // A component whose attributes are arguments to nothing (an
+            // anonymous one, whose attributes are its *view's* variables)
+            // just declares the variable.
+            ComponentBinding::Declare => {
+                return (format!(" /** @var \\{fqn} ${var} */ ${var} = null; "), None);
+            }
+        };
+        // The plain attributes have to be read ahead: their markup stays
+        // masked where it is written, so there is nowhere to emit them but
+        // the call itself. A tag whose `>` is nowhere to be found has no
+        // call to emit at all.
+        let Some(literals) = tag_attribute_arguments(rest, following) else {
+            return (format!(" /** @var \\{fqn} ${var} */ ${var} = null; "), None);
+        };
+
+        let call = OpenComponentCall {
+            fqn: fqn.to_string(),
+            mount,
+            pending: parameters.clone(),
+            literals,
+            arguments: Vec::new(),
+        };
+        (String::new(), Some(call))
+    }
+
+    /// Whether the tag name is one Blade's compiler claims for itself
+    /// rather than looking up as a component: `<x-slot>` / `<x-slot:name>`
+    /// open a slot on the surrounding component, and
+    /// `<x-dynamic-component>` names its target through a `:component`
+    /// attribute the surrounding scan already emits.  A project component
+    /// that happened to share one of those names would never be reached
+    /// by the tag anyway.
+    fn is_reserved(&self) -> bool {
+        self.prefix == "x-"
+            && matches!(
+                self.name
+                    .split_once(':')
+                    .map_or(self.name.as_str(), |(head, _)| head),
+                "slot" | "dynamic-component"
+            )
+    }
+}
+
+/// The prefix of the variables a component tag's bound attributes are
+/// bound to before the call that consumes them.
+///
+/// They are the preprocessor's own, so they are exempt from the
+/// unused-variable diagnostic the way `$loop` and `$component` are.
+pub const ARGUMENT_VAR_PREFIX: &str = "__blade_arg_";
+
+/// The call a resolved component tag makes, held between the tag's name
+/// and the `>` that closes it.
+struct OpenComponentCall {
+    /// Fully qualified class name, without a leading `\`.
+    fqn: String,
+    /// Whether the attributes are `mount()`'s arguments rather than the
+    /// constructor's.
+    mount: bool,
+    /// The parameters no attribute has filled yet, in declaration order.
+    pending: Vec<ComponentParameter>,
+    /// The tag's plain attributes as `(camelCase name, PHP expression)`,
+    /// read ahead when the tag opened, since their markup stays masked
+    /// where it is written.
+    literals: Vec<(String, String)>,
+    /// The `name: value` arguments settled so far, in the order the
+    /// attributes filling them were written.
+    arguments: Vec<String>,
+}
+
+impl OpenComponentCall {
+    /// Claim the parameter a bound attribute named `attr` fills, and
+    /// return the variable its expression is bound to. `None` when the
+    /// attribute names no parameter — Laravel routes that one to the
+    /// component's attribute bag instead.
+    ///
+    /// A bound attribute claims ahead of a plain one of the same name
+    /// (which is duplicate markup either way), so that this and the scan
+    /// in [`super::component_tags`] agree on which attributes are
+    /// arguments without either having to know the order the other saw
+    /// them in.
+    fn take(&mut self, attr: &str) -> Option<String> {
+        let index = self.pending.iter().position(|param| param.name == attr)?;
+        let param = self.pending.remove(index);
+        let variable = format!("${ARGUMENT_VAR_PREFIX}{}", param.name);
+        self.arguments.push(format!("{}: {variable}", param.name));
+        Some(variable)
+    }
+
+    /// The whole call: the arguments the tag's attributes settled, then
+    /// what Laravel itself would pass for a parameter no attribute
+    /// filled.
+    fn close(mut self) -> String {
+        for (name, value) in std::mem::take(&mut self.literals) {
+            if self.pending.iter().any(|param| param.name == name) {
+                self.pending.retain(|param| param.name != name);
+                self.arguments.push(format!("{name}: {value}"));
+            }
+        }
+        for param in &self.pending {
+            if let Some(fallback) = &param.fallback {
+                self.arguments.push(format!("{}: {fallback}", param.name));
+            }
+        }
+        let var = super::COMPONENT_VAR;
+        let arguments = self.arguments.join(", ");
+        if self.mount {
+            format!(
+                " ${var} = new \\{}(); ${var}->mount({arguments}); ",
+                self.fqn
+            )
+        } else {
+            format!(" ${var} = new \\{}({arguments}); ", self.fqn)
+        }
+    }
+}
+
+/// How far a tag's attribute list is followed onto later lines before it
+/// is given up on. Well past any real tag, and it bounds the scan on a
+/// template whose `<` never closes.
+const MAX_TAG_LOOKAHEAD_LINES: usize = 64;
+
+/// The plain attributes of the tag whose name ends at `rest`, as
+/// `(camelCase name, PHP expression)`, or `None` when the tag's `>` is
+/// nowhere to be found and there is therefore nowhere to emit its call.
+///
+/// Bound attributes (`:name="$expr"`, `:$name`) are left out: their
+/// expression is emitted where it is written, so that hovering it still
+/// lands on the template's own text.
+fn tag_attribute_arguments(rest: &[char], following: &[&str]) -> Option<Vec<(String, String)>> {
+    let mut chars: Vec<char> = rest.to_vec();
+    for line in following.iter().take(MAX_TAG_LOOKAHEAD_LINES) {
+        chars.push('\n');
+        chars.extend(line.chars());
+    }
+
+    let mut attributes = Vec::new();
+    let mut i = 0;
+    // Whether the previous character ended a token, so the next name is at
+    // attribute position rather than in the middle of a value.
+    let mut at_attribute = true;
+    while i < chars.len() {
+        let rem = &chars[i..];
+        let ch = chars[i];
+        if ch == '>' {
+            return Some(attributes);
+        }
+        if ch == '/' && rem.get(1) == Some(&'>') {
+            return Some(attributes);
+        }
+        if ch.is_whitespace() {
+            at_attribute = true;
+            i += 1;
+            continue;
+        }
+        if !at_attribute {
+            i += 1;
+            continue;
+        }
+        at_attribute = false;
+
+        // A bound attribute is emitted where it is written; only its name
+        // has to be stepped over here.
+        let bound = ch == ':' && rem.get(1) != Some(&':');
+        let name_start = i + usize::from(ch == ':');
+        let mut end = name_start;
+        while end < chars.len() && is_attr_name_char(chars[end]) {
+            end += 1;
+        }
+        if end == name_start {
+            i += 1;
+            continue;
+        }
+        let name = super::component_tags::camel_case_attr_name(
+            &chars[name_start..end].iter().collect::<String>(),
+        );
+        i = end;
+
+        if chars.get(i) != Some(&'=') {
+            // A bare attribute is `true`; a bare *bound* one is markup
+            // Blade drops.
+            if !bound {
+                attributes.push((name, "true".to_string()));
+            }
+            continue;
+        }
+        i += 1;
+
+        let quote = chars.get(i).copied().filter(|c| *c == '"' || *c == '\'');
+        let value_start = i + usize::from(quote.is_some());
+        let mut end = value_start;
+        match quote {
+            Some(delimiter) => {
+                while end < chars.len() && chars[end] != delimiter {
+                    end += 1;
+                }
+                if end == chars.len() {
+                    // The value never closes: the tag is malformed and its
+                    // `>` cannot be trusted either.
+                    return None;
+                }
+            }
+            None => {
+                while end < chars.len() && !chars[end].is_whitespace() && chars[end] != '>' {
+                    end += 1;
+                }
+            }
+        }
+        let value: String = chars[value_start..end].iter().collect();
+        if !bound {
+            // An attribute value carrying an echo is whatever the echo
+            // renders concatenated with the text around it, which is a
+            // string and nothing more precise. The echo's own expression
+            // is emitted where it is written, as it is on any other tag.
+            let value = if value.contains("{{") || value.contains("{!!") {
+                "(string) ''".to_string()
+            } else {
+                php_string_literal(&value)
+            };
+            attributes.push((name, value));
+        }
+        i = end + usize::from(quote.is_some());
+    }
+    None
+}
+
+/// The characters an HTML attribute name is spelled with, which is a
+/// wider set than a tag name's: `wire:model.live`, `x-on:keydown`, and
+/// `@click` are all legal there.
+fn is_attr_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '.' | ':' | '_' | '@')
+}
+
+/// `text` as a single-quoted PHP string literal.
+fn php_string_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('\'');
+    for ch in text.chars() {
+        if ch == '\'' || ch == '\\' {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.push('\'');
+    out
+}
+
+/// The component tag `rem` opens, or `None` when `rem` is not one.
+fn component_tag_at(rem: &[char]) -> Option<ComponentTag> {
+    if rem.first() != Some(&'<') {
+        return None;
+    }
+    let closing = rem.get(1) == Some(&'/');
+    let after_angle = 1 + usize::from(closing);
+    for prefix in TAG_PREFIXES {
+        if !starts_with_ascii(&rem[after_angle..], prefix) {
+            continue;
+        }
+        let name_start = after_angle + prefix.len();
+        let mut end = name_start;
+        while end < rem.len() && is_tag_name_char(rem[end]) {
+            end += 1;
+        }
+        if end == name_start {
+            return None;
+        }
+        return Some(ComponentTag {
+            len: end,
+            prefix,
+            name: rem[name_start..end].iter().collect(),
+            closing,
+        });
+    }
+    None
+}
+
+/// Whether `chars` opens with the ASCII `prefix`, without allocating: the
+/// HTML scan asks this of every `<` in the template.
+fn starts_with_ascii(chars: &[char], prefix: &str) -> bool {
+    chars.len() >= prefix.len()
+        && chars
+            .iter()
+            .zip(prefix.bytes())
+            .all(|(ch, byte)| *ch == byte as char)
+}
+
+/// The characters a component tag name is spelled with. Dots separate
+/// directories (`forms.input`), a double colon a package namespace
+/// (`pkg::calendar`), and `<x-slot:title>` names a slot the same way.
+fn is_tag_name_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '.' | ':' | '_')
+}
+
 /// If `rem` (starting at a `:`) opens a `:name="` or `:name='` bound
 /// attribute, return the length (in chars) of that opening span, up to and
 /// including the opening quote. Returns `None` when the syntax does not
@@ -1273,6 +1801,7 @@ mod tests {
             &[],
             TemplateKind::View,
             Some("App\\Livewire\\Counter"),
+            None,
         );
         assert!(
             php.contains(
@@ -1299,6 +1828,7 @@ mod tests {
             "<img {{ $attributes->merge(['class' => 'x']) }} />{{ $slot }}",
             &[],
             TemplateKind::Component,
+            None,
             None,
         );
         assert!(
@@ -1342,6 +1872,7 @@ mod tests {
             &[("attributes".to_string(), "string".to_string())],
             TemplateKind::Component,
             None,
+            None,
         );
         assert!(
             !php.contains("$attributes = null;"),
@@ -1361,6 +1892,7 @@ mod tests {
                 ("user".to_string(), "\\App\\Models\\User".to_string()),
             ],
             TemplateKind::View,
+            None,
             None,
         );
         assert!(
@@ -1409,6 +1941,7 @@ mod tests {
             &[("body".to_string(), "'line1\nline2'".to_string())],
             TemplateKind::View,
             None,
+            None,
         );
         assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 2);
         assert!(
@@ -1434,6 +1967,7 @@ mod tests {
             &[("x".to_string(), "'*/ evil()'".to_string())],
             TemplateKind::View,
             None,
+            None,
         );
         assert!(
             php.contains("/** @var mixed $x */") && !php.contains("evil()"),
@@ -1457,6 +1991,7 @@ mod tests {
                 ("ok".to_string(), "string".to_string()),
             ],
             TemplateKind::Component,
+            None,
             None,
         );
         assert!(
@@ -1746,10 +2281,11 @@ mod tests {
             "bound attribute expression should be emitted as PHP: {}",
             php
         );
-        // The tag name and other attribute markup must not leak as raw PHP.
+        // A tag no component index resolves becomes a comment naming it,
+        // never executable PHP.
         assert!(
-            !php.contains("x-img.size"),
-            "tag markup should stay masked: {}",
+            php.contains("/* x-img.size */"),
+            "an unresolved tag should degrade to a comment: {}",
             php
         );
         assert!(
@@ -1776,6 +2312,315 @@ mod tests {
             !php.contains("blade_directive(edit-channel"),
             "namespace colon in the tag name must not be treated as a binding: {}",
             php
+        );
+    }
+
+    /// A resolver over a fixed table, standing in for the project's
+    /// discovery index.
+    struct TestComponents(Vec<(String, ComponentTarget)>);
+
+    impl ComponentResolver for TestComponents {
+        fn x_component(&self, tag: &str) -> Option<ComponentTarget> {
+            self.lookup(&format!("x-{tag}"))
+        }
+
+        fn livewire_component(&self, name: &str) -> Option<ComponentTarget> {
+            self.lookup(&format!("livewire:{name}"))
+        }
+    }
+
+    impl TestComponents {
+        fn lookup(&self, tag: &str) -> Option<ComponentTarget> {
+            self.0
+                .iter()
+                .find(|(known, _)| known == tag)
+                .map(|(_, target)| target.clone())
+        }
+    }
+
+    /// A parameter list from `name` / `name?` / `name=fallback` spellings:
+    /// required with nothing to stand in for it, optional, and required
+    /// with what Laravel's container would pass.
+    fn params(spec: &[&str]) -> Vec<ComponentParameter> {
+        spec.iter()
+            .map(|entry| match entry.split_once('=') {
+                Some((name, fallback)) => ComponentParameter {
+                    name: name.to_string(),
+                    fallback: Some(fallback.to_string()),
+                },
+                None => ComponentParameter {
+                    name: entry.trim_end_matches('?').to_string(),
+                    fallback: None,
+                },
+            })
+            .collect()
+    }
+
+    fn target(fqn: &str, binding: ComponentBinding) -> ComponentTarget {
+        ComponentTarget {
+            fqn: fqn.to_string(),
+            binding,
+        }
+    }
+
+    fn preprocess_with_components(
+        content: &str,
+        components: Vec<(String, ComponentTarget)>,
+    ) -> String {
+        let resolver = TestComponents(components);
+        preprocess_with_vars(
+            content,
+            &[],
+            TemplateKind::View,
+            None,
+            Some(&resolver as &dyn ComponentResolver),
+        )
+        .0
+    }
+
+    /// `Alert::__construct(string $type, ?Post $post = null)`.
+    fn alert() -> Vec<(String, ComponentTarget)> {
+        vec![(
+            "x-alert".to_string(),
+            target(
+                "App\\View\\Components\\Alert",
+                ComponentBinding::Construct(params(&["type", "post?"])),
+            ),
+        )]
+    }
+
+    /// A tag the component index knows binds `$component` to the class
+    /// behind it, and its attributes become the arguments Laravel builds
+    /// that class with, so a component handed the wrong thing is reported
+    /// the way any other call is.
+    #[test]
+    fn test_preprocess_component_tag_builds_the_component() {
+        let php =
+            preprocess_with_components(r#"<x-alert type="danger">{{ $slot }}</x-alert>"#, alert());
+        assert!(
+            php.contains("$component = new \\App\\View\\Components\\Alert("),
+            "the tag should build its component: {php}"
+        );
+        assert!(
+            php.contains("type: 'danger'"),
+            "a plain attribute becomes a named argument: {php}"
+        );
+        assert!(
+            php.contains("/* /x-alert */"),
+            "the closing tag should become a comment: {php}"
+        );
+        assert!(
+            !php.contains(r#"type="danger""#),
+            "attribute markup should stay masked: {php}"
+        );
+    }
+
+    /// A bound attribute's expression is the argument, emitted where the
+    /// template wrote it so that hovering it lands on the template's own
+    /// text. An attribute naming no parameter is markup Laravel routes to
+    /// the component's attribute bag, so it is not an argument at all --
+    /// but its expression is still emitted, or a variable used only there
+    /// would read as unused.
+    #[test]
+    fn test_preprocess_component_tag_partitions_its_attributes() {
+        let php = preprocess_with_components(
+            r#"<x-alert :type="$kind" class="m-2" :data-id="$id" />"#,
+            alert(),
+        );
+        assert!(
+            php.contains("$__blade_arg_type = $kind;") && php.contains("type: $__blade_arg_type"),
+            "a bound attribute naming a parameter is an argument: {php}"
+        );
+        assert!(
+            !php.contains("class:") && !php.contains("dataId:"),
+            "an attribute the attribute bag takes is not an argument: {php}"
+        );
+        assert!(
+            php.contains("blade_directive($id);"),
+            "a bound attribute that is not an argument still contributes \
+             its expression: {php}"
+        );
+    }
+
+    /// Laravel builds a component the tag left incomplete through the
+    /// container, so a parameter no attribute filled is passed what the
+    /// container would pass rather than being reported missing. One
+    /// nothing can stand in for is left out, which is the case Laravel
+    /// itself fails on.
+    #[test]
+    fn test_preprocess_component_tag_fills_what_the_container_would() {
+        let components = vec![(
+            "x-card".to_string(),
+            target(
+                "App\\View\\Components\\Card",
+                ComponentBinding::Construct(params(&[
+                    "title",
+                    "footer?",
+                    "service=resolve(\\App\\Service::class)",
+                    "count=null",
+                ])),
+            ),
+        )];
+        let php = preprocess_with_components("<x-card />", components);
+        assert!(
+            php.contains("service: resolve(\\App\\Service::class)") && php.contains("count: null"),
+            "the container's own arguments should be passed: {php}"
+        );
+        assert!(
+            !php.contains("title:") && !php.contains("footer:"),
+            "a parameter with a default and one nothing can fill are both \
+             left out: {php}"
+        );
+    }
+
+    /// A dotted tag names a component in a sub-directory, and an index
+    /// component answers to its directory alone; both are ordinary index
+    /// lookups, so the preprocessor only has to pass the name through
+    /// unchanged.
+    #[test]
+    fn test_preprocess_component_tag_passes_the_written_name_through() {
+        let nested = [
+            ("x-forms.input", "App\\View\\Components\\Forms\\Input"),
+            ("x-card", "App\\View\\Components\\Card\\Card"),
+            ("x-pkg::calendar", "Vendor\\Pkg\\Calendar"),
+        ];
+        let components: Vec<(String, ComponentTarget)> = nested
+            .iter()
+            .map(|(tag, fqn)| {
+                (
+                    (*tag).to_string(),
+                    target(fqn, ComponentBinding::Construct(Vec::new())),
+                )
+            })
+            .collect();
+        for (tag, fqn) in nested {
+            let php = preprocess_with_components(&format!("<{tag} />"), components.clone());
+            assert!(
+                php.contains(&format!("$component = new \\{fqn}(")),
+                "<{tag}> should resolve to {fqn}: {php}"
+            );
+        }
+    }
+
+    /// Livewire builds its component through the container and hands the
+    /// tag's attributes to `mount()`.
+    #[test]
+    fn test_preprocess_livewire_tag_mounts_the_component() {
+        let components = vec![(
+            "livewire:counter".to_string(),
+            target(
+                "App\\Livewire\\Counter",
+                ComponentBinding::Mount(params(&["count"])),
+            ),
+        )];
+        let php = preprocess_with_components(r#"<livewire:counter :count="$n" />"#, components);
+        assert!(
+            php.contains("$component = new \\App\\Livewire\\Counter();"),
+            "the tag should build its Livewire component: {php}"
+        );
+        assert!(
+            php.contains("$component->mount(count: $__blade_arg_count);"),
+            "the attributes are `mount()`'s arguments: {php}"
+        );
+    }
+
+    /// A component whose attributes are arguments to nothing (an
+    /// anonymous one, whose attributes are its *view's* variables) still
+    /// declares `$component` so the tag body can reach it.
+    #[test]
+    fn test_preprocess_anonymous_component_declares_without_a_call() {
+        let components = vec![(
+            "x-banner".to_string(),
+            target(super::super::ANONYMOUS_COMPONENT, ComponentBinding::Declare),
+        )];
+        let php = preprocess_with_components(r#"<x-banner :title="$t" />"#, components);
+        assert!(
+            php.contains(
+                "/** @var \\Illuminate\\View\\AnonymousComponent $component */ $component = null;"
+            ),
+            "an anonymous component is declared, not built: {php}"
+        );
+        assert!(
+            php.contains("blade_directive($t);"),
+            "its attributes still contribute their expressions: {php}"
+        );
+    }
+
+    /// Markup between a tag's name and its `>` becomes statements — a
+    /// `{{ }}` echo in an attribute value, a directive, a bound attribute
+    /// the attribute bag takes — which is why the call is emitted where
+    /// the tag closes rather than spanning it. The statements stand, and
+    /// the call still happens.
+    #[test]
+    fn test_preprocess_component_tag_survives_markup_between_its_attributes() {
+        let php = preprocess_with_components(r#"<x-alert type="a {{ $kind }}" />"#, alert());
+        assert!(
+            php.contains("echo e( $kind );"),
+            "the echo in the attribute value still runs: {php}"
+        );
+        assert!(
+            php.contains("new \\App\\View\\Components\\Alert(type: (string) '')"),
+            "an interpolated value is a string and nothing more precise: {php}"
+        );
+
+        let php = preprocess_with_components("<x-alert @if($a) type=\"x\" @endif />", alert());
+        assert!(
+            php.contains("if ($a):") && php.contains("new \\App\\View\\Components\\Alert("),
+            "a directive between attributes is still a directive: {php}"
+        );
+    }
+
+    /// A bound attribute is only at attribute position inside a tag, and
+    /// the component tag's `<` never reaches the HTML scanner — so the
+    /// tag state has to be carried across the replacement, including on a
+    /// tag that spans lines.
+    #[test]
+    fn test_preprocess_component_tag_keeps_bound_attributes_in_scope() {
+        let php =
+            preprocess_with_components("<x-alert\n  :type=\"$kind\"\n/>\n:notAnAttr", alert());
+        assert!(
+            php.contains("$__blade_arg_type = $kind;") && php.contains("type: $__blade_arg_type"),
+            "a bound attribute on a multi-line component tag: {php}"
+        );
+        assert!(
+            !php.contains("blade_directive(notAnAttr"),
+            "a colon after the tag closed is not an attribute: {php}"
+        );
+    }
+
+    /// A tag name written inside an attribute value is markup, not a tag.
+    #[test]
+    fn test_preprocess_component_tag_inside_an_attribute_value_is_not_a_tag() {
+        let php = preprocess_with_components(r#"<div data-tpl="<x-alert />"></div>"#, alert());
+        assert!(
+            !php.contains("$component ="),
+            "a tag written inside an attribute value is not a tag: {php}"
+        );
+    }
+
+    /// A tag no index resolves — an unknown component, `<x-slot>`, or
+    /// `<x-dynamic-component>` — degrades to a comment, and a bound
+    /// attribute on it still contributes its expression.
+    #[test]
+    fn test_preprocess_unresolved_component_tags_degrade_to_comments() {
+        let php = preprocess_with_components(
+            r#"<x-dynamic-component :component="$name" :attr="$v" /><x-slot:title>t</x-slot><x-unknown />"#,
+            alert(),
+        );
+        for comment in [
+            "/* x-dynamic-component */",
+            "/* x-slot:title */",
+            "/* x-unknown */",
+        ] {
+            assert!(php.contains(comment), "expected {comment} in: {php}");
+        }
+        assert!(
+            !php.contains("$component ="),
+            "no unresolved tag may bind a component: {php}"
+        );
+        assert!(
+            php.contains("blade_directive($name);") && php.contains("blade_directive($v);"),
+            "a dynamic component's expressions are still parsed: {php}"
         );
     }
 

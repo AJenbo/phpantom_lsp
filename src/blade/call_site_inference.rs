@@ -95,6 +95,14 @@ pub(crate) struct BladeScope {
     /// renders with, which the preprocessor wraps the body in a method of
     /// (see `preprocess_with_vars`).  `None` for every other template.
     pub this_class: Option<String>,
+    /// The class behind each `<x-…>` / `<livewire:…>` tag the template
+    /// renders, and the call its attributes fill, sorted by tag as
+    /// written.  Carried here rather than looked up while preprocessing
+    /// so that resolving a tag never puts a walk of the project's view
+    /// roots on the edit path, and so that a tag that starts resolving
+    /// (or a component whose signature changes) after the workspace index
+    /// finishes re-parses the template that renders it.
+    pub components: Vec<(String, crate::blade::preprocessor::ComponentTarget)>,
 }
 
 /// User files that render Blade views, with their symbol maps.  Shared
@@ -111,6 +119,26 @@ pub(crate) type ViewCallerSnapshot = Vec<(String, Arc<SymbolMap>)>;
 /// refresh pass keeps that scan at O(templates) rather than
 /// O(templates × templates).
 pub(crate) type BladeCallerSnapshot = Vec<(String, Arc<String>)>;
+
+/// The parameter names a tag's attributes fill, from the targets a
+/// template's virtual PHP was built with.
+///
+/// `None` when the tag names no component the preprocessor could build,
+/// so none of its attributes were arguments.
+fn component_argument_names(
+    components: &[(String, crate::blade::preprocessor::ComponentTarget)],
+    tag: &str,
+) -> Option<Vec<String>> {
+    use crate::blade::preprocessor::ComponentBinding;
+
+    let (_, target) = components.iter().find(|(known, _)| known == tag)?;
+    match &target.binding {
+        ComponentBinding::Construct(parameters) | ComponentBinding::Mount(parameters) => {
+            Some(parameters.iter().map(|param| param.name.clone()).collect())
+        }
+        ComponentBinding::Declare => None,
+    }
+}
 
 /// Append the entries whose names nothing has declared yet, so the
 /// highest-priority source to carry a name is the one that keeps it.
@@ -166,9 +194,17 @@ impl Backend {
         shared: Option<&ViewCallerSnapshot>,
         shared_blade: Option<&BladeCallerSnapshot>,
     ) -> BladeScope {
+        // The tags this template renders resolve whatever its own view
+        // name turns out to be — a template outside every view root still
+        // renders components.
+        let components = self.resolve_component_tags(blade_content);
+
         let view_names = self.view_names_for_blade_uri(uri);
         if view_names.is_empty() {
-            return BladeScope::default();
+            return BladeScope {
+                components,
+                ..BladeScope::default()
+            };
         }
 
         // The backing class is a *declared* source, so it stands whatever
@@ -193,6 +229,7 @@ impl Backend {
             return BladeScope {
                 vars: declared,
                 this_class,
+                components,
             };
         }
 
@@ -301,8 +338,21 @@ impl Backend {
                 if !crate::blade::component_tags::may_contain_component_tag(content, &needles) {
                     continue;
                 }
-                let occurrences =
-                    crate::blade::component_tags::scan_component_tag_calls(content, &tag_names);
+                // The same partition the caller's own virtual PHP was
+                // built with, so the scan agrees with it about which
+                // attributes became arguments of the tag's call and are
+                // therefore not `blade_directive` calls to count.
+                let caller_components = self
+                    .blade_injected_vars
+                    .read()
+                    .get(file_uri)
+                    .map(|scope| scope.components.clone())
+                    .unwrap_or_default();
+                let occurrences = crate::blade::component_tags::scan_component_tag_calls(
+                    content,
+                    &tag_names,
+                    &|tag| component_argument_names(&caller_components, tag),
+                );
                 if occurrences.is_empty() {
                     continue;
                 }
@@ -324,6 +374,7 @@ impl Backend {
             return BladeScope {
                 vars: declared,
                 this_class,
+                components,
             };
         }
 
@@ -343,7 +394,11 @@ impl Backend {
         // prologue emits for the names more than one source carries.
         let mut vars = declared;
         vars.extend(result);
-        BladeScope { vars, this_class }
+        BladeScope {
+            vars,
+            this_class,
+            components,
+        }
     }
 
     /// Re-run call-site inference for already-preprocessed Blade

@@ -106,6 +106,27 @@ pub(crate) fn is_type_compatible(
         );
     }
 
+    // `array-key` is exactly `int|string`, so it has to be judged as
+    // that union: written as one name it matches neither half, and every
+    // rule below that reasons about a union member (including the
+    // int-to-string coercion PHP performs outside `strict_types`) would
+    // pass it over. `is_subtype_of` expands it for the same reason.
+    if arg_type.is_array_key() || param_type.is_array_key() {
+        let expand = |ty: &PhpType| {
+            if ty.is_array_key() {
+                PhpType::union(vec![PhpType::int(), PhpType::string()])
+            } else {
+                ty.clone()
+            }
+        };
+        return is_type_compatible(
+            &expand(arg_type),
+            &expand(param_type),
+            class_loader,
+            strict_types,
+        );
+    }
+
     // Skip if either type is unresolved/unknown.
     if arg_type.is_untyped() || param_type.is_untyped() {
         return true;

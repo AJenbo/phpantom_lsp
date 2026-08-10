@@ -25,12 +25,8 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor)          | High       | High       |
 | BL4  | [Component tag and attribute completion](todo/blade.md#bl4-component-tag-and-attribute-completion)                         | High       | Medium     |
-| BL5  | [Go-to-definition for component tags](todo/blade.md#bl5-go-to-definition-for-component-tags)                               | Medium     | Medium     |
-| BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
-| BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#bl10-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
 | F8  | [Implementation → test navigation via `@covers`](todo/lsp-features.md#f8-implementation-test-navigation-via-covers)                                                        | Low         | Medium      |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -51,10 +47,10 @@ within the same impact tier.
 | #    | Item                                                                                                                       | Impact     | Effort     |
 | ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------- |
 |      | Clear [refactoring gate](todo/refactor.md)                                                                                | —          | —          |
-| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium     |
 | BL23 | [Unbalanced component tag diagnostics](todo/blade.md#bl23-unbalanced-component-tag-diagnostics)                            | Low-Medium | Low        |
 | BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
 | BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
+| BL24 | [Named slot variables scoped to the component that receives them](todo/blade.md#bl24-named-slot-variables-scoped-to-the-component-that-receives-them) | Low-Medium | Medium |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
 | BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
 
@@ -185,7 +181,6 @@ unlikely to move the needle for most users.
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
 | L44 | [Sibling resource registrations and degenerate resource names](todo/laravel.md#l44-sibling-resource-registrations-and-degenerate-resource-names)                             | Low-Medium  | Low-Medium  |
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
-| BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Low-Medium  |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |

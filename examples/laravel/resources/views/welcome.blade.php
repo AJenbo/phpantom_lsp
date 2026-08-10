@@ -127,6 +127,21 @@
          passes: resources/views/components/post-summary.blade.php --}}
     <x-post-summary :post="$posts->first()" heading="Latest post" />
 
+    {{-- A component tag is the call Laravel makes with it, so its
+         attributes are the constructor's arguments and are checked as
+         such: change `:post` to pass a BlogAuthor and the tag is reported
+         the way any other call would be. Attributes the component
+         forwards to its attribute bag (`class` below) name no parameter,
+         so they are not arguments and are never reported.
+
+         The tag also binds $component to the component itself, the same
+         variable Blade's own compiled output uses, so the body reaches
+         the class rather than only the data it exposes.
+         Try: completion on `$component->` on the next line. --}}
+    <x-post-summary :post="$posts->first()" heading="Second post" class="mt-2">
+        {{ $component->excerpt(20) }}
+    </x-post-summary>
+
     {{-- <x-widgets::badge> is not a namespaced view: the `widgets::` prefix
          is registered in DemoServiceProvider::boot() with
          Blade::anonymousComponentNamespace(), so the tag renders the plain

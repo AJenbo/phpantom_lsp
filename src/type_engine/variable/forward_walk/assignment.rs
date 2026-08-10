@@ -798,25 +798,19 @@ pub(crate) fn try_process_inline_var_override<'b>(
     let before = &ctx.content[..offset.min(ctx.content.len())];
     let trimmed = trim_trailing_line_comments(before);
 
-    // Quick check: does it end with `*/`?
-    if !trimmed.ends_with("*/") {
-        return VarOverrideResult::None;
-    }
-
-    // Find the docblock start.
-    let doc_end = trimmed.len();
-    let doc_start = if let Some(pos) = trimmed.rfind("/**") {
-        pos
-    } else {
+    let Some(doc_text) = trailing_docblock(trimmed) else {
         return VarOverrideResult::None;
     };
-
-    let doc_text = &trimmed[doc_start..doc_end];
+    let doc_start = trimmed.len() - doc_text.len();
 
     // Try multi-@var first: a single docblock may declare several
     // variables (e.g. `/** @var App $app  @var array{…} $params */`).
     let multi = parse_all_inline_var_docblocks(doc_text, ctx);
     if !multi.is_empty() {
+        // The blocks further back run first, so a name this docblock also
+        // declares ends up carrying the type written closest to the
+        // expression.
+        apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
         // When the cursor is inside the RHS of an assignment, skip
         // overriding the LHS variable so that hover/completion on the
         // RHS sees the pre-override type.  E.g.:
@@ -847,15 +841,6 @@ pub(crate) fn try_process_inline_var_override<'b>(
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
             scope.set(var_name, resolved);
         }
-        // After processing the immediate docblock, scan backwards for
-        // additional standalone docblocks that precede it.  This handles
-        // patterns like:
-        //   /** @var App $app  @var array{…} $params */
-        //   /** @var Client $client */
-        //   $client = $app->make(Client::class);
-        // where the first block is separated from the expression by
-        // another docblock.
-        apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
 
         // When the @var variable names all differ from the assignment
         // LHS, return None so the caller continues processing the
@@ -910,15 +895,15 @@ pub(crate) fn try_process_inline_var_override<'b>(
                 }
 
                 let var_name = bytes_to_str(dv.name).to_string();
-                scope.set(&var_name, resolved);
-                // Scan for preceding docblocks.
+                // Scan for preceding docblocks first, so this one wins.
                 apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+                scope.set(&var_name, resolved);
                 return VarOverrideResult::NoVar;
             }
         } else if let Expression::Variable(Variable::Direct(dv)) = expr {
             let var_name = bytes_to_str(dv.name).to_string();
-            scope.set(&var_name, resolved);
             apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+            scope.set(&var_name, resolved);
             return VarOverrideResult::NoVar;
         }
     }
@@ -964,27 +949,48 @@ pub(crate) fn apply_preceding_var_docblocks(
 ) -> bool {
     let mut applied = false;
     let mut remaining = trim_trailing_line_comments(before);
+    // The blocks are visited nearest first, so a name a nearer one already
+    // declared is not overwritten by a further one that repeats it.
+    let mut declared: Vec<String> = Vec::new();
     // Keep scanning as long as the preceding text ends with a docblock.
-    while remaining.ends_with("*/") {
-        let doc_end = remaining.len();
-        let doc_start = match remaining.rfind("/**") {
-            Some(pos) => pos,
-            None => break,
-        };
-        let doc_text = &remaining[doc_start..doc_end];
+    while let Some(doc_text) = trailing_docblock(remaining) {
+        let doc_start = remaining.len() - doc_text.len();
         let vars = parse_all_inline_var_docblocks(doc_text, ctx);
         if vars.is_empty() {
             // Not a @var docblock — stop scanning.
             break;
         }
         for (var_name, php_type) in &vars {
+            if declared.iter().any(|seen| seen == var_name) {
+                continue;
+            }
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
             scope.set(var_name, resolved);
+            declared.push(var_name.clone());
         }
         applied = true;
         remaining = trim_trailing_line_comments(&remaining[..doc_start]);
     }
     applied
+}
+
+/// The `/** … */` docblock `text` ends with, or `None` when it ends with
+/// something else.
+///
+/// The comment that ends the text opens at the first `/*` no earlier
+/// comment closes.  An ordinary `/* … */` block is not a docblock, and
+/// searching past it for the nearest `/**` would take everything in
+/// between — including whole statements — for the docblock's body, and
+/// read out of it a `@var` annotation that the code in between has
+/// already superseded.  A preprocessed Blade template is full of such
+/// blocks (every `{{-- --}}` comment and every component tag becomes
+/// one), but so is any PHP file with a commented-out line between two
+/// annotated assignments.
+fn trailing_docblock(text: &str) -> Option<&str> {
+    let body = text.strip_suffix("*/")?;
+    let after_previous = body.rfind("*/").map_or(0, |pos| pos + 2);
+    let start = after_previous + body[after_previous..].find("/*")?;
+    text.get(start..).filter(|doc| doc.starts_with("/**"))
 }
 
 /// Trim trailing whitespace and whole-line `//` / `#` comments from
@@ -2883,6 +2889,29 @@ mod tests {
         // Nothing but comments: the scan bottoms out at an empty string.
         assert_eq!(trim_trailing_line_comments("// only\n"), "");
         assert_eq!(trim_trailing_line_comments(""), "");
+    }
+
+    #[test]
+    fn only_a_docblock_ends_the_backward_search_for_one() {
+        assert_eq!(
+            trailing_docblock("$a = 1; /** @var Foo $x */"),
+            Some("/** @var Foo $x */")
+        );
+        // An ordinary block comment is where the search stops: reading
+        // past it would take the statements in between for the body of
+        // the docblock beyond them.
+        assert_eq!(
+            trailing_docblock("/** @var Foo $x */ $x = 1; /* note */"),
+            None
+        );
+        assert_eq!(trailing_docblock("$a = 1;"), None);
+        assert_eq!(trailing_docblock(""), None);
+        // PHP block comments do not nest, so a `/*` written inside a
+        // docblock is part of its body rather than a comment of its own.
+        assert_eq!(
+            trailing_docblock("/** @var Foo $x  see /* the note */"),
+            Some("/** @var Foo $x  see /* the note */")
+        );
     }
 
     #[test]

@@ -124,90 +124,6 @@ attributes inside `<x-alert ` shows constructor parameter names.
 
 ---
 
-## BL3. `<x-component>` tag parsing in preprocessor
-
-**Impact: High · Effort: High**
-
-The preprocessor already tracks HTML tag state so that a bound
-attribute's expression (`:attr="$expr"`) survives into the virtual PHP
-as a `blade_directive(...)` call, and `src/blade/component_tags.rs`
-scans tags in the raw Blade source as call sites for signature
-inference. What is missing is translating the tag itself into PHP: the
-component class is never instantiated in the virtual PHP, so
-`$component->` has nothing to resolve against.
-
-### Opening tags
-
-Parse `<x-component-name attr="val" :attr="$expr" ...>` or
-`<x-component-name ... />` (self-closing).
-
-1. Extract the component name (everything between `<x-` and the first
-   whitespace or `>`/`/>`).
-2. Look up the name in the component index (`blade_component_fqn`). If
-   found, resolve the FQN.
-3. Extract attributes:
-   - `attr="literal"` → named arg with string value
-   - `:attr="$expr"` → named arg with PHP expression value
-   - `::attr="expr"` → ignored (Alpine.js passthrough)
-   - Bare `attr` → named arg with `true`
-   - `:$var` (short syntax) → named arg `var: $var`
-4. Convert attribute names from kebab-case to camelCase for the
-   constructor call.
-5. Emit `$component = new \FQN(camelAttr: value, ...);`
-
-If the component is not in the component index, check if it's an
-anonymous component (a view under the `components.` prefix). For
-anonymous components, emit a comment but still expose `$attributes`
-and `$slot`.
-
-For `<x-dynamic-component :component="$name" ...>`, emit
-`echo $name;` so the expression gets parsed, but do not try to
-resolve a target component.
-
-### Closing tags
-
-`</x-name>` becomes a comment: `/* /x-name */`
-
-### Named slots
-
-`<x-slot:title>` → `$title = new \Illuminate\View\ComponentSlot();`
-`</x-slot>` → comment
-
-### `<livewire:component>` tag parsing
-
-Parse `<livewire:name :attr="$expr" ...>` or
-`<livewire:name ... />`.
-
-1. Extract the component name (everything between `<livewire:` and
-   the first whitespace or `>`/`/>`).
-2. Look up in the Livewire index (`livewire_component_fqn`). If found,
-   resolve the FQN.
-3. Extract attributes (same rules as `<x-...>`).
-4. Emit `$component = new \FQN();` followed by property assignments
-   for each attribute: `$component->attrName = $expr;`.
-
-Livewire attribute names use camelCase on the class, so apply the
-same kebab-to-camelCase conversion.
-
-### Tests
-
-New file `tests/integration/blade_components.rs`:
-
-- `<x-alert>` resolves to `App\View\Components\Alert`
-- `<x-forms.input>` resolves to `App\View\Components\Forms\Input`
-- `<x-card>` resolves to index component
-  `App\View\Components\Card\Card`
-- `<livewire:counter>` resolves to `App\Livewire\Counter`
-- Anonymous component detection
-- `<x-dynamic-component>` does not crash
-- Attribute parsing: string, expression, Alpine passthrough, bare,
-  short syntax
-
-**Deliverable:** `$component->` after `<x-alert>` produces
-completions from the Alert class.
-
----
-
 ## BL23. Unbalanced component tag diagnostics
 
 **Impact: Low-Medium · Effort: Low**
@@ -280,8 +196,8 @@ translates through the source map.
 - Build a Blade-native symbol tree on top of the translated PHP
   symbols: `@section`s and `@push`/`@stack` blocks as top-level
   symbols, `<x-component>` tags as child symbols showing the resolved
-  component FQN once component parsing (BL3) lands — degrade to the
-  bare tag name if the component doesn't resolve.
+  component FQN — degrade to the bare tag name if the component
+  doesn't resolve.
 - Matches the structure-view behaviour other Blade-aware editors
   already provide.
 
@@ -290,8 +206,43 @@ translates through the source map.
 New file `tests/integration/document_symbols_blade.rs`:
 
 - `@section('content')` appears as an outline entry
-- `<x-alert>` appears as an outline entry with the resolved FQN once
-  component parsing (BL3) is in place
+- `<x-alert>` appears as an outline entry with the resolved FQN
+
+---
+
+## BL24. Named slot variables scoped to the component that receives them
+
+**Impact: Low-Medium · Effort: Medium**
+
+Deferred from the component-tag work: `<x-slot:title>` and its legacy
+`<x-slot name="title">` form become a comment in the virtual PHP, so
+nothing declares `$title`.
+
+Declaring it where the tag is written would be wrong. A named slot is a
+variable of the *component's* template, not of the template that fills
+it, and the filling template is where the tag sits. Emitting `$title =
+new \Illuminate\View\ComponentSlot();` there would put a name in the
+caller's scope that Blade never binds, and a slot named after a variable
+the caller already holds (`<x-slot:item>` inside `@foreach ($items as
+$item)`) would silently retype it for the rest of the block.
+
+The right shape is the one the backing class already uses: the slot
+names a template's tags fill are part of what the *component's* template
+receives, alongside `$slot` and `$attributes` (`COMPONENT_VARS` in
+`src/blade/preprocessor.rs`, fed from `super::backing_class`). That
+means scanning the tags that render a component for their `<x-slot:…>`
+children and declaring those names in the component template's prologue
+as `\Illuminate\View\ComponentSlot`, the same way
+`scan_component_tag_calls` already turns a tag's attributes into that
+template's variables.
+
+### Tests
+
+- `<x-slot:title>` in a caller declares `$title` in the component's
+  template, not in the caller's.
+- `<x-slot name="title">` (the legacy form) does the same.
+- A slot name that collides with a caller variable leaves the caller's
+  variable alone.
 
 ---
 

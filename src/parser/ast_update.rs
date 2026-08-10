@@ -118,11 +118,13 @@ impl Backend {
                 .get(uri)
                 .cloned()
                 .unwrap_or_default();
+            let components = self.blade_component_resolver(&injected.components);
             let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
                 content,
                 &injected.vars,
                 crate::blade::template_kind(uri, content),
                 injected.this_class.as_deref(),
+                Some(&components),
             );
             self.blade_source_maps
                 .write()

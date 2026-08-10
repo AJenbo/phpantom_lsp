@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::preprocessor::{ComponentBinding, ComponentParameter, ComponentTarget};
 use crate::Backend;
 
 /// The namespace tail Laravel looks for class-based components under when no
@@ -156,6 +157,163 @@ impl Backend {
         self.blade_discovery().livewire.get(name).cloned()
     }
 
+    /// The discovery index, but only when one is already built.
+    ///
+    /// For the callers that run on the edit path: building the index walks
+    /// every view root and the whole class index, which a keystroke (or a
+    /// parallel index worker, which invalidates the index as it goes) must
+    /// not pay for.
+    fn built_blade_discovery(&self) -> Option<Arc<BladeDiscovery>> {
+        self.laravel_string_key_cache.read().blade_discovery.clone()
+    }
+
+    /// Resolve every component tag `content` references to the class
+    /// behind it, as `(tag as written, target)` pairs sorted by tag.
+    ///
+    /// Part of a template's cached scope rather than something the
+    /// preprocessor looks up, for the same reason its injected variables
+    /// are: the serial refresh passes own project-wide enumeration and
+    /// `update_ast` only reads what they cached.
+    pub(crate) fn resolve_component_tags(&self, content: &str) -> Vec<(String, ComponentTarget)> {
+        let tags = super::component_tags::referenced_tags(content);
+        if tags.is_empty() {
+            // Nothing to look up, and asking for the index would build it
+            // for a template that has no use for it.
+            return Vec::new();
+        }
+        let discovery = self.blade_discovery();
+        let mut resolved: Vec<(String, ComponentTarget)> = tags
+            .into_iter()
+            .filter_map(|tag| {
+                let target = self.component_tag_target(&tag, &discovery)?;
+                Some((tag, target))
+            })
+            .collect();
+        resolved.sort_by(|a, b| a.0.cmp(&b.0));
+        resolved
+    }
+
+    /// The class a tag written as `x-alert` or `livewire:counter` names,
+    /// and the call its attributes fill.
+    fn component_tag_target(
+        &self,
+        tag: &str,
+        discovery: &BladeDiscovery,
+    ) -> Option<ComponentTarget> {
+        if let Some(name) = tag.strip_prefix("livewire:") {
+            let fqn = discovery.livewire.get(name)?.clone();
+            // Livewire builds the component through the container and
+            // hands the tag's attributes to `mount()`.
+            let binding = self
+                .component_signature(&fqn, "mount")
+                .map_or(ComponentBinding::Declare, ComponentBinding::Mount);
+            return Some(ComponentTarget { fqn, binding });
+        }
+        let name = tag.strip_prefix("x-")?;
+        if let Some(fqn) = discovery.components.get(name) {
+            let binding = self
+                .component_signature(fqn, "__construct")
+                .map_or(ComponentBinding::Declare, ComponentBinding::Construct);
+            return Some(ComponentTarget {
+                fqn: fqn.clone(),
+                binding,
+            });
+        }
+        // No class backs the tag, but a template addressed by it does:
+        // Laravel renders that through `AnonymousComponent`, whose own
+        // constructor takes the view name and the data rather than the
+        // attributes, so the tag declares the variable without a call.
+        let anonymous = self.anonymous_component_namespaces();
+        super::component_tags::view_names_for_component_tag(name, &anonymous)
+            .iter()
+            .any(|view| discovery.views.contains_key(view))
+            .then(|| ComponentTarget {
+                fqn: super::ANONYMOUS_COMPONENT.to_string(),
+                binding: ComponentBinding::Declare,
+            })
+    }
+
+    /// The parameters of `class`'s `method`, as the attributes of a tag
+    /// that renders it have to fill them.
+    ///
+    /// `None` when the class cannot be read at all, which leaves the tag
+    /// declaring `$component` without claiming anything about its
+    /// arguments.  A class that simply declares no such method has an
+    /// empty parameter list: Laravel still constructs it, and a tag
+    /// passing attributes to it is passing them to the attribute bag.
+    fn component_signature(&self, fqn: &str, method: &str) -> Option<Vec<ComponentParameter>> {
+        let class = self.find_or_load_class(fqn.trim_matches('\\'))?;
+        let loader = |name: &str| self.find_or_load_class(name);
+        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &class,
+            &loader,
+            Some(&self.resolved_class_cache),
+        );
+        let Some(signature) = resolved
+            .methods
+            .iter()
+            .find(|candidate| candidate.name.eq_ignore_ascii_case(method))
+        else {
+            return Some(Vec::new());
+        };
+
+        let mut parameters = Vec::with_capacity(signature.parameters.len());
+        for param in signature.parameters.iter() {
+            // A variadic parameter collects what is left over
+            // positionally, so no attribute names it.
+            if param.is_variadic {
+                continue;
+            }
+            let fallback = match param
+                .is_required
+                .then(|| container_argument(param.type_hint.as_ref()))
+                .flatten()
+            {
+                Some(ContainerArgument::Null) => Some("null".to_string()),
+                Some(ContainerArgument::Resolve(class)) => {
+                    // Without the helper to name it with, there is no way
+                    // to say the container fills this one — and reporting
+                    // it missing would be wrong — so the tag makes no call
+                    // at all.
+                    if !self.has_container_resolve_helper() {
+                        return None;
+                    }
+                    Some(format!("resolve(\\{class}::class)"))
+                }
+                None => None,
+            };
+            parameters.push(ComponentParameter {
+                name: param.name.trim_start_matches('$').to_string(),
+                fallback,
+            });
+        }
+        Some(parameters)
+    }
+
+    /// Whether the project has Laravel's `resolve()` helper, which is how
+    /// the virtual PHP spells "the container builds this one".
+    fn has_container_resolve_helper(&self) -> bool {
+        let empty_use_map = std::collections::HashMap::new();
+        self.function_loader_with(None, &empty_use_map, &None)("resolve", 0).is_some()
+    }
+
+    /// A [`super::preprocessor::ComponentResolver`] over the index the
+    /// project already has: whatever a refresh pass cached for this
+    /// template, and the live discovery index when one is built.
+    ///
+    /// The live index leads, so a tag typed since the last refresh pass
+    /// resolves on the next keystroke rather than at the next save.
+    pub(crate) fn blade_component_resolver<'a>(
+        &self,
+        cached: &'a [(String, ComponentTarget)],
+    ) -> BladeComponentResolver<'a, '_> {
+        BladeComponentResolver {
+            backend: self,
+            discovery: self.built_blade_discovery(),
+            cached,
+        }
+    }
+
     /// Every configured view root and provider-registered view directory,
     /// scanned into dot-notation names.
     fn scan_view_names(&self) -> HashMap<String, PathBuf> {
@@ -283,6 +441,65 @@ impl Backend {
             best = Some((prefix.len(), dir));
         }
         best.map(|(_, dir)| dir).filter(|dir| dir.is_dir())
+    }
+}
+
+/// What Laravel's container passes for a required parameter no attribute
+/// filled.
+enum ContainerArgument {
+    /// A nullable parameter the container leaves unset.
+    Null,
+    /// A class the container builds, by name.
+    Resolve(String),
+}
+
+/// What the container would pass for a required parameter a component tag
+/// left out, which is what Laravel does as soon as a tag's attributes do
+/// not cover every parameter (`Component::resolveComponent` hands the
+/// whole thing to the container rather than calling `new` itself).
+///
+/// `None` for a parameter the container cannot build either: that one is
+/// genuinely missing, and reporting it is right.
+fn container_argument(type_hint: Option<&crate::php_type::PhpType>) -> Option<ContainerArgument> {
+    let type_hint = type_hint?;
+    if type_hint.accepts_null() {
+        return Some(ContainerArgument::Null);
+    }
+    let class = type_hint.class_name()?;
+    Some(ContainerArgument::Resolve(
+        class.trim_matches('\\').to_string(),
+    ))
+}
+
+/// Resolves a component tag against the project's Blade indexes without
+/// building any of them. See [`Backend::blade_component_resolver`].
+pub(crate) struct BladeComponentResolver<'a, 'b> {
+    backend: &'b Backend,
+    discovery: Option<Arc<BladeDiscovery>>,
+    cached: &'a [(String, ComponentTarget)],
+}
+
+impl BladeComponentResolver<'_, '_> {
+    fn resolve(&self, tag: &str) -> Option<ComponentTarget> {
+        if let Some(discovery) = &self.discovery
+            && let Some(target) = self.backend.component_tag_target(tag, discovery)
+        {
+            return Some(target);
+        }
+        self.cached
+            .iter()
+            .find(|(cached_tag, _)| cached_tag == tag)
+            .map(|(_, target)| target.clone())
+    }
+}
+
+impl super::preprocessor::ComponentResolver for BladeComponentResolver<'_, '_> {
+    fn x_component(&self, tag: &str) -> Option<ComponentTarget> {
+        self.resolve(&format!("x-{tag}"))
+    }
+
+    fn livewire_component(&self, name: &str) -> Option<ComponentTarget> {
+        self.resolve(&format!("livewire:{name}"))
     }
 }
 

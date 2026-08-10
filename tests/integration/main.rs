@@ -3,6 +3,7 @@ mod common;
 mod blade;
 mod blade_backing_class;
 mod blade_call_site_inference;
+mod blade_components;
 pub mod blade_debug;
 pub mod blade_error;
 mod blade_imports;
