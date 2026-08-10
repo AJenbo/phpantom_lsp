@@ -227,52 +227,6 @@ debugger.
 
 ---
 
-## F8. Implementation → test navigation via `@covers`
-
-**Impact: Low · Effort: Medium**
-
-Given a class, surface the test classes that name it in their PHPUnit
-coverage metadata. The test → subject direction already works: coverage
-targets are symbol-map references, so go-to-definition, hover, and
-rename reach them the way they reach any other class, method, or
-function name.
-
-### Why not path-based mapping
-
-Pattern-based approaches (e.g. `src/Foo.php` → `tests/FooTest.php`)
-assume a project follows a specific directory convention. Many projects
-don't: tests may live under `tests/Feature/`, `tests/Functional/`,
-or in a completely separate directory structure. Coverage metadata is
-an explicit, project-layout-independent link that works for any
-structure.
-
-### The reverse lookup
-
-Nothing indexes coverage targets today, so answering "which tests cover
-this class?" means finding every `#[CoversClass]` / `@covers` in the
-project that names it. Two approaches:
-
-- **Lazy scan**: when the user asks, scan files matching `*Test.php` for
-  metadata referencing the current class FQN. O(n) in test file count,
-  but test directories are typically small, and a `memchr`-based
-  pre-filter on the class name before parsing keeps it fast.
-- **Indexed**: record coverage targets during the full background
-  indexing pass and keep a reverse map, evicted alongside the other
-  per-file indexes (`gti_index` is the model), so the lookup is O(1).
-
-An index is what an always-on presentation needs: a code lens fires on
-every open document, and scanning the test tree per request is too much
-work to do on that path.
-
-### Exposure
-
-The subject side has no reference to anchor to, so unlike the test side
-it cannot ride on go-to-definition. It needs a presentation of its own,
-such as a code lens or an inlay overlay above the class declaration
-("Tests: UserServiceTest"), or a code action on the class name.
-
----
-
 ## F11. VS Code extension
 
 | Field      | Value                    |

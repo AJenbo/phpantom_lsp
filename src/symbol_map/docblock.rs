@@ -456,7 +456,22 @@ fn emit_covers_tag_symbol(
     };
 
     let offset = text.span.start.offset + (raw.len() - trimmed.len()) as u32;
+    // `@covers Foo` and `@covers Foo::bar()` share their emitter with `@see`,
+    // so the class reference comes back tagged as an ordinary one.  Retagging
+    // whatever this tag just emitted keeps the coverage-specific knowledge in
+    // one place instead of threading a context through the `@see` path.
+    let first_new = spans.len();
     emit_covers_reference(reference, offset, default_class, spans);
+    retag_as_covers_target(&mut spans[first_new..]);
+}
+
+/// Mark every class reference among `spans` as PHPUnit coverage metadata.
+pub(super) fn retag_as_covers_target(spans: &mut [SymbolSpan]) {
+    for span in spans {
+        if let SymbolKind::ClassReference { context, .. } = &mut span.kind {
+            *context = ClassRefContext::CoversTarget;
+        }
+    }
 }
 
 /// Emit the spans for one PHPUnit coverage target.

@@ -110,6 +110,16 @@ pub(crate) enum ClassRefContext {
     /// instantiable class and does not produce "cannot instantiate"
     /// diagnostics.
     Attribute,
+    /// As the subject of PHPUnit coverage metadata: a `@covers` / `@uses` /
+    /// `@coversDefaultClass` tag, or a `#[CoversClass]` / `#[UsesClass]` /
+    /// `#[CoversTrait]` / `#[UsesTrait]` / `#[CoversMethod]` /
+    /// `#[UsesMethod]` attribute argument.
+    ///
+    /// The reference names a code unit rather than using it, so it
+    /// constrains nothing about the class' kind and does not autoload.  It
+    /// is tagged so the "which tests cover this class" code lens can pick
+    /// coverage references out of the reference index without re-parsing.
+    CoversTarget,
 }
 
 /// The subject (LHS) text of a [`SymbolKind::MemberAccess`] span.

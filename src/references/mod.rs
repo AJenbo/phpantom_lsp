@@ -30,6 +30,7 @@
 //! finders share.
 
 mod classes;
+mod covers;
 mod dispatch;
 mod functions;
 mod members;

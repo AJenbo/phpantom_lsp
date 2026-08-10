@@ -27,7 +27,6 @@ within the same impact tier.
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
-| F8  | [Implementation → test navigation via `@covers`](todo/lsp-features.md#f8-implementation-test-navigation-via-covers)                                                        | Low         | Medium      |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 

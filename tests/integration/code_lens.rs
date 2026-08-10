@@ -584,3 +584,248 @@ class Document implements Printable {
     assert_eq!(titles.len(), 1);
     assert_eq!(titles[0], "◆ Printable::print");
 }
+
+// ─── PHPUnit Coverage Lens ("which tests cover this class") ────────────────
+//
+// The coverage search runs through the reference index, which only answers
+// once the workspace has been indexed, so these use real files on disk
+// rather than a bare `create_test_backend()`.
+
+/// Build a workspace, open every file, and return the lenses for `subject`.
+fn covers_lens_titles_for(files: &[(&str, &str)], subject: &str) -> Vec<String> {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/", "App\\Tests\\": "tests/" } } }"#,
+        files,
+    );
+
+    for (rel_path, _) in files {
+        let path = dir.path().join(rel_path);
+        let uri = format!("file://{}", path.display());
+        let content = std::fs::read_to_string(&path).unwrap();
+        backend.update_ast(&uri, &content);
+    }
+
+    let subject_path = dir.path().join(subject);
+    let subject_uri = format!("file://{}", subject_path.display());
+    let subject_content = std::fs::read_to_string(&subject_path).unwrap();
+
+    backend
+        .handle_code_lens(&subject_uri, &subject_content)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
+        .collect()
+}
+
+const CALCULATOR: (&str, &str) = (
+    "src/Calculator.php",
+    r#"<?php
+namespace App;
+
+class Calculator {
+    public function add(int $a, int $b): int { return $a + $b; }
+}
+"#,
+);
+
+#[test]
+fn covers_lens_from_method_level_docblock_tag() {
+    let titles = covers_lens_titles_for(
+        &[
+            CALCULATOR,
+            (
+                "tests/CalculatorTest.php",
+                r#"<?php
+namespace App\Tests;
+
+use App\Calculator;
+
+class CalculatorTest {
+    /**
+     * @covers Calculator
+     */
+    public function testAdd(): void {}
+}
+"#,
+            ),
+        ],
+        "src/Calculator.php",
+    );
+
+    assert!(
+        titles.iter().any(|t| t == "Tests: CalculatorTest"),
+        "titles: {titles:?}"
+    );
+}
+
+#[test]
+fn covers_lens_from_class_level_covers_default_class() {
+    let titles = covers_lens_titles_for(
+        &[
+            CALCULATOR,
+            (
+                "tests/CalculatorTest.php",
+                r#"<?php
+namespace App\Tests;
+
+/**
+ * @coversDefaultClass \App\Calculator
+ */
+class CalculatorTest {
+    /**
+     * @covers ::add
+     */
+    public function testAdd(): void {}
+}
+"#,
+            ),
+        ],
+        "src/Calculator.php",
+    );
+
+    assert!(
+        titles.iter().any(|t| t == "Tests: CalculatorTest"),
+        "titles: {titles:?}"
+    );
+}
+
+#[test]
+fn covers_lens_from_covers_class_attribute() {
+    let titles = covers_lens_titles_for(
+        &[
+            CALCULATOR,
+            (
+                "tests/CalculatorTest.php",
+                r#"<?php
+namespace App\Tests;
+
+use App\Calculator;
+use PHPUnit\Framework\Attributes\CoversClass;
+
+#[CoversClass(Calculator::class)]
+class CalculatorTest {
+    public function testAdd(): void {}
+}
+"#,
+            ),
+        ],
+        "src/Calculator.php",
+    );
+
+    assert!(
+        titles.iter().any(|t| t == "Tests: CalculatorTest"),
+        "titles: {titles:?}"
+    );
+}
+
+#[test]
+fn covers_lens_from_covers_class_attribute_written_as_a_string() {
+    let titles = covers_lens_titles_for(
+        &[
+            CALCULATOR,
+            (
+                "tests/CalculatorTest.php",
+                r#"<?php
+namespace App\Tests;
+
+use PHPUnit\Framework\Attributes\CoversClass;
+
+#[CoversClass('App\Calculator')]
+class CalculatorTest {
+    public function testAdd(): void {}
+}
+"#,
+            ),
+        ],
+        "src/Calculator.php",
+    );
+
+    assert!(
+        titles.iter().any(|t| t == "Tests: CalculatorTest"),
+        "titles: {titles:?}"
+    );
+}
+
+#[test]
+fn covers_lens_counts_multiple_covering_tests() {
+    let titles = covers_lens_titles_for(
+        &[
+            CALCULATOR,
+            (
+                "tests/CalculatorAddTest.php",
+                r#"<?php
+namespace App\Tests;
+
+use App\Calculator;
+
+/**
+ * @covers Calculator
+ */
+class CalculatorAddTest {
+    public function testAdd(): void {}
+}
+"#,
+            ),
+            (
+                "tests/CalculatorRegressionTest.php",
+                r#"<?php
+namespace App\Tests;
+
+use App\Calculator;
+
+/**
+ * @covers Calculator
+ */
+class CalculatorRegressionTest {
+    public function testRegression(): void {}
+}
+"#,
+            ),
+        ],
+        "src/Calculator.php",
+    );
+
+    assert!(
+        titles.iter().any(|t| t == "Tests: 2 tests"),
+        "titles: {titles:?}"
+    );
+}
+
+#[test]
+fn no_covers_lens_for_an_uncovered_class() {
+    let titles = covers_lens_titles_for(&[CALCULATOR], "src/Calculator.php");
+
+    assert!(
+        !titles.iter().any(|t| t.starts_with("Tests:")),
+        "titles: {titles:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_reference_is_not_a_covers_lens() {
+    // `new Calculator()` names the class without declaring coverage for it,
+    // so it must not be mistaken for a covering test.
+    let titles = covers_lens_titles_for(
+        &[
+            CALCULATOR,
+            (
+                "src/Consumer.php",
+                r#"<?php
+namespace App;
+
+class Consumer {
+    public function run(): int {
+        return (new Calculator())->add(1, 2);
+    }
+}
+"#,
+            ),
+        ],
+        "src/Calculator.php",
+    );
+
+    assert!(
+        !titles.iter().any(|t| t.starts_with("Tests:")),
+        "titles: {titles:?}"
+    );
+}

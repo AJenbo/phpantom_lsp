@@ -5,6 +5,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::atom::Atom;
 use crate::definition::member::MemberKind;
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH};
@@ -47,6 +48,10 @@ impl Backend {
 
         for class in &classes {
             let class_fqn = class.fqn();
+
+            if let Some(lens) = self.build_covers_lens(class, uri, content) {
+                lenses.push(lens);
+            }
 
             for method in &class.methods {
                 if method.name_offset == 0
@@ -95,6 +100,106 @@ impl Backend {
         } else {
             Some(lenses)
         }
+    }
+
+    /// Build the "which tests cover this class" lens for a class
+    /// declaration, from the test classes whose PHPUnit coverage metadata
+    /// (`@covers` / `@uses` / `#[CoversClass]` and friends) names it.
+    ///
+    /// `None` when the class has no keyword position (synthetic/anonymous
+    /// classes), no test declares coverage for it, or none of the test
+    /// classes that do can be located on disk any more.  Also `None` while
+    /// the workspace is still indexing, since
+    /// [`Backend::find_covering_test_classes`] cannot answer until then.
+    fn build_covers_lens(&self, class: &ClassInfo, uri: &str, content: &str) -> Option<CodeLens> {
+        if class.keyword_offset == 0 {
+            return None;
+        }
+
+        let locations: Vec<(Atom, Location)> = self
+            .find_covering_test_classes(&class.fqn())
+            .into_iter()
+            .filter_map(|(test_fqn, test_uri)| {
+                let location =
+                    self.covers_lens_target(test_fqn.as_str(), &test_uri, uri, content)?;
+                Some((test_fqn, location))
+            })
+            .collect();
+        if locations.is_empty() {
+            return None;
+        }
+
+        let pos = offset_to_position(content, class.keyword_offset as usize);
+        let indent = line_indent(content, class.keyword_offset as usize);
+        let range = Range {
+            start: Position {
+                line: pos.line,
+                character: indent,
+            },
+            end: Position {
+                line: pos.line,
+                character: indent,
+            },
+        };
+
+        let command = if let [(test_fqn, location)] = locations.as_slice() {
+            let title = format!("Tests: {}", crate::util::short_name(test_fqn));
+            self.build_code_lens_command(title, location.uri.clone(), location.range.start)
+        } else {
+            let title = format!("Tests: {} tests", locations.len());
+            let current_uri: Url = match uri.parse() {
+                Ok(u) => u,
+                Err(_) => return None,
+            };
+            Command {
+                title,
+                command: "editor.action.showReferences".to_string(),
+                arguments: Some(vec![
+                    serde_json::json!(current_uri),
+                    serde_json::json!(range.start),
+                    serde_json::json!(locations.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>()),
+                ]),
+            }
+        };
+
+        Some(CodeLens {
+            range,
+            command: Some(command),
+            data: None,
+        })
+    }
+
+    /// The location of a covering test class's own declaration, for the
+    /// covers lens to navigate to.
+    fn covers_lens_target(
+        &self,
+        test_fqn: &str,
+        test_uri: &str,
+        current_uri: &str,
+        current_content: &str,
+    ) -> Option<Location> {
+        let test_class = self.find_or_load_class(test_fqn)?;
+        if test_class.keyword_offset == 0 {
+            return None;
+        }
+
+        // The search already told us which file declares it, so read that
+        // rather than looking the class up by name a second time.
+        let file_content = if test_uri == current_uri {
+            current_content.to_string()
+        } else {
+            self.get_file_content(test_uri)?
+        };
+        let position = offset_to_position(&file_content, test_class.keyword_offset as usize);
+        let uri: Url = test_uri.parse().ok()?;
+
+        Some(Location {
+            uri,
+            range: Range {
+                start: position,
+                end: position,
+            },
+        })
     }
 
     /// Search the inheritance hierarchy for the closest ancestor that

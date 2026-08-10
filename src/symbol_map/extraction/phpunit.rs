@@ -131,6 +131,12 @@ pub(super) fn try_emit_coverage_attribute_spans(
         ));
     }
 
+    // Mark the target as coverage metadata, for both spellings: the string
+    // reference pushed just above, and the `Foo::class` one the expression
+    // extractor recorded before this ran (`extract_from_attribute_lists`
+    // walks the argument list first).
+    retag_covers_target_in_range(spans, first.span());
+
     if kind == TargetKind::ClassLike {
         return;
     }
@@ -168,6 +174,24 @@ pub(super) fn try_emit_coverage_attribute_spans(
             is_array_callable: false,
         },
     });
+}
+
+/// Mark every class reference inside `range` as PHPUnit coverage metadata.
+///
+/// Scans the whole vec rather than just its tail: a coverage attribute's
+/// argument spans are not necessarily the most recently pushed (a docblock on
+/// the same declaration contributes spans of its own).  Coverage attributes
+/// appear only in test files and only a handful per declaration, so the scan
+/// is not on any hot path.
+fn retag_covers_target_in_range(spans: &mut [SymbolSpan], range: Span) {
+    for span in spans {
+        if span.start >= range.start.offset
+            && span.end <= range.end.offset
+            && let SymbolKind::ClassReference { context, .. } = &mut span.kind
+        {
+            *context = ClassRefContext::CoversTarget;
+        }
+    }
 }
 
 /// The subject text and span of an argument that names a class, written

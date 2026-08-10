@@ -1,0 +1,134 @@
+//! Reverse PHPUnit coverage lookup.
+//!
+//! [`Backend::find_covering_test_classes`] answers "which test classes
+//! declare coverage for this class?", the subject-side direction of the
+//! `@covers` relationship.  The test side needs nothing of its own: a
+//! coverage target is an ordinary symbol-map reference, so go-to-definition
+//! and rename already reach the subject from the test.
+//!
+//! The search is the same shape as [`super::classes`]' class-reference
+//! search, narrowed twice: the reference index picks the files that name the
+//! class at all, and the [`ClassRefContext::CoversTarget`] tag the symbol map
+//! puts on coverage metadata picks the references that are coverage
+//! declarations rather than ordinary uses.
+
+use super::*;
+
+use crate::atom::Atom;
+use crate::class_lookup::find_class_at_offset;
+use crate::symbol_map::{ClassRefContext, SymbolKind};
+use crate::types::ClassInfo;
+
+impl Backend {
+    /// The classes whose PHPUnit coverage metadata names `target_fqn`,
+    /// as `(covering class FQN, URI of the file that declares it)`.
+    ///
+    /// Empty while the workspace is still being indexed, since the reference
+    /// index cannot narrow the candidate files until then.
+    pub(crate) fn find_covering_test_classes(&self, target_fqn: &str) -> Vec<(Atom, String)> {
+        let target = strip_fqn_prefix(target_fqn);
+        let target_short = crate::util::short_name(target);
+
+        let candidate_keys = class_candidate_keys(target, target_short);
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+
+        let mut found: Vec<(Atom, String)> = Vec::new();
+
+        for (file_uri, symbol_map) in &snapshot {
+            // Only files that carry coverage metadata at all are worth
+            // resolving names in, and almost none do.
+            if !symbol_map.spans.iter().any(|span| {
+                matches!(
+                    &span.kind,
+                    SymbolKind::ClassReference {
+                        context: ClassRefContext::CoversTarget,
+                        ..
+                    }
+                )
+            }) {
+                continue;
+            }
+
+            // Same resolution ladder as the class-reference search: prefer
+            // mago-names' offset-keyed resolution, fall back to the file's
+            // imports for names it does not track (docblock references, which
+            // is exactly what `@covers` is).
+            let resolved_names = self.resolved_names.read().get(file_uri).cloned();
+            let file_namespace = self.first_file_namespace(file_uri);
+            let file_use_map = std::cell::OnceCell::new();
+
+            let classes = match self.symbols.uri_classes_index.read().get(file_uri) {
+                Some(classes) => classes.clone(),
+                None => continue,
+            };
+
+            for span in &symbol_map.spans {
+                let SymbolKind::ClassReference {
+                    name,
+                    is_fqn,
+                    context: ClassRefContext::CoversTarget,
+                } = &span.kind
+                else {
+                    continue;
+                };
+
+                // `class_ref_span` strips the leading `\` but records that it
+                // was there, so a written-out target is already the FQN.
+                // Re-resolving it would prefix the test's own namespace and
+                // produce `App\Tests\App\Calculator`.
+                let resolved = if *is_fqn {
+                    name.to_string()
+                } else if let Some(fqn) = resolved_names.as_ref().and_then(|rn| rn.get(span.start))
+                {
+                    fqn.to_string()
+                } else {
+                    let use_map = file_use_map.get_or_init(|| {
+                        self.file_imports
+                            .read()
+                            .get(file_uri)
+                            .cloned()
+                            .unwrap_or_default()
+                    });
+                    Self::resolve_to_fqn(name, use_map, &file_namespace)
+                };
+                if !class_names_match(strip_fqn_prefix(&resolved), target, target_short) {
+                    continue;
+                }
+
+                // The class the metadata belongs to is the covering test,
+                // whether the tag sat on the class or on one of its methods.
+                let Some(covering_fqn) = covering_class_fqn(&classes, span.start) else {
+                    continue;
+                };
+                if found.iter().any(|(fqn, _)| *fqn == covering_fqn) {
+                    continue;
+                }
+                found.push((covering_fqn, file_uri.clone()));
+            }
+        }
+
+        // The reference index hands back candidate files in hash order, so
+        // sort for a stable lens label and test expectations.
+        found.sort_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()));
+        found
+    }
+}
+
+/// The class a coverage tag at `offset` belongs to.
+///
+/// A tag on a *method* docblock sits inside the class body, which
+/// [`find_class_at_offset`] resolves directly.  A tag on the *class*
+/// docblock does not: a docblock is trivia preceding the declaration, so it
+/// starts before even `decl_start_offset` (which covers attributes but not
+/// comments).  For that case the owner is the next declaration to start,
+/// since a docblock binds to whatever immediately follows it.
+fn covering_class_fqn(classes: &[Arc<ClassInfo>], offset: u32) -> Option<Atom> {
+    if let Some(class) = find_class_at_offset(classes, offset) {
+        return Some(class.fqn());
+    }
+    classes
+        .iter()
+        .filter(|class| class.decl_start_offset > offset)
+        .min_by_key(|class| class.decl_start_offset)
+        .map(|class| class.fqn())
+}
