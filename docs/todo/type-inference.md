@@ -879,3 +879,78 @@ to the current class name identically to `Expression::Self_`.
 upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
 `self::` cases survive); port them back.
+
+---
+
+## T35. Readonly property reassignment outside its declaring scope is never flagged
+**Impact: Medium · Effort: Low-Medium**
+
+`is_readonly` is already tracked on `PropertyInfo` (set in
+`src/parser/mod.rs` and `src/parser/classes.rs` for both the
+`readonly` modifier and constructor-promoted properties), but nothing
+in `src/diagnostics/` reads it. Reassigning a `readonly` property from
+outside the class that declares it — or a second write from inside it,
+after the constructor has already initialized it — is a hard error in
+PHP and goes completely unreported:
+
+```php
+final class Box {
+    public function __construct(public readonly int $value) {}
+}
+
+$box = new Box(1);
+$box->value = 2; // Error: Cannot modify readonly property Box::$value
+```
+
+Every comparable tool (PHPStan, Psalm, Mago, mir, Intelephense) flags
+this; it is one of the cleanest gaps the php-typing-conformance corpus
+turned up (`properties_readonly_assignment.php`), since the metadata
+already exists and this is purely additive — no existing diagnostic
+narrows or changes shape.
+
+**Fix:** in the property-assignment diagnostic path, when the subject
+resolves to a class and the target property is `is_readonly`, flag the
+write unless it is the first write to that property from inside the
+declaring class (constructor or otherwise). Scope this the same way
+the rest of the diagnostics module resolves a subject's class, rather
+than adding a second subject-resolution path.
+
+---
+
+## T36. Array-shape and generic enforcement gaps mir already covers
+
+**Impact: Medium · Effort: Medium**
+
+Cross-referencing the php-typing-conformance results: for the cases
+below, mir recognizes and enforces the spelling and we are silent
+(zero diagnostics, not a false positive) — a real recognized-but-
+unenforced gap versus the LSP we're closest to competing with rather
+than a case where nobody has solved it yet:
+
+| Test | What mir enforces that we don't |
+| --- | --- |
+| `arrays_non_empty_list.php` | `non-empty-list<int>` rejects `[]` |
+| `arrays_shape_required_keys.php` | a required shape key missing from a literal array |
+| `assertions_assert_non_empty_list.php` | `assert()`-narrowed non-empty-list stays enforced downstream |
+| `callables_docblock_signature.php` | a `callable(int): string`-shaped docblock param against a mismatched closure |
+| `callables_return_type_mismatch.php` | a callable's declared return type against what it actually returns |
+| `generics_extends_implements.php` | a `@template` bound carried through `extends`/`implements` |
+| `generics_template_bound.php` | a `@template T of Foo` bound rejecting a non-`Foo` argument |
+| `generics_template_bound_array.php` | the same bound inside an array template argument |
+| `generics_template_box.php` | a generic "box" class enforcing its template argument on `set()`/`get()` |
+| `phpdoc_advanced_fallback_interface_string.php` | an interface-backed string pseudo-type |
+
+None of these are things we should chase for their own sake — PHPStan
+and Mago already own deep static analysis and we proxy them rather
+than re-implementing their rule sets (see the CLAUDE.md anti-pattern
+on parallel type-resolution systems). These are worth closing because
+mir is the analyzer behind php-lsp, the LSP we're most directly
+compared against, and Intelephense fails most of them too (see the
+per-test TOML `conformance_automated` field under
+`php-typing-conformance/conformance/results/{mir,intelephense}/` for
+the up-to-date pass/fail per tool).
+
+Each row needs its own root-cause pass — they were only confirmed
+silent (not misclassified), not yet traced to a specific resolver.
+Fix one at a time rather than as a single PR; several likely share a
+cause (the four `generics_template_*` cases almost certainly do).
