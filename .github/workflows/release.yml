@@ -203,9 +203,54 @@ jobs:
           name: phpantom_lsp-${{ matrix.asset_target }}
           path: phpantom_lsp-${{ matrix.asset_target }}.${{ matrix.archive }}
 
+  # The WebAssembly module for in-browser hosts (see docs/wasm.md). Kept out
+  # of the matrix above: it needs none of the signing, cross-compilation, or
+  # musl setup those targets carry, and it ships a library rather than an
+  # executable.
+  wasm:
+    name: Build wasm32-wasip1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-wasip1
+
+      - name: Build
+        env:
+          PHPANTOM_GIT_VERSION: ${{ env.RELEASE_TAG }}
+        run: |
+          cargo rustc --lib --crate-type cdylib \
+            --profile wasm-release --target wasm32-wasip1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Smoke-test the wasm reactor
+        run: node scripts/wasm-smoke-test.mjs
+
+      - name: Package
+        run: |
+          tar czf phpantom_lsp-wasm32-wasip1.tar.gz \
+            -C target/wasm32-wasip1/wasm-release phpantom_lsp.wasm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phpantom_lsp-wasm32-wasip1
+          path: phpantom_lsp-wasm32-wasip1.tar.gz
+
   release:
     name: Attach assets to draft
-    needs: build
+    needs: [build, wasm]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

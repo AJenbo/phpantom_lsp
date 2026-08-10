@@ -67,6 +67,31 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  wasm:
+    name: WebAssembly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+      # `--target` on the command line overrides the musl CARGO_BUILD_TARGET
+      # this workflow sets for every other job.
+      - run: cargo clippy --lib --target wasm32-wasip1 -- -D warnings
+      - name: Build the wasm reactor
+        run: |
+          cargo rustc --lib --crate-type cdylib \
+            --profile wasm-release --target wasm32-wasip1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Smoke-test the wasm reactor
+        run: node scripts/wasm-smoke-test.mjs
+
   php-lint:
     name: PHP Lint
     runs-on: ubuntu-latest
