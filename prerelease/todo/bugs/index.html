@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,37 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b71-completion-in-a-blade-template-edits-the-virtual-phps-coordinates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B71. Completion in a Blade template edits the virtual PHP's coordinates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1282,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1298,25 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b71-completion-in-a-blade-template-edits-the-virtual-phps-coordinates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B71. Completion in a Blade template edits the virtual PHP's coordinates
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1274,7 +1346,25 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>No outstanding items.</p>
+<h3 id="b71-completion-in-a-blade-template-edits-the-virtual-phps-coordinates">B71. Completion in a Blade template edits the virtual PHP's coordinates<a class="headerlink" href="#b71-completion-in-a-blade-template-edits-the-virtual-phps-coordinates" title="Permanent link">&para;</a></h3>
+<p>A completion item that carries a <code>TextEdit</code> puts the range it computed on
+<code>content</code>, and for a <code>.blade.php</code> file <code>handle_completion</code> swaps <code>content</code>
+for the preprocessed virtual PHP. Nothing translates the range back on the
+way out (<code>goto_definition</code>, hover, inlay hints, and diagnostics all do),
+so every such item names a position in a file the editor does not have:
+completing a view name inside <code>@include('|')</code> on line 1 of a template comes
+back as an edit at line 7, six prologue lines below where the user is
+typing, and shifted along the line by the width of the directive's
+replacement.</p>
+<p>Reproduced against <code>@include('|')</code>, where the offered view names carry an
+edit at <code>7:24</code> for a cursor at <code>1:10</code>. Every strategy that returns a
+<code>TextEdit</code> or <code>additional_text_edits</code> is affected the same way: Laravel
+string keys, array-shape keys, Eloquent column strings, request keys, and
+the <code>use</code> statement an imported class name inserts.</p>
+<p>Fix: translate the ranges of a Blade file's completion items back through
+<code>try_translate_blade_range</code> before returning them, dropping an item whose
+range falls in the injected prologue rather than clamping it to the start
+of the template.</p>
 
 
 
