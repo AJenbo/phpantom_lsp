@@ -203,7 +203,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unknown_view_variable");
+        assert_eq!(diags[0].0, "unused_view_variable");
         assert!(
             diags[0].1.contains("$usre"),
             "message should name the typo, got {:?}",
@@ -673,7 +673,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unknown_view_variable");
+        assert_eq!(diags[0].0, "unused_view_variable");
         assert!(
             diags[0].1.contains("$nope"),
             "only the name no candidate reads is unknown, got {:?}",
@@ -883,7 +883,7 @@ class ViewServiceProvider
         ]);
         let diags = call_site_diagnostics(&backend, &dir, "app/ProfileController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unknown_view_variable");
+        assert_eq!(diags[0].0, "unused_view_variable");
         assert!(
             diags[0].1.contains("$extra"),
             "message should name the key nothing reads, got {:?}",

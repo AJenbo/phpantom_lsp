@@ -301,7 +301,7 @@ mod tests {
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unknown_view_variable" && message.contains("$title")
+                |(code, message)| code == "unused_view_variable" && message.contains("$title")
             ),
             "got {diags:?}"
         );
@@ -375,7 +375,7 @@ mod tests {
 
         let diags = call_site_diagnostics(&backend, &dir, "app/PageController.php", "php").await;
         assert_eq!(diags.len(), 1, "got {diags:?}");
-        assert_eq!(diags[0].0, "unknown_view_variable");
+        assert_eq!(diags[0].0, "unused_view_variable");
         assert!(diags[0].1.contains("$titel"), "got {:?}", diags[0].1);
     }
 
@@ -455,7 +455,7 @@ mod tests {
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unknown_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
             ),
             "the typo in with: should be reported, got {diags:?}"
         );
@@ -484,7 +484,7 @@ mod tests {
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unknown_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
             ),
             "the typo in with: should be reported, got {diags:?}"
         );
@@ -612,7 +612,7 @@ mod tests {
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unknown_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
             ),
             "got {diags:?}"
         );
@@ -814,7 +814,7 @@ mod tests {
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unknown_view_variable" && message.contains("$titel")
+                |(code, message)| code == "unused_view_variable" && message.contains("$titel")
             ),
             "got {diags:?}"
         );
@@ -871,7 +871,7 @@ mod tests {
         );
         assert!(
             diags.iter().any(
-                |(code, message)| code == "unknown_view_variable" && message.contains("$title")
+                |(code, message)| code == "unused_view_variable" && message.contains("$title")
             ),
             "got {diags:?}"
         );

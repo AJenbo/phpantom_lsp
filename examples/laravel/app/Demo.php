@@ -484,7 +484,7 @@ class Demo
 
         // A declared variable this call leaves out → `missing_view_variable`,
         // and a key nothing in welcome.blade.php (or anything it @includes)
-        // reads → `unknown_view_variable`.  Both are intentional.
+        // reads → `unused_view_variable`.  Both are intentional.
         view('welcome', ['user' => $user, 'pots' => $posts]);
 
         // View under a custom path from config/view.php (resources/theme/views).

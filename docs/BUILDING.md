@@ -75,7 +75,7 @@ each demonstrating a diagnostic. `Artisan::call('does:not-exist')`
 demonstrates `invalid_laravel_command`, and one `view('welcome', …)`
 call both leaves out a variable the template declares and passes a
 misspelled key, demonstrating `missing_view_variable` and
-`unknown_view_variable`. So it must report exactly
+`unused_view_variable`. So it must report exactly
 `[ERROR] Found 3 errors`, on those two lines. Any other count, or an
 error on a different line, is a regression.
 

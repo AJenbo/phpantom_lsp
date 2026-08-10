@@ -38,7 +38,7 @@ use super::type_errors::compatibility::is_type_compatible;
 /// A declared variable the call site does not pass.
 const MISSING_CODE: &str = "missing_view_variable";
 /// A passed variable the template has no use for.
-const UNKNOWN_CODE: &str = "unknown_view_variable";
+const UNUSED_CODE: &str = "unused_view_variable";
 /// A passed variable whose type the declaration does not accept.
 const TYPE_MISMATCH_CODE: &str = "type_mismatch_view_variable";
 
@@ -214,7 +214,7 @@ impl Backend {
                 }
             }
 
-            // ── Unknown ──────────────────────────────────────────────
+            // ── Unused ───────────────────────────────────────────────
             let accepted = accepted
                 .entry(view_name.clone())
                 .or_insert_with(|| self.blade_accepted_names(view_name));
@@ -236,7 +236,7 @@ impl Backend {
                 out.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::WARNING,
-                    UNKNOWN_CODE,
+                    UNUSED_CODE,
                     format!("View '{}' has no variable ${}", view_name, var.name),
                 ));
             }
