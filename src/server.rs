@@ -934,6 +934,20 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe(move || {
+            // A component tag is HTML, so it has no position in the virtual
+            // PHP `handle_with_position` would swap in below; it is resolved
+            // from the template's own source instead.
+            if backend.is_blade_file(&uri_clone)
+                && let Some(location) = crate::util::catch_panic_unwind_safe(
+                    "goto_definition",
+                    &uri_clone,
+                    Some(position),
+                    || backend.blade_component_tag_definition(&uri_clone, position),
+                )
+                .flatten()
+            {
+                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+            }
             backend.handle_with_position("goto_definition", &uri_clone, position, |content, pos| {
                 let locs = backend.resolve_definition(&uri_clone, content, pos);
                 if locs.is_empty() {

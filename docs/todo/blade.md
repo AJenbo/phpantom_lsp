@@ -109,34 +109,6 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 
 ---
 
-## BL5. Go-to-definition for component tags
-
-**Impact: Medium · Effort: Medium**
-
-### Component tag go-to-definition
-
-On `<x-alert>`:
-
-1. Extract the component name.
-2. Look up in the component index to get the FQN.
-3. Use `find_or_load_class` + `fqn_uri_index` to find the
-   source file.
-4. Return a `Location` pointing to the class definition.
-
-On `<livewire:counter>`: same pattern using the Livewire index.
-
-### Tests
-
-New file `tests/integration/definition_blade.rs`:
-
-- Go-to-definition on `<x-alert>` → component class
-- Go-to-definition on `<livewire:counter>` → Livewire class
-
-**Deliverable:** Ctrl-click on `<x-alert>` jumps to the component
-class.
-
----
-
 ## BL22. A template never learns anything from the templates that render it
 
 **Impact: Medium · Effort: Medium**

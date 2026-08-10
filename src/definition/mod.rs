@@ -17,6 +17,8 @@
 ///   - **Chained access**: `$this->prop->method()`
 ///   - **Variables**: `$var` jumps to the most recent assignment or declaration
 ///     (assignment, parameter, foreach, catch, static/global)
+///   - **Blade component tags**: `<x-alert>` / `<livewire:counter>` jump to the
+///     class backing the tag, or to the template an anonymous component renders
 ///
 /// Supported symbols (implementation):
 ///   - **Interface names**: jumps to all classes that implement the interface
@@ -32,6 +34,8 @@
 ///   - **Function calls**: `foo()` jumps to the return type's class
 ///   - For union types, multiple locations are returned (one per class)
 ///
+/// - [`blade_component`]: Component tags — resolving `<x-…>` / `<livewire:…>`
+///   against the Blade discovery index from the raw template source.
 /// - [`resolve`]: Core entry points — symbol-map lookup, name resolution,
 ///   same-file / PSR-4 definition lookup, `self`/`static`/`parent` handling,
 ///   standalone function definition resolution, and variable definition
@@ -49,6 +53,7 @@
 ///   declaration of that type.
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
+mod blade_component;
 mod implementation;
 pub(crate) mod member;
 mod resolve;

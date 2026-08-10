@@ -102,7 +102,9 @@
          project ships (a class-backed one is listed as the class it names,
          an anonymous one as its template). Inside a tag whose name is
          written, typing a space offers the attributes that component takes,
-         plain and `:` bound. --}}
+         plain and `:` bound.
+         Ctrl+Click any tag name below to open what it renders: the class
+         for a class-backed component, the template for an anonymous one. --}}
 
     {{-- The <x-alert> component view is where $attributes and $slot come
          from: resources/views/components/alert.blade.php --}}

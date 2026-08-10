@@ -98,6 +98,7 @@ mod completion_unset;
 mod completion_variable_names;
 mod completion_variables;
 mod crash_sandbox;
+mod definition_blade;
 mod definition_classes;
 mod definition_constants;
 mod definition_laravel;
