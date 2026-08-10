@@ -350,6 +350,20 @@ class CompoundNarrowingDemo
         }
     }
 
+    /**
+     * A check on an argument-less call narrows the call itself, so the
+     * same call written again inside the branch resolves to what the
+     * check proved rather than to the declared return type.
+     */
+    public function repeatedCall(SpecimenHolder $holder): string
+    {
+        if ($holder->maybe() instanceof Rock) {
+            return $holder->maybe()->crush();     // call narrowed to Rock
+        }
+
+        return '';
+    }
+
     /** @param array<Rock|Banana> $items */
     public function indexed(array $items): void
     {
@@ -6784,6 +6798,12 @@ function runDemoAssertions(): void
     $pencilTool = new TernaryNarrowingDemo(new Pencil());
     assert($pencilTool->toolLabel() === null, 'ternary else-branch yields null (Pencil is not a Pen)');
     assert($pencilTool->repeatedCall() === null, 'ternary else-branch yields null for repeated call');
+
+    // ── instanceof on a repeated method call ────────────────────────────
+    assert(
+        (new CompoundNarrowingDemo())->repeatedCall(new SpecimenHolder()) === '',
+        'maybe() returns null, so the instanceof branch is not taken',
+    );
 
     // ── class-string guard keeps its type argument ─────────────────────
     $guarded = (new ClassStringVarDemo())->guardedInstantiation(Pen::class);

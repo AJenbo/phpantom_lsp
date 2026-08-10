@@ -104,6 +104,7 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B71 | [Completion in a Blade template edits the virtual PHP's coordinates](todo/bugs.md#b71-completion-in-a-blade-template-edits-the-virtual-phps-coordinates)                     | Medium      | Low         |
 | B72 | [A generic class named without its arguments returns its own template parameter](todo/bugs.md#b72-a-generic-class-named-without-its-arguments-returns-its-own-template-parameter) | Medium      | Medium      |
+| B73 | [Narrowing survives a reassignment of the subject's base variable](todo/bugs.md#b73-narrowing-survives-a-reassignment-of-the-subjects-base-variable)                          | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

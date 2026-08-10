@@ -54,3 +54,31 @@ An unsupplied template parameter is not a class. Substitute the bound the
 `@template` declares (`of Item` → `Item`), and `mixed` for a parameter
 declared without one, so the type is the widest thing the declaration
 guarantees rather than a name nothing can resolve.
+
+### B73. Narrowing survives a reassignment of the subject's base variable
+
+The narrowing re-walk in `apply_property_narrowing` looks for a check on a
+subject path anywhere in the enclosing body and applies it at the cursor.
+It reads conditions only, so an assignment between the check and the use is
+invisible to it:
+
+```php
+if ($a->value instanceof StringExpr) {
+    $a = $other;              // $a->value is a different value now
+    $a->value->value;         // still resolved as StringExpr
+}
+```
+
+The forward walker gets this right (`invalidate_dependent_keys` drops every
+key rooted at a reassigned variable), so during a diagnostic pass the scope
+holds no entry for the path. But an absent scope entry is indistinguishable
+from a path the walker never seeded, so the caller falls through to the
+re-walk, which reinstates the narrowing the walker had just invalidated.
+The result is a missing diagnostic on a member the value no longer has.
+
+Property paths and argument-less call subjects (`$a->get()`) are affected
+alike, since both resolve through the same re-walk.
+
+Fix: teach the re-walk to drop a subject whose base variable is assigned
+between the check and the cursor, rather than making the fall-through
+conditional on which consumer is asking.

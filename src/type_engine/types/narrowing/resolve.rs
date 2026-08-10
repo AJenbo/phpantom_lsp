@@ -61,6 +61,7 @@ pub(crate) fn resolve_class_names_to_union(
 /// - `$var` → `"$var"`
 /// - `$this->prop` → `"$this->prop"`
 /// - `$this?->prop` → `"$this->prop"` (null-safe normalised)
+/// - `$this->get()` → `"$this->get()"` (argument-less calls only)
 ///
 /// Returns `None` for expressions that are not supported as narrowing subjects.
 pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Option<String> {
@@ -87,12 +88,40 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
             let key = array_access_key_as_string(aa)?;
             Some(format!("{}[\"{}\"]", base, key))
         }
+        // A method call taking no arguments: `$kernel->getHttpKernel()`.
+        // Checking one call and using another is the idiom the check is
+        // written for (`if ($h->get() instanceof Foo) { $h->get()->m(); }`),
+        // so the two occurrences share a key.  Calls that take arguments
+        // stay unkeyed: matching them means comparing whole argument
+        // expressions, and an argument is a hint that the call does
+        // something rather than just handing back state.
+        Expression::Call(Call::Method(mc)) if mc.argument_list.arguments.is_empty() => {
+            method_call_key(mc.object, &mc.method)
+        }
+        Expression::Call(Call::NullSafeMethod(mc)) if mc.argument_list.arguments.is_empty() => {
+            method_call_key(mc.object, &mc.method)
+        }
         // See through parentheses so `($x instanceof Foo)` and grouped
         // subjects resolve to the same key as the bare form.
         Expression::Parenthesized(inner) => expr_to_subject_key(inner.expression),
         // Inline assignment as a subject: `($node = expr()) instanceof Foo`
         // narrows the assigned variable, so key on the assignment target.
         Expression::Assignment(assign) => expr_to_subject_key(assign.lhs),
+        _ => None,
+    }
+}
+
+/// Build the subject key for an argument-less method call, matching the
+/// `$obj->method()` text form the resolver's subject keys use.
+fn method_call_key(
+    object: &Expression<'_>,
+    method: &ClassLikeMemberSelector<'_>,
+) -> Option<String> {
+    let obj = expr_to_subject_key(object)?;
+    match method {
+        ClassLikeMemberSelector::Identifier(ident) => {
+            Some(format!("{}->{}()", obj, bytes_to_str(ident.value)))
+        }
         _ => None,
     }
 }

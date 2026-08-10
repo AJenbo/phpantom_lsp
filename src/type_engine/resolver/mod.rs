@@ -38,7 +38,7 @@ pub(crate) use context::{
 };
 pub(crate) use property_narrowing::apply_property_narrowing;
 
-use crate::atom::atom;
+use crate::atom::{Atom, atom};
 use std::sync::Arc;
 
 use crate::Backend;
@@ -217,12 +217,15 @@ fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String
     // a variable through array accesses or nested property chains
     // (`$args[0]->value`) is just as narrowable as a direct one.
     //
-    // Call expressions and static accesses are safe to cache because
+    // Static accesses and calls that carry arguments are safe to cache:
     // their return types are deterministic (method signatures don't
-    // change based on narrowing context).
+    // change based on narrowing context).  An argument-less instance
+    // call is not — it is a narrowing subject in its own right, so
+    // `$job->data()` can be one subtype inside one check and another
+    // inside the next.
     let is_cacheable_chain = match expr {
-        SubjectExpr::CallExpr { .. }
-        | SubjectExpr::MethodCall { .. }
+        SubjectExpr::CallExpr { .. } => narrowable_call_key(expr).is_none(),
+        SubjectExpr::MethodCall { .. }
         | SubjectExpr::StaticMethodCall { .. }
         | SubjectExpr::StaticAccess { .. } => true,
         // PropertyChain is only cacheable when its base does NOT root
@@ -479,14 +482,55 @@ fn resolve_target_classes_expr_inner(
 
         // ── Call expression ─────────────────────────────────────
         SubjectExpr::CallExpr { callee, args_text } => {
+            // ── Narrowing on the call itself ────────────────────
+            // `if ($h->get() instanceof Foo) { $h->get()->m(); }`
+            // narrows the call the same way it narrows a property
+            // path: the check is keyed under the call's text, so a
+            // later occurrence of that text reads the narrowed type
+            // instead of the declared return type.  Only argument-less
+            // instance calls carry such a key.
+            let narrowing_key = narrowable_call_key(expr);
+            if let Some(ref key) = narrowing_key
+                && let Some(narrowed) = lookup_scope_for_subject(key, ctx)
+            {
+                return narrowed;
+            }
+
             let mut hint: Option<PhpType> = None;
-            let classes = Backend::resolve_call_return_types_on_receiver(
+            let mut classes = Backend::resolve_call_return_types_on_receiver(
                 callee,
                 args_text,
                 receiver,
                 ctx,
                 Some(&mut hint),
             );
+
+            // No forward-walker scope (completion / hover): re-walk the
+            // enclosing body for a check on this call, exactly as the
+            // property path does below.
+            if let Some(key) = narrowing_key
+                && !classes.is_empty()
+            {
+                let before: Vec<Atom> = classes.iter().map(|c| c.fqn()).collect();
+                let dummy_class;
+                let effective_class = match current_class {
+                    Some(cc) => cc,
+                    None => {
+                        dummy_class = crate::class_lookup::class_context_placeholder(
+                            ctx.content,
+                            ctx.cursor_offset,
+                        );
+                        &dummy_class
+                    }
+                };
+                apply_property_narrowing(&key, effective_class, ctx, &mut classes);
+                // A narrowed result stands on its own: the raw return
+                // type hint below describes what the method declares,
+                // which is what the check just refined away.
+                if classes.iter().map(|c| c.fqn()).ne(before) {
+                    return classes.into_iter().map(ResolvedType::from_arc).collect();
+                }
+            }
             // Use the raw return type hint only when it actually carries
             // generic args a resolved class can benefit from: either the
             // class declares its own `@template` params, or (a `static<...>`
@@ -1531,6 +1575,29 @@ fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
             SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => base,
             _ => return false,
         };
+    }
+}
+
+/// The scope key for a call that narrowing can key on, when `expr` is
+/// one: an argument-less instance method call whose receiver roots in a
+/// variable (`$job->data()`, `$this->getKernel()`).  Everything else,
+/// calls with arguments, function calls, static calls, resolves purely
+/// from its signature and is never a narrowing subject.
+fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
+    let SubjectExpr::CallExpr { callee, args_text } = expr else {
+        return None;
+    };
+    if !args_text.trim().is_empty() {
+        return None;
+    }
+    match callee.as_ref() {
+        // Built from the callee rather than the whole expression so the
+        // key is spelled exactly as the AST side spells it, whatever
+        // whitespace stands between the parentheses.
+        SubjectExpr::MethodCall { base, .. } if base_roots_in_variable(base) => {
+            Some(format!("{}()", callee.to_subject_text()))
+        }
+        _ => None,
     }
 }
 

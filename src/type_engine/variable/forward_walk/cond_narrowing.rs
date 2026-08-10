@@ -2088,50 +2088,7 @@ pub(crate) fn seed_synthetic_key_if_needed(
     }
 
     if is_property {
-        // Property access: delegate to existing seeding logic via a
-        // one-key call (seed_property_keys_into_scope expects a
-        // condition expression, but we already have the key).
-        if let Some(arrow_pos) = key.rfind("->") {
-            let obj_var = &key[..arrow_pos];
-            let prop_name = &key[arrow_pos + 2..];
-            let obj_types = scope.get(obj_var);
-            if obj_types.is_empty() {
-                return;
-            }
-            let mut prop_results: Vec<ResolvedType> = Vec::new();
-            for rt in obj_types {
-                if let Some(ref cls) = rt.class_info {
-                    let type_hint = crate::inheritance::resolve_property_type_hint(
-                        cls,
-                        prop_name,
-                        ctx.class_loader,
-                    );
-                    if let Some(hint) = type_hint {
-                        let resolved_classes =
-                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                &hint,
-                                &ctx.current_class.name,
-                                ctx.all_classes,
-                                ctx.class_loader,
-                            );
-                        if resolved_classes.is_empty() {
-                            ResolvedType::extend_unique(
-                                &mut prop_results,
-                                vec![ResolvedType::from_type_string(hint)],
-                            );
-                        } else {
-                            ResolvedType::extend_unique(
-                                &mut prop_results,
-                                ResolvedType::from_classes_with_hint(resolved_classes, hint),
-                            );
-                        }
-                    }
-                }
-            }
-            if !prop_results.is_empty() {
-                scope.set(key, prop_results);
-            }
-        }
+        seed_member_key(key, scope, ctx);
     } else if is_array {
         // Array access key: `$a["test"]`.
         // Extract the base variable and key name.
@@ -2311,10 +2268,13 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
     }
 }
 
-/// Resolve the type of a property access key (e.g. `$a->foo`) from
-/// the current scope and seed it into the scope as a synthetic entry.
-/// This allows subsequent narrowing functions to find and narrow
-/// property access expressions.
+/// Resolve the type of a property access key (e.g. `$a->foo`) or an
+/// argument-less call key (`$a->foo()`) from the current scope and seed
+/// it into the scope as a synthetic entry.  This allows subsequent
+/// narrowing functions to find and narrow those expressions, and it is
+/// what keeps a check against a wide type from discarding a narrower
+/// declared one: seeded with `StringExpr`, an `instanceof Expr` guard
+/// intersects down to `StringExpr` rather than replacing it.
 pub(crate) fn seed_property_keys_into_scope(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
@@ -2329,54 +2289,73 @@ pub(crate) fn seed_property_keys_into_scope(
         if scope.contains(key) {
             continue;
         }
-        // Parse the key to extract object variable and property name.
-        // Key format: `$var->prop` (possibly chained like `$a->b->c`).
-        if let Some(arrow_pos) = key.rfind("->") {
-            let obj_var = &key[..arrow_pos];
-            let prop_name = &key[arrow_pos + 2..];
+        seed_member_key(key, scope, ctx);
+    }
+}
 
-            // Resolve the object variable's type from scope.
-            let obj_types = scope.get(obj_var);
-            if obj_types.is_empty() {
+/// Seed one member key — `$var->prop` (possibly chained like `$a->b->c`)
+/// or `$var->method()` for an argument-less call — with the type its
+/// declaration promises.
+fn seed_member_key(key: &str, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    let (head, is_call) = match key.strip_suffix("()") {
+        Some(head) => (head, true),
+        None => (key, false),
+    };
+    let Some(arrow_pos) = head.rfind("->") else {
+        return;
+    };
+    let obj_var = &head[..arrow_pos];
+    let member_name = &head[arrow_pos + 2..];
+
+    // Resolve the object variable's type from scope.
+    let obj_types = scope.get(obj_var);
+    if obj_types.is_empty() {
+        return;
+    }
+
+    // Look up the member's type on the resolved class(es).
+    let mut member_results: Vec<ResolvedType> = Vec::new();
+    for rt in obj_types {
+        let Some(ref cls) = rt.class_info else {
+            continue;
+        };
+        let type_hint = if is_call {
+            crate::inheritance::resolve_method_return_type(cls, member_name, ctx.class_loader)
+        } else {
+            crate::inheritance::resolve_property_type_hint(cls, member_name, ctx.class_loader)
+        };
+        let Some(hint) = type_hint else {
+            continue;
+        };
+        let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &hint,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        if resolved_classes.is_empty() {
+            // A return type that names nothing loadable — a template
+            // parameter, a generic alias — is answered better by the
+            // call resolver at the use site, which substitutes from the
+            // receiver.  Seeding the bare hint here would shadow that
+            // with a type no class stands behind.
+            if is_call {
                 continue;
             }
-
-            // Look up the property type on the resolved class(es).
-            let mut prop_results: Vec<ResolvedType> = Vec::new();
-            for rt in obj_types {
-                if let Some(ref cls) = rt.class_info {
-                    let type_hint = crate::inheritance::resolve_property_type_hint(
-                        cls,
-                        prop_name,
-                        ctx.class_loader,
-                    );
-                    if let Some(hint) = type_hint {
-                        let resolved_classes =
-                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                &hint,
-                                &ctx.current_class.name,
-                                ctx.all_classes,
-                                ctx.class_loader,
-                            );
-                        if resolved_classes.is_empty() {
-                            ResolvedType::extend_unique(
-                                &mut prop_results,
-                                vec![ResolvedType::from_type_string(hint)],
-                            );
-                        } else {
-                            ResolvedType::extend_unique(
-                                &mut prop_results,
-                                ResolvedType::from_classes_with_hint(resolved_classes, hint),
-                            );
-                        }
-                    }
-                }
-            }
-
-            if !prop_results.is_empty() {
-                scope.set(key, prop_results);
-            }
+            ResolvedType::extend_unique(
+                &mut member_results,
+                vec![ResolvedType::from_type_string(hint)],
+            );
+        } else {
+            ResolvedType::extend_unique(
+                &mut member_results,
+                ResolvedType::from_classes_with_hint(resolved_classes, hint),
+            );
         }
+    }
+
+    if !member_results.is_empty() {
+        scope.set(key, member_results);
     }
 }
 

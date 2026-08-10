@@ -711,3 +711,39 @@ async fn test_array_false_union_keeps_element_after_false_check() {
         methods
     );
 }
+
+#[tokio::test]
+async fn test_instanceof_guard_narrows_repeated_method_call() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///repeated_call_completion.php").unwrap();
+    // The shape from the Symfony kernel: the guard checks one call and
+    // the body makes the same call again, so the second one has to know
+    // what the check proved.
+    let text = concat!(
+        "<?php\n",
+        "interface Kernel {\n",
+        "    public function handle(): int;\n",
+        "}\n",
+        "interface Terminable extends Kernel {\n",
+        "    public function terminate(): void;\n",
+        "}\n",
+        "class App {\n",
+        "    public function getKernel(): Kernel { return $this->kernel; }\n",
+        "    public function run(): void {\n",
+        "        if ($this->getKernel() instanceof Terminable) {\n",
+        "            $this->getKernel()->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 11, 33).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"terminate"),
+        "Inside the `instanceof Terminable` guard the repeated \
+         `$this->getKernel()` call should offer `terminate`; got: {:?}",
+        methods
+    );
+}
