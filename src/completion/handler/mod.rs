@@ -40,6 +40,7 @@ use crate::completion::class_completion::{ClassCompletionParams, ClassNameContex
 use crate::text_position::position_to_byte_offset;
 use crate::types::FileContext;
 
+mod blade_component;
 mod blade_directive;
 mod class_constant;
 mod member_access;
@@ -154,6 +155,19 @@ impl Backend {
             && let Some(prefix) = self.blade_directive_prefix_at(&uri, position)
         {
             return Ok(Some(self.complete_blade_directive(&prefix)));
+        }
+
+        // ── Blade component tag and attribute completion ────────────────
+        // A `<x-` the user is still typing a component name after names no
+        // component yet, so the preprocessor degrades it to a comment and
+        // nothing of it survives into the virtual PHP — this too reads the
+        // raw buffer at the untranslated position. Runs after the
+        // directive check so a Blade directive written inside a tag
+        // (`<x-alert @if(…)`) still completes as one.
+        if self.is_blade_file(&uri)
+            && let Some(response) = self.blade_component_completion(&uri, position)
+        {
+            return Ok(Some(response));
         }
 
         // ── Blade section / stack name completion ───────────────────────

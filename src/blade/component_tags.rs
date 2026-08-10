@@ -251,6 +251,121 @@ fn strip_tag_prefix<'a>(tag: &'a str, prefix: &str) -> Option<&'a str> {
 /// neither shadows the other.
 const TAG_PREFIXES: [&str; 2] = ["<livewire:", "<x-"];
 
+/// Which index answers a component tag's name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TagKind {
+    Blade,
+    Livewire,
+}
+
+impl TagKind {
+    /// The opening a tag of this kind is written with.
+    pub(crate) fn opening(self) -> &'static str {
+        match self {
+            TagKind::Blade => "<x-",
+            TagKind::Livewire => "<livewire:",
+        }
+    }
+}
+
+/// Which part of a component tag the cursor sits in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TagCursor {
+    /// The tag's own name, whether finished or still being typed.
+    Name,
+    /// An attribute name on a tag whose name is already written.
+    Attribute,
+}
+
+/// The component tag a cursor sits in, and what it is writing there.
+#[derive(Debug, PartialEq)]
+pub(crate) struct TagContext {
+    pub(crate) kind: TagKind,
+    /// The tag name as written, without the opening. Empty for a tag
+    /// whose name has not been typed yet.
+    pub(crate) name: String,
+    /// Byte offset the token under the cursor starts at, so an edit
+    /// replaces what is already typed rather than appending to it.
+    pub(crate) token_start: usize,
+    pub(crate) cursor: TagCursor,
+}
+
+/// The component tag `offset` sits in, or `None` when it sits anywhere
+/// else.
+///
+/// Reads the raw Blade buffer rather than the virtual PHP the rest of the
+/// pipeline works from, for the same reason directive-name completion does
+/// (`super::directive_completion`): a component tag is HTML, and the
+/// virtual PHP carries neither the tag name nor a plain attribute's name
+/// anywhere near where they are written.
+pub(crate) fn tag_context_at(content: &str, offset: usize) -> Option<TagContext> {
+    let before = content.get(..offset)?;
+    // The nearest opening before the cursor is the tag it could be inside;
+    // a closing tag is spelled `</x-…`, so it never matches.
+    let (start, kind) = [TagKind::Blade, TagKind::Livewire]
+        .into_iter()
+        .filter_map(|kind| before.rfind(kind.opening()).map(|at| (at, kind)))
+        .max_by_key(|(at, _)| *at)?;
+    // A tag written inside a comment, a `@php` block, or an echo is text
+    // rather than markup, and names no component.
+    if !super::directive_completion::is_html_position(content, start) {
+        return None;
+    }
+
+    let bytes = content.as_bytes();
+    let name_start = start + kind.opening().len();
+    let mut name_end = name_start;
+    while name_end < bytes.len() && is_tag_name_char(bytes[name_end]) {
+        name_end += 1;
+    }
+    let name = content[name_start..name_end].to_string();
+    if offset <= name_end {
+        return Some(TagContext {
+            kind,
+            name,
+            token_start: name_start,
+            cursor: TagCursor::Name,
+        });
+    }
+
+    // Past the name, so the cursor is in the attribute list — unless the
+    // tag closed before reaching it, in which case the opening this scan
+    // started from is not the cursor's tag at all.
+    let mut quote: Option<u8> = None;
+    for &byte in &bytes[name_end..offset] {
+        match quote {
+            Some(open) if byte == open => quote = None,
+            Some(_) => {}
+            None if byte == b'"' || byte == b'\'' => quote = Some(byte),
+            // Both `>` and the `/` of a self-closing tag end it here.
+            None if byte == b'>' => return None,
+            None => {}
+        }
+    }
+    // Inside an attribute's value the cursor is writing PHP or text, not
+    // an attribute name.
+    if quote.is_some() {
+        return None;
+    }
+
+    let mut token_start = offset;
+    while token_start > name_end && is_attr_name_char(bytes[token_start - 1]) {
+        token_start -= 1;
+    }
+    // An attribute name follows whitespace. Anything else before it means
+    // the cursor is in the middle of an unquoted value (`type=dan`) or of
+    // the tag name itself.
+    if !bytes[token_start - 1].is_ascii_whitespace() {
+        return None;
+    }
+    Some(TagContext {
+        kind,
+        name,
+        token_start,
+        cursor: TagCursor::Attribute,
+    })
+}
+
 /// Every distinct component tag referenced by an occurrence in `content`,
 /// with the prefix it was written under (`x-alert`, `livewire:counter`).
 ///
@@ -571,6 +686,25 @@ pub(crate) fn camel_case_attr_name(name: &str) -> String {
     out
 }
 
+/// Convert a camelCase name to the kebab-case attribute (or tag-name)
+/// segment it is written as, matching `Illuminate\Support\Str::kebab`: a
+/// delimiter goes before every capital that isn't the first character, and
+/// existing separators are kept.
+///
+/// The inverse of [`camel_case_attr_name`] for the names Blade round-trips
+/// (`hairAnalysis` ↔ `hair-analysis`), and the transform that turns a
+/// component class's name into the tag that reaches it.
+pub(crate) fn kebab_case(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    for (i, ch) in name.char_indices() {
+        if ch.is_uppercase() && i > 0 {
+            out.push('-');
+        }
+        out.extend(ch.to_lowercase());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -854,5 +988,102 @@ mod tests {
             &no_arguments,
         );
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn kebab_matches_laravels_own_spelling() {
+        assert_eq!(kebab_case("DatePicker"), "date-picker");
+        assert_eq!(kebab_case("Alert"), "alert");
+        assert_eq!(kebab_case("HTMLPurifier"), "h-t-m-l-purifier");
+        assert_eq!(kebab_case("Create_Refund"), "create_-refund");
+    }
+
+    /// The cursor's context is taken at the `|` marker, which is stripped
+    /// before the scan so the surrounding text is what the user typed.
+    fn context_at(marked: &str) -> Option<TagContext> {
+        let offset = marked.find('|').expect("no cursor marker");
+        tag_context_at(&marked.replace('|', ""), offset)
+    }
+
+    fn name_context(marked: &str) -> Option<(TagKind, String, String)> {
+        let offset = marked.find('|').expect("no cursor marker");
+        let content = marked.replace('|', "");
+        let ctx = tag_context_at(&content, offset)?;
+        (ctx.cursor == TagCursor::Name).then(|| {
+            (
+                ctx.kind,
+                ctx.name.clone(),
+                content[ctx.token_start..offset].to_string(),
+            )
+        })
+    }
+
+    #[test]
+    fn a_bare_opening_is_a_name_with_nothing_typed() {
+        assert_eq!(
+            name_context("<div><x-|"),
+            Some((TagKind::Blade, String::new(), String::new()))
+        );
+    }
+
+    #[test]
+    fn a_partly_typed_name_carries_what_is_typed_so_far() {
+        assert_eq!(
+            name_context("<x-for|ms.input>"),
+            Some((TagKind::Blade, "forms.input".to_string(), "for".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_livewire_opening_is_its_own_kind() {
+        assert_eq!(
+            name_context("<livewire:coun|"),
+            Some((TagKind::Livewire, "coun".to_string(), "coun".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_cursor_after_the_tag_name_is_at_an_attribute() {
+        let ctx = context_at("<x-alert |").expect("expected an attribute context");
+        assert_eq!(ctx.cursor, TagCursor::Attribute);
+        assert_eq!(ctx.name, "alert");
+        assert_eq!(ctx.token_start, "<x-alert ".len());
+    }
+
+    #[test]
+    fn a_partly_typed_attribute_starts_at_its_own_first_character() {
+        let ctx = context_at(r#"<x-alert class="a" :mes|"#).expect("expected an attribute");
+        assert_eq!(ctx.cursor, TagCursor::Attribute);
+        assert_eq!(ctx.token_start, r#"<x-alert class="a" "#.len());
+    }
+
+    #[test]
+    fn a_closed_tag_leaves_the_cursor_outside_it() {
+        assert_eq!(context_at("<x-alert /> |"), None);
+        assert_eq!(context_at("<x-alert>{{ $com|"), None);
+    }
+
+    /// An attribute value may hold a `>` (`:items=\"$a > $b\"`), so the
+    /// scan has to read quotes rather than stop at the first one.
+    #[test]
+    fn a_greater_than_inside_a_value_does_not_close_the_tag() {
+        let ctx = context_at(r#"<x-alert :items="$a > $b" |"#).expect("expected an attribute");
+        assert_eq!(ctx.cursor, TagCursor::Attribute);
+    }
+
+    #[test]
+    fn a_cursor_inside_an_attribute_value_is_not_writing_an_attribute() {
+        assert_eq!(context_at(r#"<x-alert type="dan|"#), None);
+        assert_eq!(context_at("<x-alert type=dan|"), None);
+    }
+
+    #[test]
+    fn a_tag_written_inside_a_comment_names_nothing() {
+        assert_eq!(context_at("{{-- <x-al| --}}"), None);
+    }
+
+    #[test]
+    fn a_closing_tag_is_not_an_opening_one() {
+        assert_eq!(context_at("<div></x-al|"), None);
     }
 }

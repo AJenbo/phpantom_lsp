@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| BL4  | [Component tag and attribute completion](todo/blade.md#bl4-component-tag-and-attribute-completion)                         | High       | Medium     |
 | BL5  | [Go-to-definition for component tags](todo/blade.md#bl5-go-to-definition-for-component-tags)                               | Medium     | Medium     |
 | BL22 | [A template never learns anything from the templates that render it](todo/blade.md#bl22-a-template-never-learns-anything-from-the-templates-that-render-it)     | Medium      | Medium      |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |

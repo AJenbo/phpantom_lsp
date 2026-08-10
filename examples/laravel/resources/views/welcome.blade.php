@@ -96,6 +96,14 @@
         @each('partials.post_row', $posts, 'post')
     </table>
 
+    {{-- A component tag is addressed by name rather than by class, so the
+         name is what completion works from.
+         Try: type `<x-` on a line of its own and see every component this
+         project ships (a class-backed one is listed as the class it names,
+         an anonymous one as its template). Inside a tag whose name is
+         written, typing a space offers the attributes that component takes,
+         plain and `:` bound. --}}
+
     {{-- The <x-alert> component view is where $attributes and $slot come
          from: resources/views/components/alert.blade.php --}}
     <x-alert class="mt-4">{{ __('messages.welcome') }}</x-alert>

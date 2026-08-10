@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::component_tags::kebab_case;
 use super::preprocessor::{ComponentBinding, ComponentParameter, ComponentTarget};
 use crate::Backend;
 
@@ -642,20 +643,6 @@ fn component_names_for_tail(tail: &str, kind: ComponentKind) -> Vec<String> {
     names
 }
 
-/// A class-name segment as the tag-name segment it maps to, matching
-/// Laravel's `Str::kebab`: a delimiter goes before every capital that isn't
-/// the first character, and existing separators are kept.
-fn kebab_case(segment: &str) -> String {
-    let mut out = String::with_capacity(segment.len() + 4);
-    for (i, ch) in segment.char_indices() {
-        if ch.is_uppercase() && i > 0 {
-            out.push('-');
-        }
-        out.extend(ch.to_lowercase());
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,14 +656,6 @@ mod tests {
     fn backend_at(root: &Path) -> Backend {
         let (mappings, _) = crate::composer::parse_composer_json(root);
         Backend::new_test_with_workspace(root.to_path_buf(), mappings)
-    }
-
-    #[test]
-    fn kebab_matches_laravels_own_spelling() {
-        assert_eq!(kebab_case("DatePicker"), "date-picker");
-        assert_eq!(kebab_case("Alert"), "alert");
-        assert_eq!(kebab_case("HTMLPurifier"), "h-t-m-l-purifier");
-        assert_eq!(kebab_case("Create_Refund"), "create_-refund");
     }
 
     #[test]
