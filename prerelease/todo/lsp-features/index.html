@@ -1238,56 +1238,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f8-implementation-test-navigation-via-covers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F8. Implementation → test navigation via <code>@covers</code>
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="F8. Implementation → test navigation via @covers">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#why-not-path-based-mapping" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Why not path-based mapping
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#the-reverse-lookup" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        The reverse lookup
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#exposure" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Exposure
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#f11-vs-code-extension" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2050,56 +2000,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f8-implementation-test-navigation-via-covers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F8. Implementation → test navigation via <code>@covers</code>
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="F8. Implementation → test navigation via @covers">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#why-not-path-based-mapping" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Why not path-based mapping
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#the-reverse-lookup" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        The reverse lookup
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#exposure" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Exposure
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#f11-vs-code-extension" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2660,42 +2560,6 @@ and forwards it to the debug adapter for evaluation. Without this
 handler, the editor falls back to selecting the word under the cursor,
 which gives <code>name</code> instead of <code>$user-&gt;name</code> — useless for the
 debugger.</p>
-<hr />
-<h2 id="f8-implementation-test-navigation-via-covers">F8. Implementation → test navigation via <code>@covers</code><a class="headerlink" href="#f8-implementation-test-navigation-via-covers" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
-<p>Given a class, surface the test classes that name it in their PHPUnit
-coverage metadata. The test → subject direction already works: coverage
-targets are symbol-map references, so go-to-definition, hover, and
-rename reach them the way they reach any other class, method, or
-function name.</p>
-<h3 id="why-not-path-based-mapping">Why not path-based mapping<a class="headerlink" href="#why-not-path-based-mapping" title="Permanent link">&para;</a></h3>
-<p>Pattern-based approaches (e.g. <code>src/Foo.php</code> → <code>tests/FooTest.php</code>)
-assume a project follows a specific directory convention. Many projects
-don't: tests may live under <code>tests/Feature/</code>, <code>tests/Functional/</code>,
-or in a completely separate directory structure. Coverage metadata is
-an explicit, project-layout-independent link that works for any
-structure.</p>
-<h3 id="the-reverse-lookup">The reverse lookup<a class="headerlink" href="#the-reverse-lookup" title="Permanent link">&para;</a></h3>
-<p>Nothing indexes coverage targets today, so answering "which tests cover
-this class?" means finding every <code>#[CoversClass]</code> / <code>@covers</code> in the
-project that names it. Two approaches:</p>
-<ul>
-<li><strong>Lazy scan</strong>: when the user asks, scan files matching <code>*Test.php</code> for
-  metadata referencing the current class FQN. O(n) in test file count,
-  but test directories are typically small, and a <code>memchr</code>-based
-  pre-filter on the class name before parsing keeps it fast.</li>
-<li><strong>Indexed</strong>: record coverage targets during the full background
-  indexing pass and keep a reverse map, evicted alongside the other
-  per-file indexes (<code>gti_index</code> is the model), so the lookup is O(1).</li>
-</ul>
-<p>An index is what an always-on presentation needs: a code lens fires on
-every open document, and scanning the test tree per request is too much
-work to do on that path.</p>
-<h3 id="exposure">Exposure<a class="headerlink" href="#exposure" title="Permanent link">&para;</a></h3>
-<p>The subject side has no reference to anchor to, so unlike the test side
-it cannot ride on go-to-definition. It needs a presentation of its own,
-such as a code lens or an inlay overlay above the class declaration
-("Tests: UserServiceTest"), or a code action on the class name.</p>
 <hr />
 <h2 id="f11-vs-code-extension">F11. VS Code extension<a class="headerlink" href="#f11-vs-code-extension" title="Permanent link">&para;</a></h2>
 <table>
