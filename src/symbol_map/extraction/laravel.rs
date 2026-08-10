@@ -174,6 +174,12 @@ fn push_laravel_string_span(
         return;
     }
 
+    // A container argument spelled as a class name is a class reference rather
+    // than a binding key: it resolves without the container's table.
+    if kind == crate::symbol_map::LaravelStringKind::ContainerBinding && key.contains('\\') {
+        return;
+    }
+
     if kind == crate::symbol_map::LaravelStringKind::Command
         && let Some(name_len) = command_name_length(key)
     {
@@ -452,6 +458,72 @@ pub(super) fn is_laravel_view_factory_call(object: &Expression<'_>) -> bool {
     };
     strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("view")
         && func_call.argument_list.arguments.is_empty()
+}
+
+/// Whether `object` names the service container the way source spells it:
+/// `$this->app` inside a service provider, the `$app` a container factory
+/// receives, or a bare `app()` / `\app()` call.
+///
+/// A receiver whose containerness is only knowable from its type (an injected
+/// `Container $container`) is left out: the spelling has to say so, the same
+/// bar every other string kind extracted here is held to.
+pub(super) fn is_laravel_container_expr(object: &Expression<'_>) -> bool {
+    match object {
+        Expression::Variable(Variable::Direct(var)) => var.name == b"$app",
+        Expression::Access(Access::Property(access)) => {
+            matches!(access.object, Expression::Variable(Variable::Direct(var)) if var.name == b"$this")
+                && matches!(
+                    &access.property,
+                    ClassLikeMemberSelector::Identifier(ident)
+                        if ident.value.eq_ignore_ascii_case(b"app")
+                )
+        }
+        Expression::Call(Call::Function(func_call)) => {
+            matches!(func_call.function, Expression::Identifier(ident)
+                if strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("app"))
+                && func_call.argument_list.arguments.is_empty()
+        }
+        _ => false,
+    }
+}
+
+/// Where a container method names its binding key, and whether the call
+/// *registers* the key rather than asking for it.
+///
+/// `extend()` decorates whatever the key already holds, so it needs the key
+/// to exist rather than introducing it.  `alias()` is the odd one out the
+/// other way: it names the key it introduces second, after the binding that
+/// key stands for.
+pub(super) fn container_key_argument(member_name: &str) -> Option<(usize, bool)> {
+    match member_name.to_ascii_lowercase().as_str() {
+        "make" | "makewith" | "resolve" | "bound" | "resolved" | "extend" => Some((0, false)),
+        "bind" | "bindif" | "singleton" | "singletonif" | "scoped" | "scopedif" | "instance" => {
+            Some((0, true))
+        }
+        "alias" => Some((1, true)),
+        _ => None,
+    }
+}
+
+/// Emit the container-key span of a call that names one, whichever argument
+/// holds it.
+pub(super) fn try_emit_container_key_span(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some((index, is_write)) = container_key_argument(member_name) else {
+        return;
+    };
+    emit_laravel_string_span(
+        crate::symbol_map::LaravelStringKind::ContainerBinding,
+        is_write,
+        index,
+        argument_list,
+        content,
+        spans,
+    );
 }
 
 /// Length of the leading command-name token when `key` carries trailing

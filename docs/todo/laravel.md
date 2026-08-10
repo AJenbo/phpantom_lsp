@@ -18,7 +18,7 @@ within the same impact tier.
 
 | Item | Reason |
 |------|--------|
-| Container bindings registered dynamically or conditionally | Binding names or targets computed at runtime (variables, environment switches, loops) cannot be recovered statically. Literal `bind('name', Target::class)`-style registrations in app and package service providers **are** in scope — see L36. Names in the framework's own `registerCoreContainerAliases()` and the app's alias config already resolve via parsing. |
+| Container bindings registered dynamically or conditionally | Binding names or targets computed at runtime (variables, environment switches, loops) cannot be recovered statically. Literal `bind('name', Target::class)`-style registrations in app and package service providers are recovered, as are the `$bindings` / `$singletons` arrays. Names in the framework's own `registerCoreContainerAliases()` and the app's alias config already resolve via parsing. |
 | Facade `getFacadeAccessor()` with string aliases | Requires booting the application. `@method static` tags provide a workable fallback. |
 | Blade templates | Separate project. See `blade.md` for the implementation plan. |
 | Model column types from a live database connection | Requires a reachable, migrated database plus credentials, and answers "true for that database" rather than "true for this code". Committed schema artifacts (migration files, `database/schema/*.sql` dumps) are now parsed statically (schema dump + migration scanning). |
@@ -691,32 +691,6 @@ pass:
 Each family gets the full string-kind treatment for free once wired
 as a `LaravelStringKey`: completion, go-to-definition (jump to the
 config entry), hover, diagnostics, and references.
-
-#### L36. Container binding registrations from service providers
-
-**Impact: Low · Complexity: Low**
-
-`$this->app->bind('payments', StripeGateway::class)`, `bindIf()`,
-`singleton()`, `singletonIf()`, `scoped()`, `scopedIf()`, `instance()`,
-and `alias()` calls in `register()`/`boot()` of app and package service
-providers are already scanned for literal `(string name, target)` pairs
-and merged into the alias table, so `app('payments')->charge()`
-resolves members, and the string gets go-to-definition (the
-registration site) and hover. Binding precedence follows what the
-container would actually end up holding: an application's registration
-replaces a framework default, and a subclass provider's replaces its
-parent's.
-
-The remaining gap is the declarative form: a provider's `$bindings` /
-`$singletons` array properties (`protected array $bindings =
-['payments' => StripeGateway::class];`) are not read at all, so a
-package that registers that way instead of calling
-`bind()`/`singleton()` in `register()` stays invisible.
-
-Interface targets follow the declared-types philosophy unchanged: a
-binding `bind(Gateway::class, StripeGateway::class)` does **not**
-retype `app(Gateway::class)` to the concrete — the contract is the
-interface.
 
 #### L39. Unused view and translation key detection
 

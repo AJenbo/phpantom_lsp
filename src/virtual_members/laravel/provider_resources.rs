@@ -77,7 +77,21 @@ impl ProviderIdentity {
 #[derive(Debug, Clone)]
 pub(crate) struct Binding {
     pub class: String,
+    /// Where the registration that produced this binding is written, so the
+    /// key can be navigated to and described.
+    pub site: BindingSite,
     provider: Arc<ProviderIdentity>,
+}
+
+/// The registration a container key came from: the provider file it is
+/// written in, and the byte offset the key itself starts at.
+#[derive(Debug, Clone)]
+pub(crate) struct BindingSite {
+    /// The service provider file holding the registration.
+    pub path: PathBuf,
+    /// Byte offset of the key — inside the quotes of a literal, or the start
+    /// of whatever expression names it (a class constant, a static property).
+    pub offset: u32,
 }
 
 /// An `alias('other-key', 'key')` entry: the key it stands for, and the
@@ -85,6 +99,7 @@ pub(crate) struct Binding {
 #[derive(Debug, Clone)]
 pub(crate) struct Alias {
     target: String,
+    site: BindingSite,
     provider: Arc<ProviderIdentity>,
 }
 
@@ -211,6 +226,9 @@ impl ProviderResources {
                     key.clone(),
                     Binding {
                         class: concrete.class.clone(),
+                        // The alias is where *this* key is written, so it is
+                        // what its go-to-definition should land on.
+                        site: alias.site.clone(),
                         provider: Arc::clone(&alias.provider),
                     },
                 ))
@@ -372,19 +390,20 @@ pub(crate) fn extract_provider_resources(
         if method_lower == b"alias"
             && is_app_container_expr(mc.object)
             && let Some(target) = mc.argument_list.arguments.iter().next()
-            && let Some(key) = mc
-                .argument_list
-                .arguments
-                .iter()
-                .nth(1)
-                .and_then(|arg| alias_key(arg.value(), content, &scope, &resolved))
+            && let Some(key_arg) = mc.argument_list.arguments.iter().nth(1)
+            && let Some(key) = alias_key(key_arg.value(), content, &scope, &resolved)
         {
+            let site = BindingSite {
+                path: file_path.to_path_buf(),
+                offset: key_offset(key_arg.value()),
+            };
             match binding_concrete(Some(target.value()), &resolved) {
                 Some(concrete) => {
                     resources.bindings.insert(
                         key,
                         Binding {
                             class: concrete,
+                            site,
                             provider: Arc::clone(&provider),
                         },
                     );
@@ -397,6 +416,7 @@ pub(crate) fn extract_provider_resources(
                             key,
                             Alias {
                                 target: aliased,
+                                site,
                                 provider: Arc::clone(&provider),
                             },
                         );
@@ -438,6 +458,10 @@ pub(crate) fn extract_provider_resources(
                     key,
                     Binding {
                         class: concrete,
+                        site: BindingSite {
+                            path: file_path.to_path_buf(),
+                            offset: key_offset(key_arg.value()),
+                        },
                         provider: Arc::clone(&provider),
                     },
                 );
@@ -522,6 +546,22 @@ pub(crate) fn extract_provider_resources(
         ControlFlow::Continue(())
     });
 
+    // `public $bindings = ['payments' => StripeGateway::class]` and its
+    // `$singletons` twin are applied by `Application::register()` *after* the
+    // provider's own `register()` has run, so they overwrite what the walk
+    // above found for the same key, exactly as the container would.
+    for stmt in program.statements.iter() {
+        scan_property_bindings(
+            stmt,
+            content,
+            &scope,
+            &resolved,
+            file_path,
+            &provider,
+            &mut resources,
+        );
+    }
+
     if registers_routes_inline {
         resources.route_files.push(file_path.to_path_buf());
     } else {
@@ -529,6 +569,101 @@ pub(crate) fn extract_provider_resources(
     }
 
     resources
+}
+
+/// The two provider properties Laravel reads container registrations out of,
+/// as an alternative to writing them in `register()`.
+const BINDING_PROPERTIES: [&[u8]; 2] = [b"$bindings", b"$singletons"];
+
+/// Record the string-keyed entries of a provider's `$bindings` /
+/// `$singletons` arrays, descending through namespace and block statements to
+/// find the class that declares them.
+///
+/// Only a string key is recorded: an entry keyed by `Contract::class` binds a
+/// name that already resolves on its own, and retyping it to the concrete
+/// would contradict the contract the application declared.
+fn scan_property_bindings(
+    stmt: &Statement<'_>,
+    content: &str,
+    scope: &Scope,
+    resolved: &OwnedResolvedNames,
+    file_path: &Path,
+    provider: &Arc<ProviderIdentity>,
+    resources: &mut ProviderResources,
+) {
+    let members = match stmt {
+        Statement::Class(class) => &class.members,
+        Statement::Namespace(ns) => {
+            for inner in ns.statements().iter() {
+                scan_property_bindings(
+                    inner, content, scope, resolved, file_path, provider, resources,
+                );
+            }
+            return;
+        }
+        Statement::Block(block) => {
+            for inner in block.statements.iter() {
+                scan_property_bindings(
+                    inner, content, scope, resolved, file_path, provider, resources,
+                );
+            }
+            return;
+        }
+        _ => return,
+    };
+
+    for member in members.iter() {
+        let ClassLikeMember::Property(Property::Plain(prop)) = member else {
+            continue;
+        };
+        for item in prop.items.iter() {
+            let PropertyItem::Concrete(concrete) = item else {
+                continue;
+            };
+            if !BINDING_PROPERTIES.contains(&concrete.variable.name) {
+                continue;
+            }
+            let Expression::Array(array) = concrete.value else {
+                continue;
+            };
+            for element in array.elements.iter() {
+                let ArrayElement::KeyValue(kv) = element else {
+                    continue;
+                };
+                let Some(key) = const_string(kv.key, content, scope) else {
+                    continue;
+                };
+                // An integer key is Laravel's shorthand for binding the class
+                // to itself, which needs no table.
+                if key.parse::<i64>().is_ok() {
+                    continue;
+                }
+                let Some(class) = binding_concrete(Some(kv.value), resolved) else {
+                    continue;
+                };
+                resources.bindings.insert(
+                    key,
+                    Binding {
+                        class,
+                        site: BindingSite {
+                            path: file_path.to_path_buf(),
+                            offset: key_offset(kv.key),
+                        },
+                        provider: Arc::clone(provider),
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// Where go-to-definition lands for a registration's key: just inside the
+/// quotes of a string literal, or the start of whatever else names it.
+fn key_offset(expr: &Expression<'_>) -> u32 {
+    match expr {
+        Expression::Literal(literal::Literal::String(s)) => s.span.start.offset + 1,
+        other => other.span().start.offset,
+    }
 }
 
 /// What a path argument is resolved against: the referring file's directory
@@ -677,9 +812,11 @@ pub(in crate::virtual_members::laravel) fn is_app_container_expr(expr: &Expressi
 /// (`bind('foo', Foo::class)`), a ready-made instance
 /// (`instance('foo', new Foo())`), and the usual factory
 /// (`singleton('foo', fn () => new Foo())` or its closure equivalent, whose
-/// first `return` decides the type).  A factory that hands back anything else
-/// (a container lookup, a variable, a conditional) yields `None`: guessing
-/// there would bind the key to a class the application never resolves.
+/// first `return` decides the type).  A factory whose body says nothing falls
+/// back to its declared return type, which is the author's own statement of
+/// what the key holds.  A factory that hands back anything else (a container
+/// lookup, a variable, a conditional) yields `None`: guessing there would bind
+/// the key to a class the application never resolves.
 fn binding_concrete(
     expr: Option<&Expression<'_>>,
     resolved: &OwnedResolvedNames,
@@ -691,11 +828,24 @@ fn binding_concrete(
             _ => None,
         },
         Expression::Access(Access::ClassConstant(_)) => class_string_fqn(expr, resolved),
-        Expression::ArrowFunction(arrow) => binding_concrete(Some(arrow.expression), resolved),
-        Expression::Closure(closure) => closure_binding_concrete(closure, resolved),
+        Expression::ArrowFunction(arrow) => binding_concrete(Some(arrow.expression), resolved)
+            .or_else(|| declared_factory_return(arrow.return_type_hint.as_ref(), resolved)),
+        Expression::Closure(closure) => closure_binding_concrete(closure, resolved)
+            .or_else(|| declared_factory_return(closure.return_type_hint.as_ref(), resolved)),
         Expression::Parenthesized(inner) => binding_concrete(Some(inner.expression), resolved),
         _ => None,
     }
+}
+
+/// The class a factory's own `: Concrete` return type names.
+///
+/// Nothing but a plain class name counts: a union, an intersection, or a
+/// built-in type does not name one class the key holds.
+fn declared_factory_return(
+    return_type_hint: Option<&FunctionLikeReturnTypeHint<'_>>,
+    resolved: &OwnedResolvedNames,
+) -> Option<String> {
+    super::macros::resolve_hint_target_fqn(&return_type_hint?.hint, resolved)
 }
 
 /// The concrete class a closure factory's `return` hands back.
@@ -1389,6 +1539,240 @@ mod tests {
         assert_eq!(
             resources.bindings.get("sentry").map(|b| b.class.as_str()),
             Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn binds_a_factory_by_its_declared_return_type() {
+        // The body builds nothing this scan can name, but the factory says
+        // what it hands back.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', function ($app): HubAdapter {\n\
+                        return $app->make('sentry.factory')->build();\n\
+                    });\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn binds_the_string_keyed_entries_of_the_bindings_arrays() {
+        // Laravel applies `$bindings` and `$singletons` itself, after the
+        // provider's own `register()` has run.  A `Contract::class` key names
+        // something that already resolves, and retyping it to the concrete
+        // would contradict the contract the application declared.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public array $bindings = [\n\
+                    'sentry.hub' => HubAdapter::class,\n\
+                    HubInterface::class => HubAdapter::class,\n\
+                ];\n\
+                public $singletons = ['sentry.client' => Client::class];\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources
+                .bindings
+                .get("sentry.hub")
+                .map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+        assert_eq!(
+            resources
+                .bindings
+                .get("sentry.client")
+                .map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\Client")
+        );
+        assert!(
+            !resources
+                .bindings
+                .contains_key("Sentry\\Laravel\\HubInterface"),
+            "a contract-keyed entry must not retype the contract"
+        );
+    }
+
+    #[test]
+    fn a_bindings_array_entry_that_names_no_key_or_class_is_skipped() {
+        // Every shape the arrays hold that says nothing bindable: a property
+        // with no default, one holding something other than an array, the
+        // list shorthand (whose entry binds a class to itself and so needs no
+        // table), an integer key (Laravel's spelling of that same shorthand),
+        // a key built at runtime, and a value that names no class.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public array $bindings;\n\
+                public $singletons = self::DEFAULTS;\n\
+                public array $aliases = ['ignored' => HubAdapter::class];\n\
+                public array $extra = [\n\
+                    HubAdapter::class,\n\
+                    0 => HubAdapter::class,\n\
+                    $runtime => HubAdapter::class,\n\
+                    'no.class' => $factory,\n\
+                ];\n\
+            }\n";
+        // The shapes above are spread over `$bindings`/`$singletons` and two
+        // properties that are not read at all, so nothing may bind.
+        let resources = scan_sentry_provider(content);
+        let bound: Vec<&String> = resources.bindings.keys().collect();
+        assert!(bound.is_empty(), "unexpected bindings: {bound:?}");
+
+        // The same unbindable entries under a name that *is* read still bind
+        // nothing, while the one good entry beside them does.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public array $bindings = [\n\
+                    HubAdapter::class,\n\
+                    0 => HubAdapter::class,\n\
+                    $runtime => HubAdapter::class,\n\
+                    'no.class' => $factory,\n\
+                    'sentry.hub' => HubAdapter::class,\n\
+                ];\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.keys().collect::<Vec<_>>(),
+            vec!["sentry.hub"]
+        );
+    }
+
+    #[test]
+    fn a_provider_declared_inside_a_block_is_still_scanned() {
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            {\n\
+                class ServiceProvider extends BaseServiceProvider {\n\
+                    public array $bindings = ['sentry.hub' => HubAdapter::class];\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources
+                .bindings
+                .get("sentry.hub")
+                .map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn an_arrow_function_factory_binds_by_its_declared_return_type() {
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', fn ($app): HubAdapter => $app->build());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn a_factory_returning_something_that_is_not_a_class_binds_nothing() {
+        // A built-in return type names no class the key could hold, and
+        // guessing one would bind the key to something never resolved.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', fn ($app): array => $app->all());\n\
+                    $this->app->singleton('sentry.hub', function ($app) {\n\
+                        return $app->build();\n\
+                    });\n\
+                }\n\
+            }\n";
+        assert!(scan_sentry_provider(content).bindings.is_empty());
+    }
+
+    #[test]
+    fn an_alias_records_the_site_of_the_key_it_introduces() {
+        // The alias is where *this* key is written, so it is what the key's
+        // go-to-definition must land on — not the registration it points at.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', fn () => new HubAdapter());\n\
+                    $this->app->alias('sentry', 'sentry.hub');\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        let site = &resources.bindings.get("sentry.hub").expect("aliased").site;
+        let offset = site.offset as usize;
+        assert_eq!(&content[offset..offset + "sentry.hub".len()], "sentry.hub");
+    }
+
+    #[test]
+    fn a_key_that_is_not_a_literal_points_at_the_expression_that_names_it() {
+        // `static::$abstract` has no quotes to land inside, so the key's
+        // go-to-definition target is the expression itself.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton(static::$abstract, fn () => new HubAdapter());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        let site = &resources.bindings.get("sentry").expect("bound").site;
+        let offset = site.offset as usize;
+        let at_key = &content[offset..offset + "static::$abstract".len()];
+        assert_eq!(at_key, "static::$abstract");
+    }
+
+    #[test]
+    fn a_bindings_array_replaces_what_register_bound() {
+        // `Application::register()` applies the arrays after calling
+        // `register()`, so the array is what the container ends up holding.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public array $bindings = ['sentry' => Client::class];\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', fn () => new HubAdapter());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\Client")
+        );
+    }
+
+    #[test]
+    fn a_binding_records_where_its_key_is_written() {
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', fn () => new HubAdapter());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        let site = &resources.bindings.get("sentry").expect("bound").site;
+        assert!(
+            site.path.ends_with("Sentry/Laravel/ServiceProvider.php"),
+            "unexpected registration file: {:?}",
+            site.path
+        );
+        assert_eq!(
+            &content[site.offset as usize..site.offset as usize + "sentry".len()],
+            "sentry",
+            "the offset should land on the key itself"
         );
     }
 

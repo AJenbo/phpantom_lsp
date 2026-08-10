@@ -1073,6 +1073,24 @@ check(
     $providers->make('pastry.oven') instanceof \App\Support\BakeryService
 );
 
+// `Application::register()` applies a provider's `$bindings` / `$singletons`
+// arrays itself, *after* calling `register()`, so a key in one of the arrays
+// binds like any other and beats what `register()` bound it to.
+$app = new \Illuminate\Foundation\Application(__DIR__);
+$app->register(\App\Providers\DemoServiceProvider::class);
+check(
+    'a $bindings entry binds its key',
+    $app->make('pastry.counter') instanceof \App\Support\PastryCounter
+);
+check(
+    'a $singletons entry binds its key',
+    $app->make('pastry.plain-oven') instanceof \App\Support\PlainOven
+);
+check(
+    'a factory that declares a return type hands back that class',
+    $app->make('pastry.tally') instanceof \App\Support\PastryCounter
+);
+
 // The `#[Signature]` attribute (Laravel 13) is read by the Command
 // constructor exactly like a `$signature` property, so the attribute is the
 // command's effective name and parameter list.

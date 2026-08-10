@@ -47,7 +47,36 @@ pub(crate) fn resolve_laravel_string_key(
             .collect(),
         LaravelStringKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
         LaravelStringKind::GateAbility => resolve_gate_ability_definitions(backend, key),
+        LaravelStringKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
     }
+}
+
+/// Resolve a container binding key to the service-provider registration that
+/// bound it and to the class it resolves to.
+///
+/// The registration comes first, matching every other string kind: a config
+/// key jumps to the config file, a morph alias to its `morphMap()` entry.  A
+/// core alias the framework declares has no registration of its own, so the
+/// bound class is the only answer it has.
+fn resolve_container_binding_definitions(backend: &crate::Backend, key: &str) -> Vec<Location> {
+    use tower_lsp::lsp_types::Url;
+
+    let Some(target) = backend.container_binding_target(key) else {
+        return Vec::new();
+    };
+
+    let mut locations = Vec::new();
+    if let Some(site) = target.site
+        && let Ok(parsed_uri) = Url::parse(&site.uri)
+        && let Some(content) = backend.get_file_content(&site.uri)
+    {
+        let position = crate::text_position::offset_to_position(&content, site.offset as usize);
+        locations.push(crate::definition::point_location(parsed_uri, position));
+    }
+    if let Some(location) = backend.class_declaration_location(&target.fqn) {
+        locations.push(location);
+    }
+    locations
 }
 
 /// Resolve an authorization ability to every place it is declared: the
@@ -206,7 +235,10 @@ pub(crate) fn find_laravel_string_key_references(
         | LaravelStringKind::Trans
         | LaravelStringKind::Command
         | LaravelStringKind::MorphAlias
-        | LaravelStringKind::GateAbility => find_string_key_usages(kind, key, backend, snapshot),
+        | LaravelStringKind::GateAbility
+        | LaravelStringKind::ContainerBinding => {
+            find_string_key_usages(kind, key, backend, snapshot)
+        }
     };
 
     if include_declaration && kind != &LaravelStringKind::Config {

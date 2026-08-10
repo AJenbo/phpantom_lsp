@@ -4397,6 +4397,161 @@ fn real_member_access_is_not_marked_as_array_callable() {
     }
 }
 
+// ── Container binding key spans ─────────────────────────────────────
+
+/// Every `ContainerBinding` key the map records, with whether the call
+/// registers it, in source order.
+fn container_keys(map: &SymbolMap) -> Vec<(String, bool)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::ContainerBinding,
+                key,
+                is_write,
+                ..
+            } => Some((key.clone(), *is_write)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_container_key_is_read_from_every_spelling_of_the_call() {
+    for call in [
+        "app('payments')",
+        "resolve('payments')",
+        "app()->make('payments')",
+        "App::make('payments')",
+        "\\Illuminate\\Support\\Facades\\App::makeWith('payments', [])",
+        "$this->app->make('payments')",
+        "$app->bound('payments')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            container_keys(&map),
+            vec![("payments".to_string(), false)],
+            "`{call}` should name a container key"
+        );
+    }
+}
+
+#[test]
+fn a_registration_marks_the_key_it_declares() {
+    for call in [
+        "$this->app->bind('payments', Gateway::class)",
+        "$this->app->bindIf('payments', Gateway::class)",
+        "$this->app->singleton('payments', $factory)",
+        "$this->app->singletonIf('payments', $factory)",
+        "$this->app->scoped('payments', $factory)",
+        "$this->app->scopedIf('payments', $factory)",
+        "$this->app->instance('payments', $gateway)",
+        // `alias()` names the key it introduces second.
+        "$app->alias(Gateway::class, 'payments')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            container_keys(&map),
+            vec![("payments".to_string(), true)],
+            "`{call}` should declare the key"
+        );
+    }
+}
+
+/// `extend()` decorates whatever the key already holds, so it needs the key
+/// to exist rather than introducing it.  `resolved()` only asks a question
+/// about it.
+#[test]
+fn decorating_or_querying_a_key_does_not_declare_it() {
+    for call in [
+        "$this->app->extend('payments', $decorator)",
+        "$app->resolved('payments')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            container_keys(&map),
+            vec![("payments".to_string(), false)],
+            "`{call}` should read the key rather than declare it"
+        );
+    }
+}
+
+/// A container reached through the helper is only the container when the
+/// helper is called with no arguments: `app('a')->make('b')` asks for `a` and
+/// then calls `make` on whatever that is.
+#[test]
+fn a_helper_call_with_an_argument_is_not_the_container() {
+    let map = parse_and_extract("<?php\napp('payments')->make('gateway');\n");
+    assert_eq!(container_keys(&map), vec![("payments".to_string(), false)]);
+}
+
+/// The helper resolves the same written `\app()`, since a root-namespace
+/// qualifier changes nothing about which function is called.
+#[test]
+fn a_root_qualified_helper_still_names_the_container() {
+    let map = parse_and_extract("<?php\n\\app('payments');\n\\app()->make('gateway');\n");
+    assert_eq!(
+        container_keys(&map),
+        vec![
+            ("payments".to_string(), false),
+            ("gateway".to_string(), false),
+        ]
+    );
+}
+
+/// Only a plain string literal names a key: a variable, a concatenation, and
+/// an interpolation are all settled at runtime.
+#[test]
+fn a_key_that_is_not_a_literal_is_not_recorded() {
+    for argument in ["$key", "'pay' . $suffix", "\"pay-{$id}\"", "Gateway::class"] {
+        let map = parse_and_extract(&format!("<?php\napp({argument});\n"));
+        assert!(
+            container_keys(&map).is_empty(),
+            "`app({argument})` should name no key"
+        );
+    }
+}
+
+/// A method the container does not have is not a container call, even on the
+/// container itself.
+#[test]
+fn an_unrelated_method_on_the_container_names_no_key() {
+    let map = parse_and_extract("<?php\n$this->app->runningInConsole('payments');\n");
+    assert!(container_keys(&map).is_empty());
+}
+
+/// The `App` facade is the static spelling of the same calls; another facade
+/// with the same method name is not.
+#[test]
+fn only_the_app_facade_names_container_keys_statically() {
+    let map = parse_and_extract("<?php\nApp::make('payments');\n");
+    assert_eq!(container_keys(&map), vec![("payments".to_string(), false)]);
+
+    let map = parse_and_extract("<?php\nCache::make('payments');\n");
+    assert!(container_keys(&map).is_empty());
+}
+
+/// `make()` and `bind()` are far too ordinary as method names to claim on
+/// sight, so the receiver has to read as the container.
+#[test]
+fn a_container_method_needs_a_container_receiver() {
+    for receiver in ["$builder", "$this->factory", "Cache::store()"] {
+        let map = parse_and_extract(&format!("<?php\n{receiver}->make('payments');\n"));
+        assert!(
+            container_keys(&map).is_empty(),
+            "`{receiver}->make(…)` should not be read as a container lookup"
+        );
+    }
+}
+
+/// A container argument spelled as a class name resolves on its own, without
+/// the binding table, so it is a class reference rather than a key.
+#[test]
+fn a_class_name_argument_is_not_a_container_key() {
+    let map = parse_and_extract("<?php\napp('App\\\\Payments\\\\Gateway');\n");
+    assert!(container_keys(&map).is_empty());
+}
+
 // ── Authorization ability spans ─────────────────────────────────────
 
 /// Every `GateAbility` key the map records, in source order.

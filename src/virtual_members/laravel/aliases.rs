@@ -69,6 +69,25 @@ impl LaravelAliases {
     }
 }
 
+/// What a container binding key resolves to, and where it was registered.
+#[derive(Debug, Clone)]
+pub(crate) struct ContainerBindingTarget {
+    /// FQN of the class the container hands back for the key.
+    pub(crate) fqn: String,
+    /// The service-provider registration the key comes from, absent for the
+    /// framework's own core aliases.
+    pub(crate) site: Option<ContainerBindingSite>,
+}
+
+/// Where a service provider registers a container binding key.
+#[derive(Debug, Clone)]
+pub(crate) struct ContainerBindingSite {
+    /// URI of the provider file holding the registration.
+    pub(crate) uri: String,
+    /// Byte offset of the key within that file.
+    pub(crate) offset: u32,
+}
+
 /// The slot the built [`LaravelAliases`] live in, shared by handle between the
 /// [`Backend`] that builds them and the resolved-class cache, so a virtual
 /// member provider (which sees the cache but not the `Backend`) can read the
@@ -110,6 +129,26 @@ impl Backend {
     /// than the loaded `ClassInfo` (e.g. to feed a caller-supplied loader).
     pub(crate) fn container_alias_concrete_fqn(&self, key: &str) -> Option<String> {
         self.laravel_aliases().container.get(key).cloned()
+    }
+
+    /// What a container binding key stands for: the class it resolves to, and
+    /// the service-provider registration that put it there.
+    ///
+    /// A core alias has no registration site of its own — the framework
+    /// declares the lot in one table — so `site` is `None` for those and the
+    /// class is all the key has to show.
+    pub(crate) fn container_binding_target(&self, key: &str) -> Option<ContainerBindingTarget> {
+        let fqn = self.container_alias_concrete_fqn(key)?;
+        let site = self
+            .laravel_provider_resources
+            .read()
+            .bindings
+            .get(key)
+            .map(|binding| ContainerBindingSite {
+                uri: crate::util::path_to_uri(&binding.site.path),
+                offset: binding.site.offset,
+            });
+        Some(ContainerBindingTarget { fqn, site })
     }
 
     /// Build the alias tables if they are not built yet, so a consumer that
