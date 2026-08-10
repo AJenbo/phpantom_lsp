@@ -663,6 +663,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#building-for-the-browser" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Building for the browser
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1437,6 +1448,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#building-for-the-browser" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Building for the browser
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1548,6 +1570,10 @@ off from what's documented in <code>docs/todo/performance.md</code>, check which
 allocator built the binary before assuming a regression — macOS and
 Windows use the system allocator in both CI and locally already, so
 they need no special steps.</p>
+<h3 id="building-for-the-browser">Building for the browser<a class="headerlink" href="#building-for-the-browser" title="Permanent link">&para;</a></h3>
+<p>PHPantom also compiles to WebAssembly, which is how the PHPStan playground
+runs it client-side. See <a href="../wasm/">wasm.md</a> for the build command, the host
+interface, and what the wasm build leaves out.</p>
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
 <p>Run the full test suite:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span><span class="nb">test</span>
@@ -1563,6 +1589,10 @@ they need no special steps.</p>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/laravel/app/Demo.php
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
 </code></pre></div>
+<p>CI additionally builds the WebAssembly target and runs
+<code>scripts/wasm-smoke-test.mjs</code> against it, which is worth running locally
+if your change touches dependencies, <code>Cargo.toml</code>, or anything in the
+per-file request path. See <a href="../wasm/">wasm.md</a>.</p>
 <p>All eight must pass with zero warnings and zero failures, except the
 final <code>analyze</code> run: <code>app/Demo.php</code> carries three deliberate mistakes,
 each demonstrating a diagnostic. <code>Artisan::call('does:not-exist')</code>

@@ -860,6 +860,61 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b74-analyze-format-json-prints-a-prose-note-ahead-of-the-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B74. <code>analyze --format json</code> prints a prose note ahead of the payload
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b75-a-path-that-does-not-exist-is-reported-as-no-php-files-found-with-exit-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B75. A path that does not exist is reported as "No PHP files found" with exit 0
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B76. <code>{@see method()}</code> unqualified inside its own class resolves as a global function
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B77. An unrecognized PHPDoc pseudo-type spelling is treated as a class name and enforced literally
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1360,6 +1415,61 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b74-analyze-format-json-prints-a-prose-note-ahead-of-the-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B74. <code>analyze --format json</code> prints a prose note ahead of the payload
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b75-a-path-that-does-not-exist-is-reported-as-no-php-files-found-with-exit-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B75. A path that does not exist is reported as "No PHP files found" with exit 0
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B76. <code>{@see method()}</code> unqualified inside its own class resolves as a global function
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B77. An unrecognized PHPDoc pseudo-type spelling is treated as a class name and enforced literally
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1451,6 +1561,144 @@ alike, since both resolve through the same re-walk.</p>
 <p>Fix: teach the re-walk to drop a subject whose base variable is assigned
 between the check and the cursor, rather than making the fall-through
 conditional on which consumer is asking.</p>
+<h3 id="b74-analyze-format-json-prints-a-prose-note-ahead-of-the-payload">B74. <code>analyze --format json</code> prints a prose note ahead of the payload<a class="headerlink" href="#b74-analyze-format-json-prints-a-prose-note-ahead-of-the-payload" title="Permanent link">&para;</a></h3>
+<p>A project root without a <code>composer.json</code> makes <code>run_analysis</code> print
+<code>Note: no composer.json found in … — analysing as a plain PHP project.</code>
+on stdout before anything else, regardless of <code>--format</code>. Under
+<code>--format json</code> that line sits ahead of the object, so a consumer that
+parses stdout as JSON fails outright, and one that recovers has to cut
+the payload out by brace-matching:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span>--project-root<span class="w"> </span>/tmp/plain<span class="w"> </span>/tmp/plain
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">Note: no composer.json found in /tmp/plain — analysing as a plain PHP project.</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">{</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">  &quot;totals&quot;: { &quot;errors&quot;: 0, &quot;file_errors&quot;: 0 },</span>
+</code></pre></div>
+<p>The same applies to any future informational line on the machine-readable
+formats. Fix: write the note to stderr, so stdout carries only the payload
+the format promises.</p>
+<h3 id="b75-a-path-that-does-not-exist-is-reported-as-no-php-files-found-with-exit-0">B75. A path that does not exist is reported as "No PHP files found" with exit 0<a class="headerlink" href="#b75-a-path-that-does-not-exist-is-reported-as-no-php-files-found-with-exit-0" title="Permanent link">&para;</a></h3>
+<p><code>analyze</code> resolves a relative <code>PATH</code> against <code>--project-root</code> rather than
+the working directory, and a path that resolves nowhere produces
+<code>No PHP files found.</code> and exit code 0 — the same answer as a clean run of
+an empty directory. A caller cannot tell "analysed nothing, all good" from
+"you pointed me at a path I could not find":</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>conformance<span class="w"> </span>conformance/tests/x.php
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">No PHP files found.</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="gp">$ </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">0</span>
+</code></pre></div>
+<p>Two things to settle here. A <code>PATH</code> that exists relative to the working
+directory should be accepted as such (that is what every other analyzer
+CLI does, and what a shell tab-completion produces), and a path that
+resolves nowhere should be an error on stderr with a non-zero exit
+distinct from 1 (which already means "diagnostics found").</p>
+<h3 id="b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function">B76. <code>{@see method()}</code> unqualified inside its own class resolves as a global function<a class="headerlink" href="#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function" title="Permanent link">&para;</a></h3>
+<p><code>@see</code> (and presumably <code>@link</code>/<code>@uses</code>) resolves a bare <code>name()</code> reference by
+looking up a global function, never checking whether the enclosing class
+declares a method of that name. A docblock on a class that implements an
+interface, referring to one of its own unqualified methods, gets
+"Function 'name' not found" instead of resolving to the method:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/**</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x"> * ... {@see covers()} draws that line ...</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x"> */</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">final class QodanaChecker implements CoverageAware</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">{</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function covers(TestCase $testCase): bool { ... }</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>phpDocumentor and PHPStorm both resolve a bare <code>name()</code> in <code>@see</code> against the
+enclosing class's own members before falling back to a global function, which
+is the convention this pattern relies on (see
+<code>conformance/src/Checker/QodanaChecker.php</code> and <code>CoverageAware.php</code> in the
+php-typing-conformance corpus for a real instance). Fix: when resolving an
+<code>@see</code>-family reference, check the containing class's members (own, then
+inherited) for a matching method/property/constant before falling back to a
+global function/constant lookup.</p>
+<h3 id="b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally">B77. An unrecognized PHPDoc pseudo-type spelling is treated as a class name and enforced literally<a class="headerlink" href="#b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally" title="Permanent link">&para;</a></h3>
+<p>When the docblock parser meets a lowercase-hyphenated pseudo-type
+spelling it doesn't have a keyword for — <code>value-of&lt;T&gt;</code>, <code>literal-int</code>,
+<code>stringable-object</code>, <code>pure-callable</code>, and likely every other
+<code>phpdoc_advanced_fallback_*</code>/<code>phpdoc_advanced_psalm_*</code> spelling in the
+php-typing-conformance corpus that isn't already a recognized keyword —
+it falls through to the same path as an unresolved class name: it gets
+namespace-qualified against the file's own namespace and then used
+verbatim as the declared type, so every call site is checked against a
+type that can never match anything.</p>
+<p>The result is not "not implemented" (an honest, expected outcome the
+conformance suite explicitly does not treat as a defect) but active
+false positives on entirely valid code, alongside missed detection of
+the actually-invalid cases, which then get the same generic message as
+the false positives:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @return value-of&lt;array{a: int, b: int}&gt; */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function returnsValue(): int { return 1; }</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">// reported: &quot;Return type 1 is incompatible with declared return type</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">//            value-of&lt;array{a: int, b: int}&gt;&quot; — false positive, 1 IS a value-of</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">/** @param value-of&lt;array{a: int, b: int}&gt; $value */</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">function acceptsValue($value): void {}</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">acceptsValue(1);   // false positive: &quot;expects value-of&lt;...&gt;, got 1&quot;</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">acceptsValue(&#39;x&#39;); // should report this — instead gets the identical generic message</span>
+</code></pre></div>
+<p><code>key-of&lt;T&gt;</code> shows the same shape but partially recognizes the syntax
+(the type prints as <code>key-of&lt;array{...}&gt;</code> rather than being
+namespace-qualified into a bogus class), so the parser has <em>started</em>
+handling it, but nothing expands it to the union of the shape's
+literal keys before enforcement runs — the effect on call sites is
+identical.</p>
+<p>Reproduced in <code>php-typing-conformance/conformance/tests/</code>:
+<code>phpdoc_advanced_fallback_value_of.php</code>,
+<code>phpdoc_advanced_fallback_key_of.php</code>,
+<code>phpdoc_advanced_psalm_literal_int.php</code>,
+<code>phpdoc_advanced_psalm_stringable_object.php</code>,
+<code>phpdoc_advanced_fallback_pure_callable.php</code>,
+<code>phpdoc_advanced_fallback_decimal_int_string.php</code>,
+<code>phpdoc_advanced_fallback_non_decimal_int_string.php</code>,
+<code>phpdoc_advanced_psalm_arraylike_object.php</code>. DEVSENSE (measured as <code>phpy</code>
+in that suite) recognizes every one of these; it's the tool our own
+diagnostics diverge from most sharply on this specific failure mode.</p>
+<p>This violates the "no diagnostic suppression" principle in the
+opposite direction: an unrecognized spelling must degrade to "not
+recognized" (skip enforcement, and for docblock type positions ideally
+fall back to <code>mixed</code>, the way B72 substitutes a <code>@template</code> bound),
+never to "treat the spelling as if it were a class and enforce it
+literally." Fix at the type-string parser
+(<code>src/docblock/type_strings.rs</code> / <code>src/php_type/parse.rs</code>): a
+pseudo-type spelling with no matching keyword and no matching class
+must resolve to <code>mixed</code>, not to a synthesized class-like type name, and
+<code>key-of</code>/<code>value-of</code> need their expansion (to the shape's key union /
+value union) wired in before enforcement, not just accepted as syntax.</p>
+<h3 id="b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape">B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape<a class="headerlink" href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" title="Permanent link">&para;</a></h3>
+<p>Unlike B77's cluster, <code>object{foo: int}</code> is correctly parsed and printed —
+it isn't mistaken for a class name. But nothing checks a concrete class or
+anonymous object against the shape structurally: every object argument is
+rejected, including ones that satisfy it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class Reading {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    public int $foo = 1;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">}</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">/** @param object{foo: int} $shape */</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">function takesObjectShape(object $shape): void {}</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">takesObjectShape(new Reading());        // false positive: Reading has `foo: int`</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">takesObjectShape((object) [&#39;foo&#39; =&gt; 1]); // false positive: an anonymous stdClass with `foo: int`</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">takesObjectShape(new Mistyped());        // correctly invalid ($foo is string) — reported for the wrong reason</span>
+</code></pre></div>
+<p>All three calls get the same generic "expects <code>object{foo: int}</code>, got X"
+message, so the two valid calls and the one genuinely invalid call are
+indistinguishable in the output — the diagnostic is never actually
+checking property-by-property compatibility, just failing unconditionally
+whenever the declared type isn't literally <code>object{foo: int}</code> itself.</p>
+<p>Reproduced in
+<code>php-typing-conformance/conformance/tests/phpdoc_advanced_fallback_object_shape.php</code>.
+mir, Intelephense, and DEVSENSE (<code>phpy</code>) all pass this one; we're the
+outlier.</p>
+<p>Fix: when the expected side of a compatibility check is an object shape,
+resolve the actual side to a class (or anonymous object literal) and check
+each declared property against the shape's fields (type, and required vs.
+optional) instead of falling through to nominal comparison. Likely lives
+next to whatever <code>is_type_compatible</code> (see T32) already does for array
+shapes against array literals — object shapes need the same treatment
+against object literals and named classes.</p>
 
 
 

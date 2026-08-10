@@ -1504,6 +1504,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t35-readonly-property-reassignment-outside-its-declaring-scope-is-never-flagged" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T35. Readonly property reassignment outside its declaring scope is never flagged
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T36. Array-shape and generic enforcement gaps mir already covers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1940,6 +1962,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T34. <code>static::CONST</code> over-narrows to the declaring class's value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t35-readonly-property-reassignment-outside-its-declaring-scope-is-never-flagged" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T35. Readonly property reassignment outside its declaring scope is never flagged
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T36. Array-shape and generic enforcement gaps mir already covers
       </span>
     </span>
   </a>
@@ -2740,6 +2784,105 @@ to the current class name identically to <code>Expression::Self_</code>.</p>
 upstream's <code>nsrt/class-constant-types.php</code> were dropped when
 <code>tests/phpstan_nsrt/class-constant-types.php</code> was ported (only the
 <code>self::</code> cases survive); port them back.</p>
+<hr />
+<h2 id="t35-readonly-property-reassignment-outside-its-declaring-scope-is-never-flagged">T35. Readonly property reassignment outside its declaring scope is never flagged<a class="headerlink" href="#t35-readonly-property-reassignment-outside-its-declaring-scope-is-never-flagged" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><code>is_readonly</code> is already tracked on <code>PropertyInfo</code> (set in
+<code>src/parser/mod.rs</code> and <code>src/parser/classes.rs</code> for both the
+<code>readonly</code> modifier and constructor-promoted properties), but nothing
+in <code>src/diagnostics/</code> reads it. Reassigning a <code>readonly</code> property from
+outside the class that declares it — or a second write from inside it,
+after the constructor has already initialized it — is a hard error in
+PHP and goes completely unreported:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">final class Box {</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    public function __construct(public readonly int $value) {}</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">}</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">$box = new Box(1);</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">$box-&gt;value = 2; // Error: Cannot modify readonly property Box::$value</span>
+</code></pre></div>
+<p>Every comparable tool (PHPStan, Psalm, Mago, mir, Intelephense) flags
+this; it is one of the cleanest gaps the php-typing-conformance corpus
+turned up (<code>properties_readonly_assignment.php</code>), since the metadata
+already exists and this is purely additive — no existing diagnostic
+narrows or changes shape.</p>
+<p><strong>Fix:</strong> in the property-assignment diagnostic path, when the subject
+resolves to a class and the target property is <code>is_readonly</code>, flag the
+write unless it is the first write to that property from inside the
+declaring class (constructor or otherwise). Scope this the same way
+the rest of the diagnostics module resolves a subject's class, rather
+than adding a second subject-resolution path.</p>
+<hr />
+<h2 id="t36-array-shape-and-generic-enforcement-gaps-mir-already-covers">T36. Array-shape and generic enforcement gaps mir already covers<a class="headerlink" href="#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p>Cross-referencing the php-typing-conformance results: for the cases
+below, mir recognizes and enforces the spelling and we are silent
+(zero diagnostics, not a false positive) — a real recognized-but-
+unenforced gap versus the LSP we're closest to competing with rather
+than a case where nobody has solved it yet:</p>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>What mir enforces that we don't</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>arrays_non_empty_list.php</code></td>
+<td><code>non-empty-list&lt;int&gt;</code> rejects <code>[]</code></td>
+</tr>
+<tr>
+<td><code>arrays_shape_required_keys.php</code></td>
+<td>a required shape key missing from a literal array</td>
+</tr>
+<tr>
+<td><code>assertions_assert_non_empty_list.php</code></td>
+<td><code>assert()</code>-narrowed non-empty-list stays enforced downstream</td>
+</tr>
+<tr>
+<td><code>callables_docblock_signature.php</code></td>
+<td>a <code>callable(int): string</code>-shaped docblock param against a mismatched closure</td>
+</tr>
+<tr>
+<td><code>callables_return_type_mismatch.php</code></td>
+<td>a callable's declared return type against what it actually returns</td>
+</tr>
+<tr>
+<td><code>generics_extends_implements.php</code></td>
+<td>a <code>@template</code> bound carried through <code>extends</code>/<code>implements</code></td>
+</tr>
+<tr>
+<td><code>generics_template_bound.php</code></td>
+<td>a <code>@template T of Foo</code> bound rejecting a non-<code>Foo</code> argument</td>
+</tr>
+<tr>
+<td><code>generics_template_bound_array.php</code></td>
+<td>the same bound inside an array template argument</td>
+</tr>
+<tr>
+<td><code>generics_template_box.php</code></td>
+<td>a generic "box" class enforcing its template argument on <code>set()</code>/<code>get()</code></td>
+</tr>
+<tr>
+<td><code>phpdoc_advanced_fallback_interface_string.php</code></td>
+<td>an interface-backed string pseudo-type</td>
+</tr>
+</tbody>
+</table>
+<p>None of these are things we should chase for their own sake — PHPStan
+and Mago already own deep static analysis and we proxy them rather
+than re-implementing their rule sets (see the CLAUDE.md anti-pattern
+on parallel type-resolution systems). These are worth closing because
+mir is the analyzer behind php-lsp, the LSP we're most directly
+compared against, and Intelephense fails most of them too (see the
+per-test TOML <code>conformance_automated</code> field under
+<code>php-typing-conformance/conformance/results/{mir,intelephense}/</code> for
+the up-to-date pass/fail per tool).</p>
+<p>Each row needs its own root-cause pass — they were only confirmed
+silent (not misclassified), not yet traced to a specific resolver.
+Fix one at a time rather than as a single PR; several likely share a
+cause (the four <code>generics_template_*</code> cases almost certainly do).</p>
 
 
 
