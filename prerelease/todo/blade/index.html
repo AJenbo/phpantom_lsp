@@ -845,17 +845,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL22. A template never learns anything from the templates that render it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl23-unbalanced-component-tag-diagnostics" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1573,17 +1562,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL22. A template never learns anything from the templates that render it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl23-unbalanced-component-tag-diagnostics" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1906,30 +1884,6 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 <li>Filtering out actions that don't make sense in Blade context.</li>
 </ul>
 <p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
-<hr />
-<h2 id="bl22-a-template-never-learns-anything-from-the-templates-that-render-it">BL22. A template never learns anything from the templates that render it<a class="headerlink" href="#bl22-a-template-never-learns-anything-from-the-templates-that-render-it" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p><code>compute_blade_injected_vars</code> skips every Blade file in the caller
-snapshot (<code>if self.is_blade_file(file_uri) { continue; }</code>, and
-<code>view_caller_snapshot</code> filters them out again), so call-site inference
-only ever reads controllers. A partial rendered exclusively from other
-templates therefore gets nothing: neither the entries of an
-<code>@include('partials.row', ['row' =&gt; $row])</code>, nor the item and key an
-<code>@each</code> binds, reach it, and an unannotated partial has no type for the
-variable it exists to display. Only the diagnostics path, which runs on
-the rendering template itself, reads those sites today.</p>
-<p>The comment gives the two reasons: a template must not feed itself, and
-other templates' <code>@include</code>s would recurse. Both are addressable the way
-the component-tag path already does it — that one <em>does</em> read Blade
-callers, keying off <code>blade_virtual_content</code> rather than the raw source
-(the symbol map's offsets are virtual-PHP offsets, so the raw Blade
-source is the wrong thing to parse) and skipping the template's own URI.
-What is left to settle is mutual rendering: A includes B includes A
-resolves each against the other's cached scope, so the refresh pass needs
-to converge rather than oscillate.</p>
-<p>Until then a partial rendered only from templates must declare its own
-<code>@bladestan-signature</code> to get completion and hover, which is what the
-contract checks want anyway.</p>
 <hr />
 <h2 id="bl23-unbalanced-component-tag-diagnostics">BL23. Unbalanced component tag diagnostics<a class="headerlink" href="#bl23-unbalanced-component-tag-diagnostics" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>
