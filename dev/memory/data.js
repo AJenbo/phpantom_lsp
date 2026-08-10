@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786383898876,
+  "lastUpdate": 1786384971301,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18087,6 +18087,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "d65e982a8b23d0fcb21398430e9d26e7fc13e22b",
+          "message": "fix: send inlayHint/refresh after didChange background parse\n\nThe didChange handler sent workspace/semanticTokens/refresh after\ncommitting a new symbol map but did not send\nworkspace/inlayHint/refresh. This left inlay hints (parameter names,\nclosure types, reference counts) showing pre-edit data until the\neditor re-requested them on its own, typically requiring a manual\nfile reload in NeoVim.\n\nNow both refresh notifications are sent together when the background\nparse produces a new symbol map.",
+          "timestamp": "2026-08-10T12:46:13-05:00",
+          "tree_id": "0b36a0a4be7d2b4d16b635f3e0c28917d71bdb8f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d65e982a8b23d0fcb21398430e9d26e7fc13e22b"
+        },
+        "date": 1786384965433,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.6,
             "unit": "MiB"
           }
         ]
