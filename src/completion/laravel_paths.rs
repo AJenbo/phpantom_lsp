@@ -51,12 +51,25 @@ fn detect_context(
 ) -> Option<PathHelperContext> {
     let (quote_offset, _) = code.open_string?;
 
-    let paren = code.enclosing_paren()?;
+    // The innermost open bracket, so the literal has to sit in the argument
+    // list itself: `base_path(['…'])` hands the helper an array, not a path.
+    let paren = code.open_brackets.last().filter(|b| b.byte == b'(')?;
     if paren.commas != 0 || paren.callee_operator.is_some() || quote_offset < paren.offset {
         return None;
     }
-    let (helper, _) = split_trailing_ident(content[..paren.code_before].trim_end());
+    let (helper, before_helper) = split_trailing_ident(content[..paren.code_before].trim_end());
     if !is_path_helper(helper) {
+        return None;
+    }
+    // `\base_path()` is the global helper written explicitly, but
+    // `Acme\base_path()` is a namespaced function of somebody else's that
+    // happens to end in the same word.
+    if let Some(namespace) = before_helper.strip_suffix('\\')
+        && namespace
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
         return None;
     }
 
@@ -217,6 +230,64 @@ mod tests {
 
         assert!(context_at(&backend, "<?php\n$app->base_path('rou", "rou").is_none());
         assert!(context_at(&backend, "<?php\nApp::base_path('rou", "rou").is_none());
+    }
+
+    #[test]
+    fn ignores_a_namespaced_function_of_the_same_short_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = backend_rooted_at(dir.path());
+
+        assert!(
+            context_at(&backend, "<?php\nAcme\\base_path('rou", "rou").is_none(),
+            "a namespaced function only shares the helper's last word"
+        );
+        assert!(
+            context_at(&backend, "<?php\n\\base_path('rou", "rou").is_some(),
+            "a root-namespaced call is the helper itself"
+        );
+    }
+
+    #[test]
+    fn ignores_an_argument_nested_in_an_array() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = backend_rooted_at(dir.path());
+
+        assert!(
+            context_at(&backend, "<?php\nbase_path(['rou", "rou").is_none(),
+            "an array argument names no path"
+        );
+    }
+
+    #[test]
+    fn ignores_a_function_that_is_not_a_path_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = backend_rooted_at(dir.path());
+
+        assert!(context_at(&backend, "<?php\nsprintf('rou", "rou").is_none());
+        assert!(
+            context_at(&backend, "<?php\nview_path('rou", "rou").is_none(),
+            "a name shaped like a helper is still not one of them"
+        );
+    }
+
+    #[test]
+    fn a_directory_that_is_not_there_offers_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = backend_rooted_at(dir.path());
+
+        let content = "<?php\nresource_path('nowhere/wel');\n";
+        let cursor = content.find("nowhere/wel").unwrap() + "nowhere/wel".len();
+        let code = code_context_at(content, cursor).unwrap();
+        let ctx = detect_context(&backend, content, cursor, &code)
+            .expect("the call is still a path helper");
+        assert_eq!(matching_entries(&ctx).0.len(), 0);
+
+        assert!(
+            backend
+                .try_path_helper_completion(content, offset_to_position(content, cursor), &code)
+                .is_none(),
+            "an unreadable directory offers nothing rather than an empty list"
+        );
     }
 
     #[test]

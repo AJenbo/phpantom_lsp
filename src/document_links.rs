@@ -60,7 +60,7 @@ impl Backend {
         }
 
         for (start, end, target) in
-            crate::virtual_members::laravel::collect_path_helper_links(self, content)
+            crate::virtual_members::laravel::collect_path_helper_links(self, content, program)
         {
             if let Ok(target_url) = Url::from_file_path(&target) {
                 links.push(DocumentLink {

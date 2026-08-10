@@ -17,7 +17,7 @@ use crate::atom::bytes_to_str;
 use crate::document_links::normalize_path;
 use crate::util::strip_fqn_prefix;
 
-use super::helpers::{extract_string_literal, walk_all_php_expressions};
+use super::helpers::{extract_string_literal, walk_all_php_expressions, walk_program_expressions};
 
 /// Every path helper, with the project-root-relative directory it anchors its
 /// argument to.  `lang_path` carries the modern directory here; the one case
@@ -125,16 +125,22 @@ pub(crate) fn resolve_path_helper_definition(
 ///
 /// Directories are left out for the same reason go-to-definition leaves them
 /// out — see [`resolve_path_helper_definition`].
+///
+/// Takes the caller's already-parsed `Program` rather than parsing again: the
+/// document-link handler walks the same file for its include paths, and a
+/// second parse of every open file on every edit is the whole cost of the
+/// feature paid twice.
 pub(crate) fn collect_path_helper_links(
     backend: &Backend,
     content: &str,
+    program: &Program<'_>,
 ) -> Vec<(usize, usize, PathBuf)> {
     let Some(root) = path_helper_root(backend, content) else {
         return Vec::new();
     };
 
     let mut links = Vec::new();
-    walk_all_php_expressions(content, &mut |expr| {
+    walk_program_expressions(program, &mut |expr| {
         if let Some((helper, argument, start, end)) = path_helper_call(expr, content)
             && let Some(target) = path_helper_target(&root, helper, argument)
             && target.is_file()
@@ -188,6 +194,51 @@ fn path_helper_call<'c>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every path helper call the source holds, as (helper, argument).
+    fn helper_calls(content: &str) -> Vec<(&'static str, String)> {
+        let mut calls = Vec::new();
+        walk_all_php_expressions(content, &mut |expr| {
+            if let Some((helper, argument, _, _)) = path_helper_call(expr, content) {
+                calls.push((helper, argument.to_string()));
+            }
+            ControlFlow::Continue(())
+        });
+        calls
+    }
+
+    #[test]
+    fn recognises_a_helper_call() {
+        assert_eq!(
+            helper_calls("<?php\nbase_path('routes/web.php');\n"),
+            vec![("base_path", "routes/web.php".to_string())]
+        );
+        assert_eq!(
+            helper_calls("<?php\n\\resource_path('views');\n"),
+            vec![("resource_path", "views".to_string())],
+            "a root-namespaced call is the same function"
+        );
+    }
+
+    #[test]
+    fn ignores_calls_that_only_look_like_one() {
+        assert!(
+            helper_calls("<?php\n$helper('routes/web.php');\n").is_empty(),
+            "a dynamic callee names no helper we can read"
+        );
+        assert!(
+            helper_calls("<?php\nsprintf('routes/web.php');\n").is_empty(),
+            "an unrelated function is left alone"
+        );
+        assert!(
+            helper_calls("<?php\nbase_path($file);\n").is_empty(),
+            "a computed argument names no path we can resolve"
+        );
+        assert!(
+            helper_calls("<?php\nbase_path();\n").is_empty(),
+            "with no argument the helper names its own directory, not a file"
+        );
+    }
 
     #[test]
     fn maps_helpers_to_conventional_directories() {
