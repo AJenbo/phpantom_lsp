@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786414665225,
+  "lastUpdate": 1786417560611,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18359,6 +18359,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "88b066e3efb6ccc758be94b9ccace4fc8e7432f1",
+          "message": "Renaming a method no longer rewrites a call whose receiver just happens\nto be named after the class",
+          "timestamp": "2026-08-11T04:50:11+02:00",
+          "tree_id": "baeb119b4fd254b924d3e9cd6330e8334d320a38",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/88b066e3efb6ccc758be94b9ccace4fc8e7432f1"
+        },
+        "date": 1786417555012,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.6,
             "unit": "MiB"
           }
         ]
