@@ -13490,3 +13490,60 @@ function run(): void {
         "a bare template return should bind the whole annotated type, got: {text}"
     );
 }
+
+/// A subject that names a generic class without arguments must read its
+/// members through the bounds the `@template` tags declare.  A member typed
+/// `TModel` used to come back as the template parameter's own name, which
+/// resolves nowhere.
+#[test]
+fn hover_bare_generic_class_erases_template_param_to_bound() {
+    let backend = create_test_backend();
+    let uri = "file:///bare_generic_bound.php";
+    let content = r#"<?php
+class Item {
+    public function title(): string { return ''; }
+}
+/**
+ * @template TModel of Item
+ */
+class ItemCollection {
+    /** @return TModel|null */
+    public function first() { return null; }
+}
+/** @var ItemCollection $items */
+$item = $items->first();
+$item->title();
+"#;
+    let hover = hover_at(&backend, uri, content, 12, 1).expect("expected hover on $item");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Item|null"),
+        "`TModel of Item` should erase to its bound, got: {text}"
+    );
+}
+
+/// A template parameter declared without a bound erases to `mixed`, not to
+/// its own name.
+#[test]
+fn hover_bare_generic_class_erases_unbounded_template_param_to_mixed() {
+    let backend = create_test_backend();
+    let uri = "file:///bare_generic_unbounded.php";
+    let content = r#"<?php
+/**
+ * @template TValue
+ */
+class Box {
+    /** @return TValue */
+    public function unwrap() {}
+}
+function take(Box $box): void {
+    $inner = $box->unwrap();
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 9, 6).expect("expected hover on $inner");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("mixed"),
+        "an unbounded `TValue` should erase to mixed, got: {text}"
+    );
+}

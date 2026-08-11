@@ -773,6 +773,32 @@ class GenericsDemo
 }
 
 
+// ── Bare Generic Class Names (@template bound) ─────────────────────────────
+
+class BareGenericSubjectDemo
+{
+    /**
+     * A subject that names a generic class without its type arguments
+     * supplies no `TPen`, so a member typed `TPen` reads as the bound the
+     * `@template` declares. Without that, `first()` would resolve to a
+     * class called `TPen`, which exists nowhere.
+     */
+    public function demo(ScaffoldingBoundedPenCollection $pens): void
+    {
+        $pens->first()?->write();                 // TPen of Pen → Pen
+        // MUST NOT appear: highlight() (Marker's, not Pen's)
+
+        /** @var ScaffoldingBoundedPenCollection $viaDocblock */
+        $viaDocblock = $pens;
+        $viaDocblock->first()?->write();          // same through a @var
+
+        // An unbounded parameter is the widest thing the declaration
+        // guarantees, which is `mixed`.
+        var_dump((new ScaffoldingUnboundedBox())->unwrap());
+    }
+}
+
+
 // ── @implements Generic Resolution ─────────────────────────────────────────
 
 class ImplementsGenericDemo
@@ -5527,6 +5553,33 @@ class ScaffoldingGenericArrayAccess implements \ArrayAccess
     public function offsetUnset(mixed $offset): void { unset($this->items[$offset]); }
 }
 
+/**
+ * Named bare (no type arguments) by `BareGenericSubjectDemo`, so `TPen`
+ * has to fall back to the bound its `@template` declares.
+ *
+ * @template TPen of Pen
+ */
+class ScaffoldingBoundedPenCollection
+{
+    /** @param list<TPen> $items */
+    public function __construct(private array $items = []) {}
+
+    /** @return TPen|null */
+    public function first() { return $this->items[0] ?? null; }
+}
+
+/**
+ * The same shape with no declared bound, where the widest guarantee is
+ * `mixed`.
+ *
+ * @template TValue
+ */
+class ScaffoldingUnboundedBox
+{
+    /** @return TValue */
+    public function unwrap() { return null; }
+}
+
 class ScaffoldingFormatter
 {
     public function __invoke(): Pen { return new Pen(); }
@@ -6780,6 +6833,11 @@ function runDemoAssertions(): void
 
     // ── Leading-backslash (absolute) function call ─────────────────────
     assert(\Demo\makePen() instanceof Pen, 'absolute \\Demo\\makePen() resolves the same as makePen()');
+
+    // ── Bare generic class name → @template bound ──────────────────────
+    $boundedPens = new ScaffoldingBoundedPenCollection([new Pen()]);
+    assert($boundedPens->first() instanceof Pen, 'a bare generic collection yields its @template bound');
+    assert((new ScaffoldingBoundedPenCollection())->first() === null, 'an empty bare generic collection yields null');
 
     // ── Trait `return $this` fluent chain ───────────────────────────────
     $page = new TestablePage();

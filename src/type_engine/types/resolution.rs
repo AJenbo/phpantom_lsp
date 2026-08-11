@@ -50,6 +50,74 @@ pub(crate) fn resolve_property_types(
     type_hint_to_classes_typed(&type_hint, &owner_fqn, all_classes, class_loader)
 }
 
+/// Look up a class by name and return its declaration as written, with
+/// no generic substitution applied.
+///
+/// When `name` is a short name (no backslash), a class in the same
+/// namespace as the owning class wins.  This prevents cross-namespace
+/// contamination in multi-namespace files where several namespaces
+/// define a class with the same short name.
+///
+/// Callers that want the *type* `name` denotes (with unsupplied
+/// `@template` parameters erased to their bounds) want
+/// [`type_hint_to_classes_typed`] instead.  This entry point is for the
+/// few callers that bind those parameters themselves and therefore need
+/// the parameter names still standing in the member signatures.
+pub(crate) fn lookup_class_declaration(
+    name: &str,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Arc<ClassInfo>> {
+    if !name.contains('\\') && owning_class_name.contains('\\') {
+        let owning_ns = owning_class_name.rsplit_once('\\').map(|(ns, _)| ns);
+        all_classes
+            .iter()
+            .find(|c| c.name == name && c.file_namespace.as_deref() == owning_ns)
+            .map(Arc::clone)
+            .or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
+            .or_else(|| class_loader(name))
+    } else if !name.contains('\\') && owning_class_name.is_empty() {
+        // For unqualified names in top-level code (no enclosing class),
+        // prefer the namespace-aware class_loader over find_class_by_name.
+        // The class_loader uses the FileContext's namespace to resolve
+        // short names correctly, while find_class_by_name returns the
+        // first match regardless of namespace in multi-namespace files.
+        class_loader(name).or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
+    } else {
+        find_class_by_name(all_classes, name)
+            .map(Arc::clone)
+            .or_else(|| class_loader(name))
+    }
+}
+
+/// Whether `cls` is the very class the hint is being resolved inside.
+///
+/// Callers spell `owning_class_name` either short or fully qualified, so
+/// a direct FQN comparison is not enough.  When only the short names
+/// match, the owning class is looked up to confirm both spellings name
+/// the same declaration; that lookup is skipped whenever the cheap
+/// comparison already settles it.
+fn is_enclosing_class(
+    cls: &ClassInfo,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    if owning_class_name.is_empty() {
+        return false;
+    }
+    let fqn = cls.fqn();
+    if fqn.eq_ignore_ascii_case(owning_class_name) {
+        return true;
+    }
+    if !cls.name.eq_ignore_ascii_case(short_name(owning_class_name)) {
+        return false;
+    }
+    lookup_class_declaration(owning_class_name, "", all_classes, class_loader)
+        .is_some_and(|owner| owner.fqn().eq_ignore_ascii_case(fqn.as_str()))
+}
+
 /// Map a parsed [`PhpType`] to all matching `ClassInfo` values.
 ///
 /// Handles:
@@ -298,35 +366,7 @@ fn resolve_named_type(
         generic_args
     };
 
-    // ── Class lookup ───────────────────────────────────────────────
-    // When `name` is a short name (no backslash), prefer a class in the
-    // same namespace as the owning class.  This prevents cross-namespace
-    // contamination in multi-namespace files where multiple namespaces
-    // define a class with the same short name.
-    let found = if !name.contains('\\') && owning_class_name.contains('\\') {
-        let owning_ns = owning_class_name.rsplit_once('\\').map(|(ns, _)| ns);
-        // Try same-namespace first.
-        let same_ns = all_classes
-            .iter()
-            .find(|c| c.name == name && c.file_namespace.as_deref() == owning_ns)
-            .map(Arc::clone);
-        same_ns
-            .or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
-            .or_else(|| class_loader(name))
-    } else if !name.contains('\\') && owning_class_name.is_empty() {
-        // For unqualified names in top-level code (no enclosing class),
-        // prefer the namespace-aware class_loader over find_class_by_name.
-        // The class_loader uses the FileContext's namespace to resolve
-        // short names correctly, while find_class_by_name returns the
-        // first match regardless of namespace in multi-namespace files.
-        class_loader(name).or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
-    } else {
-        find_class_by_name(all_classes, name)
-            .map(Arc::clone)
-            .or_else(|| class_loader(name))
-    };
-
-    match found {
+    match lookup_class_declaration(name, owning_class_name, all_classes, class_loader) {
         Some(cls) => {
             // ── Eloquent custom collection swapping ────────────────
             let cls = laravel::try_swap_custom_collection(
@@ -336,6 +376,34 @@ fn resolve_named_type(
                 all_classes,
                 class_loader,
             );
+
+            // A type hint that names a generic class without arguments
+            // (`@var ItemCollection $items`, a bare parameter or return
+            // type) still has to answer member lookups.  Erase every
+            // unsupplied template parameter to the bound its `@template`
+            // declares (`@template TModel of Item` → `Item`), or `mixed`
+            // when it declares none, so a member typed `TModel` resolves
+            // to the widest type the declaration guarantees instead of to
+            // the parameter's own name.  This mirrors PHPStan's
+            // `resolveToBounds()` and the treatment `new ItemCollection()`
+            // already gets.
+            //
+            // A hint naming the enclosing class is left alone: inside its
+            // own body a class's `@template` parameters are in scope, and
+            // a member typed `TModel` means the caller's binding, not the
+            // bound.  `self`/`static` already return the class unerased
+            // above, and a name that resolves back to the same class is
+            // the same reference spelled out.
+            let erased_args: Vec<PhpType>;
+            let generic_args: &[PhpType] = if generic_args.is_empty()
+                && !cls.template_params.is_empty()
+                && !is_enclosing_class(&cls, owning_class_name, all_classes, class_loader)
+            {
+                erased_args = crate::inheritance::default_type_args(&cls);
+                &erased_args
+            } else {
+                generic_args
+            };
 
             // Apply generic substitution if the type hint carried generic
             // arguments and the class has template parameters of its own

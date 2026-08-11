@@ -54,8 +54,23 @@ pub(super) fn resolve_rhs_instantiation(
         // has `@param` bindings for them, infer concrete types from
         // the constructor arguments and apply the substitution to
         // the class so that methods returning `T` resolve correctly.
-        if classes.len() == 1 && !classes[0].template_params.is_empty() {
-            let cls = &classes[0];
+        //
+        // The binding is matched against the declaration as written:
+        // `type_hint_to_classes_typed` hands back the type the bare name
+        // denotes, whose unsupplied parameters are already erased to
+        // their bounds, leaving `@param array<TKey, TValue> $array` as
+        // `array<mixed, mixed>` with nothing for the classifier to bind.
+        let declaration = (classes.len() == 1 && !classes[0].template_params.is_empty())
+            .then(|| {
+                crate::type_engine::type_resolution::lookup_class_declaration(
+                    &fqn,
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                )
+            })
+            .flatten();
+        if let Some(cls) = declaration.as_deref() {
             // Look for the constructor on the raw class first; if not
             // found (child class without its own constructor), walk up
             // the parent chain to find the original declaring class and

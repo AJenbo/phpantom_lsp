@@ -11,32 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B72. A generic class named without its arguments returns its own template parameter
-**Impact: Medium · Effort: Medium**
-
-A subject written with no template arguments — a `@var ItemCollection $items`
-docblock, a parameter or return type spelled without generics, anything that
-names the class rather than instantiating it — resolves a member's
-template-typed return to the *parameter itself*. `ItemCollection::first()`,
-declared `@return TModel|null` on a class whose docblock says
-`@template TModel of Item`, comes back as the class `TModel`, which resolves
-nowhere.
-
-Reproduced with a controller passing `$items->first()` to an unannotated
-view: the injected prologue declares `@var TModel $item`, and the template
-then reports `Cannot verify method 'title' — subject type 'TModel' could not
-be resolved` on every member it reads. It is not specific to Blade or to
-call-site inference, which only made it visible: the same subject reads the
-same way in a plain PHP file, and Laravel's own collections are declared
-this way (`PostCollection` in `examples/laravel` forwards
-`@template TModel of BlogPost` to `Collection<TKey, TModel>`), so any
-project that types a variable by a bare collection class hits it.
-
-An unsupplied template parameter is not a class. Substitute the bound the
-`@template` declares (`of Item` → `Item`), and `mixed` for a parameter
-declared without one, so the type is the widest thing the declaration
-guarantees rather than a name nothing can resolve.
-
 ### B73. Narrowing survives a reassignment of the subject's base variable
 **Impact: Medium · Effort: Medium**
 

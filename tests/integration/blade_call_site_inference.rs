@@ -1114,4 +1114,52 @@ mod tests {
             hover
         );
     }
+
+    /// A controller that hands a view an element of a collection typed by
+    /// a bare generic class name (`ItemCollection` with `@template TModel
+    /// of Item`) must type the template's variable as the bound, not as
+    /// the template parameter.  `TModel` names no class, so every member
+    /// the template read off it was reported unverifiable.
+    #[tokio::test]
+    async fn bare_generic_collection_element_types_template_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "app/ItemCollection.php",
+                    "<?php\nnamespace App;\n/**\n * @template TModel of Item\n */\nclass ItemCollection {\n    /** @return TModel|null */\n    public function first() { return null; }\n}\n",
+                ),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nclass Controller {\n    public function show(ItemCollection $items): mixed {\n        return view('shop', ['item' => $items->first()]);\n    }\n}\n",
+                ),
+                ("resources/views/shop.blade.php", "{{ $item->name }}\n"),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let controller_uri = Url::from_file_path(root.join("app/Controller.php")).unwrap();
+        let blade_uri = Url::from_file_path(root.join("resources/views/shop.blade.php")).unwrap();
+
+        for (uri, path, language) in [
+            (&controller_uri, "app/Controller.php", "php"),
+            (&blade_uri, "resources/views/shop.blade.php", "blade"),
+        ] {
+            open(
+                &backend,
+                uri,
+                language,
+                &std::fs::read_to_string(root.join(path)).unwrap(),
+            )
+            .await;
+        }
+
+        let hover = hover_type(&backend, &blade_uri, 0, 5).await;
+        assert!(
+            hover.contains("Item") && !hover.contains("TModel"),
+            "$item should be typed by the TModel bound Item, got: {}",
+            hover
+        );
+    }
 }
