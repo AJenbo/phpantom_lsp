@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786411373348,
+  "lastUpdate": 1786412923135,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18257,6 +18257,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ab5db42099aaaf52ecef737d5c62e3c7a777dbbc",
+          "message": "An `object{prop: Type}` shape now matches a class or object literal that\nactually has that property, instead of rejecting every argument",
+          "timestamp": "2026-08-11T03:31:59+02:00",
+          "tree_id": "cf15b2abdfe3c0207d0ea3e7a389c5805c9cb8e7",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ab5db42099aaaf52ecef737d5c62e3c7a777dbbc"
+        },
+        "date": 1786412918213,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.2,
             "unit": "MiB"
           }
         ]
