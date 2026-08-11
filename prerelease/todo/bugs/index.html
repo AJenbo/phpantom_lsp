@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b2-a-class-declared-in-two-files-disappears-when-the-winning-file-drops-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A class declared in two files disappears when the winning file drops it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b2-a-class-declared-in-two-files-disappears-when-the-winning-file-drops-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A class declared in two files disappears when the winning file drops it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1349,31 +1277,7 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h2 id="b2-a-class-declared-in-two-files-disappears-when-the-winning-file-drops-it">B2. A class declared in two files disappears when the winning file drops it<a class="headerlink" href="#b2-a-class-declared-in-two-files-disappears-when-the-winning-file-drops-it" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>A class name two files declare, which is how a package ships a variant
-behind a <code>class_exists</code> guard, settles on the lowest-sorting URI. Only
-that declaration is kept, so when the winning file stops declaring the
-name (the class is renamed, deleted, or the file is removed) the name
-becomes unresolvable even though the other file still declares it. The
-user sees "class not found" on a class that exists, until the surviving
-file happens to be re-parsed.</p>
-<p>Duplicate <em>functions</em> keep their runners-up in
-<code>SymbolIndex::duplicate_functions</code> and promote the next-lowest declarant
-when the winner withdraws, which is what classes need too. Classes are
-harder because two paths index them: <code>apply_ast_index_updates_batch</code> in
-<code>parser/ast_update.rs</code> (editor files) and <code>parse_and_cache_content</code> in
-<code>resolution.rs</code> (the lazily loaded vendor/stub path). Both would have to
-go through the same declare/withdraw helpers, or the runner-up record
-goes stale.</p>
-<p>While in there: the two paths already disagree about duplicates.
-<code>parse_and_cache_content</code> fills <code>fqn_uri_index</code> with <code>or_insert_with</code>
-(first write wins) but <code>fqn_class_index</code> with <code>insert</code> (last write
-wins), so for a duplicated name the URI go-to-definition jumps to and
-the <code>ClassInfo</code> its members are read from can describe different files.</p>
-<p><strong>Fix:</strong> give classes the same declare/withdraw treatment functions
-have, and route both indexing paths through it so the two class indexes
-cannot disagree.</p>
+<p>No outstanding items.</p>
 
 
 
