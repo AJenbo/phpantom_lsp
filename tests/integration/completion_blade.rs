@@ -448,6 +448,43 @@ async fn attribute_completion_does_not_fire_inside_an_attribute_value() {
     );
 }
 
+// ── Virtual-PHP completion edits translated back to Blade coordinates ───
+
+#[tokio::test]
+async fn an_include_view_name_edit_lands_on_the_directive_not_the_prologue() {
+    let composer = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
+    let (backend, _dir) = create_psr4_workspace(
+        composer,
+        &[
+            (
+                "resources/views/partials/header.blade.php",
+                "<div>header</div>",
+            ),
+            ("resources/views/page.blade.php", "@include('"),
+        ],
+    );
+    let root = backend.workspace_root().read().clone().unwrap();
+    let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+    let template = "@include('";
+    open_blade(&backend, &uri, template).await;
+
+    // `@include('` is lowered into the virtual PHP's prologue-shifted body,
+    // so an untranslated edit would land several lines below line 0.
+    let items = complete_typed(&backend, &uri, 0, 10).await;
+    let item = items
+        .iter()
+        .find(|i| i.label == "partials.header")
+        .unwrap_or_else(|| panic!("expected the partial view name, got: {:?}", labels(&items)));
+    let edit = match item.text_edit.as_ref().expect("no text edit") {
+        CompletionTextEdit::Edit(edit) => edit,
+        other => panic!("expected a plain edit, got {other:?}"),
+    };
+    assert_eq!(
+        edit.range.start.line, 0,
+        "the edit must land on the template's own line, not the virtual PHP prologue"
+    );
+}
+
 #[tokio::test]
 async fn a_closed_tag_leaves_completion_to_the_rest_of_the_pipeline() {
     let template = "<x-alert type=\"danger\" />\n@\n";

@@ -197,111 +197,120 @@ impl Backend {
         };
 
         if let Some(content) = content {
-            // Activate the chain resolution cache so that shared chain
-            // prefixes are resolved once and reused within this completion
-            // request.  The guard is re-entrant safe.
-            let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
-            let _resolver_guard =
-                crate::type_engine::call_resolution::activate_type_engine_caches();
-            let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
-                &self.resolved_class_cache,
-            );
+            let response = (|| -> Result<Option<CompletionResponse>> {
+                // Activate the chain resolution cache so that shared chain
+                // prefixes are resolved once and reused within this completion
+                // request.  The guard is re-entrant safe.
+                let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
+                let _resolver_guard =
+                    crate::type_engine::call_resolution::activate_type_engine_caches();
+                let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
+                    &self.resolved_class_cache,
+                );
 
-            // Gather per-file context (classes, use-map, namespace) in one
-            // call instead of three separate lock-and-unwrap blocks.
-            // Use the cursor offset for position-aware namespace resolution
-            // so that multi-namespace files resolve to the correct namespace.
-            let cursor_offset = crate::text_position::position_to_offset(&content, position);
-            let ctx = self.file_context_at(&uri, cursor_offset);
+                // Gather per-file context (classes, use-map, namespace) in one
+                // call instead of three separate lock-and-unwrap blocks.
+                // Use the cursor offset for position-aware namespace resolution
+                // so that multi-namespace files resolve to the correct namespace.
+                let cursor_offset = crate::text_position::position_to_offset(&content, position);
+                let ctx = self.file_context_at(&uri, cursor_offset);
 
-            // Scanning for a comment costs a pass over the file, so the answer
-            // is taken once and reused by the check below it.
-            let in_non_doc_comment =
-                crate::completion::comment_position::is_inside_non_doc_comment(&content, position);
+                // Scanning for a comment costs a pass over the file, so the answer
+                // is taken once and reused by the check below it.
+                let in_non_doc_comment =
+                    crate::completion::comment_position::is_inside_non_doc_comment(
+                        &content, position,
+                    );
 
-            if (in_non_doc_comment
-                || crate::completion::comment_position::is_inside_docblock(&content, position))
-                && let Some(prefix) =
-                    crate::phpstan_ignore::phpstan_ignore_code_prefix(&content, position)
-            {
-                return Ok(Some(self.complete_phpstan_ignore_code(&uri, &prefix)));
-            }
-
-            // ── Suppress completion inside non-doc comments ─────────
-            if in_non_doc_comment {
-                return Ok(None);
-            }
-
-            // ── PHPDoc block generation on `/**` ────────────────────
-            // When the user types `/**` above a declaration, generate
-            // a complete docblock skeleton as a single snippet item.
-            // Must run before the docblock-interior checks below.
-            {
-                let class_loader = self.class_loader(&ctx);
-                let function_loader = self.function_loader(&ctx);
-                if let Some(response) = crate::completion::phpdoc::generation::try_generate_docblock(
-                    &content,
-                    position,
-                    &ctx.use_map,
-                    &ctx.namespace,
-                    &ctx.classes,
-                    &class_loader,
-                    Some(self),
-                    Some(&function_loader),
-                ) {
-                    return Ok(Some(response));
+                if (in_non_doc_comment
+                    || crate::completion::comment_position::is_inside_docblock(&content, position))
+                    && let Some(prefix) =
+                        crate::phpstan_ignore::phpstan_ignore_code_prefix(&content, position)
+                {
+                    return Ok(Some(self.complete_phpstan_ignore_code(&uri, &prefix)));
                 }
-            }
 
-            // ── PHPDoc tag completion ────────────────────────────────
-            // Always short-circuits when an `@` prefix is detected
-            // inside a docblock — even when the item list is empty.
-            if let Some(prefix) =
-                crate::completion::phpdoc::extract_phpdoc_prefix(&content, position)
-            {
-                return Ok(Some(
-                    self.complete_phpdoc_tag(&content, &prefix, position, &ctx),
-                ));
-            }
-
-            // ── Docblock type / variable completion ─────────────────
-            // Always short-circuits when inside a docblock.
-            if crate::completion::comment_position::is_inside_docblock(&content, position) {
-                return Ok(self.complete_docblock_type_or_variable(&content, position, &ctx, &uri));
-            }
-
-            // ── Type hint completion in definitions ─────────────────
-            // Always short-circuits when a type-hint position is detected.
-            if let Some(th_ctx) = crate::completion::type_hint_completion::detect_type_hint_context(
-                &content, position,
-            ) {
-                return Ok(self.complete_type_hint(&content, &th_ctx, &ctx, position, &uri));
-            }
-
-            // ── Class-body root member completion ───────────────────
-            // At a new-member position with no modifier typed yet
-            // (e.g. `o` right inside a class body), offer overridable
-            // parent/interface/trait members with their full
-            // declarations plus member keywords, and suppress
-            // class/function/constant completions, which are invalid
-            // at this position.
-            //
-            // Runs before the modifier-anchored check below because that
-            // one scans backwards for `function`/`const` without skipping
-            // comments, so a docblock mentioning `const` above the cursor
-            // claims the position.  This check is lexical and only matches
-            // a bare identifier, so `public function ge|` and `const FO|`
-            // still fall through to it.
-            if let Some(items) =
-                self.try_class_root_member_completion(&uri, &content, position, &ctx)
-            {
-                if items.is_empty() {
+                // ── Suppress completion inside non-doc comments ─────────
+                if in_non_doc_comment {
                     return Ok(None);
                 }
-                return Ok(Some(CompletionResponse::Array(items)));
-            }
 
-            if crate::completion::context::override_completion::is_member_declaration_name_position_at_offset(
+                // ── PHPDoc block generation on `/**` ────────────────────
+                // When the user types `/**` above a declaration, generate
+                // a complete docblock skeleton as a single snippet item.
+                // Must run before the docblock-interior checks below.
+                {
+                    let class_loader = self.class_loader(&ctx);
+                    let function_loader = self.function_loader(&ctx);
+                    if let Some(response) =
+                        crate::completion::phpdoc::generation::try_generate_docblock(
+                            &content,
+                            position,
+                            &ctx.use_map,
+                            &ctx.namespace,
+                            &ctx.classes,
+                            &class_loader,
+                            Some(self),
+                            Some(&function_loader),
+                        )
+                    {
+                        return Ok(Some(response));
+                    }
+                }
+
+                // ── PHPDoc tag completion ────────────────────────────────
+                // Always short-circuits when an `@` prefix is detected
+                // inside a docblock — even when the item list is empty.
+                if let Some(prefix) =
+                    crate::completion::phpdoc::extract_phpdoc_prefix(&content, position)
+                {
+                    return Ok(Some(
+                        self.complete_phpdoc_tag(&content, &prefix, position, &ctx),
+                    ));
+                }
+
+                // ── Docblock type / variable completion ─────────────────
+                // Always short-circuits when inside a docblock.
+                if crate::completion::comment_position::is_inside_docblock(&content, position) {
+                    return Ok(
+                        self.complete_docblock_type_or_variable(&content, position, &ctx, &uri)
+                    );
+                }
+
+                // ── Type hint completion in definitions ─────────────────
+                // Always short-circuits when a type-hint position is detected.
+                if let Some(th_ctx) =
+                    crate::completion::type_hint_completion::detect_type_hint_context(
+                        &content, position,
+                    )
+                {
+                    return Ok(self.complete_type_hint(&content, &th_ctx, &ctx, position, &uri));
+                }
+
+                // ── Class-body root member completion ───────────────────
+                // At a new-member position with no modifier typed yet
+                // (e.g. `o` right inside a class body), offer overridable
+                // parent/interface/trait members with their full
+                // declarations plus member keywords, and suppress
+                // class/function/constant completions, which are invalid
+                // at this position.
+                //
+                // Runs before the modifier-anchored check below because that
+                // one scans backwards for `function`/`const` without skipping
+                // comments, so a docblock mentioning `const` above the cursor
+                // claims the position.  This check is lexical and only matches
+                // a bare identifier, so `public function ge|` and `const FO|`
+                // still fall through to it.
+                if let Some(items) =
+                    self.try_class_root_member_completion(&uri, &content, position, &ctx)
+                {
+                    if items.is_empty() {
+                        return Ok(None);
+                    }
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+
+                if crate::completion::context::override_completion::is_member_declaration_name_position_at_offset(
                 &content,
                 cursor_offset as usize,
             ) {
@@ -313,240 +322,263 @@ impl Backend {
                 return Ok(None);
             }
 
-            // ── Named argument completion (collected, not short-circuited) ──
-            // Named arg items are always valid alongside normal
-            // completions, so collect them here and merge them into
-            // whatever strategy wins below.
-            let named_arg_items = self.collect_named_arg_items(&uri, &content, position, &ctx);
+                // ── Named argument completion (collected, not short-circuited) ──
+                // Named arg items are always valid alongside normal
+                // completions, so collect them here and merge them into
+                // whatever strategy wins below.
+                let named_arg_items = self.collect_named_arg_items(&uri, &content, position, &ctx);
 
-            // ── String context detection ────────────────────────────
-            // Classify once and use throughout the remaining pipeline.
-            let string_ctx =
-                crate::completion::comment_position::classify_string_context(&content, position);
-            use crate::completion::comment_position::StringContext;
+                // ── String context detection ────────────────────────────
+                // Classify once and use throughout the remaining pipeline.
+                let string_ctx = crate::completion::comment_position::classify_string_context(
+                    &content, position,
+                );
+                use crate::completion::comment_position::StringContext;
 
-            // ── Cursor's lexical position ───────────────────────────
-            // Resolving it is a forward pass over the file, and every
-            // string-argument strategy below needs the same answer (the
-            // literal being typed in, and the brackets around it), so the
-            // scan runs once here and is shared rather than repeated per
-            // strategy on every keystroke.
-            let code_ctx = crate::completion::source::code_context::code_context_at(
-                &content,
-                cursor_offset as usize,
-            );
-            // ── Array shape key completion ───────────────────────────
-            // Runs before `InStringLiteral` suppression because in
-            // normal code `$arr['` puts the scanner inside a
-            // single-quoted string, yet array shape completion is
-            // designed to work there.  Skip only in simple
-            // interpolation: `"$arr['key']"` does NOT perform array
-            // access in PHP (only `"{$arr['key']}"` does).
-            if !matches!(string_ctx, StringContext::SimpleInterpolation)
-                && let Some(response) = self.try_array_shape_completion(&content, position, &ctx)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── Laravel string key completion (route/config/view/trans) ──
-            // Inside `route('|')`, `config('|')`, `view('|')`, `__('|')`,
-            // etc., offer matching key names from the project.
-            // NB: `is_laravel` is extracted to a `let` so the read lock
-            // on `resolved_class_cache` is dropped before calling
-            // `try_laravel_string_key_completion`, which may trigger
-            // `ensure_workspace_indexed` → `update_ast` → write lock.
-            let is_laravel = self.resolved_class_cache.read().is_laravel();
-            if is_laravel
-                && matches!(
-                    string_ctx,
-                    StringContext::InStringLiteral | StringContext::NotInString
-                )
-                && let Some(response) = self.try_laravel_string_key_completion(&content, position)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── Route parameter completion ──────────────────────────
-            // The keys of `route('users.show', ['|' => 1])` are the URI
-            // parameters of the named route.
-            if is_laravel
-                && matches!(
-                    string_ctx,
-                    StringContext::InStringLiteral | StringContext::NotInString
-                )
-                && let Some(code) = code_ctx.as_ref()
-                && let Some(response) = self.try_route_param_completion(&content, position, code)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── Artisan command parameter completion ────────────────
-            // `$this->argument('|')` / `$this->option('|')` against the
-            // enclosing command's own signature, and array keys of
-            // `Artisan::call('cmd', ['|' => ...])`.
-            if is_laravel
-                && matches!(
-                    string_ctx,
-                    StringContext::InStringLiteral | StringContext::NotInString
-                )
-                && let Some(code) = code_ctx.as_ref()
-                && let Some(response) = self.try_command_param_completion(&content, position, code)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── Eloquent relation/column string completion ──────────
-            // Like array shape completion, this triggers inside string
-            // literals where the cursor is in a method argument position
-            // for an Eloquent method that accepts relation or column names.
-            if matches!(
-                string_ctx,
-                StringContext::InStringLiteral | StringContext::NotInString
-            ) && let Some(code) = code_ctx.as_ref()
-                && let Some(response) =
-                    self.try_eloquent_string_completion(&content, position, &ctx, code)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── model-property<Model> string completion ────────────
-            // When the cursor is inside a string argument whose
-            // parameter is typed as `model-property<Model>`, suggest
-            // the model's known property names.
-            if matches!(
-                string_ctx,
-                StringContext::InStringLiteral | StringContext::NotInString
-            ) && let Some(code) = code_ctx.as_ref()
-                && let Some(response) =
-                    self.try_model_property_completion(&content, position, &ctx, code)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── Request input key completion ────────────────────────
-            // `$request->input('|')`, `->has('|')`, `$request['|']`, …
-            // offer the field names the validation rules in scope define.
-            // Runs after the Eloquent strategies because `has()` is also a
-            // relation method: a Builder subject resolves there first, and
-            // only a request-typed subject falls through to here.
-            if is_laravel
-                && matches!(
-                    string_ctx,
-                    StringContext::InStringLiteral | StringContext::NotInString
-                )
-                && let Some(code) = code_ctx.as_ref()
-                && let Some(response) =
-                    self.try_request_input_key_completion(&uri, &content, position, &ctx, code)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── Laravel route controller method completion ─────────
-            // Inside `Route::controller(X::class)->group(fn(){…})`,
-            // the 2nd argument string of Route::get/post/patch/… is a
-            // controller method name.
-            if matches!(
-                string_ctx,
-                StringContext::InStringLiteral | StringContext::NotInString
-            ) && let Some(response) =
-                self.try_laravel_route_controller_completion(&uri, &content, position, &ctx)
-            {
-                return Ok(Some(response));
-            }
-
-            // ── Array callable method completion ────────────────────
-            // Like array shape and Eloquent string completion, this
-            // triggers inside string literals — specifically the
-            // method-name string in `[Class::class, 'method']`.
-            if matches!(
-                string_ctx,
-                StringContext::InStringLiteral | StringContext::NotInString
-            ) && let Some(response) =
-                self.try_array_callable_completion(&uri, &content, position, &ctx)
-            {
-                return Ok(Some(response));
-            }
-
-            if matches!(string_ctx, StringContext::InStringLiteral) {
-                return Ok(None);
-            }
-
-            // ── Member access completion (-> or ::) ─────────────────
-            if let Some(response) = self.try_member_access_completion(
-                &uri,
-                &content,
-                position,
-                &ctx,
-                completion_context.as_ref(),
-            ) {
-                // In simple interpolation (`"$var->"`), PHP only allows
-                // property access — method calls and constants are
-                // syntax errors.  Filter to properties only.
-                if matches!(string_ctx, StringContext::SimpleInterpolation) {
-                    let filtered = match response {
-                        CompletionResponse::Array(items) => items
-                            .into_iter()
-                            .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-                            .collect(),
-                        CompletionResponse::List(list) => list
-                            .items
-                            .into_iter()
-                            .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-                            .collect(),
-                    };
-                    return Ok(Some(CompletionResponse::Array(filtered)));
+                // ── Cursor's lexical position ───────────────────────────
+                // Resolving it is a forward pass over the file, and every
+                // string-argument strategy below needs the same answer (the
+                // literal being typed in, and the brackets around it), so the
+                // scan runs once here and is shared rather than repeated per
+                // strategy on every keystroke.
+                let code_ctx = crate::completion::source::code_context::code_context_at(
+                    &content,
+                    cursor_offset as usize,
+                );
+                // ── Array shape key completion ───────────────────────────
+                // Runs before `InStringLiteral` suppression because in
+                // normal code `$arr['` puts the scanner inside a
+                // single-quoted string, yet array shape completion is
+                // designed to work there.  Skip only in simple
+                // interpolation: `"$arr['key']"` does NOT perform array
+                // access in PHP (only `"{$arr['key']}"` does).
+                if !matches!(string_ctx, StringContext::SimpleInterpolation)
+                    && let Some(response) =
+                        self.try_array_shape_completion(&content, position, &ctx)
+                {
+                    return Ok(Some(response));
                 }
-                return Ok(Some(response));
-            }
 
-            // ── Variable name completion ────────────────────────────
-            // Placed before the interpolation guard so that `"$`
-            // and `"{$` both offer variable suggestions.
-            if let Some(response) = self.try_variable_name_completion(&content, position, &uri) {
-                return Ok(Some(response));
-            }
+                // ── Laravel string key completion (route/config/view/trans) ──
+                // Inside `route('|')`, `config('|')`, `view('|')`, `__('|')`,
+                // etc., offer matching key names from the project.
+                // NB: `is_laravel` is extracted to a `let` so the read lock
+                // on `resolved_class_cache` is dropped before calling
+                // `try_laravel_string_key_completion`, which may trigger
+                // `ensure_workspace_indexed` → `update_ast` → write lock.
+                let is_laravel = self.resolved_class_cache.read().is_laravel();
+                if is_laravel
+                    && matches!(
+                        string_ctx,
+                        StringContext::InStringLiteral | StringContext::NotInString
+                    )
+                    && let Some(response) =
+                        self.try_laravel_string_key_completion(&content, position)
+                {
+                    return Ok(Some(response));
+                }
 
-            // Inside any interpolation context the only useful
-            // completions are variable names and member access (handled
-            // above).  Suppress the remaining completion strategies so
-            // class names, catch clauses, etc. don't leak into strings.
-            if matches!(
-                string_ctx,
-                StringContext::SimpleInterpolation | StringContext::BraceInterpolation
-            ) {
-                return Ok(None);
-            }
+                // ── Route parameter completion ──────────────────────────
+                // The keys of `route('users.show', ['|' => 1])` are the URI
+                // parameters of the named route.
+                if is_laravel
+                    && matches!(
+                        string_ctx,
+                        StringContext::InStringLiteral | StringContext::NotInString
+                    )
+                    && let Some(code) = code_ctx.as_ref()
+                    && let Some(response) =
+                        self.try_route_param_completion(&content, position, code)
+                {
+                    return Ok(Some(response));
+                }
 
-            // ── Smart catch clause completion ───────────────────────
-            if let Some(response) = self.try_catch_completion(&content, position, &ctx, &uri) {
-                return Ok(Some(merge_named_args_into_response(
-                    response,
-                    named_arg_items,
-                )));
-            }
+                // ── Artisan command parameter completion ────────────────
+                // `$this->argument('|')` / `$this->option('|')` against the
+                // enclosing command's own signature, and array keys of
+                // `Artisan::call('cmd', ['|' => ...])`.
+                if is_laravel
+                    && matches!(
+                        string_ctx,
+                        StringContext::InStringLiteral | StringContext::NotInString
+                    )
+                    && let Some(code) = code_ctx.as_ref()
+                    && let Some(response) =
+                        self.try_command_param_completion(&content, position, code)
+                {
+                    return Ok(Some(response));
+                }
 
-            // ── Class declaration name completion ───────────────────
-            // When declaring a new class/interface/trait/enum, suggest
-            // the filename (without extension) as the class name.
-            if let Some(response) = self.try_class_declaration_completion(&uri, &content, position)
-            {
-                return Ok(Some(response));
-            }
+                // ── Eloquent relation/column string completion ──────────
+                // Like array shape completion, this triggers inside string
+                // literals where the cursor is in a method argument position
+                // for an Eloquent method that accepts relation or column names.
+                if matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                ) && let Some(code) = code_ctx.as_ref()
+                    && let Some(response) =
+                        self.try_eloquent_string_completion(&content, position, &ctx, code)
+                {
+                    return Ok(Some(response));
+                }
 
-            // ── Class name + constant + function completion ─────────
-            if let Some(response) =
-                self.try_class_constant_function_completion(&content, position, &ctx, &uri)
-            {
-                return Ok(Some(merge_named_args_into_response(
-                    response,
-                    named_arg_items,
-                )));
-            }
+                // ── model-property<Model> string completion ────────────
+                // When the cursor is inside a string argument whose
+                // parameter is typed as `model-property<Model>`, suggest
+                // the model's known property names.
+                if matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                ) && let Some(code) = code_ctx.as_ref()
+                    && let Some(response) =
+                        self.try_model_property_completion(&content, position, &ctx, code)
+                {
+                    return Ok(Some(response));
+                }
 
-            // No strategy matched, but we may still have named arg items.
-            if !named_arg_items.is_empty() {
-                return Ok(Some(CompletionResponse::Array(named_arg_items)));
-            }
+                // ── Request input key completion ────────────────────────
+                // `$request->input('|')`, `->has('|')`, `$request['|']`, …
+                // offer the field names the validation rules in scope define.
+                // Runs after the Eloquent strategies because `has()` is also a
+                // relation method: a Builder subject resolves there first, and
+                // only a request-typed subject falls through to here.
+                if is_laravel
+                    && matches!(
+                        string_ctx,
+                        StringContext::InStringLiteral | StringContext::NotInString
+                    )
+                    && let Some(code) = code_ctx.as_ref()
+                    && let Some(response) =
+                        self.try_request_input_key_completion(&uri, &content, position, &ctx, code)
+                {
+                    return Ok(Some(response));
+                }
+
+                // ── Laravel route controller method completion ─────────
+                // Inside `Route::controller(X::class)->group(fn(){…})`,
+                // the 2nd argument string of Route::get/post/patch/… is a
+                // controller method name.
+                if matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                ) && let Some(response) =
+                    self.try_laravel_route_controller_completion(&uri, &content, position, &ctx)
+                {
+                    return Ok(Some(response));
+                }
+
+                // ── Array callable method completion ────────────────────
+                // Like array shape and Eloquent string completion, this
+                // triggers inside string literals — specifically the
+                // method-name string in `[Class::class, 'method']`.
+                if matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                ) && let Some(response) =
+                    self.try_array_callable_completion(&uri, &content, position, &ctx)
+                {
+                    return Ok(Some(response));
+                }
+
+                if matches!(string_ctx, StringContext::InStringLiteral) {
+                    return Ok(None);
+                }
+
+                // ── Member access completion (-> or ::) ─────────────────
+                if let Some(response) = self.try_member_access_completion(
+                    &uri,
+                    &content,
+                    position,
+                    &ctx,
+                    completion_context.as_ref(),
+                ) {
+                    // In simple interpolation (`"$var->"`), PHP only allows
+                    // property access — method calls and constants are
+                    // syntax errors.  Filter to properties only.
+                    if matches!(string_ctx, StringContext::SimpleInterpolation) {
+                        let filtered = match response {
+                            CompletionResponse::Array(items) => items
+                                .into_iter()
+                                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                                .collect(),
+                            CompletionResponse::List(list) => list
+                                .items
+                                .into_iter()
+                                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                                .collect(),
+                        };
+                        return Ok(Some(CompletionResponse::Array(filtered)));
+                    }
+                    return Ok(Some(response));
+                }
+
+                // ── Variable name completion ────────────────────────────
+                // Placed before the interpolation guard so that `"$`
+                // and `"{$` both offer variable suggestions.
+                if let Some(response) = self.try_variable_name_completion(&content, position, &uri)
+                {
+                    return Ok(Some(response));
+                }
+
+                // Inside any interpolation context the only useful
+                // completions are variable names and member access (handled
+                // above).  Suppress the remaining completion strategies so
+                // class names, catch clauses, etc. don't leak into strings.
+                if matches!(
+                    string_ctx,
+                    StringContext::SimpleInterpolation | StringContext::BraceInterpolation
+                ) {
+                    return Ok(None);
+                }
+
+                // ── Smart catch clause completion ───────────────────────
+                if let Some(response) = self.try_catch_completion(&content, position, &ctx, &uri) {
+                    return Ok(Some(merge_named_args_into_response(
+                        response,
+                        named_arg_items,
+                    )));
+                }
+
+                // ── Class declaration name completion ───────────────────
+                // When declaring a new class/interface/trait/enum, suggest
+                // the filename (without extension) as the class name.
+                if let Some(response) =
+                    self.try_class_declaration_completion(&uri, &content, position)
+                {
+                    return Ok(Some(response));
+                }
+
+                // ── Class name + constant + function completion ─────────
+                if let Some(response) =
+                    self.try_class_constant_function_completion(&content, position, &ctx, &uri)
+                {
+                    return Ok(Some(merge_named_args_into_response(
+                        response,
+                        named_arg_items,
+                    )));
+                }
+
+                // No strategy matched, but we may still have named arg items.
+                if !named_arg_items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(named_arg_items)));
+                }
+
+                Ok(None)
+            })()?;
+
+            // A Blade file was swapped to its virtual PHP content and
+            // position above, so any item carrying a `TextEdit` names a
+            // position in the virtual file, not one the editor's buffer
+            // has — translate it back, dropping items whose range falls in
+            // the injected prologue rather than clamping them to the
+            // template's start.
+            return Ok(match response {
+                Some(response) if self.is_blade_file(&uri) => {
+                    Some(self.translate_completion_response(&uri, response))
+                }
+                other => other,
+            });
         }
 
         Ok(None)

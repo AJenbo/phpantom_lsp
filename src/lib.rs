@@ -1924,6 +1924,71 @@ impl Backend {
         })
     }
 
+    /// Translate one completion item's edit ranges from virtual PHP
+    /// coordinates back to Blade, dropping the item if any range falls in
+    /// the injected prologue.
+    fn translate_completion_item(
+        &self,
+        uri: &str,
+        mut item: tower_lsp::lsp_types::CompletionItem,
+    ) -> Option<tower_lsp::lsp_types::CompletionItem> {
+        use tower_lsp::lsp_types::CompletionTextEdit;
+
+        if let Some(edit) = item.text_edit.take() {
+            item.text_edit = Some(match edit {
+                CompletionTextEdit::Edit(mut e) => {
+                    e.range = self.try_translate_blade_range(uri, e.range)?;
+                    CompletionTextEdit::Edit(e)
+                }
+                CompletionTextEdit::InsertAndReplace(mut e) => {
+                    e.insert = self.try_translate_blade_range(uri, e.insert)?;
+                    e.replace = self.try_translate_blade_range(uri, e.replace)?;
+                    CompletionTextEdit::InsertAndReplace(e)
+                }
+            });
+        }
+
+        if let Some(edits) = item.additional_text_edits.take() {
+            let mut translated = Vec::with_capacity(edits.len());
+            for mut e in edits {
+                e.range = self.try_translate_blade_range(uri, e.range)?;
+                translated.push(e);
+            }
+            item.additional_text_edits = Some(translated);
+        }
+
+        Some(item)
+    }
+
+    /// Translate every completion item in a response from virtual PHP
+    /// coordinates back to Blade, dropping items whose edits target the
+    /// preprocessor's injected prologue rather than clamping them to the
+    /// start of the template.
+    pub(crate) fn translate_completion_response(
+        &self,
+        uri: &str,
+        response: tower_lsp::lsp_types::CompletionResponse,
+    ) -> tower_lsp::lsp_types::CompletionResponse {
+        use tower_lsp::lsp_types::{CompletionList, CompletionResponse};
+
+        match response {
+            CompletionResponse::Array(items) => CompletionResponse::Array(
+                items
+                    .into_iter()
+                    .filter_map(|item| self.translate_completion_item(uri, item))
+                    .collect(),
+            ),
+            CompletionResponse::List(list) => CompletionResponse::List(CompletionList {
+                is_incomplete: list.is_incomplete,
+                items: list
+                    .items
+                    .into_iter()
+                    .filter_map(|item| self.translate_completion_item(uri, item))
+                    .collect(),
+            }),
+        }
+    }
+
     /// Translate a location from virtual PHP coordinates back to original Blade
     /// coordinates if the location points into a Blade file.
     pub(crate) fn translate_location(
