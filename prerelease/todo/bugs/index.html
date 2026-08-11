@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B76. <code>{@see method()}</code> unqualified inside its own class resolves as a global function
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B76. <code>{@see method()}</code> unqualified inside its own class resolves as a global function
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1349,29 +1277,7 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function">B76. <code>{@see method()}</code> unqualified inside its own class resolves as a global function<a class="headerlink" href="#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p><code>@see</code> (and presumably <code>@link</code>/<code>@uses</code>) resolves a bare <code>name()</code> reference by
-looking up a global function, never checking whether the enclosing class
-declares a method of that name. A docblock on a class that implements an
-interface, referring to one of its own unqualified methods, gets
-"Function 'name' not found" instead of resolving to the method:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * ... {@see covers()} draws that line ...</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> */</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">final class QodanaChecker implements CoverageAware</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">{</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    public function covers(TestCase $testCase): bool { ... }</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>phpDocumentor and PHPStorm both resolve a bare <code>name()</code> in <code>@see</code> against the
-enclosing class's own members before falling back to a global function, which
-is the convention this pattern relies on (see
-<code>conformance/src/Checker/QodanaChecker.php</code> and <code>CoverageAware.php</code> in the
-php-typing-conformance corpus for a real instance). Fix: when resolving an
-<code>@see</code>-family reference, check the containing class's members (own, then
-inherited) for a matching method/property/constant before falling back to a
-global function/constant lookup.</p>
+<p>No outstanding items.</p>
 
 
 
