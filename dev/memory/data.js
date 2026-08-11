@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786417996526,
+  "lastUpdate": 1786418914041,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18427,6 +18427,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "58940964852fcdfb480ae2cc822fcc8d7d9f43f5",
+          "message": "A generic class named without its type arguments no longer hands back\nits own template parameter",
+          "timestamp": "2026-08-11T05:10:47+02:00",
+          "tree_id": "38747fa3b949fb88802986774ec40d04bd8cb575",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/58940964852fcdfb480ae2cc822fcc8d7d9f43f5"
+        },
+        "date": 1786418908090,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.5,
             "unit": "MiB"
           }
         ]
