@@ -838,17 +838,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b2-a-template-bound-from-several-parameters-is-checked-one-argument-against-another" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A template bound from several parameters is checked one argument against another
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1327,17 +1316,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b2-a-template-bound-from-several-parameters-is-checked-one-argument-against-another" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A template bound from several parameters is checked one argument against another
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1391,36 +1369,6 @@ Break the tie on a stable key (scan order, then path) when a duplicate
 function declaration is inserted, so the same project always produces
 the same symbol table. Duplicate class declarations go through the same
 index and should be checked for the same race while in there.</p>
-<hr />
-<h2 id="b2-a-template-bound-from-several-parameters-is-checked-one-argument-against-another">B2. A template bound from several parameters is checked one argument against another<a class="headerlink" href="#b2-a-template-bound-from-several-parameters-is-checked-one-argument-against-another" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p><code>self_bound_template_params</code> deliberately skips the argument check only
-for a <code>@template</code> parameter with exactly one binding site, on the
-grounds that a template bound from several parameters "still carries a
-real independent check". It does not: the substitution keeps the type
-from one binding site (unioning it with the others where the binding
-mode remembers to, and overwriting it where it does not), so every other
-argument is then measured against a type taken from one of its
-siblings.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * @template T</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> * @param T[] $first</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x"> * @param T[] $second</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x"> */</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">function combine(array $first, array $second): void {}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">// Argument 1 ($first) expects array&lt;string&gt;, got list&lt;int&gt;</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">combine([1, 2], [&#39;a&#39;, &#39;b&#39;]);</span>
-</code></pre></div>
-<p><code>T</code> is bound to <code>string</code> from the second argument, and the first is then
-reported for not being one. PHPStan infers <code>T</code> as the union of every
-binding site and reports nothing here.</p>
-<p><strong>Fix:</strong> union at every binding site in <code>build_function_template_subs</code>.
-The direct, callable and class-string modes already do; the array
-literal and array-position branches of <code>GenericWrapper</code> and
-<code>ArrayElement</code> still overwrite, so a multi-bound template resolves to
-whichever argument was resolved last rather than to what all of them
-have in common.</p>
 
 
 
