@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786412923135,
+  "lastUpdate": 1786414210471,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18291,6 +18291,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2dd4eb7b9bb1fe74a69aa2e58e55d3093a1ff49c",
+          "message": "`analyze` and `fix` no longer silently drop a `PATH` argument typed\nrelative to the working directory",
+          "timestamp": "2026-08-11T03:53:13+02:00",
+          "tree_id": "4dc02449e6b1d3e1e78a3f9d319f3211439e65c1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2dd4eb7b9bb1fe74a69aa2e58e55d3093a1ff49c"
+        },
+        "date": 1786414205859,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.6,
             "unit": "MiB"
           }
         ]
