@@ -894,10 +894,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally" class="md-nav__link">
+  <a href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B77. An unrecognized PHPDoc pseudo-type spelling is treated as a class name and enforced literally
+        B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape
       </span>
     </span>
   </a>
@@ -905,10 +905,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" class="md-nav__link">
+  <a href="#b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape
+        B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B80. A same-named user class loses to a pseudo-type keyword
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B81. <code>key-of&lt;T&gt;</code> widens to the bound array instead of the argument's own shape
       </span>
     </span>
   </a>
@@ -1449,10 +1471,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally" class="md-nav__link">
+  <a href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B77. An unrecognized PHPDoc pseudo-type spelling is treated as a class name and enforced literally
+        B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape
       </span>
     </span>
   </a>
@@ -1460,10 +1482,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" class="md-nav__link">
+  <a href="#b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape
+        B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B80. A same-named user class loses to a pseudo-type keyword
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B81. <code>key-of&lt;T&gt;</code> widens to the bound array instead of the argument's own shape
       </span>
     </span>
   </a>
@@ -1500,7 +1544,11 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
+<p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
+scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
+each bug's row lives in the current sprint/backlog.</p>
 <h3 id="b71-completion-in-a-blade-template-edits-the-virtual-phps-coordinates">B71. Completion in a Blade template edits the virtual PHP's coordinates<a class="headerlink" href="#b71-completion-in-a-blade-template-edits-the-virtual-phps-coordinates" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
 <p>A completion item that carries a <code>TextEdit</code> puts the range it computed on
 <code>content</code>, and for a <code>.blade.php</code> file <code>handle_completion</code> swaps <code>content</code>
 for the preprocessed virtual PHP. Nothing translates the range back on the
@@ -1520,6 +1568,7 @@ the <code>use</code> statement an imported class name inserts.</p>
 range falls in the injected prologue rather than clamping it to the start
 of the template.</p>
 <h3 id="b72-a-generic-class-named-without-its-arguments-returns-its-own-template-parameter">B72. A generic class named without its arguments returns its own template parameter<a class="headerlink" href="#b72-a-generic-class-named-without-its-arguments-returns-its-own-template-parameter" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>A subject written with no template arguments — a <code>@var ItemCollection $items</code>
 docblock, a parameter or return type spelled without generics, anything that
 names the class rather than instantiating it — resolves a member's
@@ -1541,6 +1590,7 @@ project that types a variable by a bare collection class hits it.</p>
 declared without one, so the type is the widest thing the declaration
 guarantees rather than a name nothing can resolve.</p>
 <h3 id="b73-narrowing-survives-a-reassignment-of-the-subjects-base-variable">B73. Narrowing survives a reassignment of the subject's base variable<a class="headerlink" href="#b73-narrowing-survives-a-reassignment-of-the-subjects-base-variable" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>The narrowing re-walk in <code>apply_property_narrowing</code> looks for a check on a
 subject path anywhere in the enclosing body and applies it at the cursor.
 It reads conditions only, so an assignment between the check and the use is
@@ -1562,6 +1612,7 @@ alike, since both resolve through the same re-walk.</p>
 between the check and the cursor, rather than making the fall-through
 conditional on which consumer is asking.</p>
 <h3 id="b74-analyze-format-json-prints-a-prose-note-ahead-of-the-payload">B74. <code>analyze --format json</code> prints a prose note ahead of the payload<a class="headerlink" href="#b74-analyze-format-json-prints-a-prose-note-ahead-of-the-payload" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
 <p>A project root without a <code>composer.json</code> makes <code>run_analysis</code> print
 <code>Note: no composer.json found in … — analysing as a plain PHP project.</code>
 on stdout before anything else, regardless of <code>--format</code>. Under
@@ -1577,6 +1628,7 @@ the payload out by brace-matching:</p>
 formats. Fix: write the note to stderr, so stdout carries only the payload
 the format promises.</p>
 <h3 id="b75-a-path-that-does-not-exist-is-reported-as-no-php-files-found-with-exit-0">B75. A path that does not exist is reported as "No PHP files found" with exit 0<a class="headerlink" href="#b75-a-path-that-does-not-exist-is-reported-as-no-php-files-found-with-exit-0" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
 <p><code>analyze</code> resolves a relative <code>PATH</code> against <code>--project-root</code> rather than
 the working directory, and a path that resolves nowhere produces
 <code>No PHP files found.</code> and exit code 0 — the same answer as a clean run of
@@ -1593,6 +1645,7 @@ CLI does, and what a shell tab-completion produces), and a path that
 resolves nowhere should be an error on stderr with a non-zero exit
 distinct from 1 (which already means "diagnostics found").</p>
 <h3 id="b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function">B76. <code>{@see method()}</code> unqualified inside its own class resolves as a global function<a class="headerlink" href="#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>@see</code> (and presumably <code>@link</code>/<code>@uses</code>) resolves a bare <code>name()</code> reference by
 looking up a global function, never checking whether the enclosing class
 declares a method of that name. A docblock on a class that implements an
@@ -1614,74 +1667,23 @@ php-typing-conformance corpus for a real instance). Fix: when resolving an
 <code>@see</code>-family reference, check the containing class's members (own, then
 inherited) for a matching method/property/constant before falling back to a
 global function/constant lookup.</p>
-<h3 id="b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally">B77. An unrecognized PHPDoc pseudo-type spelling is treated as a class name and enforced literally<a class="headerlink" href="#b77-an-unrecognized-phpdoc-pseudo-type-spelling-is-treated-as-a-class-name-and-enforced-literally" title="Permanent link">&para;</a></h3>
-<p>When the docblock parser meets a lowercase-hyphenated pseudo-type
-spelling it doesn't have a keyword for — <code>value-of&lt;T&gt;</code>, <code>literal-int</code>,
-<code>stringable-object</code>, <code>pure-callable</code>, and likely every other
-<code>phpdoc_advanced_fallback_*</code>/<code>phpdoc_advanced_psalm_*</code> spelling in the
-php-typing-conformance corpus that isn't already a recognized keyword —
-it falls through to the same path as an unresolved class name: it gets
-namespace-qualified against the file's own namespace and then used
-verbatim as the declared type, so every call site is checked against a
-type that can never match anything.</p>
-<p>The result is not "not implemented" (an honest, expected outcome the
-conformance suite explicitly does not treat as a defect) but active
-false positives on entirely valid code, alongside missed detection of
-the actually-invalid cases, which then get the same generic message as
-the false positives:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @return value-of&lt;array{a: int, b: int}&gt; */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function returnsValue(): int { return 1; }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">// reported: &quot;Return type 1 is incompatible with declared return type</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">//            value-of&lt;array{a: int, b: int}&gt;&quot; — false positive, 1 IS a value-of</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">/** @param value-of&lt;array{a: int, b: int}&gt; $value */</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">function acceptsValue($value): void {}</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">acceptsValue(1);   // false positive: &quot;expects value-of&lt;...&gt;, got 1&quot;</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">acceptsValue(&#39;x&#39;); // should report this — instead gets the identical generic message</span>
-</code></pre></div>
-<p><code>key-of&lt;T&gt;</code> shows the same shape but partially recognizes the syntax
-(the type prints as <code>key-of&lt;array{...}&gt;</code> rather than being
-namespace-qualified into a bogus class), so the parser has <em>started</em>
-handling it, but nothing expands it to the union of the shape's
-literal keys before enforcement runs — the effect on call sites is
-identical.</p>
-<p>Reproduced in <code>php-typing-conformance/conformance/tests/</code>:
-<code>phpdoc_advanced_fallback_value_of.php</code>,
-<code>phpdoc_advanced_fallback_key_of.php</code>,
-<code>phpdoc_advanced_psalm_literal_int.php</code>,
-<code>phpdoc_advanced_psalm_stringable_object.php</code>,
-<code>phpdoc_advanced_fallback_pure_callable.php</code>,
-<code>phpdoc_advanced_fallback_decimal_int_string.php</code>,
-<code>phpdoc_advanced_fallback_non_decimal_int_string.php</code>,
-<code>phpdoc_advanced_psalm_arraylike_object.php</code>. DEVSENSE (measured as <code>phpy</code>
-in that suite) recognizes every one of these; it's the tool our own
-diagnostics diverge from most sharply on this specific failure mode.</p>
-<p>This violates the "no diagnostic suppression" principle in the
-opposite direction: an unrecognized spelling must degrade to "not
-recognized" (skip enforcement, and for docblock type positions ideally
-fall back to <code>mixed</code>, the way B72 substitutes a <code>@template</code> bound),
-never to "treat the spelling as if it were a class and enforce it
-literally." Fix at the type-string parser
-(<code>src/docblock/type_strings.rs</code> / <code>src/php_type/parse.rs</code>): a
-pseudo-type spelling with no matching keyword and no matching class
-must resolve to <code>mixed</code>, not to a synthesized class-like type name, and
-<code>key-of</code>/<code>value-of</code> need their expansion (to the shape's key union /
-value union) wired in before enforcement, not just accepted as syntax.</p>
 <h3 id="b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape">B78. <code>object{prop: Type}</code> shapes never match a concrete class, even when it satisfies the shape<a class="headerlink" href="#b78-objectprop-type-shapes-never-match-a-concrete-class-even-when-it-satisfies-the-shape" title="Permanent link">&para;</a></h3>
-<p>Unlike B77's cluster, <code>object{foo: int}</code> is correctly parsed and printed —
-it isn't mistaken for a class name. But nothing checks a concrete class or
+<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
+<p><code>object{foo: int}</code> is correctly parsed and printed — it isn't mistaken for a
+class name the way an unmodelled pseudo-type spelling used to be. But nothing
+checks a concrete class or
 anonymous object against the shape structurally: every object argument is
 rejected, including ones that satisfy it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class Reading {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    public int $foo = 1;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">}</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">/** @param object{foo: int} $shape */</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">function takesObjectShape(object $shape): void {}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">takesObjectShape(new Reading());        // false positive: Reading has `foo: int`</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">takesObjectShape((object) [&#39;foo&#39; =&gt; 1]); // false positive: an anonymous stdClass with `foo: int`</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">takesObjectShape(new Mistyped());        // correctly invalid ($foo is string) — reported for the wrong reason</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">final class Reading {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    public int $foo = 1;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">}</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">/** @param object{foo: int} $shape */</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">function takesObjectShape(object $shape): void {}</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">takesObjectShape(new Reading());        // false positive: Reading has `foo: int`</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">takesObjectShape((object) [&#39;foo&#39; =&gt; 1]); // false positive: an anonymous stdClass with `foo: int`</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">takesObjectShape(new Mistyped());        // correctly invalid ($foo is string) — reported for the wrong reason</span>
 </code></pre></div>
 <p>All three calls get the same generic "expects <code>object{foo: int}</code>, got X"
 message, so the two valid calls and the one genuinely invalid call are
@@ -1699,6 +1701,105 @@ optional) instead of falling through to nominal comparison. Likely lives
 next to whatever <code>is_type_compatible</code> (see T32) already does for array
 shapes against array literals — object shapes need the same treatment
 against object literals and named classes.</p>
+<h3 id="b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved">B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved<a class="headerlink" href="#b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Effort: Medium-High</strong></p>
+<p><code>find_member_references</code> scopes candidates to the target method's class
+hierarchy — but only when the receiver's type resolves. When
+<code>resolve_subject_to_fqns</code> comes back empty (an untyped property, an
+unannotated parameter, anything the forward walker can't pin down),
+<code>unresolved_member_subject_matches_scope</code> takes over, and it isn't a type
+check at all: it takes the receiver's <em>variable name</em> (<code>$context</code> →
+<code>context</code>), normalizes it, and checks whether it textually matches the
+<em>short name</em> of any class in the hierarchy (<code>Context</code> → <code>context</code>, plus a
+couple of <code>Repository</code>/<code>Gateway</code>/<code>Repo</code> suffix variants). Any call
+<code>$context-&gt;getAll()</code> anywhere in the project counts as a reference to
+<code>Context::getAll()</code> once the receiver's type can't be resolved, regardless
+of what <code>$context</code> actually holds — a <code>SymfonyContext</code>, an array, an
+unrelated class that also happens to get assigned to a same-named
+variable.</p>
+<p>This is precisely the failure mode php-typing-conformance's LSP survey is
+built to surface: <code>conformance/lsp/navigation.toml</code> plants same-named
+decoy methods across the psysh checkout specifically so that "a large
+extra count is how name-matching reference implementations become
+visible" (<code>ProbeGrading::navigation()</code>'s own docblock). Our result for
+<code>Psy\Context::getAll()</code> is <code>refs_expected = 10, refs_found = 10, refs_extra
+= 3</code> — three results outside the curated reference set, which is
+consistent with the heuristic firing on unrelated <code>getAll()</code> receivers
+named similarly to <code>Context</code> rather than three references the fixture's
+hand-curated list simply missed. (Not confirmed against the actual
+checkout — <code>~/repo/php/steins-survey</code> is outside this repo — but the
+mechanism is confirmed by reading <code>unresolved_member_subject_matches_scope</code>
+directly, and it matches the documented decoy mechanism exactly.)</p>
+<p>This runs on the same path <code>rename</code> uses
+(<code>find_references_for_rename</code> → <code>find_member_references</code>), so it is not
+just a references-panel accuracy issue: a rename on a method can silently
+also rewrite an unrelated call site whose receiver variable happens to
+share a name with the target class.</p>
+<p>The heuristic exists for a real reason — Laravel's Eloquent/Builder
+methods are frequently called through untyped or dynamically-typed
+receivers, and the <code>Repository</code>/<code>Gateway</code>/<code>Repo</code> suffix handling in
+<code>member_scope_name_keys</code> is clearly aimed at that pattern — so the fix is
+to narrow it, not delete it. Options worth weighing: restrict the
+fallback to contexts where the framework/project actually uses that
+untyped-receiver convention (Laravel projects, the way other
+Laravel-specific behaviour in this codebase is already gated on
+<code>is_laravel_project</code>) rather than applying it universally; or require a
+higher bar than a bare name match (e.g. only match when the hierarchy has
+exactly one class, so the heuristic can't silently pick a wrong one out of
+several same-named candidates).</p>
+<h3 id="b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword">B80. A same-named user class loses to a pseudo-type keyword<a class="headerlink" href="#b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p>A class the project declares takes precedence over a PHPDoc pseudo-type
+of the same name — the class is a real symbol, the keyword is a
+convention. We resolve it the other way round for the aliases that have a
+native PHP counterpart, so a <code>@param Integer $value</code> annotating a
+parameter of a user-declared <code>Integer</code> class is read as PHP's <code>integer</code>
+alias for <code>int</code>, and passing an actual <code>Integer</code> instance is reported as
+a mismatch:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class Integer {}</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">/** @param Integer $value */</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function acceptsInteger($value): void {}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">acceptsInteger(new Integer()); // reported: expects Integer, got App\Integer</span>
+</code></pre></div>
+<p><code>number</code> and <code>real</code> already get this right (<code>is_lowercase_only_pseudo_type</code>
+keeps any casing other than all-lowercase out of the scalar), but
+<code>integer</code>, <code>boolean</code>, <code>double</code>, and <code>resource</code> are folded case-insensitively
+because PHP's own type keywords are. The distinction is that PHP has no
+native <code>Integer</code> type: a class of that name is legal, so an annotation
+naming one has to resolve to the class when the project declares it.</p>
+<p>Reproduced in <code>php-typing-conformance/conformance/tests/</code>:
+<code>phpdoc_advanced_pseudotype_class_precedence.php</code>.</p>
+<h3 id="b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape">B81. <code>key-of&lt;T&gt;</code> widens to the bound array instead of the argument's own shape<a class="headerlink" href="#b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p>A <code>@template T of array&lt;array-key, mixed&gt;</code> bound to a call's argument
+should take that argument's shape, so <code>key-of&lt;T&gt;</code> projects the keys the
+caller actually passed. Instead <code>T</code> binds to the bare bound (<code>array</code>),
+<code>key-of&lt;array&gt;</code> cannot be evaluated, and the projection is lost:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/**</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x"> * @template T of array&lt;array-key, mixed&gt;</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x"> * @param T $items</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x"> * @return key-of&lt;T&gt;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x"> */</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">function firstKey(array $items) { /* … */ }</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">/** @param &#39;debug&#39;|&#39;verbose&#39; $flag */</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">function acceptsFlagName(string $flag): void {}</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="x">acceptsFlagName(firstKey([&#39;debug&#39; =&gt; false, &#39;verbose&#39; =&gt; true]));</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="x">// the keys are exactly &#39;debug&#39;|&#39;verbose&#39;, but T bound to `array`</span>
+</code></pre></div>
+<p>The unevaluated <code>key-of</code> widens rather than rejecting now, so this is
+silence rather than a false positive, but the precision is still gone:
+neither the true match above nor the genuine mismatch on an <code>int</code>
+parameter is decided. The fix is in template inference — an array
+literal argument should bind the template to its shape, not to the
+bound's erased form — after which the existing <code>key-of</code> evaluation
+handles the rest.</p>
+<p>Reproduced in <code>php-typing-conformance/conformance/tests/</code>:
+<code>phpdoc_advanced_fallback_key_of_template.php</code>,
+<code>phpdoc_advanced_fallback_value_of_template.php</code>.</p>
 
 
 
