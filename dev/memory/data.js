@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786418914041,
+  "lastUpdate": 1786419509004,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18461,6 +18461,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5a7c7e8aed07f2b4ee17a0c838a865ed54752f80",
+          "message": "Better formatting around the table footnotes",
+          "timestamp": "2026-08-11T05:23:38+02:00",
+          "tree_id": "ad3bf363ced5ac1bbd40452a7f98d0c0a2978f2d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5a7c7e8aed07f2b4ee17a0c838a865ed54752f80"
+        },
+        "date": 1786419504953,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.1,
             "unit": "MiB"
           }
         ]
