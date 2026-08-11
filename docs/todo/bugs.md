@@ -161,47 +161,6 @@ php-typing-conformance corpus for a real instance). Fix: when resolving an
 inherited) for a matching method/property/constant before falling back to a
 global function/constant lookup.
 
-### B78. `object{prop: Type}` shapes never match a concrete class, even when it satisfies the shape
-**Impact: Medium-High · Effort: Medium**
-
-`object{foo: int}` is correctly parsed and printed — it isn't mistaken for a
-class name the way an unmodelled pseudo-type spelling used to be. But nothing
-checks a concrete class or
-anonymous object against the shape structurally: every object argument is
-rejected, including ones that satisfy it.
-
-```php
-final class Reading {
-    public int $foo = 1;
-}
-
-/** @param object{foo: int} $shape */
-function takesObjectShape(object $shape): void {}
-
-takesObjectShape(new Reading());        // false positive: Reading has `foo: int`
-takesObjectShape((object) ['foo' => 1]); // false positive: an anonymous stdClass with `foo: int`
-takesObjectShape(new Mistyped());        // correctly invalid ($foo is string) — reported for the wrong reason
-```
-
-All three calls get the same generic "expects `object{foo: int}`, got X"
-message, so the two valid calls and the one genuinely invalid call are
-indistinguishable in the output — the diagnostic is never actually
-checking property-by-property compatibility, just failing unconditionally
-whenever the declared type isn't literally `object{foo: int}` itself.
-
-Reproduced in
-`php-typing-conformance/conformance/tests/phpdoc_advanced_fallback_object_shape.php`.
-mir, Intelephense, and DEVSENSE (`phpy`) all pass this one; we're the
-outlier.
-
-Fix: when the expected side of a compatibility check is an object shape,
-resolve the actual side to a class (or anonymous object literal) and check
-each declared property against the shape's fields (type, and required vs.
-optional) instead of falling through to nominal comparison. Likely lives
-next to whatever `is_type_compatible` (see T32) already does for array
-shapes against array literals — object shapes need the same treatment
-against object literals and named classes.
-
 ### B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved
 **Impact: High · Effort: Medium-High**
 

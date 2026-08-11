@@ -15,7 +15,7 @@ use crate::class_lookup::is_subtype_of_typed;
 use crate::php_type::{
     LiteralValue, PhpType, TypeKind, int_literal_is_within_range, is_array_like_name,
 };
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, Visibility};
 
 /// Returns `true` when the type names a class by an unqualified short name
 /// the project cannot load.  Covers both `Foo` and `Foo<Bar>`: a generic
@@ -819,6 +819,86 @@ pub(crate) fn is_type_compatible(
     // otherwise from the type alone.
     if matches!(param_type.kind(), TypeKind::ArrayShape(_)) && is_any_array_type(arg_type) {
         return true;
+    }
+
+    // ── Object shape structural match: MAYBE ────────────────────
+    // `object{foo: int}` is a structural constraint: any class or
+    // object literal with a public `foo` property assignable to `int`
+    // satisfies it, regardless of its class hierarchy. Extra properties
+    // on the argument are harmless — object shapes are structurally
+    // open, like array shapes.
+    if let TypeKind::ObjectShape(param_entries) = param_type.kind() {
+        if let TypeKind::ObjectShape(arg_entries) = arg_type.kind() {
+            let all_param_keys_satisfied = param_entries.iter().all(|pe| {
+                if pe.optional {
+                    return arg_entries
+                        .iter()
+                        .find(|ae| ae.key == pe.key)
+                        .is_none_or(|ae| {
+                            is_type_compatible(
+                                &ae.value_type,
+                                &pe.value_type,
+                                class_loader,
+                                strict_types,
+                            )
+                        });
+                }
+                arg_entries.iter().any(|ae| {
+                    ae.key == pe.key
+                        && is_type_compatible(
+                            &ae.value_type,
+                            &pe.value_type,
+                            class_loader,
+                            strict_types,
+                        )
+                })
+            });
+            if all_param_keys_satisfied {
+                return true;
+            }
+        } else if let Some(class_name) = arg_type.base_name()
+            && !crate::php_type::is_builtin_non_class_type(class_name)
+            && !is_array_like_name(class_name)
+        {
+            match class_loader(class_name) {
+                Some(cls) => {
+                    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+                        &cls,
+                        class_loader,
+                        crate::virtual_members::active_resolved_class_cache(),
+                    );
+                    let all_param_keys_satisfied = param_entries.iter().all(|pe| {
+                        let Some(key) = pe.key.as_deref() else {
+                            return pe.optional;
+                        };
+                        match resolved
+                            .properties
+                            .iter()
+                            .find(|p| p.visibility == Visibility::Public && &*p.name == key)
+                        {
+                            Some(p) => match &p.type_hint {
+                                Some(t) => is_type_compatible(
+                                    t,
+                                    &pe.value_type,
+                                    class_loader,
+                                    strict_types,
+                                ),
+                                None => true,
+                            },
+                            None => pe.optional,
+                        }
+                    });
+                    if all_param_keys_satisfied {
+                        return true;
+                    }
+                }
+                None => {
+                    // Class we can't load (likely unindexed vendor code) —
+                    // stay permissive rather than risk a false positive.
+                    return true;
+                }
+            }
+        }
     }
 
     // Use the full subtype check including class hierarchy.

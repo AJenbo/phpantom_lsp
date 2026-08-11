@@ -1509,6 +1509,88 @@ function test(): void {
     );
 }
 
+// ─── Object shape vs concrete class / object literal ────────────────────────
+
+#[test]
+fn no_diagnostic_for_class_satisfying_object_shape() {
+    let php = r#"<?php
+final class Reading {
+    public int $foo = 1;
+}
+
+/** @param object{foo: int} $shape */
+function takesObjectShape(object $shape): void {}
+
+function test(): void {
+    takesObjectShape(new Reading());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag a class with a matching public property against an object shape, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_object_literal_satisfying_object_shape() {
+    let php = r#"<?php
+/** @param object{foo: int} $shape */
+function takesObjectShape(object $shape): void {}
+
+function test(): void {
+    takesObjectShape((object) ['foo' => 1]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag an anonymous object literal with a matching field against an object shape, got: {diags:?}"
+    );
+}
+
+#[test]
+fn diagnostic_for_class_with_mistyped_property_against_object_shape() {
+    let php = r#"<?php
+final class Mistyped {
+    public string $foo = 'one';
+}
+
+/** @param object{foo: int} $shape */
+function takesObjectShape(object $shape): void {}
+
+function test(): void {
+    takesObjectShape(new Mistyped());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Should flag a class whose property type doesn't match the object shape, got: {diags:?}"
+    );
+}
+
+#[test]
+fn diagnostic_for_class_missing_property_against_object_shape() {
+    let php = r#"<?php
+final class Unrelated {
+    public int $bar = 1;
+}
+
+/** @param object{foo: int} $shape */
+function takesObjectShape(object $shape): void {}
+
+function test(): void {
+    takesObjectShape(new Unrelated());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Should flag a class that has no property matching the object shape, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: bare array ↔ typed array
 // ═══════════════════════════════════════════════════════════════════════════
