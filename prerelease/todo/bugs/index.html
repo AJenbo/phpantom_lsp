@@ -915,17 +915,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B80. A same-named user class loses to a pseudo-type keyword
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1481,17 +1470,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B80. A same-named user class loses to a pseudo-type keyword
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1725,30 +1703,6 @@ Laravel-specific behaviour in this codebase is already gated on
 higher bar than a bare name match (e.g. only match when the hierarchy has
 exactly one class, so the heuristic can't silently pick a wrong one out of
 several same-named candidates).</p>
-<h3 id="b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword">B80. A same-named user class loses to a pseudo-type keyword<a class="headerlink" href="#b80-a-same-named-user-class-loses-to-a-pseudo-type-keyword" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Low</strong></p>
-<p>A class the project declares takes precedence over a PHPDoc pseudo-type
-of the same name — the class is a real symbol, the keyword is a
-convention. We resolve it the other way round for the aliases that have a
-native PHP counterpart, so a <code>@param Integer $value</code> annotating a
-parameter of a user-declared <code>Integer</code> class is read as PHP's <code>integer</code>
-alias for <code>int</code>, and passing an actual <code>Integer</code> instance is reported as
-a mismatch:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class Integer {}</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">/** @param Integer $value */</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function acceptsInteger($value): void {}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">acceptsInteger(new Integer()); // reported: expects Integer, got App\Integer</span>
-</code></pre></div>
-<p><code>number</code> and <code>real</code> already get this right (<code>is_lowercase_only_pseudo_type</code>
-keeps any casing other than all-lowercase out of the scalar), but
-<code>integer</code>, <code>boolean</code>, <code>double</code>, and <code>resource</code> are folded case-insensitively
-because PHP's own type keywords are. The distinction is that PHP has no
-native <code>Integer</code> type: a class of that name is legal, so an annotation
-naming one has to resolve to the class when the project declares it.</p>
-<p>Reproduced in <code>php-typing-conformance/conformance/tests/</code>:
-<code>phpdoc_advanced_pseudotype_class_precedence.php</code>.</p>
 
 
 
