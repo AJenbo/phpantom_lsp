@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786459460722,
+  "lastUpdate": 1786460274315,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18558,6 +18558,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 34.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a693996f05c7d0101a1ee57cc27bafc2aaa365c0",
+          "message": "`{@see method()}` written inside its own class no longer reads as a\nmissing global function",
+          "timestamp": "2026-08-11T16:30:23+02:00",
+          "tree_id": "dd9a39a47c80cbc00e54a54ab34a4e74036e87f8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a693996f05c7d0101a1ee57cc27bafc2aaa365c0"
+        },
+        "date": 1786460270002,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
             "unit": "MiB"
           },
           {
