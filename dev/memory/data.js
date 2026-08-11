@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786410051659,
+  "lastUpdate": 1786411373348,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18223,6 +18223,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ea3201be4ab7934f6b452c5066e4d8faeaf1f40d",
+          "message": "A class named `Integer`, `Boolean`, `Double`, or `Resource` is no longer\nread as PHP's scalar alias of the same name",
+          "timestamp": "2026-08-11T03:06:31+02:00",
+          "tree_id": "64e4f398a21a34671bcac1f145657e7311e318bd",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ea3201be4ab7934f6b452c5066e4d8faeaf1f40d"
+        },
+        "date": 1786411367897,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.9,
             "unit": "MiB"
           }
         ]
