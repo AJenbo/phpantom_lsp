@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786403846965,
+  "lastUpdate": 1786409299816,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18155,6 +18155,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "744bae44ec40ebc81b03616cbe9869ab927815c3",
+          "message": "A PHPDoc pseudo-type with a no model found is no longer enforced as\nthough it were a class",
+          "timestamp": "2026-08-11T02:31:41+02:00",
+          "tree_id": "4dd2001baa89d53d772736bb7db3522ce1dc9db5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/744bae44ec40ebc81b03616cbe9869ab927815c3"
+        },
+        "date": 1786409295280,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.1,
             "unit": "MiB"
           }
         ]
