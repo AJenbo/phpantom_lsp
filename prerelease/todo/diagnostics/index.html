@@ -893,17 +893,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d3-deprecated-rendering-chain-subject-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D3. Deprecated rendering — chain subject resolution
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d5-external-tool-diagnostic-suppression-actions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1589,17 +1578,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d3-deprecated-rendering-chain-subject-resolution" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D3. Deprecated rendering — chain subject resolution
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d5-external-tool-diagnostic-suppression-actions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1938,28 +1916,6 @@ within the same impact tier.</p>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="d3-deprecated-rendering-chain-subject-resolution">D3. Deprecated rendering — chain subject resolution<a class="headerlink" href="#d3-deprecated-rendering-chain-subject-resolution" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>Chain subjects like <code>getHelper()-&gt;deprecatedMethod()</code> do not produce
-a deprecated diagnostic because <code>resolve_subject_to_class_name</code> in
-<code>diagnostics/deprecated.rs</code> returns <code>None</code> for non-variable,
-non-keyword subjects (the <code>_ =&gt; None</code> arm). The function call return
-type is never resolved, so the member deprecation check is skipped.</p>
-<p><strong>Fix:</strong> Route chain subjects through the completion/type-inference
-pipeline to resolve the return type of the call before checking the
-member for deprecation. The variable-resolution path already works
-for <code>$var-&gt;deprecatedMethod()</code> via <code>resolve_variable_subject</code>; the
-gap is function-call and method-call return types in subject position.</p>
-<p>The following have been verified and are covered by tests:</p>
-<ul>
-<li>Deprecated class references in <code>new</code>, type hints, <code>extends</code>, and
-  <code>implements</code> positions all render with strikethrough.</li>
-<li>Deprecated method calls, property accesses, and constants render
-  with strikethrough (via both <code>$var-&gt;</code> and <code>ClassName::</code> subjects).</li>
-<li>Offset-based class resolution for <code>$this</code>/<code>self</code>/<code>static</code> resolves
-  to the correct class in files with multiple class declarations.</li>
-</ul>
 <hr />
 <h2 id="d5-external-tool-diagnostic-suppression-actions">D5. External tool diagnostic suppression actions<a class="headerlink" href="#d5-external-tool-diagnostic-suppression-actions" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low (per tool, after proxy exists)</strong></p>
