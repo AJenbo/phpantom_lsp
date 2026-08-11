@@ -3143,3 +3143,98 @@ class Dto {
         unnecessary
     );
 }
+
+// ─── Deprecated member reached through a chain subject ──────────────────────
+
+#[test]
+fn deprecated_method_on_call_chain_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_chain.php";
+    let text = r#"<?php
+class Helper {
+    /** @deprecated Use newMethod() instead */
+    public function deprecatedMethod(): void {}
+}
+
+class Consumer {
+    public function getHelper(): Helper {
+        return new Helper();
+    }
+
+    public function run(): void {
+        $this->getHelper()->deprecatedMethod();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated
+            .iter()
+            .any(|d| d.message.contains("deprecatedMethod")),
+        "Expected a deprecated diagnostic for deprecatedMethod() reached through getHelper(), got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn deprecated_method_on_property_chain_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_prop_chain.php";
+    let text = r#"<?php
+class Helper {
+    /** @deprecated Use newMethod() instead */
+    public function deprecatedMethod(): void {}
+}
+
+class Consumer {
+    private Helper $helper;
+
+    public function run(): void {
+        $this->helper->deprecatedMethod();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated
+            .iter()
+            .any(|d| d.message.contains("deprecatedMethod")),
+        "Expected a deprecated diagnostic for deprecatedMethod() reached through $this->helper, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn deprecated_method_on_free_function_call_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_fn_chain.php";
+    let text = r#"<?php
+class Helper {
+    /** @deprecated Use newMethod() instead */
+    public function deprecatedMethod(): void {}
+}
+
+function makeHelper(): Helper {
+    return new Helper();
+}
+
+makeHelper()->deprecatedMethod();
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated
+            .iter()
+            .any(|d| d.message.contains("deprecatedMethod")),
+        "Expected a deprecated diagnostic for deprecatedMethod() reached through makeHelper(), got: {:?}",
+        deprecated
+    );
+}

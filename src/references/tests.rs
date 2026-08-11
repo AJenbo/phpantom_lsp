@@ -1459,8 +1459,8 @@ async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
         lines
     );
     assert!(
-        lines.contains(&15),
-        "Should include unresolved but clearly named $notificationRepository->find() on L15; got lines: {:?}",
+        !lines.contains(&15),
+        "Should NOT include unresolved $notificationRepository->find() on L15 — receivers are matched by resolved type, never by variable name; got lines: {:?}",
         lines
     );
     assert!(
@@ -2741,4 +2741,80 @@ fn index_progress_weight_prefers_supplied_and_open_file_content() {
         .write()
         .insert(uri.to_string(), std::sync::Arc::new("abcdef".to_string()));
     assert_eq!(backend.index_progress_weight_for_uri(uri, None), 6);
+}
+
+// ─── Property-receiver resolution (psysh corpus shapes) ─────────────────────
+//
+// Each receiver property is named `$ctx` (not `$holder`/`$context`) so the
+// deleted name-vs-class-name fallback could never have matched; a found
+// reference proves the receiver's type genuinely resolved.
+
+#[tokio::test]
+async fn test_member_references_through_property_receivers() {
+    let backend = Backend::new_test();
+    let uri_ctx = Url::parse("file:///Context.php").unwrap();
+    let uri_use = Url::parse("file:///users.php").unwrap();
+
+    let text_ctx = concat!(
+        "<?php\n",                                 // L0
+        "namespace Psy;\n",                        // L1
+        "class Context {\n",                       // L2
+        "    public function getAll(): array {\n", // L3
+        "        return [];\n",                    // L4
+        "    }\n",                                 // L5
+        "}\n",                                     // L6
+    );
+    let text_use = concat!(
+        "<?php\n",                                           // L0
+        "namespace Psy\\Sub;\n",                             // L1
+        "use Psy\\Context;\n",                               // L2
+        "class NativeTyped {\n",                             // L3
+        "    private Context $ctx;\n",                       // L4
+        "    public function go(): array {\n",               // L5
+        "        return $this->ctx->getAll();\n",            // L6
+        "    }\n",                                           // L7
+        "}\n",                                               // L8
+        "class DocblockTyped {\n",                           // L9
+        "    /** @var Context */\n",                         // L10
+        "    protected $ctx;\n",                             // L11
+        "    public function go(): array {\n",               // L12
+        "        return $this->ctx->getAll();\n",            // L13
+        "    }\n",                                           // L14
+        "}\n",                                               // L15
+        "class CtorAssigned {\n",                            // L16
+        "    private $ctx;\n",                               // L17
+        "    public function __construct(Context $ctx) {\n", // L18
+        "        $this->ctx = $ctx;\n",                      // L19
+        "    }\n",                                           // L20
+        "    public function go(): array {\n",               // L21
+        "        return $this->ctx->getAll();\n",            // L22
+        "    }\n",                                           // L23
+        "}\n",                                               // L24
+        "class SetterAssigned {\n",                          // L25
+        "    protected $ctx;\n",                             // L26
+        "    public function setContext(Context $ctx) {\n",  // L27
+        "        $this->ctx = $ctx;\n",                      // L28
+        "    }\n",                                           // L29
+        "    public function go(): array {\n",               // L30
+        "        return $this->ctx->getAll();\n",            // L31
+        "    }\n",                                           // L32
+        "}\n",                                               // L33
+    );
+
+    open_file(&backend, &uri_ctx, text_ctx).await;
+    open_file(&backend, &uri_use, text_use).await;
+
+    // Find references to getAll() from its declaration.
+    let locs = find_references(&backend, &uri_ctx, 3, 21, false).await;
+    let call_lines: Vec<u32> = locs
+        .iter()
+        .filter(|l| l.uri == uri_use)
+        .map(|l| l.range.start.line)
+        .collect();
+    for expected in [6u32, 13, 22, 31] {
+        assert!(
+            call_lines.contains(&expected),
+            "expected getAll() reference at users.php line {expected}, got {call_lines:?}"
+        );
+    }
 }

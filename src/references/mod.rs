@@ -181,62 +181,6 @@ pub(super) fn static_call_root(
     }
 }
 
-pub(super) fn unresolved_member_subject_matches_scope(
-    subject_text: &str,
-    scope: &HashSet<String>,
-) -> bool {
-    let Some(subject_name) = unresolved_member_subject_name(subject_text) else {
-        return false;
-    };
-    let subject_key = normalized_member_subject_key(&subject_name);
-    if subject_key.is_empty() {
-        return false;
-    }
-
-    scope.iter().any(|fqn| {
-        member_scope_name_keys(crate::util::short_name(fqn))
-            .into_iter()
-            .any(|key| key == subject_key)
-    })
-}
-
-fn unresolved_member_subject_name(subject_text: &str) -> Option<String> {
-    match &crate::type_engine::subject_expr::SubjectExpr::parse(subject_text) {
-        crate::type_engine::subject_expr::SubjectExpr::Variable(name) => {
-            Some(name.trim_start_matches('$').to_string())
-        }
-        crate::type_engine::subject_expr::SubjectExpr::PropertyChain { property, .. } => {
-            Some(property.clone())
-        }
-        _ => None,
-    }
-}
-
-fn member_scope_name_keys(short_name: &str) -> Vec<String> {
-    let mut names = vec![short_name.to_string()];
-    for suffix in ["Repository", "Gateway"] {
-        if let Some(stem) = short_name.strip_suffix(suffix) {
-            names.push(format!("{stem}{suffix}"));
-            if suffix == "Repository" {
-                names.push(format!("{stem}Repo"));
-            }
-        }
-    }
-
-    names
-        .into_iter()
-        .map(|name| normalized_member_subject_key(&name))
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-
-fn normalized_member_subject_key(name: &str) -> String {
-    name.chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
 pub(super) fn is_laravel_builder_static_entrypoint(method_name: &str) -> bool {
     matches!(
         method_name.to_ascii_lowercase().as_str(),

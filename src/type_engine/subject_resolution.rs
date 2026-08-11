@@ -14,7 +14,8 @@ use std::sync::Arc;
 use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
-use crate::types::ClassInfo;
+use crate::type_engine::subject_expr::SubjectExpr;
+use crate::types::{AccessKind, ClassInfo, ResolvedType};
 use crate::util::resolve_to_fqn;
 
 /// Context for resolving a subject expression to its type.
@@ -71,20 +72,58 @@ pub(crate) fn resolve_subject_type(
             let fqn = resolve_to_fqn(trimmed, ctx.use_map, ctx.namespace);
             Some(PhpType::named(atom(&fqn)))
         }
-        _ if trimmed.starts_with('$') => {
+        _ => {
+            let expr = SubjectExpr::parse(trimmed);
+            if matches!(expr, SubjectExpr::Variable(_)) {
+                // A bare variable resolves through the forward walker,
+                // which is position-accurate (reassignment, narrowing).
+                let current_class = find_class_at_offset(ctx.local_classes, access_offset);
+                return crate::type_engine::variable::resolution::resolve_variable_php_type(
+                    trimmed,
+                    ctx.content,
+                    access_offset,
+                    current_class,
+                    ctx.local_classes,
+                    ctx.class_loader,
+                    ctx.backend,
+                    Loaders::with_function(Some(ctx.function_loader)),
+                );
+            }
+
+            // Everything else — property chains (`$this->context`), method
+            // calls, static accesses, and combinations thereof — goes
+            // through the shared chain resolver, the same path completion
+            // and hover use.
             let current_class = find_class_at_offset(ctx.local_classes, access_offset);
-            crate::type_engine::variable::resolution::resolve_variable_php_type(
-                trimmed,
-                ctx.content,
-                access_offset,
+            let rctx = crate::type_engine::resolver::ResolutionCtx {
                 current_class,
-                ctx.local_classes,
-                ctx.class_loader,
-                ctx.backend,
-                Loaders::with_function(Some(ctx.function_loader)),
-            )
+                all_classes: ctx.local_classes,
+                content: ctx.content,
+                cursor_offset: access_offset,
+                class_loader: ctx.class_loader,
+                backend: ctx.backend,
+                laravel_macro_this_resolver: None,
+                resolved_class_cache: ctx.backend.map(|b| &b.resolved_class_cache),
+                function_loader: Some(ctx.function_loader),
+                scope_var_resolver: None,
+                is_in_static_method: false,
+                preserve_static: false,
+            };
+            let access_kind = if is_static {
+                AccessKind::DoubleColon
+            } else {
+                AccessKind::Arrow
+            };
+            let resolved = crate::type_engine::resolver::resolve_target_classes_expr(
+                &expr,
+                access_kind,
+                &rctx,
+            );
+            if resolved.is_empty() {
+                return None;
+            }
+            Some(ResolvedType::types_joined(&resolved))
         }
-        _ => None,
     }
 }
 

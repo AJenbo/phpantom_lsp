@@ -23,33 +23,6 @@ PHPantom assigns diagnostic severity based on runtime consequences:
 
 ---
 
-## D3. Deprecated rendering — chain subject resolution
-
-**Impact: Low-Medium · Effort: Medium**
-
-Chain subjects like `getHelper()->deprecatedMethod()` do not produce
-a deprecated diagnostic because `resolve_subject_to_class_name` in
-`diagnostics/deprecated.rs` returns `None` for non-variable,
-non-keyword subjects (the `_ => None` arm). The function call return
-type is never resolved, so the member deprecation check is skipped.
-
-**Fix:** Route chain subjects through the completion/type-inference
-pipeline to resolve the return type of the call before checking the
-member for deprecation. The variable-resolution path already works
-for `$var->deprecatedMethod()` via `resolve_variable_subject`; the
-gap is function-call and method-call return types in subject position.
-
-The following have been verified and are covered by tests:
-
-- Deprecated class references in `new`, type hints, `extends`, and
-  `implements` positions all render with strikethrough.
-- Deprecated method calls, property accesses, and constants render
-  with strikethrough (via both `$var->` and `ClassName::` subjects).
-- Offset-based class resolution for `$this`/`self`/`static` resolves
-  to the correct class in files with multiple class declarations.
-
----
-
 ## D5. External tool diagnostic suppression actions
 
 **Impact: Low · Effort: Low (per tool, after proxy exists)**

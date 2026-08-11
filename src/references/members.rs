@@ -317,16 +317,13 @@ impl Backend {
                                 span.start,
                                 content,
                             );
-                            if subject_fqns.is_empty() {
-                                if !unresolved_member_subject_matches_scope(
-                                    subject_text.as_str(content),
-                                    hier,
-                                ) {
-                                    continue;
-                                }
-                            } else if !subject_fqns.iter().any(|fqn| hier.contains(fqn)) {
-                                // Subject resolved but none of the resolved
-                                // classes are in the target hierarchy — skip.
+                            if !subject_fqns.iter().any(|fqn| hier.contains(fqn)) {
+                                // The subject did not resolve to a class in
+                                // the target hierarchy — skip.  An
+                                // unresolved subject (empty `subject_fqns`)
+                                // is skipped too: accepting every unresolved
+                                // `$x->method()` makes common names such as
+                                // `find` unusably noisy in large projects.
                                 continue;
                             }
                         }

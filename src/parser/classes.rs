@@ -843,7 +843,7 @@ impl Backend {
         let mut trait_precedences = Vec::new();
         let mut trait_aliases = Vec::new();
         let mut inline_use_generics: Vec<(Atom, Vec<PhpType>)> = Vec::new();
-        let mut constructor_body: Option<&MethodBody<'_>> = None;
+        let mut method_bodies: Vec<(usize, &MethodBody<'_>)> = Vec::new();
 
         for member in members {
             match member {
@@ -1078,7 +1078,6 @@ impl Backend {
                     // (e.g. `@param list<User> $users` vs native `array $users`).
                     // We apply `resolve_effective_type()` to pick the winner.
                     if name == "__construct" {
-                        constructor_body = Some(&method.body);
                         for param in method.parameter_list.parameters.iter() {
                             if param.is_promoted_property() {
                                 let raw_name = bytes_to_str(param.variable.name).to_string();
@@ -1308,6 +1307,7 @@ impl Backend {
                         if_this_is: method_docblock_text
                             .and_then(crate::docblock::extract_if_this_is_type),
                     });
+                    method_bodies.push((methods.len() - 1, &method.body));
                 }
                 ClassLikeMember::Property(property) => {
                     let mut prop_infos =
@@ -1589,31 +1589,120 @@ impl Backend {
             }
         }
 
-        // Infer types for untyped properties from constructor assignments.
-        // Scans the constructor body for `$this->prop = new ClassName()`
-        // and fills in the type_hint when not set by declaration or docblock.
-        // Only applies when neither native type hint nor docblock type is present.
-        // Resolves to FQN eagerly so downstream code does not need
-        // short-name resolution logic.
-        if let Some(MethodBody::Concrete(concrete)) = constructor_body {
-            for stmt in concrete.statements.iter() {
-                if let Statement::Expression(expr_stmt) = stmt
-                    && let Expression::Assignment(assign) = expr_stmt.expression
-                    && let Expression::Access(Access::Property(pa)) = assign.lhs
-                    && let Expression::Variable(Variable::Direct(dv)) = pa.object
-                    && dv.name == b"$this"
-                    && let ClassLikeMemberSelector::Identifier(ident) = &pa.property
-                    && let Expression::Instantiation(inst) = assign.rhs
-                    && let Expression::Identifier(class_ident) = inst.class
-                {
-                    let prop_name = bytes_to_str(ident.value).to_string();
-                    if let Some(prop) = properties.iter_mut().find(|p| {
-                        p.name == prop_name && p.type_hint.is_none() && p.native_type_hint.is_none()
-                    }) {
-                        let raw = bytes_to_str(class_ident.value()).to_string();
-                        let fqn = resolve_name_via_ctx(&raw, doc_ctx);
-                        prop.type_hint = Some(PhpType::named(atom(&fqn)));
+        // Infer types for untyped properties from `$this->prop = ...`
+        // assignments in method bodies (constructors and setters alike),
+        // the way PHPStan and Psalm do.  Two RHS shapes are recognized:
+        // `new ClassName()` (resolved to an FQN eagerly so downstream code
+        // does not need short-name resolution logic) and a parameter of
+        // the enclosing method whose type is known.  Only applies when
+        // neither a native type hint nor a docblock type is present on
+        // the property; assignments to the same property in different
+        // methods union their types.
+        let untyped_property = |properties: &[PropertyInfo], name: &str| {
+            properties
+                .iter()
+                .any(|p| p.name == name && p.type_hint.is_none() && p.native_type_hint.is_none())
+        };
+        if properties
+            .iter()
+            .any(|p| p.type_hint.is_none() && p.native_type_hint.is_none())
+        {
+            let mut inferred: Vec<(String, Vec<PhpType>)> = Vec::new();
+            for &(method_idx, body) in &method_bodies {
+                let MethodBody::Concrete(concrete) = body else {
+                    continue;
+                };
+                for (stmt_idx, stmt) in concrete.statements.iter().enumerate() {
+                    let Statement::Expression(expr_stmt) = stmt else {
+                        continue;
+                    };
+                    let Expression::Assignment(assign) = expr_stmt.expression else {
+                        continue;
+                    };
+                    if !matches!(
+                        assign.operator,
+                        mago_syntax::cst::assignment::AssignmentOperator::Assign(_)
+                    ) {
+                        continue;
                     }
+                    let Expression::Access(Access::Property(pa)) = assign.lhs else {
+                        continue;
+                    };
+                    let Expression::Variable(Variable::Direct(dv)) = pa.object else {
+                        continue;
+                    };
+                    if dv.name != b"$this" {
+                        continue;
+                    }
+                    let ClassLikeMemberSelector::Identifier(ident) = &pa.property else {
+                        continue;
+                    };
+                    let prop_name = bytes_to_str(ident.value);
+                    if !untyped_property(&properties, prop_name) {
+                        continue;
+                    }
+
+                    let assigned_type = match assign.rhs {
+                        Expression::Instantiation(inst) => {
+                            if let Expression::Identifier(class_ident) = inst.class {
+                                let raw = bytes_to_str(class_ident.value()).to_string();
+                                let fqn = resolve_name_via_ctx(&raw, doc_ctx);
+                                Some(PhpType::named(atom(&fqn)))
+                            } else {
+                                None
+                            }
+                        }
+                        Expression::Variable(Variable::Direct(rhs_var)) => {
+                            let var_name = bytes_to_str(rhs_var.name);
+                            // A parameter reassigned earlier in the body no
+                            // longer holds its declared type — skip it.
+                            let reassigned =
+                                concrete.statements.iter().take(stmt_idx).any(|prior| {
+                                    if let Statement::Expression(prior_stmt) = prior
+                                        && let Expression::Assignment(prior_assign) =
+                                            prior_stmt.expression
+                                        && let Expression::Variable(Variable::Direct(lhs)) =
+                                            prior_assign.lhs
+                                    {
+                                        bytes_to_str(lhs.name) == var_name
+                                    } else {
+                                        false
+                                    }
+                                });
+                            if reassigned {
+                                None
+                            } else {
+                                methods[method_idx]
+                                    .parameters
+                                    .iter()
+                                    .find(|p| p.name == var_name)
+                                    .and_then(|p| p.type_hint.clone())
+                            }
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(ty) = assigned_type {
+                        match inferred.iter_mut().find(|(name, _)| name == prop_name) {
+                            Some((_, types)) => {
+                                if !types.contains(&ty) {
+                                    types.push(ty);
+                                }
+                            }
+                            None => inferred.push((prop_name.to_string(), vec![ty])),
+                        }
+                    }
+                }
+            }
+            for (prop_name, mut types) in inferred {
+                if let Some(prop) = properties.iter_mut().find(|p| {
+                    p.name == prop_name && p.type_hint.is_none() && p.native_type_hint.is_none()
+                }) {
+                    prop.type_hint = Some(if types.len() == 1 {
+                        types.pop().expect("checked len == 1")
+                    } else {
+                        PhpType::union(types)
+                    });
                 }
             }
         }
@@ -1699,5 +1788,122 @@ if (\defined('SOME_FLAG')) {
             Some(atom("First")),
             "first (source-order) branch should win",
         );
+    }
+
+    fn property_type(classes: &[(ClassInfo, Option<String>)], class: &str, prop: &str) -> String {
+        classes
+            .iter()
+            .find(|(c, _)| c.name == atom(class))
+            .unwrap_or_else(|| panic!("class {class} not found"))
+            .0
+            .properties
+            .iter()
+            .find(|p| p.name == atom(prop))
+            .unwrap_or_else(|| panic!("property {prop} not found on {class}"))
+            .type_hint
+            .as_ref()
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "<none>".to_string())
+    }
+
+    /// An untyped property assigned a typed parameter in the constructor
+    /// or a setter picks up the parameter's type.
+    #[test]
+    fn untyped_property_infers_type_from_assigned_parameter() {
+        let src = r#"<?php
+namespace App;
+use Psy\Context;
+class CtorAssigned {
+    private $ctx;
+    public function __construct(Context $ctx) {
+        $this->ctx = $ctx;
+    }
+}
+class SetterAssigned {
+    protected $ctx;
+    /** @param list<Context> $items */
+    public function setItems(array $items) {
+        $this->items = $items;
+    }
+    public function setContext(Context $ctx) {
+        $this->ctx = $ctx;
+    }
+    private $items;
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        assert_eq!(property_type(&classes, "CtorAssigned", "ctx"), "Context");
+        assert_eq!(property_type(&classes, "SetterAssigned", "ctx"), "Context");
+        // Docblock @param types win over the native hint, and a property
+        // declared after the setter is still matched.
+        assert_eq!(
+            property_type(&classes, "SetterAssigned", "items"),
+            "list<Context>"
+        );
+    }
+
+    /// Assignments of different types in different methods union; a
+    /// parameter reassigned before the property write contributes nothing.
+    #[test]
+    fn untyped_property_inference_unions_and_skips_reassigned_params() {
+        let src = r#"<?php
+class Holder {
+    private $subject;
+    private $tainted;
+    public function setUser(User $u) {
+        $this->subject = $u;
+    }
+    public function setPost(Post $p) {
+        $this->subject = $p;
+    }
+    public function setTainted(User $u) {
+        $u = 5;
+        $this->tainted = $u;
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        assert_eq!(property_type(&classes, "Holder", "subject"), "User|Post");
+        assert_eq!(property_type(&classes, "Holder", "tainted"), "<none>");
+    }
+
+    /// Declared types are never overridden, and only plain `=` infers.
+    #[test]
+    fn untyped_property_inference_respects_declared_types_and_operators() {
+        let src = r#"<?php
+class Holder {
+    private User $typed;
+    /** @var Widget */
+    private $doc;
+    private $joined;
+    public function setAll(Post $p, Post $q, string $s) {
+        $this->typed = $p;
+        $this->doc = $q;
+        $this->joined .= $s;
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        assert_eq!(property_type(&classes, "Holder", "typed"), "User");
+        assert_eq!(property_type(&classes, "Holder", "doc"), "Widget");
+        assert_eq!(property_type(&classes, "Holder", "joined"), "<none>");
+    }
+
+    /// `$this->prop = new ClassName()` infers in any method, not just the
+    /// constructor, and resolves the name through the use-map.
+    #[test]
+    fn untyped_property_infers_type_from_instantiation_in_setter() {
+        let src = r#"<?php
+namespace App;
+use Lib\Logger;
+class Service {
+    private $logger;
+    public function init() {
+        $this->logger = new Logger();
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        assert_eq!(property_type(&classes, "Service", "logger"), "Lib\\Logger");
     }
 }

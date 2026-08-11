@@ -15,7 +15,6 @@
 //! resolution pass instead of re-parsing the file for each access.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -76,6 +75,16 @@ impl Backend {
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
         let cache = &self.resolved_class_cache;
 
+        let subject_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
+            local_classes,
+            use_map: file_use_map,
+            namespace: file_namespace,
+            content,
+            class_loader: &class_loader,
+            backend: Some(self),
+            function_loader: &function_loader,
+        };
+
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
             match &span.kind {
@@ -127,10 +136,8 @@ impl Backend {
                     let base_class = resolve_subject_to_class_name(
                         subject_str,
                         *is_static,
-                        file_use_map,
-                        file_namespace,
-                        local_classes,
                         span.start,
+                        &subject_ctx,
                     )
                     .and_then(|name| self.find_or_load_class(&name))
                     .map(|arc| ClassInfo::clone(&arc));
@@ -365,16 +372,16 @@ fn deprecated_diagnostic(
 /// Handles:
 /// - `self`, `static`, `parent` → resolve from enclosing class
 /// - `ClassName` (static access) → resolve via use map
+/// - chain subjects (`makeHelper()`, `Foo::create()`) → resolve their
+///   return type through the shared chain resolver
 /// - `$this` → resolve from enclosing class
 /// - Other `$variable` subjects return `None` (resolved separately
 ///   by [`resolve_variable_subject`]).
 fn resolve_subject_to_class_name(
     subject_text: &str,
     is_static: bool,
-    file_use_map: &HashMap<String, String>,
-    file_namespace: &Option<String>,
-    local_classes: &[Arc<ClassInfo>],
     access_offset: u32,
+    ctx: &crate::type_engine::subject_resolution::SubjectResolutionCtx<'_>,
 ) -> Option<String> {
     let trimmed = subject_text.trim();
 
@@ -383,28 +390,11 @@ fn resolve_subject_to_class_name(
         return None;
     }
 
-    // Use the shared subject resolution utility for keywords and bare
-    // class names.  We pass a dummy function loader (not needed for
-    // non-variable subjects) and a dummy class loader.
-    let dummy_class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
-    let dummy_function_loader = |_: &str, _: u32| -> Option<crate::types::FunctionInfo> { None };
-    let ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
-        local_classes,
-        use_map: file_use_map,
-        namespace: file_namespace,
-        content: "",
-        class_loader: &dummy_class_loader,
-        // Non-variable subjects (keywords, bare class names) resolve from
-        // the file's own use-map, so no server state is needed.
-        backend: None,
-        function_loader: &dummy_function_loader,
-    };
-
     crate::type_engine::subject_resolution::resolve_subject_type(
         subject_text,
         is_static,
         access_offset,
-        &ctx,
+        ctx,
     )
     .and_then(|t| t.top_level_class_names().into_iter().next())
 }
