@@ -126,3 +126,43 @@ async fn integer_index_guard_completion() {
          methods, got: {methods:?}"
     );
 }
+
+/// Reassigning the base variable ends the narrowing: after `$arg` holds a
+/// different object, `$arg->value` is back to what the property declares,
+/// so the narrowed type's own members are not offered.
+#[tokio::test]
+async fn reassigned_base_variable_drops_property_completion() {
+    let text = concat!(
+        "<?php\n",
+        "interface Expr {\n",
+        "    public function onEveryExpr(): void;\n",
+        "}\n",
+        "class StringExpr implements Expr {\n",
+        "    public function onEveryExpr(): void {}\n",
+        "    public function onlyOnString(): void {}\n",
+        "}\n",
+        "class Arg {\n",
+        "    public Expr $value;\n",
+        "}\n",
+        "class C {\n",
+        "    public function m(Arg $arg, Arg $other): void {\n",
+        "        if ($arg->value instanceof StringExpr) {\n",
+        "            $arg = $other;\n",
+        "            $arg->value->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+    // Line 15 (0-indexed), after `$arg->value->` = 12 + 13 = 25.
+    let methods = completion_methods(text, 15, 25).await;
+    assert!(
+        methods.iter().any(|m| m == "onEveryExpr"),
+        "The declared property type's members should still be offered, \
+         got: {methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|m| m == "onlyOnString"),
+        "A check that ran before `$arg` was replaced must not narrow the \
+         property after it, got: {methods:?}"
+    );
+}

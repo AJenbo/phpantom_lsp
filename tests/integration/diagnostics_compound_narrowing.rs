@@ -449,3 +449,85 @@ class Ord {{
          got: {diags:?}"
     );
 }
+
+/// Reassigning the base variable between the check and the use makes the
+/// narrowing stale: `$arg->value` after `$arg = $other` is a different
+/// value, so the member that only the narrowed type has must be flagged.
+#[test]
+fn reassigning_the_base_variable_drops_property_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///base_reassigned.php";
+    let text = format!(
+        "{SCAFFOLD}
+class C {{
+    public function m(Arg $arg, Arg $other): void {{
+        if ($arg->value instanceof StringExpr) {{
+            $arg = $other;
+            takeString($arg->value->value);
+        }}
+    }}
+}}
+"
+    );
+    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "Reassigning `$arg` must drop the narrowing on `$arg->value`, \
+         got: {diags:?}"
+    );
+}
+
+/// The same for an argument-less call subject: once the receiver is
+/// replaced, a check on `$holder->getReturnType()` says nothing about
+/// what the call hands back now.
+#[test]
+fn reassigning_the_base_variable_drops_call_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///base_reassigned_call.php";
+    let text = format!(
+        "{SCAFFOLD}
+class C {{
+    public function m(Holder $holder, Holder $other): void {{
+        if ($holder->getReturnType() instanceof StringExpr) {{
+            $holder = $other;
+            takeString($holder->getReturnType()->value);
+        }}
+    }}
+}}
+"
+    );
+    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "Reassigning `$holder` must drop the narrowing on its call, \
+         got: {diags:?}"
+    );
+}
+
+/// A reassignment *before* the check is irrelevant: the check runs on the
+/// new value, so the narrowing stands.
+#[test]
+fn reassignment_before_the_check_keeps_property_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///base_reassigned_early.php";
+    let text = format!(
+        "{SCAFFOLD}
+class C {{
+    public function m(Arg $arg, Arg $other): void {{
+        $arg = $other;
+        if ($arg->value instanceof StringExpr) {{
+            takeString($arg->value->value);
+        }}
+    }}
+}}
+"
+    );
+    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    assert!(
+        diags.is_empty(),
+        "A reassignment before the check must not disturb narrowing, \
+         got: {diags:?}"
+    );
+}
