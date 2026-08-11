@@ -860,17 +860,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1371,17 +1360,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1482,52 +1460,6 @@ php-typing-conformance corpus for a real instance). Fix: when resolving an
 <code>@see</code>-family reference, check the containing class's members (own, then
 inherited) for a matching method/property/constant before falling back to a
 global function/constant lookup.</p>
-<h3 id="b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved">B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved<a class="headerlink" href="#b79-find-references-falls-back-to-variable-name-vs-class-name-text-matching-when-a-receivers-type-cant-be-resolved" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium-High</strong></p>
-<p><code>find_member_references</code> scopes candidates to the target method's class
-hierarchy — but only when the receiver's type resolves. When
-<code>resolve_subject_to_fqns</code> comes back empty (an untyped property, an
-unannotated parameter, anything the forward walker can't pin down),
-<code>unresolved_member_subject_matches_scope</code> takes over, and it isn't a type
-check at all: it takes the receiver's <em>variable name</em> (<code>$context</code> →
-<code>context</code>), normalizes it, and checks whether it textually matches the
-<em>short name</em> of any class in the hierarchy (<code>Context</code> → <code>context</code>, plus a
-couple of <code>Repository</code>/<code>Gateway</code>/<code>Repo</code> suffix variants). Any call
-<code>$context-&gt;getAll()</code> anywhere in the project counts as a reference to
-<code>Context::getAll()</code> once the receiver's type can't be resolved, regardless
-of what <code>$context</code> actually holds — a <code>SymfonyContext</code>, an array, an
-unrelated class that also happens to get assigned to a same-named
-variable.</p>
-<p>This is precisely the failure mode php-typing-conformance's LSP survey is
-built to surface: <code>conformance/lsp/navigation.toml</code> plants same-named
-decoy methods across the psysh checkout specifically so that "a large
-extra count is how name-matching reference implementations become
-visible" (<code>ProbeGrading::navigation()</code>'s own docblock). Our result for
-<code>Psy\Context::getAll()</code> is <code>refs_expected = 10, refs_found = 10, refs_extra
-= 3</code> — three results outside the curated reference set, which is
-consistent with the heuristic firing on unrelated <code>getAll()</code> receivers
-named similarly to <code>Context</code> rather than three references the fixture's
-hand-curated list simply missed. (Not confirmed against the actual
-checkout — <code>~/repo/php/steins-survey</code> is outside this repo — but the
-mechanism is confirmed by reading <code>unresolved_member_subject_matches_scope</code>
-directly, and it matches the documented decoy mechanism exactly.)</p>
-<p>This runs on the same path <code>rename</code> uses
-(<code>find_references_for_rename</code> → <code>find_member_references</code>), so it is not
-just a references-panel accuracy issue: a rename on a method can silently
-also rewrite an unrelated call site whose receiver variable happens to
-share a name with the target class.</p>
-<p>The heuristic exists for a real reason — Laravel's Eloquent/Builder
-methods are frequently called through untyped or dynamically-typed
-receivers, and the <code>Repository</code>/<code>Gateway</code>/<code>Repo</code> suffix handling in
-<code>member_scope_name_keys</code> is clearly aimed at that pattern — so the fix is
-to narrow it, not delete it. Options worth weighing: restrict the
-fallback to contexts where the framework/project actually uses that
-untyped-receiver convention (Laravel projects, the way other
-Laravel-specific behaviour in this codebase is already gated on
-<code>is_laravel_project</code>) rather than applying it universally; or require a
-higher bar than a bare name match (e.g. only match when the hierarchy has
-exactly one class, so the heuristic can't silently pick a wrong one out of
-several same-named candidates).</p>
 
 
 
