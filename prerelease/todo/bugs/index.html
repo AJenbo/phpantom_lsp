@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b72-a-generic-class-named-without-its-arguments-returns-its-own-template-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B72. A generic class named without its arguments returns its own template parameter
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b73-narrowing-survives-a-reassignment-of-the-subjects-base-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1328,17 +1317,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b72-a-generic-class-named-without-its-arguments-returns-its-own-template-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B72. A generic class named without its arguments returns its own template parameter
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b73-narrowing-survives-a-reassignment-of-the-subjects-base-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1393,28 +1371,6 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b72-a-generic-class-named-without-its-arguments-returns-its-own-template-parameter">B72. A generic class named without its arguments returns its own template parameter<a class="headerlink" href="#b72-a-generic-class-named-without-its-arguments-returns-its-own-template-parameter" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>A subject written with no template arguments — a <code>@var ItemCollection $items</code>
-docblock, a parameter or return type spelled without generics, anything that
-names the class rather than instantiating it — resolves a member's
-template-typed return to the <em>parameter itself</em>. <code>ItemCollection::first()</code>,
-declared <code>@return TModel|null</code> on a class whose docblock says
-<code>@template TModel of Item</code>, comes back as the class <code>TModel</code>, which resolves
-nowhere.</p>
-<p>Reproduced with a controller passing <code>$items-&gt;first()</code> to an unannotated
-view: the injected prologue declares <code>@var TModel $item</code>, and the template
-then reports <code>Cannot verify method 'title' — subject type 'TModel' could not
-be resolved</code> on every member it reads. It is not specific to Blade or to
-call-site inference, which only made it visible: the same subject reads the
-same way in a plain PHP file, and Laravel's own collections are declared
-this way (<code>PostCollection</code> in <code>examples/laravel</code> forwards
-<code>@template TModel of BlogPost</code> to <code>Collection&lt;TKey, TModel&gt;</code>), so any
-project that types a variable by a bare collection class hits it.</p>
-<p>An unsupplied template parameter is not a class. Substitute the bound the
-<code>@template</code> declares (<code>of Item</code> → <code>Item</code>), and <code>mixed</code> for a parameter
-declared without one, so the type is the widest thing the declaration
-guarantees rather than a name nothing can resolve.</p>
 <h3 id="b73-narrowing-survives-a-reassignment-of-the-subjects-base-variable">B73. Narrowing survives a reassignment of the subject's base variable<a class="headerlink" href="#b73-narrowing-survives-a-reassignment-of-the-subjects-base-variable" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>The narrowing re-walk in <code>apply_property_narrowing</code> looks for a check on a
