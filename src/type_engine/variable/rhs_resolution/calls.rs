@@ -259,6 +259,12 @@ pub(crate) fn build_function_template_subs(
                 // resolve the argument type and walk its @extends chain
                 // to find the wrapper class's generic arg at the right
                 // position.
+                //
+                // Union rather than overwrite, as the direct binding mode
+                // does: `@param Wrap<T> $a, Wrap<T> $b` binds `T` at two
+                // sites, and letting the last one win would leave every
+                // other argument measured against a type taken from one
+                // of its siblings.
                 if !is_array_like_wrapper(wrapper_name)
                     && wrapper_name != "class-string"
                     && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
@@ -269,7 +275,7 @@ pub(crate) fn build_function_template_subs(
                         rctx,
                     )
                 {
-                    subs.insert(tpl_name.to_string(), concrete);
+                    insert_or_union(&mut subs, tpl_name.to_string(), concrete);
                     continue;
                 }
                 // When array-type extraction fails (e.g. bare `array`

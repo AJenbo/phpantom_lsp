@@ -3541,6 +3541,13 @@ class TypeErrorDemo
         $admin = new AdminUser('Admin', 'admin@test.com', ['manage']);
         $this->requiresUser($admin);
 
+        // Type error — the box's type argument is inferred from what it
+        // was constructed with, so a box of Pen is not a box of User:
+        $this->requiresUserBox(new ScaffoldingTypedBox($pen));
+
+        // No diagnostic — a box of a User subclass satisfies it:
+        $this->requiresUserBox(new ScaffoldingTypedBox($admin));
+
         // No diagnostic — null is valid for nullable parameter:
         $this->acceptsNullable(null);
         $this->acceptsNullable("hello");
@@ -3552,6 +3559,8 @@ class TypeErrorDemo
     private function requiresInt(int $value): void {}
     private function requiresString(string $text): void {}
     private function requiresUser(User $user): void {}
+    /** @param ScaffoldingTypedBox<User> $box */
+    private function requiresUserBox(ScaffoldingTypedBox $box): void {}
     private function acceptsNullable(?string $text): void {}
     private function requiresFloat(float $value): void {}
 }
@@ -5312,6 +5321,18 @@ class ScaffoldingGenericShapeBase
  * @extends ScaffoldingGenericShapeBase<Gift>
  */
 class ScaffoldingGenericShape extends ScaffoldingGenericShapeBase {}
+
+// ScaffoldingTypedBox — used by TypeErrorDemo
+/**
+ * @template T
+ */
+class ScaffoldingTypedBox
+{
+    /** @param T $value */
+    public function __construct(public mixed $value)
+    {
+    }
+}
 
 class ScaffoldingCollectionForeach
 {

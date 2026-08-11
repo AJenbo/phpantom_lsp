@@ -900,9 +900,7 @@ than a case where nobody has solved it yet:
 | `callables_docblock_signature.php` | a `callable(int): string`-shaped docblock param against a mismatched closure |
 | `callables_return_type_mismatch.php` | a callable's declared return type against what it actually returns |
 | `generics_extends_implements.php` | a `@template` bound carried through `extends`/`implements` |
-| `generics_template_bound.php` | a `@template T of Foo` bound rejecting a non-`Foo` argument |
-| `generics_template_bound_array.php` | the same bound inside an array template argument |
-| `generics_template_box.php` | a generic "box" class enforcing its template argument on `set()`/`get()` |
+| `generics_template_bound_array.php` | a `@template T of array` bound rejecting a non-array constructor argument |
 | `phpdoc_advanced_fallback_interface_string.php` | an interface-backed string pseudo-type |
 
 None of these are things we should chase for their own sake — PHPStan
@@ -918,7 +916,14 @@ the up-to-date pass/fail per tool).
 Each row needs its own root-cause pass — they were only confirmed
 silent (not misclassified), not yet traced to a specific resolver.
 Fix one at a time rather than as a single PR; several likely share a
-cause (the four `generics_template_*` cases almost certainly do).
+cause. The two remaining generics rows do not share one with the pair
+already closed: a mismatch between the *same* generic class' type
+arguments is now reported, but `generics_extends_implements.php` needs
+a subclass' `@extends Box<int>` read as its ancestor's type arguments
+before the two sides have a common base to compare, and
+`generics_template_bound_array.php` needs a constructor argument
+checked against the template's declared bound rather than against the
+substitution that argument itself produced.
 
 ---
 

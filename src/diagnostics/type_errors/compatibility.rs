@@ -54,6 +54,24 @@ fn is_bare_array(ty: &PhpType) -> bool {
     }
 }
 
+/// Returns `true` when two class-like types may name the same class
+/// despite being spelled differently.
+///
+/// A name that arrives here unqualified is one the pipeline could not
+/// place in its file's namespace, and resolving a bare name against the
+/// whole project is a guess — in a codebase with several `User` classes
+/// the loader picks one of them arbitrarily.  When that guess is the only
+/// thing separating two types, there is no mismatch to report.
+fn may_name_same_class(a: &PhpType, b: &PhpType) -> bool {
+    let (Some(name_a), Some(name_b)) = (a.base_name(), b.base_name()) else {
+        return false;
+    };
+    if name_a.contains('\\') && name_b.contains('\\') {
+        return false;
+    }
+    crate::util::short_name(name_a).eq_ignore_ascii_case(crate::util::short_name(name_b))
+}
+
 /// Check if an argument type is compatible with a parameter type.
 ///
 /// Returns `true` if the argument type can be passed to the parameter
@@ -560,6 +578,33 @@ pub(crate) fn is_type_compatible(
                 .all(|(a, p)| is_type_compatible(a, p, class_loader, strict_types));
             if all_args_compatible {
                 return true;
+            }
+            // The same class with disjoint type arguments is a mismatch,
+            // and the nominal fallback below cannot see it: it compares
+            // base names, so `Box<string>` reaches `Box<int>` as `Box`
+            // <: `Box`.
+            //
+            // Disjoint, not merely "not a subtype": a class type
+            // argument we inferred is widened to the template's declared
+            // bound whenever nothing bound it, so an argument that is a
+            // *supertype* of the declared one says we learned too little,
+            // not that the value contradicts the annotation.  It also
+            // leaves `@template-contravariant` alone, where the wider
+            // argument is the correct one.
+            //
+            // Only decide it here for a class-like base — array-likes
+            // have their own cross-form rules further down (`list<X>` ↔
+            // `array<int, X>`, `X[]`) that a verdict at this point would
+            // pre-empt.
+            if !is_array_like_name(name_arg)
+                && !is_array_like_name(name_param)
+                && args_arg.iter().zip(args_param.iter()).any(|(a, p)| {
+                    !is_type_compatible(a, p, class_loader, strict_types)
+                        && !is_type_compatible(p, a, class_loader, strict_types)
+                        && !may_name_same_class(a, p)
+                })
+            {
+                return false;
             }
         }
     }

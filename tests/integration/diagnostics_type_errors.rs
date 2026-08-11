@@ -4257,6 +4257,161 @@ function test(): void {
     );
 }
 
+// ── Generic type-argument mismatches at call sites ──────────────────
+
+#[test]
+fn diagnostic_for_mismatched_generic_type_argument() {
+    // `Box<string>` (inferred from the constructor argument) is not a
+    // `Box<int>`, and the nominal `Box` <: `Box` fallback must not
+    // rescue it.  `strict_types` because without it a `string` type
+    // argument is still a candidate for PHP's int coercion.
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(public mixed $value) {}
+}
+
+/** @param Box<int> $box */
+function takesIntBox(Box $box): void {}
+
+takesIntBox(new Box(1));
+takesIntBox(new Box('x'));
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Expected exactly one type error for Box<string> where Box<int> is required, got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("Box<int>") && msgs[0].contains("Box<string>"),
+        "Message should name both generic types, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn diagnostic_for_generic_type_argument_outside_template_bound() {
+    // `@template T of HasName` makes `NamedBox<AnonymousUser>` an
+    // incompatible argument where `NamedBox<User>` is required.
+    let php = r#"<?php
+interface HasName {
+    public function name(): string;
+}
+
+final class User implements HasName {
+    public function name(): string { return 'user'; }
+}
+
+final class AnonymousUser {}
+
+/** @template T of HasName */
+final class NamedBox {
+    /** @param T $value */
+    public function __construct(public object $value) {}
+}
+
+/** @param NamedBox<User> $box */
+function takesNamedBox(NamedBox $box): void {}
+
+takesNamedBox(new NamedBox(new User()));
+takesNamedBox(new NamedBox(new AnonymousUser()));
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Expected exactly one type error for NamedBox<AnonymousUser>, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_covariant_generic_type_argument() {
+    // A narrower type argument still satisfies the wider one.
+    let php = r#"<?php
+class Animal {}
+class Cat extends Animal {}
+
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(public mixed $value) {}
+}
+
+/** @param Box<Animal> $box */
+function takesAnimalBox(Box $box): void {}
+
+takesAnimalBox(new Box(new Cat()));
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Box<Cat> should satisfy Box<Animal>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_generic_argument_with_unknown_type_argument() {
+    // An unparameterised `Box` says nothing about its type argument,
+    // so it must not be reported against `Box<int>`.
+    let php = r#"<?php
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(public mixed $value) {}
+}
+
+/** @param Box<int> $box */
+function takesIntBox(Box $box): void {}
+
+/** @param Box $box */
+function forward(Box $box): void {
+    takesIntBox($box);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A bare Box must stay silent against Box<int>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_template_bound_from_two_generic_parameters() {
+    // `T` is bound at two sites, so it is what both arguments have in
+    // common — neither may be measured against the other's type.
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @template-covariant T */
+interface Wrap {}
+
+/** @return Wrap<int> */
+function wrapInt(): Wrap {}
+
+/** @return Wrap<string> */
+function wrapString(): Wrap {}
+
+/**
+ * @template T
+ * @param Wrap<T> $first
+ * @param Wrap<T> $second
+ */
+function combine(Wrap $first, Wrap $second): void {}
+
+combine(wrapInt(), wrapString());
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A multi-bound template must not measure one argument against another, got: {diags:?}"
+    );
+}
+
 #[test]
 fn no_false_positive_for_method_level_template_unbound() {
     // Method-level @template params that cannot be bound from call-site
