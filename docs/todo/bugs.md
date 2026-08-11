@@ -90,49 +90,6 @@ Fix: teach the re-walk to drop a subject whose base variable is assigned
 between the check and the cursor, rather than making the fall-through
 conditional on which consumer is asking.
 
-### B74. `analyze --format json` prints a prose note ahead of the payload
-**Impact: Medium · Effort: Low**
-
-A project root without a `composer.json` makes `run_analysis` print
-`Note: no composer.json found in … — analysing as a plain PHP project.`
-on stdout before anything else, regardless of `--format`. Under
-`--format json` that line sits ahead of the object, so a consumer that
-parses stdout as JSON fails outright, and one that recovers has to cut
-the payload out by brace-matching:
-
-```console
-$ phpantom_lsp analyze --format json --project-root /tmp/plain /tmp/plain
-Note: no composer.json found in /tmp/plain — analysing as a plain PHP project.
-{
-  "totals": { "errors": 0, "file_errors": 0 },
-```
-
-The same applies to any future informational line on the machine-readable
-formats. Fix: write the note to stderr, so stdout carries only the payload
-the format promises.
-
-### B75. A path that does not exist is reported as "No PHP files found" with exit 0
-**Impact: Medium · Effort: Low**
-
-`analyze` resolves a relative `PATH` against `--project-root` rather than
-the working directory, and a path that resolves nowhere produces
-`No PHP files found.` and exit code 0 — the same answer as a clean run of
-an empty directory. A caller cannot tell "analysed nothing, all good" from
-"you pointed me at a path I could not find":
-
-```console
-$ phpantom_lsp analyze --project-root conformance conformance/tests/x.php
-No PHP files found.
-$ echo $?
-0
-```
-
-Two things to settle here. A `PATH` that exists relative to the working
-directory should be accepted as such (that is what every other analyzer
-CLI does, and what a shell tab-completion produces), and a path that
-resolves nowhere should be an error on stderr with a non-zero exit
-distinct from 1 (which already means "diagnostics found").
-
 ### B76. `{@see method()}` unqualified inside its own class resolves as a global function
 **Impact: Medium · Effort: Medium**
 

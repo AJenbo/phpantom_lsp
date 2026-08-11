@@ -25,8 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| B74 | [`analyze --format json` prints a prose note ahead of the payload](todo/bugs.md#b74-analyze-format-json-prints-a-prose-note-ahead-of-the-payload)                            | Medium      | Low         |
-| B75 | [A path that does not exist is reported as "No PHP files found" with exit 0](todo/bugs.md#b75-a-path-that-does-not-exist-is-reported-as-no-php-files-found-with-exit-0)       | Medium      | Low         |
 | T35 | [Readonly property reassignment outside its declaring scope is never flagged](todo/type-inference.md#t35-readonly-property-reassignment-outside-its-declaring-scope-is-never-flagged) | Medium      | Low-Medium  |
 | B76 | [`{@see method()}` unqualified inside its own class resolves as a global function](todo/bugs.md#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function) | Medium      | Medium      |
 | T36 | [Array-shape and generic enforcement gaps mir already covers](todo/type-inference.md#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers)                       | Medium      | Medium      |

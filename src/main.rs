@@ -308,7 +308,7 @@ async fn async_main() {
 
             let options = phpantom_lsp::analyse::AnalyseOptions {
                 workspace_root,
-                path_filter: path,
+                path_filter: resolve_path_filter(path, 2),
                 severity_filter: severity.into(),
                 use_colour,
                 output_format,
@@ -343,7 +343,7 @@ async fn async_main() {
 
             let options = phpantom_lsp::fix::FixOptions {
                 workspace_root,
-                path_filter: path,
+                path_filter: resolve_path_filter(path, 1),
                 rules,
                 dry_run,
                 use_colour,
@@ -444,4 +444,31 @@ fn parse_tcp_address(input: &str) -> SocketAddr {
 fn atty_stdout() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
+}
+
+/// Resolve a `PATH` positional argument against the current working
+/// directory (not `--project-root`) and exit with `error_exit_code` if it
+/// does not exist, matching what shell tab-completion and every other
+/// analyzer CLI produce for a typed-out relative path.
+fn resolve_path_filter(
+    path: Option<std::path::PathBuf>,
+    error_exit_code: i32,
+) -> Option<std::path::PathBuf> {
+    let path = path?;
+    let abs = if path.is_absolute() {
+        path
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(&path),
+            Err(e) => {
+                eprintln!("Error: cannot determine current directory: {e}");
+                std::process::exit(error_exit_code);
+            }
+        }
+    };
+    if !abs.exists() {
+        eprintln!("Error: path not found: {}", abs.display());
+        std::process::exit(error_exit_code);
+    }
+    Some(abs)
 }

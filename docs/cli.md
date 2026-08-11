@@ -139,10 +139,11 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 
 ### Exit codes
 
-| Code | Meaning                 |
-| ---- | ----------------------- |
-| 0    | No diagnostics found    |
-| 1    | Diagnostics were found  |
+| Code | Meaning                       |
+| ---- | ------------------------------ |
+| 0    | No diagnostics found            |
+| 1    | Diagnostics were found          |
+| 2    | `PATH` argument does not exist  |
 
 ### Example output
 
