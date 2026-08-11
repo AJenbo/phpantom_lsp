@@ -926,17 +926,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B81. <code>key-of&lt;T&gt;</code> widens to the bound array instead of the argument's own shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1503,17 +1492,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B81. <code>key-of&lt;T&gt;</code> widens to the bound array instead of the argument's own shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1771,35 +1749,6 @@ native <code>Integer</code> type: a class of that name is legal, so an annotatio
 naming one has to resolve to the class when the project declares it.</p>
 <p>Reproduced in <code>php-typing-conformance/conformance/tests/</code>:
 <code>phpdoc_advanced_pseudotype_class_precedence.php</code>.</p>
-<h3 id="b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape">B81. <code>key-of&lt;T&gt;</code> widens to the bound array instead of the argument's own shape<a class="headerlink" href="#b81-key-oft-widens-to-the-bound-array-instead-of-the-arguments-own-shape" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>A <code>@template T of array&lt;array-key, mixed&gt;</code> bound to a call's argument
-should take that argument's shape, so <code>key-of&lt;T&gt;</code> projects the keys the
-caller actually passed. Instead <code>T</code> binds to the bare bound (<code>array</code>),
-<code>key-of&lt;array&gt;</code> cannot be evaluated, and the projection is lost:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/**</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x"> * @template T of array&lt;array-key, mixed&gt;</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x"> * @param T $items</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x"> * @return key-of&lt;T&gt;</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x"> */</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">function firstKey(array $items) { /* … */ }</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">/** @param &#39;debug&#39;|&#39;verbose&#39; $flag */</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">function acceptsFlagName(string $flag): void {}</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="x">acceptsFlagName(firstKey([&#39;debug&#39; =&gt; false, &#39;verbose&#39; =&gt; true]));</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="x">// the keys are exactly &#39;debug&#39;|&#39;verbose&#39;, but T bound to `array`</span>
-</code></pre></div>
-<p>The unevaluated <code>key-of</code> widens rather than rejecting now, so this is
-silence rather than a false positive, but the precision is still gone:
-neither the true match above nor the genuine mismatch on an <code>int</code>
-parameter is decided. The fix is in template inference — an array
-literal argument should bind the template to its shape, not to the
-bound's erased form — after which the existing <code>key-of</code> evaluation
-handles the rest.</p>
-<p>Reproduced in <code>php-typing-conformance/conformance/tests/</code>:
-<code>phpdoc_advanced_fallback_key_of_template.php</code>,
-<code>phpdoc_advanced_fallback_value_of_template.php</code>.</p>
 
 
 
