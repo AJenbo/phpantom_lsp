@@ -62,6 +62,11 @@ impl<V> CiMap<V> {
     }
 
     #[inline]
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut V> {
+        self.inner.get_mut(fold(key).as_ref()).map(|(_, v)| v)
+    }
+
+    #[inline]
     pub fn contains_key(&self, key: &str) -> bool {
         self.inner.contains_key(fold(key).as_ref())
     }

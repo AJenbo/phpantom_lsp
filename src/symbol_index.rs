@@ -5,7 +5,7 @@
 //! `Arc`-wrapped, so `#[derive(Clone)]` shares them with a cloned `Backend`
 //! (the same semantics the per-request clone had as individual fields).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,6 +23,15 @@ pub(crate) struct SymbolIndex {
     pub(crate) uri_classes_index: Arc<RwLock<HashMap<String, Vec<Arc<ClassInfo>>>>>,
     /// Global function definitions indexed by (case-insensitive) name.
     pub(crate) global_functions: Arc<RwLock<CiMap<(String, FunctionInfo)>>>,
+    /// Every declaration of a function name that more than one file
+    /// declares, keyed by name and then by declaring URI.
+    ///
+    /// A name only appears here once a second file declares it, so the
+    /// overwhelming majority of functions cost nothing.  The lowest-sorting
+    /// URI is the winner and is mirrored into `global_functions`; keeping
+    /// the runners-up means that when the winning file stops declaring the
+    /// name, the next declaration takes over instead of the name vanishing.
+    pub(crate) duplicate_functions: Arc<RwLock<CiMap<BTreeMap<String, FunctionInfo>>>>,
     /// Global constants from `define()` / top-level `const` statements.
     pub(crate) global_defines: Arc<RwLock<HashMap<String, DefineInfo>>>,
     /// Per-URI record of the global function/constant symbols each file
@@ -70,6 +79,7 @@ impl SymbolIndex {
             class_lookup_generation: Arc::new(AtomicU64::new(0)),
             uri_classes_index: Arc::new(RwLock::new(HashMap::new())),
             global_functions: Arc::new(RwLock::new(CiMap::new())),
+            duplicate_functions: Arc::new(RwLock::new(CiMap::new())),
             global_defines: Arc::new(RwLock::new(HashMap::new())),
             uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
             autoload_function_index: Arc::new(RwLock::new(CiMap::new())),

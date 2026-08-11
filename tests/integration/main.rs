@@ -142,6 +142,7 @@ mod document_highlight;
 mod document_links;
 mod document_symbols;
 mod duplicate_class_declarations;
+mod duplicate_function_declarations;
 mod folding_ranges;
 mod hover;
 mod implementation;

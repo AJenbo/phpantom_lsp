@@ -7,11 +7,12 @@
 /// helpers (`resolve_parent_class_names`, `resolve_name`) used to convert
 /// short class names to fully-qualified names.
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use crate::ParseErrorEntry;
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::ci_map::CiMap;
 use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SymbolMap, extract_symbol_map};
@@ -85,7 +86,124 @@ fn class_info_fqn(class: &ClassInfo) -> String {
     }
 }
 
+/// The declaration of `fqn` that `uri` contributed, whether or not it is
+/// the one currently serving lookups.
+fn declared_function<'a>(
+    fmap: &'a CiMap<(String, FunctionInfo)>,
+    dupes: &'a CiMap<BTreeMap<String, FunctionInfo>>,
+    fqn: &str,
+    uri: &str,
+) -> Option<&'a FunctionInfo> {
+    if let Some(decls) = dupes.get(fqn) {
+        return decls.get(uri);
+    }
+    fmap.get(fqn)
+        .filter(|(owner, _)| owner == uri)
+        .map(|(_, info)| info)
+}
+
+/// Mirror the lowest-sorting declaration of `fqn` into the lookup map,
+/// dropping the name entirely once nothing declares it.
+fn publish_winning_function(
+    fmap: &mut CiMap<(String, FunctionInfo)>,
+    dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
+    fqn: &str,
+) {
+    let Some(decls) = dupes.get(fqn) else { return };
+    match decls.iter().next() {
+        Some((uri, info)) => {
+            let winner = (uri.clone(), info.clone());
+            fmap.insert(fqn.to_string(), winner);
+        }
+        None => {
+            fmap.remove(fqn);
+        }
+    }
+    // One declarant left is not a duplicate; the lookup map alone
+    // describes it, so stop paying for the second entry.
+    if dupes.get(fqn).is_some_and(|d| d.len() <= 1) {
+        dupes.remove(fqn);
+    }
+}
+
+/// Record that `uri` declares `fqn`.
+///
+/// The lowest-sorting URI wins, so a name two files declare resolves to
+/// the same one of them however the indexing workers were scheduled.
+fn declare_function(
+    fmap: &mut CiMap<(String, FunctionInfo)>,
+    dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
+    fqn: String,
+    uri: &str,
+    info: FunctionInfo,
+) {
+    if let Some(decls) = dupes.get_mut(&fqn) {
+        decls.insert(uri.to_string(), info);
+        publish_winning_function(fmap, dupes, &fqn);
+        return;
+    }
+    match fmap.get(fqn.as_str()) {
+        // A second file declares a name another one already holds, which
+        // is how a package ships a native helper alongside a
+        // `function_exists`-guarded polyfill.  Start tracking both.
+        Some((existing_uri, existing_info)) if existing_uri != uri => {
+            let mut decls = BTreeMap::new();
+            decls.insert(existing_uri.clone(), existing_info.clone());
+            decls.insert(uri.to_string(), info);
+            dupes.insert(fqn.clone(), decls);
+            publish_winning_function(fmap, dupes, &fqn);
+        }
+        _ => {
+            fmap.insert(fqn, (uri.to_string(), info));
+        }
+    }
+}
+
+/// Drop `uri`'s declaration of `fqn`, handing the name to the next-lowest
+/// file that still declares it.
+fn withdraw_function(
+    fmap: &mut CiMap<(String, FunctionInfo)>,
+    dupes: &mut CiMap<BTreeMap<String, FunctionInfo>>,
+    fqn: &str,
+    uri: &str,
+) {
+    if let Some(decls) = dupes.get_mut(fqn) {
+        decls.remove(uri);
+        publish_winning_function(fmap, dupes, fqn);
+        return;
+    }
+    if fmap.get(fqn).is_some_and(|(owner, _)| owner == uri) {
+        fmap.remove(fqn);
+    }
+}
+
 impl Backend {
+    /// Drop every function declaration contributed by `uris`, handing each
+    /// name to the next-lowest file that still declares it.
+    ///
+    /// Used by the file-watcher purge, where a deleted file must not take a
+    /// name another file also declares down with it.
+    pub(crate) fn withdraw_functions_for_uris(&self, uris: &std::collections::HashSet<String>) {
+        let mut fmap = self.symbols.global_functions.write();
+        let mut dupes = self.symbols.duplicate_functions.write();
+
+        let affected: Vec<String> = dupes
+            .iter()
+            .filter(|(_, decls)| decls.keys().any(|u| uris.contains(u)))
+            .map(|(fqn, _)| fqn.to_string())
+            .collect();
+        for fqn in affected {
+            if let Some(decls) = dupes.get_mut(&fqn) {
+                decls.retain(|u, _| !uris.contains(u));
+            }
+            publish_winning_function(&mut fmap, &mut dupes, &fqn);
+        }
+
+        // Whatever the promotions above did not re-point still belongs to a
+        // purged file.
+        fmap.retain(|_, (u, _)| !uris.contains(u));
+    }
+
     /// Update the uri_classes_index, use_map, and namespace_map for a given file URI
     /// by parsing its content.
     ///
@@ -823,13 +941,34 @@ impl Backend {
             }
         }
 
+        // Names this batch took over from a file that previously won them.
+        // Their entries in the fqn-keyed derived indexes below belong to the
+        // old owner and have to be cleared; every other name this batch
+        // declares either had no owner (nothing to clear) or kept the one it
+        // had.  Collecting them keeps first-parse indexing off the per-fqn
+        // full-map scan that eviction costs.
+        let mut reowned_fqns: Vec<String> = Vec::new();
+
         {
             let mut idx = self.symbols.fqn_uri_index.write();
             let mut fqn_idx = self.symbols.fqn_class_index.write();
 
-            for old_fqn in &all_old_fqns {
-                idx.remove(old_fqn);
-                fqn_idx.remove(old_fqn);
+            // Only evict a fqn this update no longer declares, and only if
+            // this update's own URI is the one currently indexed for it.
+            // `all_old_fqns` mixes together every URI's prior declarations,
+            // so removing by fqn alone would delete a *different* file's
+            // still-valid winning entry whenever a losing duplicate (see the
+            // tie-break below) gets reparsed on its own.
+            for update in &prepared {
+                for old_fqn in &update.old_fqns {
+                    if update.new_fqns.contains(old_fqn) {
+                        continue;
+                    }
+                    if idx.get(old_fqn).is_some_and(|owner| *owner == update.uri) {
+                        idx.remove(old_fqn);
+                        fqn_idx.remove(old_fqn);
+                    }
+                }
             }
 
             for update in &prepared {
@@ -846,10 +985,10 @@ impl Backend {
                     // whichever parse worker happened to finish last, which
                     // decided the members the name resolved to (and the
                     // diagnostics that followed) anew on every run.
-                    if let Some(existing) = idx.get(&fqn)
-                        && existing.as_str() < update.uri.as_str()
-                    {
-                        continue;
+                    match idx.get(&fqn) {
+                        Some(existing) if existing.as_str() < update.uri.as_str() => continue,
+                        Some(existing) if *existing != update.uri => reowned_fqns.push(fqn.clone()),
+                        _ => {}
                     }
                     idx.insert(fqn.clone(), update.uri.clone());
                     fqn_idx.insert(fqn, Arc::clone(class));
@@ -881,24 +1020,31 @@ impl Backend {
         let mut any_function_changed = false;
         {
             let mut fmap = self.symbols.global_functions.write();
+            let mut dupes = self.symbols.duplicate_functions.write();
             for update in &mut prepared {
                 if update.functions.is_empty() && update.old_function_fqns.is_empty() {
                     continue;
                 }
 
-                // Snapshot old functions declared in this file before
-                // overwriting, so we can detect signature changes and
-                // trigger cross-file diagnostic invalidation.
-                let old_functions: Vec<(String, FunctionInfo)> = fmap
+                // Snapshot the functions this file contributed last parse,
+                // so we can detect signature changes and trigger cross-file
+                // diagnostic invalidation.  Reading the recorded name list
+                // rather than scanning the whole map by URI also finds the
+                // declarations this file was outvoted on.
+                let old_functions: Vec<(String, FunctionInfo)> = update
+                    .old_function_fqns
                     .iter()
-                    .filter(|(_, (file_uri, _))| *file_uri == update.uri)
-                    .map(|(fqn, (_, info))| (fqn.to_string(), info.clone()))
+                    .filter_map(|fqn| {
+                        declared_function(&fmap, &dupes, fqn, &update.uri)
+                            .map(|info| (fqn.clone(), info.clone()))
+                    })
                     .collect();
 
-                // Remove old function entries for this URI so that
-                // renamed/deleted functions don't linger.
+                // Withdraw this file's previous declarations so that
+                // renamed/deleted functions don't linger.  A name another
+                // file also declares survives on that file's declaration.
                 for (old_fqn, _) in &old_functions {
-                    fmap.remove(old_fqn);
+                    withdraw_function(&mut fmap, &mut dupes, old_fqn, &update.uri);
                 }
 
                 for func_info in std::mem::take(&mut update.functions) {
@@ -956,19 +1102,16 @@ impl Backend {
                     // fallback entry is unnecessary and would cause collisions
                     // when two namespaces define the same short name.
                     update.new_function_fqns.push(fqn.clone());
-                    fmap.insert(fqn, (update.uri.clone(), func_info));
+                    declare_function(&mut fmap, &mut dupes, fqn, &update.uri, func_info);
                 }
 
                 // A function was removed from this file — callers may
                 // now reference an unknown function.
-                if !any_function_changed && !old_functions.is_empty() {
-                    let new_count = fmap
-                        .iter()
-                        .filter(|(_, (file_uri, _))| *file_uri == update.uri)
-                        .count();
-                    if new_count != old_functions.len() {
-                        any_function_changed = true;
-                    }
+                if !any_function_changed
+                    && !old_functions.is_empty()
+                    && update.new_function_fqns.len() != old_functions.len()
+                {
+                    any_function_changed = true;
                 }
             }
         }
@@ -1023,10 +1166,46 @@ impl Backend {
             }
         }
 
-        self.evict_methods_for_fqns(&all_old_fqns);
-        self.evict_gti_for_fqns(&all_old_fqns);
-        self.populate_method_store(&all_classes);
-        self.populate_gti_index(&all_classes);
+        // These two indexes are keyed by fqn, so they have to be refilled
+        // from whichever declaration won the tie-break above rather than
+        // from this batch's classes.  When a batch reparses (or drops) the
+        // losing copy of a duplicated name, the winner is not in
+        // `all_classes`, and populating from the batch would leave
+        // go-to-implementation disagreeing with the class index about which
+        // declaration the name refers to.
+        let evict_fqns = if reowned_fqns.is_empty() {
+            all_old_fqns.clone()
+        } else {
+            let mut fqns = all_old_fqns.clone();
+            fqns.append(&mut reowned_fqns);
+            fqns.sort();
+            fqns.dedup();
+            fqns
+        };
+
+        let winning_classes: Vec<Arc<ClassInfo>> = {
+            let fqn_idx = self.symbols.fqn_class_index.read();
+            all_new_fqns
+                .iter()
+                .chain(
+                    evict_fqns
+                        .iter()
+                        .filter(|fqn| all_new_fqns.binary_search(fqn).is_err()),
+                )
+                .filter_map(|fqn| fqn_idx.get(fqn).map(Arc::clone))
+                .chain(
+                    all_classes
+                        .iter()
+                        .filter(|class| class.name.starts_with("__anonymous@"))
+                        .map(Arc::clone),
+                )
+                .collect()
+        };
+
+        self.evict_methods_for_fqns(&evict_fqns);
+        self.evict_gti_for_fqns(&evict_fqns);
+        self.populate_method_store(&winning_classes);
+        self.populate_gti_index(&winning_classes);
 
         // Selectively invalidate the resolved-class cache with
         // signature-level granularity.  Full indexing usually hits the
@@ -1956,6 +2135,78 @@ class User extends Model {
         assert_eq!(
             backend.parse_errors.read().get(uri).cloned(),
             Some(vec![("Parse failed (internal error)".to_string(), 10, 20)])
+        );
+    }
+
+    /// When a class name is declared in two files, the fqn-keyed derived
+    /// indexes must describe the same declaration the class index resolved
+    /// the name to.  Re-parsing the losing copy used to clear the winner's
+    /// method-store and reverse-inheritance entries without putting them
+    /// back, so go-to-implementation stopped listing the class.
+    #[test]
+    fn duplicate_class_derived_indexes_follow_the_winner() {
+        let backend = Backend::new_test();
+
+        let rich =
+            "<?php namespace Vendor; class Variant extends Base { public function rich() {} }";
+        let bare = "<?php namespace Vendor; class Variant {}";
+
+        backend.update_ast("file:///b_bare.php", bare);
+        backend.update_ast("file:///a_rich.php", rich);
+
+        // Re-parse only the losing file.
+        backend.update_ast(
+            "file:///b_bare.php",
+            "<?php namespace Vendor; class Variant { /* edited */ }",
+        );
+
+        assert!(
+            backend
+                .symbols
+                .method_store
+                .read()
+                .contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
+            "the winner's method must survive a re-parse of the losing copy"
+        );
+        assert!(
+            backend
+                .symbols
+                .gti_index
+                .read()
+                .get("Vendor\\Base")
+                .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Variant")),
+            "the winner's parent must still list it as an implementor"
+        );
+    }
+
+    /// A class the batch declares for the first time still reaches the
+    /// derived indexes: restricting eviction to names whose owner changed
+    /// must not also restrict what gets populated.
+    #[test]
+    fn newly_declared_class_reaches_derived_indexes() {
+        let backend = Backend::new_test();
+
+        backend.update_ast(
+            "file:///fresh.php",
+            "<?php namespace Vendor; class Fresh extends Base { public function hello() {} }",
+        );
+
+        assert!(
+            backend
+                .symbols
+                .method_store
+                .read()
+                .contains_key(&("Vendor\\Fresh".to_string(), "hello".to_string())),
+            "a first-parse class must populate the method store"
+        );
+        assert!(
+            backend
+                .symbols
+                .gti_index
+                .read()
+                .get("Vendor\\Base")
+                .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Fresh")),
+            "a first-parse class must populate the reverse-inheritance index"
         );
     }
 }

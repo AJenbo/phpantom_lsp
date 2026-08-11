@@ -1642,10 +1642,7 @@ impl Backend {
             .autoload_constant_index
             .write()
             .retain(|_, v| !path_set.contains(v));
-        self.symbols
-            .global_functions
-            .write()
-            .retain(|_, (u, _)| !uri_set.contains(u.as_str()));
+        self.withdraw_functions_for_uris(&uri_set);
         self.symbols
             .global_defines
             .write()

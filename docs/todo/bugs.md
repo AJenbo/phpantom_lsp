@@ -11,27 +11,33 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-## B1. A function declared in two files resolves to a different one on every run
+## B2. A class declared in two files disappears when the winning file drops it
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Low-Medium · Effort: Medium**
 
-When two indexed files declare the same fully-qualified function, which
-declaration wins is decided by whichever indexing worker finishes last,
-so repeated analyses of an unchanged project disagree with each other.
-PHPStan's own test corpus has a minimal case:
-`tests/PHPStan/Levels/data/stubs-functions.php` declares
-`StubsIntegrationTest\foo($i)` with no annotations, and
-`tests/PHPStan/Levels/data/stubs/function.php` declares the same
-function with `@param int $i` / `@return string`. Running `analyze` on
-that directory four times in a row reports the argument type mismatch on
-`foo('test')` in some runs and nothing in others.
+A class name two files declare, which is how a package ships a variant
+behind a `class_exists` guard, settles on the lowest-sorting URI. Only
+that declaration is kept, so when the winning file stops declaring the
+name (the class is renamed, deleted, or the file is removed) the name
+becomes unresolvable even though the other file still declares it. The
+user sees "class not found" on a class that exists, until the surviving
+file happens to be re-parsed.
 
-The user-visible effect is diagnostics that appear and disappear between
-identical runs, which reads as a flaky analyzer, and (in the editor) a
-go-to-definition target that changes between sessions.
+Duplicate *functions* keep their runners-up in
+`SymbolIndex::duplicate_functions` and promote the next-lowest declarant
+when the winner withdraws, which is what classes need too. Classes are
+harder because two paths index them: `apply_ast_index_updates_batch` in
+`parser/ast_update.rs` (editor files) and `parse_and_cache_content` in
+`resolution.rs` (the lazily loaded vendor/stub path). Both would have to
+go through the same declare/withdraw helpers, or the runner-up record
+goes stale.
 
-**Fix:** make the winner deterministic rather than last-writer-wins.
-Break the tie on a stable key (scan order, then path) when a duplicate
-function declaration is inserted, so the same project always produces
-the same symbol table. Duplicate class declarations go through the same
-index and should be checked for the same race while in there.
+While in there: the two paths already disagree about duplicates.
+`parse_and_cache_content` fills `fqn_uri_index` with `or_insert_with`
+(first write wins) but `fqn_class_index` with `insert` (last write
+wins), so for a duplicated name the URI go-to-definition jumps to and
+the `ClassInfo` its members are read from can describe different files.
+
+**Fix:** give classes the same declare/withdraw treatment functions
+have, and route both indexing paths through it so the two class indexes
+cannot disagree.

@@ -99,3 +99,33 @@ async fn winning_file_can_still_be_reparsed() {
         "the pre-edit member should be gone"
     );
 }
+
+/// Reparsing the losing duplicate on its own must not steal ownership
+/// away from the untouched winning file: the previous fix removed a
+/// fqn's index entries by name alone before reinserting only the
+/// updates in the current batch, so a reparse of just the loser wiped
+/// the winner's entry and nothing put it back.
+#[tokio::test]
+async fn reparsing_losing_file_does_not_steal_ownership() {
+    let backend = create_test_backend();
+
+    backend.update_ast("file:///b_bare.php", BARE);
+    backend.update_ast("file:///a_rich.php", RICH);
+
+    // Re-parse only the losing file with a trivial edit.
+    backend.update_ast(
+        "file:///b_bare.php",
+        "<?php\nnamespace Vendor;\nclass Variant { /* comment */ }\n",
+    );
+
+    let class = backend
+        .fqn_class_index()
+        .read()
+        .get("Vendor\\Variant")
+        .cloned()
+        .expect("Vendor\\Variant should still be indexed");
+    assert!(
+        class.methods.iter().any(|m| m.name == "rich"),
+        "a_rich.php should still win even though b_bare.php was reparsed"
+    );
+}
