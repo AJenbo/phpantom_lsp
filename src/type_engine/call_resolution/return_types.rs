@@ -206,11 +206,15 @@ fn resolve_validated_shape_at_call(
 
     let call = validated_shape::shape_bearing_method(method_name)?;
     let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
+    let mut args = split_text_args(text_args);
+    for arg in &mut args {
+        *arg = crate::call_args::text_arg_value(arg);
+    }
 
     validated_shape::resolve_shape_at_call(
         receiver,
         call,
-        &split_text_args(text_args),
+        &args,
         &|| validated_shape::safe_source_class(base, ctx),
         ctx.content,
         ctx.cursor_offset,
@@ -262,7 +266,8 @@ fn auth_guard_name(base: &SubjectExpr, user_args: &str) -> Option<String> {
 /// not a single-quoted or double-quoted string literal.
 fn first_string_literal_arg(args_text: &str) -> Option<String> {
     let first = split_text_args(args_text).into_iter().next()?;
-    crate::text_scan::unquote_php_string(first.trim()).map(str::to_string)
+    crate::text_scan::unquote_php_string(crate::call_args::text_arg_value(first))
+        .map(str::to_string)
 }
 
 fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option<PhpType> {
@@ -1018,9 +1023,7 @@ impl Backend {
                             if let Some(ref mut hint_out) = return_type_hint_out {
                                 **hint_out = Some(parsed_ty);
                             }
-                            if !classes.is_empty() {
-                                return classes;
-                            }
+                            return classes;
                         }
                     }
                     // ── Function-level @template substitution ────────
@@ -1241,12 +1244,13 @@ impl Backend {
                 if let Some(ctor) = ctor_ref
                     && !ctor.template_bindings.is_empty()
                 {
-                    let arg_texts: Vec<String> =
-                        crate::type_engine::conditional_resolution::split_text_args(text_args)
-                            .into_iter()
-                            .map(|s| s.to_string())
-                            .collect();
+                    let arg_texts =
+                        crate::type_engine::conditional_resolution::split_text_args(text_args);
                     if !arg_texts.is_empty() {
+                        let bound_args = crate::call_args::bind_text_args_to_params(
+                            &ctor.parameters,
+                            &arg_texts,
+                        );
                         let mut subs = std::collections::HashMap::new();
                         for (tpl_name, param_name) in &ctor.template_bindings {
                             let param_idx = match ctor
@@ -1257,10 +1261,11 @@ impl Backend {
                                 Some(idx) => idx,
                                 None => continue,
                             };
-                            let arg_text = match arg_texts.get(param_idx) {
-                                Some(text) => text.trim(),
-                                None => continue,
-                            };
+                            let arg_text =
+                                match bound_args.get(param_idx).and_then(Option::as_deref) {
+                                    Some(text) => text,
+                                    None => continue,
+                                };
                             let param_hint = ctor
                                 .parameters
                                 .get(param_idx)

@@ -1278,4 +1278,16 @@ class Demo
         // because Illuminate\Support\Carbon extends \DateTime.
         return now()->addHours(1);
     }
+
+    // ── URL helper conditional return ──────────────────────────────────────
+
+    public function urlHelpers(string $path): string
+    {
+        // Without a path, url() returns the generator and its methods resolve.
+        url()->to($path);                 // → UrlGenerator
+        url(null)->to($path);             // → UrlGenerator
+
+        // Supplying a path returns the generated URL string.
+        return url($path);                // → string
+    }
 }

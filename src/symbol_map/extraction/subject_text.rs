@@ -316,11 +316,14 @@ fn lower_method_call(
 pub(super) fn format_all_call_args(args: &TokenSeparatedSequence<'_, Argument<'_>>) -> String {
     let mut parts = Vec::new();
     for arg in args.iter() {
-        let arg_expr = match arg {
-            Argument::Positional(pos) => pos.value,
-            Argument::Named(named) => named.value,
+        let text = match arg {
+            Argument::Positional(pos) => format_arg_expr(pos.value),
+            Argument::Named(named) => format!(
+                "{}: {}",
+                bytes_to_str(named.name.value),
+                format_arg_expr(named.value)
+            ),
         };
-        let text = format_arg_expr(arg_expr);
         parts.push(text);
     }
     // Trim trailing `...` placeholders beyond the first argument so

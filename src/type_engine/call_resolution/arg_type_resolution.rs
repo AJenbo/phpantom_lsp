@@ -74,30 +74,9 @@ impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
     /// The nth argument's value text, with any `name:` prefix removed
     /// so that a named argument reads the same as a positional one.
     fn arg_text(&self, index: usize) -> Option<&'a str> {
-        self.args.get(index).map(|arg| strip_arg_name(arg.trim()))
-    }
-}
-
-/// Strip a leading `name:` label from a named argument's source text.
-///
-/// Returns the text unchanged when there is no label, taking care not
-/// to mistake `Foo::BAR`, `$a ? b : c`, or a colon inside a string
-/// literal for one.
-fn strip_arg_name(arg: &str) -> &str {
-    let Some(colon) = arg.find(':') else {
-        return arg;
-    };
-    if arg[colon + 1..].starts_with(':') {
-        return arg;
-    }
-    let name = arg[..colon].trim_end();
-    let is_identifier = !name.is_empty()
-        && !name.starts_with(|c: char| c.is_ascii_digit())
-        && name.chars().all(|c| c.is_alphanumeric() || c == '_');
-    if is_identifier {
-        arg[colon + 1..].trim_start()
-    } else {
-        arg
+        self.args
+            .get(index)
+            .map(|arg| crate::call_args::text_arg_value(arg))
     }
 }
 
@@ -179,7 +158,7 @@ impl Backend {
                 ',' if depth == 0 => {
                     let arg = trimmed[..i].trim();
                     if !arg.is_empty() {
-                        return Some(arg.to_string());
+                        return Some(crate::call_args::text_arg_value(arg).to_string());
                     }
                     return None;
                 }
@@ -189,7 +168,7 @@ impl Backend {
         // No top-level comma: the whole text is a single argument.
         let arg = trimmed.trim();
         if !arg.is_empty() {
-            Some(arg.to_string())
+            Some(crate::call_args::text_arg_value(arg).to_string())
         } else {
             None
         }

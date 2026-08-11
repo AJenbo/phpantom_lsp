@@ -1362,6 +1362,26 @@ check(
     ])
 );
 
+// ─── URL helper conditional return ──────────────────────────────────────────
+
+$previousContainer = \Illuminate\Container\Container::getInstance();
+$helperContainer = new \Illuminate\Container\Container();
+$urlGenerator = new \Illuminate\Routing\UrlGenerator(
+    new \Illuminate\Routing\RouteCollection(),
+    \Illuminate\Http\Request::create('https://example.test')
+);
+$helperContainer->instance(
+    \Illuminate\Contracts\Routing\UrlGenerator::class,
+    $urlGenerator
+);
+\Illuminate\Container\Container::setInstance($helperContainer);
+
+check('url() returns the URL generator', url() === $urlGenerator);
+check('url(null) returns the URL generator', url(null) === $urlGenerator);
+check("url('/login') returns a string", is_string(url('/login')));
+
+\Illuminate\Container\Container::setInstance($previousContainer);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

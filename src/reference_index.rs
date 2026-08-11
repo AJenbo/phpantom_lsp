@@ -122,7 +122,7 @@ impl Backend {
         &self,
         keys: &[ReferenceIndexKey],
     ) -> Option<HashSet<Arc<str>>> {
-        if !self.workspace_indexed.load(Ordering::Acquire) {
+        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
             return None;
         }
 
@@ -597,6 +597,18 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nclass Foo {}\n$foo = new Foo();\n",
         );
+
+        let candidates = backend
+            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
+
+        assert!(candidates.is_none());
+    }
+
+    #[test]
+    fn candidate_lookup_is_disabled_when_reference_indexing_is_skipped() {
+        let mut backend = Backend::new_test();
+        backend.skip_reference_index = true;
+        backend.workspace_indexed.store(true, Ordering::Release);
 
         let candidates = backend
             .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
