@@ -416,11 +416,12 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
     let sub_l = sub_raw.to_ascii_lowercase();
     let sup_l = sup_raw.to_ascii_lowercase();
 
-    // `number` (int|float) and `real` (removed in PHP 8.0) are pseudo-types
-    // only in their exact lowercase spelling. A differently-cased bare `Number`
-    // (e.g. `BcMath\Number`) or `Real` is a real class, so it must not reach
-    // case-insensitive equality or alias normalisation below; nominal class
-    // relationships are resolved by the caller's hierarchy check.
+    // `number`, `real`, `integer`, `boolean`, `double`, and `resource` are
+    // pseudo-types/aliases only in their exact lowercase spelling (see
+    // `is_lowercase_only_pseudo_type`). A differently-cased bare `Number`
+    // (e.g. `BcMath\Number`) or `Integer` is a real class, so it must not
+    // reach case-insensitive equality or alias normalisation below; nominal
+    // class relationships are resolved by the caller's hierarchy check.
     let sub_is_pseudo_class = is_lowercase_only_pseudo_type(&sub_l) && sub_raw != sub_l;
     let sup_is_pseudo_class = is_lowercase_only_pseudo_type(&sup_l) && sup_raw != sup_l;
 

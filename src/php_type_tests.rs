@@ -3742,8 +3742,19 @@ mod predicate_tests {
 
     #[test]
     fn is_bool_case_insensitive() {
+        // `bool` is one of PHP's actual reserved type keywords, so no class
+        // can ever be named `Bool` in any casing.
         assert!(PhpType::named(atom("Bool")).is_bool());
-        assert!(PhpType::named(atom("BOOLEAN")).is_bool());
+        assert!(PhpType::named(atom("BOOL")).is_bool());
+    }
+
+    #[test]
+    fn is_bool_not_folded_for_uppercase_boolean() {
+        // `boolean` is only a legacy alias, not a reserved keyword, so PHP
+        // allows a class named `Boolean`; only the exact lowercase spelling
+        // is the alias (see `is_lowercase_only_pseudo_type`).
+        assert!(!PhpType::named(atom("Boolean")).is_bool());
+        assert!(!PhpType::named(atom("BOOLEAN")).is_bool());
     }
 
     #[test]
@@ -3831,8 +3842,19 @@ mod predicate_tests {
 
     #[test]
     fn is_int_case_insensitive() {
+        // `int` is one of PHP's actual reserved type keywords, so no class
+        // can ever be named `Int` in any casing.
         assert!(PhpType::named(atom("Int")).is_int());
-        assert!(PhpType::named(atom("INTEGER")).is_int());
+        assert!(PhpType::named(atom("INT")).is_int());
+    }
+
+    #[test]
+    fn is_int_not_folded_for_uppercase_integer() {
+        // `integer` is only a legacy alias, not a reserved keyword, so PHP
+        // allows a class named `Integer`; only the exact lowercase spelling
+        // is the alias (see `is_lowercase_only_pseudo_type`).
+        assert!(!PhpType::named(atom("Integer")).is_int());
+        assert!(!PhpType::named(atom("INTEGER")).is_int());
     }
 
     #[test]
@@ -3887,8 +3909,19 @@ mod predicate_tests {
 
     #[test]
     fn is_float_case_insensitive() {
+        // `float` is one of PHP's actual reserved type keywords, so no class
+        // can ever be named `Float` in any casing.
         assert!(PhpType::named(atom("Float")).is_float());
-        assert!(PhpType::named(atom("DOUBLE")).is_float());
+        assert!(PhpType::named(atom("FLOAT")).is_float());
+    }
+
+    #[test]
+    fn is_float_not_folded_for_uppercase_double() {
+        // `double` is only a legacy alias, not a reserved keyword, so PHP
+        // allows a class named `Double`; only the exact lowercase spelling
+        // is the alias (see `is_lowercase_only_pseudo_type`).
+        assert!(!PhpType::named(atom("Double")).is_float());
+        assert!(!PhpType::named(atom("DOUBLE")).is_float());
     }
 
     #[test]
@@ -4171,9 +4204,13 @@ mod predicate_tests {
     }
 
     #[test]
-    fn is_resource_case_insensitive() {
-        assert!(PhpType::parse("Resource").is_resource());
-        assert!(PhpType::parse("RESOURCE").is_resource());
+    fn is_resource_not_folded_for_uppercase_resource() {
+        // PHP has no `resource` type-hint at all, so `resource` is not a
+        // reserved keyword in any casing; a project may legally declare a
+        // class named `Resource`, so only the exact lowercase spelling is
+        // the pseudo-type (see `is_lowercase_only_pseudo_type`).
+        assert!(!PhpType::parse("Resource").is_resource());
+        assert!(!PhpType::parse("RESOURCE").is_resource());
     }
 
     #[test]

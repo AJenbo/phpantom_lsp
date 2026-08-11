@@ -252,34 +252,3 @@ Laravel-specific behaviour in this codebase is already gated on
 higher bar than a bare name match (e.g. only match when the hierarchy has
 exactly one class, so the heuristic can't silently pick a wrong one out of
 several same-named candidates).
-
-### B80. A same-named user class loses to a pseudo-type keyword
-**Impact: Low · Effort: Low**
-
-A class the project declares takes precedence over a PHPDoc pseudo-type
-of the same name — the class is a real symbol, the keyword is a
-convention. We resolve it the other way round for the aliases that have a
-native PHP counterpart, so a `@param Integer $value` annotating a
-parameter of a user-declared `Integer` class is read as PHP's `integer`
-alias for `int`, and passing an actual `Integer` instance is reported as
-a mismatch:
-
-```php
-final class Integer {}
-
-/** @param Integer $value */
-function acceptsInteger($value): void {}
-
-acceptsInteger(new Integer()); // reported: expects Integer, got App\Integer
-```
-
-`number` and `real` already get this right (`is_lowercase_only_pseudo_type`
-keeps any casing other than all-lowercase out of the scalar), but
-`integer`, `boolean`, `double`, and `resource` are folded case-insensitively
-because PHP's own type keywords are. The distinction is that PHP has no
-native `Integer` type: a class of that name is legal, so an annotation
-naming one has to resolve to the class when the project declares it.
-
-Reproduced in `php-typing-conformance/conformance/tests/`:
-`phpdoc_advanced_pseudotype_class_precedence.php`.
-

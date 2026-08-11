@@ -522,6 +522,78 @@ function test(): void {
     );
 }
 
+// ─── No diagnostic: a user class shadows an alias-with-native-counterpart ───
+
+#[test]
+fn no_diagnostic_for_class_named_integer_via_phpdoc_param() {
+    // `integer` is only a legacy PHP alias for `int`, never a reserved
+    // keyword, so a project may declare a real class named `Integer`. A
+    // `@param Integer $value` annotation naming that class must resolve to
+    // the class, not PHP's `int` alias.
+    let php = r#"<?php
+final class Integer {}
+
+/** @param Integer $value */
+function acceptsInteger($value): void {}
+
+acceptsInteger(new Integer());
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An `Integer` argument passed to a `@param Integer` param must not be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_wrong_type_to_integer_class_phpdoc_param() {
+    // The `Integer` class must still participate in genuine mismatch
+    // detection: passing an unrelated class where `Integer` is expected is
+    // an error.
+    let php = r#"<?php
+final class Integer {}
+final class Money {}
+
+/** @param Integer $value */
+function acceptsInteger($value): void {}
+
+acceptsInteger(new Money());
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Passing Money to an `@param Integer` param should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_classes_named_boolean_double_resource_via_phpdoc_param() {
+    // `boolean`, `double`, and `resource` share the same status as
+    // `integer`: PHP aliases/legacy names with no reserved keyword, so a
+    // project may declare classes with these names and they must win over
+    // the pseudo-type reading.
+    let php = r#"<?php
+final class Boolean {}
+final class Double {}
+final class Resource {}
+
+/**
+ * @param Boolean $b
+ * @param Double $d
+ * @param Resource $r
+ */
+function accepts($b, $d, $r): void {}
+
+accepts(new Boolean(), new Double(), new Resource());
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Boolean/Double/Resource class instances must not be flagged against \
+         same-named @param annotations, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: interface implementation ────────────────────────────────
 
 #[test]

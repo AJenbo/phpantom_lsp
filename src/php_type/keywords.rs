@@ -4,14 +4,20 @@
 /// when it is written in lowercase.
 ///
 /// PHP's reserved type keywords are case-insensitive, so `FLOAT` is the scalar
-/// and a class can never be named `Float`. These two are different: `number`
-/// is a PHPDoc-only pseudo-type (`int|float`) that PHP has no native spelling
-/// for, and `real` was removed from PHP in 8.0. Both `Number` (PHP 8.4's
-/// `BcMath\Number`) and `Real` are legal, plausible class names, so any casing
-/// other than all-lowercase is a class reference and must not be folded into
-/// the scalar.
+/// and a class can never be named `Float`. The names here are different: none
+/// of them is one of PHP's actual reserved type keywords (those are `int`,
+/// `float`, `bool`, and `string`; PHP has no `resource` type-hint at all), so
+/// a class can legally be named `Integer`, `Boolean`, `Double`, `Resource`,
+/// `Number` (PHP 8.4's `BcMath\Number`), or `Real`. `integer`, `boolean`, and
+/// `double` are only aliases `gettype()`/legacy PHPDoc use for `int`/`bool`/
+/// `float`; `number` is a PHPDoc-only pseudo-type (`int|float`); `real` was
+/// removed from PHP in 8.0. Any casing other than all-lowercase is a class
+/// reference and must not be folded into the scalar/alias.
 pub(crate) fn is_lowercase_only_pseudo_type(lower: &str) -> bool {
-    matches!(lower, "number" | "real")
+    matches!(
+        lower,
+        "number" | "real" | "integer" | "boolean" | "double" | "resource"
+    )
 }
 
 /// Lowercase `name` for keyword matching, leaving the casing of a
@@ -228,15 +234,23 @@ pub(crate) fn is_scalar_name(name: &str) -> bool {
     if name == "number" {
         return true;
     }
+    let lower = name.to_ascii_lowercase();
+    // `integer`, `boolean`, `double`, and `resource` are PHP aliases/pseudo-
+    // types, not reserved keywords (see `is_lowercase_only_pseudo_type`), so
+    // a project may legally declare a class of one of these names. Only the
+    // exact lowercase spelling counts as the alias.
+    if matches!(
+        lower.as_str(),
+        "integer" | "boolean" | "double" | "resource"
+    ) {
+        return name == lower;
+    }
     matches!(
-        name.to_ascii_lowercase().as_str(),
+        lower.as_str(),
         "int"
-            | "integer"
             | "float"
-            | "double"
             | "string"
             | "bool"
-            | "boolean"
             | "void"
             | "never"
             | "null"
@@ -245,7 +259,6 @@ pub(crate) fn is_scalar_name(name: &str) -> bool {
             | "array"
             | "callable"
             | "iterable"
-            | "resource"
             | "object"
             | "self"
             | "static"
@@ -350,9 +363,10 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
         | "closed-resource" | "open-resource" | "callable-object" | "callable-array"
         | "stringable-object"
         | "array-key" | "scalar" | "numeric" => lower,
-        // `number` and `real` are pseudo-types only in lowercase; fall through
-        // so a `Number`/`Real` class keeps its casing and the lowercase
-        // spellings stay as-is.
+        // `number`, `real`, `integer`, `boolean`, `double`, and `resource`
+        // are aliases/pseudo-types only in lowercase; fall through so a
+        // same-named class keeps its casing and the lowercase spellings
+        // stay as-is.
         _ => name.to_string(),
     }
 }

@@ -906,7 +906,7 @@ impl PhpType {
     /// Also returns `true` when the type is `?bool` (nullable wrapper).
     pub fn is_bool(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "bool" | "boolean"),
+            TypeKind::Named(s) => matches!(keyword_lowercase(s).as_str(), "bool" | "boolean"),
             TypeKind::Nullable(inner) => inner.is_bool(),
             _ => false,
         }
@@ -939,7 +939,7 @@ impl PhpType {
     /// Also returns `true` when the type is `?int` (nullable wrapper).
     pub fn is_int(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "int" | "integer"),
+            TypeKind::Named(s) => matches!(keyword_lowercase(s).as_str(), "int" | "integer"),
             TypeKind::Nullable(inner) => inner.is_int(),
             _ => false,
         }
@@ -1030,7 +1030,7 @@ impl PhpType {
     pub fn is_int_subtype(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => matches!(
-                s.to_ascii_lowercase().as_str(),
+                keyword_lowercase(s).as_str(),
                 "int"
                     | "integer"
                     | "positive-int"
@@ -1134,12 +1134,16 @@ impl PhpType {
         }
     }
 
-    /// Whether this type is `resource` (case-insensitive).
+    /// Whether this type is `resource`.
     ///
-    /// Also returns `true` when the type is `?resource` (nullable wrapper).
+    /// Only the lowercase spelling counts: PHP has no `resource` type-hint,
+    /// so a project may legally declare a class named `Resource`, and that
+    /// must not be folded into the pseudo-type (see
+    /// `is_lowercase_only_pseudo_type`). Also returns `true` when the type
+    /// is `?resource` (nullable wrapper).
     pub fn is_resource(&self) -> bool {
         match self.kind() {
-            TypeKind::Named(s) => s.eq_ignore_ascii_case("resource"),
+            TypeKind::Named(s) => s == "resource",
             TypeKind::Nullable(inner) => inner.is_resource(),
             _ => false,
         }
@@ -1172,7 +1176,7 @@ impl PhpType {
             TypeKind::Named(s) => {
                 s == "number"
                     || matches!(
-                        s.to_ascii_lowercase().as_str(),
+                        keyword_lowercase(s).as_str(),
                         "int"
                             | "integer"
                             | "float"
