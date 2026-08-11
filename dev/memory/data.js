@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786480929529,
+  "lastUpdate": 1786484839032,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18733,6 +18733,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "713f089c7f55f1fda36a53581646af8937d080c3",
+          "message": "A class declared in two files survives the file that won it dropping the\nname",
+          "timestamp": "2026-08-11T23:31:00+02:00",
+          "tree_id": "d5248ca0b1220fb4359401568aa31f052aaca83e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/713f089c7f55f1fda36a53581646af8937d080c3"
+        },
+        "date": 1786484834839,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.4,
             "unit": "MiB"
           }
         ]
