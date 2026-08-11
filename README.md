@@ -54,6 +54,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | RAM usage                       | 360 MB   | 520 MB       | 3.9 GB     | 498 MB      | 1.7 GB      |
 | Disk cache                      | 0        | 45 MB        | 0          | 4.1 GB      | 551 MB      |
 
+<p>
 <sub>
 🚧 = partial support. 🧩 = requires plugin. 🔒 = paid tier.<br>
 <sup>1</sup> Completion, hover, signature help, go-to-definition, find references, diagnostics, document symbols.<br>
@@ -63,7 +64,9 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 <sup>5</sup> Convert between arrow functions and closures, and switch statements to match expressions.<br>
 Performance measured on a production codebase: 21K PHP files, 1.5M lines of code (vendor + application). Time to ready is CPU time consumed until full type intelligence is available on a cold start (first index); tools with a disk cache launch faster on subsequent starts.
 </sub>
+</p>
 
+> [!TIP]
 > **Want to verify?** Open [`examples/demo.php`](examples/demo.php) in your editor and trigger completion at the marked locations. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings.
 
 ## Context-Aware Intelligence
