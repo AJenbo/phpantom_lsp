@@ -5543,6 +5543,48 @@ function test(int $id): void {
     );
 }
 
+/// A `class-string<T>` parameter with a class name for its default states the
+/// return type of the argument-less call, and the conditional such a
+/// signature reads as answers `mixed` for that call. The default is the more
+/// precise of the two, so a branch that collapses to bare `mixed` must not
+/// stand in its way.
+#[test]
+fn a_class_string_helpers_default_types_its_argument_less_call() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class Application {
+    public function basePath(string $path = ''): string { return $path; }
+}
+
+class Mailer {
+    public function send(): void {}
+}
+
+/**
+ * @template T of object
+ * @param class-string<T> $name
+ * @return T
+ */
+function app(string $name = Application::class): object {}
+
+function test(): void {
+    app()->basePath('/tmp');
+    app(Mailer::class)->send();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, php);
+    assert!(
+        diags.is_empty(),
+        "the parameter default and an explicit class-string should both resolve, got: {diags:?}"
+    );
+}
+
 // ─── Issue #168: instanceof narrowing must not leak into elseif body ────────
 
 #[test]

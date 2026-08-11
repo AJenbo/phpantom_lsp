@@ -45,6 +45,42 @@ No outstanding items.
 
 ## Miscellaneous
 
+#### B2. A request accessor written with named arguments loses its key
+
+**Impact: Low · Complexity: Low**
+
+`header()`, `query()`, `cookie()`, `input()`, `post()`, and `file()`
+each declare one union spanning every way of calling them, and the
+call's own arguments are what pick a member. Both resolution paths read
+`$key` and `$default` off the call by position, so a named argument is
+read as whichever slot it happens to sit in:
+
+```php
+$photos = $request->file(key: 'photos');   // list<UploadedFile>|null
+                                           // resolves as UploadedFile|null
+$all = $request->header(default: 'x');     // the whole HeaderBag
+                                           // resolves as a plain string
+```
+
+The key text is `key: 'photos'`, which no string literal unquotes to, so
+the validation rules that decide between one upload and a list are never
+consulted, and a call that supplies only a default is read as if that
+default were the key.
+
+The argument texts reaching both sites keep their `name:` labels on
+purpose, so that `bind_text_args_to_params` can route them; these two
+sites just never call it. The AST counterpart (`bind_args_to_params`)
+covers the default's expression the same way.
+
+**Where to look:** `try_resolve_request_accessor_type` in
+`type_engine/variable/rhs_resolution/calls.rs` and
+`resolve_request_accessor_at_call` in
+`type_engine/call_resolution/return_types.rs`. Binding needs the
+accessor's declared parameters, and the `ClassInfo` both sites hold is
+the receiver's own class rather than an inheritance-merged one, so
+`get_method_ci("file")` on an app's `FormRequest` subclass finds
+nothing: the lookup has to walk the parent chain.
+
 #### B1. Editing a service provider does not re-scan what it registers
 
 **Impact: Medium · Complexity: Medium**
