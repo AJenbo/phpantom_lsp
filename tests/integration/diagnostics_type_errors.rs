@@ -7402,3 +7402,109 @@ fn mapwithkeys_does_not_bind_the_key_to_the_whole_return_type() {
         "expected no type error, got {messages:?}"
     );
 }
+
+// ─── PHPDoc pseudo-type spellings we have no model for ──────────────────────
+
+/// A hyphenated spelling that no keyword covers used to be qualified against
+/// the file's namespace and enforced as if it were a class, so every call site
+/// was checked against a type nothing can satisfy.
+#[test]
+fn unmodelled_pseudo_type_param_does_not_reject_every_argument() {
+    let php = r#"<?php
+namespace App;
+
+/** @param decimal-int-string $value */
+function acceptsDecimalIntString($value): void {}
+
+acceptsDecimalIntString('123');
+acceptsDecimalIntString(42);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(
+        messages.is_empty(),
+        "expected no type error for an unmodelled spelling, got {messages:?}"
+    );
+}
+
+/// `pure-callable` is recognized; only its purity is unmodelled. Widening it to
+/// `callable` keeps the check that a non-callable argument is wrong.
+#[test]
+fn pure_callable_param_still_rejects_a_non_callable() {
+    let php = r#"<?php
+namespace App;
+
+/** @param pure-callable $value */
+function acceptsPureCallable($value): void {}
+
+acceptsPureCallable(static fn (int $v): int => $v + 1);
+acceptsPureCallable(1);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("callable"), "{messages:?}");
+}
+
+/// `value-of<T>` over a concrete shape is the union of the shape's values, so
+/// a value of the shape passes and one of its *keys* does not.
+#[test]
+fn value_of_over_a_concrete_shape_is_enforced_as_its_value_union() {
+    let php = r#"<?php
+namespace App;
+
+/** @param value-of<array{a: int, b: int}> $value */
+function acceptsShapeValue($value): void {}
+
+acceptsShapeValue(1);
+acceptsShapeValue('a');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'a'"), "{messages:?}");
+}
+
+/// `key-of<T>` likewise, in the other direction.
+#[test]
+fn key_of_over_a_concrete_shape_is_enforced_as_its_key_union() {
+    let php = r#"<?php
+namespace App;
+
+/** @param key-of<array{name: string, age: int}> $key */
+function acceptsShapeKey($key): void {}
+
+acceptsShapeKey('name');
+acceptsShapeKey('age');
+acceptsShapeKey('missing');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'missing'"), "{messages:?}");
+}
+
+/// When the operand cannot be read, the operator names no set of values. It has
+/// to widen rather than reject: as a parameter to the bound its result falls
+/// within, as an argument to "unknown".
+#[test]
+fn unevaluated_key_of_widens_instead_of_rejecting() {
+    let php = r#"<?php
+namespace App;
+
+class Config { const MAP = ['debug' => 1, 'verbose' => 2]; }
+
+/** @param key-of<Config::MAP> $key */
+function acceptsConfigKey($key): void {}
+
+/** @return value-of<Config::MAP> */
+function firstValue() { return 1; }
+
+acceptsConfigKey('debug');
+acceptsConfigKey('anything');
+
+function acceptsInt(int $value): void {}
+acceptsInt(firstValue());
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(
+        messages.is_empty(),
+        "expected no type error while the operand is unreadable, got {messages:?}"
+    );
+}

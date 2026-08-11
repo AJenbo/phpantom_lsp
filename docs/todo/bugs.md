@@ -7,7 +7,12 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
+Each entry below carries an **Impact · Effort** rating using the same
+scale defined in [`docs/todo.md`](../todo.md); that table is also where
+each bug's row lives in the current sprint/backlog.
+
 ### B71. Completion in a Blade template edits the virtual PHP's coordinates
+**Impact: Medium · Effort: Low**
 
 A completion item that carries a `TextEdit` puts the range it computed on
 `content`, and for a `.blade.php` file `handle_completion` swaps `content`
@@ -31,6 +36,7 @@ range falls in the injected prologue rather than clamping it to the start
 of the template.
 
 ### B72. A generic class named without its arguments returns its own template parameter
+**Impact: Medium · Effort: Medium**
 
 A subject written with no template arguments — a `@var ItemCollection $items`
 docblock, a parameter or return type spelled without generics, anything that
@@ -56,6 +62,7 @@ declared without one, so the type is the widest thing the declaration
 guarantees rather than a name nothing can resolve.
 
 ### B73. Narrowing survives a reassignment of the subject's base variable
+**Impact: Medium · Effort: Medium**
 
 The narrowing re-walk in `apply_property_narrowing` looks for a check on a
 subject path anywhere in the enclosing body and applies it at the cursor.
@@ -84,6 +91,7 @@ between the check and the cursor, rather than making the fall-through
 conditional on which consumer is asking.
 
 ### B74. `analyze --format json` prints a prose note ahead of the payload
+**Impact: Medium · Effort: Low**
 
 A project root without a `composer.json` makes `run_analysis` print
 `Note: no composer.json found in … — analysing as a plain PHP project.`
@@ -104,6 +112,7 @@ formats. Fix: write the note to stderr, so stdout carries only the payload
 the format promises.
 
 ### B75. A path that does not exist is reported as "No PHP files found" with exit 0
+**Impact: Medium · Effort: Low**
 
 `analyze` resolves a relative `PATH` against `--project-root` rather than
 the working directory, and a path that resolves nowhere produces
@@ -125,6 +134,7 @@ resolves nowhere should be an error on stderr with a non-zero exit
 distinct from 1 (which already means "diagnostics found").
 
 ### B76. `{@see method()}` unqualified inside its own class resolves as a global function
+**Impact: Medium · Effort: Medium**
 
 `@see` (and presumably `@link`/`@uses`) resolves a bare `name()` reference by
 looking up a global function, never checking whether the enclosing class
@@ -151,71 +161,12 @@ php-typing-conformance corpus for a real instance). Fix: when resolving an
 inherited) for a matching method/property/constant before falling back to a
 global function/constant lookup.
 
-### B77. An unrecognized PHPDoc pseudo-type spelling is treated as a class name and enforced literally
-
-When the docblock parser meets a lowercase-hyphenated pseudo-type
-spelling it doesn't have a keyword for — `value-of<T>`, `literal-int`,
-`stringable-object`, `pure-callable`, and likely every other
-`phpdoc_advanced_fallback_*`/`phpdoc_advanced_psalm_*` spelling in the
-php-typing-conformance corpus that isn't already a recognized keyword —
-it falls through to the same path as an unresolved class name: it gets
-namespace-qualified against the file's own namespace and then used
-verbatim as the declared type, so every call site is checked against a
-type that can never match anything.
-
-The result is not "not implemented" (an honest, expected outcome the
-conformance suite explicitly does not treat as a defect) but active
-false positives on entirely valid code, alongside missed detection of
-the actually-invalid cases, which then get the same generic message as
-the false positives:
-
-```php
-/** @return value-of<array{a: int, b: int}> */
-function returnsValue(): int { return 1; }
-// reported: "Return type 1 is incompatible with declared return type
-//            value-of<array{a: int, b: int}>" — false positive, 1 IS a value-of
-
-/** @param value-of<array{a: int, b: int}> $value */
-function acceptsValue($value): void {}
-acceptsValue(1);   // false positive: "expects value-of<...>, got 1"
-acceptsValue('x'); // should report this — instead gets the identical generic message
-```
-
-`key-of<T>` shows the same shape but partially recognizes the syntax
-(the type prints as `key-of<array{...}>` rather than being
-namespace-qualified into a bogus class), so the parser has *started*
-handling it, but nothing expands it to the union of the shape's
-literal keys before enforcement runs — the effect on call sites is
-identical.
-
-Reproduced in `php-typing-conformance/conformance/tests/`:
-`phpdoc_advanced_fallback_value_of.php`,
-`phpdoc_advanced_fallback_key_of.php`,
-`phpdoc_advanced_psalm_literal_int.php`,
-`phpdoc_advanced_psalm_stringable_object.php`,
-`phpdoc_advanced_fallback_pure_callable.php`,
-`phpdoc_advanced_fallback_decimal_int_string.php`,
-`phpdoc_advanced_fallback_non_decimal_int_string.php`,
-`phpdoc_advanced_psalm_arraylike_object.php`. DEVSENSE (measured as `phpy`
-in that suite) recognizes every one of these; it's the tool our own
-diagnostics diverge from most sharply on this specific failure mode.
-
-This violates the "no diagnostic suppression" principle in the
-opposite direction: an unrecognized spelling must degrade to "not
-recognized" (skip enforcement, and for docblock type positions ideally
-fall back to `mixed`, the way B72 substitutes a `@template` bound),
-never to "treat the spelling as if it were a class and enforce it
-literally." Fix at the type-string parser
-(`src/docblock/type_strings.rs` / `src/php_type/parse.rs`): a
-pseudo-type spelling with no matching keyword and no matching class
-must resolve to `mixed`, not to a synthesized class-like type name, and
-`key-of`/`value-of` need their expansion (to the shape's key union /
-value union) wired in before enforcement, not just accepted as syntax.
-
 ### B78. `object{prop: Type}` shapes never match a concrete class, even when it satisfies the shape
+**Impact: Medium-High · Effort: Medium**
 
-Unlike B77's cluster, `object{foo: int}` is correctly parsed and printed —
-it isn't mistaken for a class name. But nothing checks a concrete class or
+`object{foo: int}` is correctly parsed and printed — it isn't mistaken for a
+class name the way an unmodelled pseudo-type spelling used to be. But nothing
+checks a concrete class or
 anonymous object against the shape structurally: every object argument is
 rejected, including ones that satisfy it.
 
@@ -250,3 +201,119 @@ optional) instead of falling through to nominal comparison. Likely lives
 next to whatever `is_type_compatible` (see T32) already does for array
 shapes against array literals — object shapes need the same treatment
 against object literals and named classes.
+
+### B79. Find-references falls back to variable-name-vs-class-name text matching when a receiver's type can't be resolved
+**Impact: High · Effort: Medium-High**
+
+`find_member_references` scopes candidates to the target method's class
+hierarchy — but only when the receiver's type resolves. When
+`resolve_subject_to_fqns` comes back empty (an untyped property, an
+unannotated parameter, anything the forward walker can't pin down),
+`unresolved_member_subject_matches_scope` takes over, and it isn't a type
+check at all: it takes the receiver's *variable name* (`$context` →
+`context`), normalizes it, and checks whether it textually matches the
+*short name* of any class in the hierarchy (`Context` → `context`, plus a
+couple of `Repository`/`Gateway`/`Repo` suffix variants). Any call
+`$context->getAll()` anywhere in the project counts as a reference to
+`Context::getAll()` once the receiver's type can't be resolved, regardless
+of what `$context` actually holds — a `SymfonyContext`, an array, an
+unrelated class that also happens to get assigned to a same-named
+variable.
+
+This is precisely the failure mode php-typing-conformance's LSP survey is
+built to surface: `conformance/lsp/navigation.toml` plants same-named
+decoy methods across the psysh checkout specifically so that "a large
+extra count is how name-matching reference implementations become
+visible" (`ProbeGrading::navigation()`'s own docblock). Our result for
+`Psy\Context::getAll()` is `refs_expected = 10, refs_found = 10, refs_extra
+= 3` — three results outside the curated reference set, which is
+consistent with the heuristic firing on unrelated `getAll()` receivers
+named similarly to `Context` rather than three references the fixture's
+hand-curated list simply missed. (Not confirmed against the actual
+checkout — `~/repo/php/steins-survey` is outside this repo — but the
+mechanism is confirmed by reading `unresolved_member_subject_matches_scope`
+directly, and it matches the documented decoy mechanism exactly.)
+
+This runs on the same path `rename` uses
+(`find_references_for_rename` → `find_member_references`), so it is not
+just a references-panel accuracy issue: a rename on a method can silently
+also rewrite an unrelated call site whose receiver variable happens to
+share a name with the target class.
+
+The heuristic exists for a real reason — Laravel's Eloquent/Builder
+methods are frequently called through untyped or dynamically-typed
+receivers, and the `Repository`/`Gateway`/`Repo` suffix handling in
+`member_scope_name_keys` is clearly aimed at that pattern — so the fix is
+to narrow it, not delete it. Options worth weighing: restrict the
+fallback to contexts where the framework/project actually uses that
+untyped-receiver convention (Laravel projects, the way other
+Laravel-specific behaviour in this codebase is already gated on
+`is_laravel_project`) rather than applying it universally; or require a
+higher bar than a bare name match (e.g. only match when the hierarchy has
+exactly one class, so the heuristic can't silently pick a wrong one out of
+several same-named candidates).
+
+### B80. A same-named user class loses to a pseudo-type keyword
+**Impact: Low · Effort: Low**
+
+A class the project declares takes precedence over a PHPDoc pseudo-type
+of the same name — the class is a real symbol, the keyword is a
+convention. We resolve it the other way round for the aliases that have a
+native PHP counterpart, so a `@param Integer $value` annotating a
+parameter of a user-declared `Integer` class is read as PHP's `integer`
+alias for `int`, and passing an actual `Integer` instance is reported as
+a mismatch:
+
+```php
+final class Integer {}
+
+/** @param Integer $value */
+function acceptsInteger($value): void {}
+
+acceptsInteger(new Integer()); // reported: expects Integer, got App\Integer
+```
+
+`number` and `real` already get this right (`is_lowercase_only_pseudo_type`
+keeps any casing other than all-lowercase out of the scalar), but
+`integer`, `boolean`, `double`, and `resource` are folded case-insensitively
+because PHP's own type keywords are. The distinction is that PHP has no
+native `Integer` type: a class of that name is legal, so an annotation
+naming one has to resolve to the class when the project declares it.
+
+Reproduced in `php-typing-conformance/conformance/tests/`:
+`phpdoc_advanced_pseudotype_class_precedence.php`.
+
+### B81. `key-of<T>` widens to the bound array instead of the argument's own shape
+**Impact: Medium · Effort: Medium**
+
+A `@template T of array<array-key, mixed>` bound to a call's argument
+should take that argument's shape, so `key-of<T>` projects the keys the
+caller actually passed. Instead `T` binds to the bare bound (`array`),
+`key-of<array>` cannot be evaluated, and the projection is lost:
+
+```php
+/**
+ * @template T of array<array-key, mixed>
+ * @param T $items
+ * @return key-of<T>
+ */
+function firstKey(array $items) { /* … */ }
+
+/** @param 'debug'|'verbose' $flag */
+function acceptsFlagName(string $flag): void {}
+
+acceptsFlagName(firstKey(['debug' => false, 'verbose' => true]));
+// the keys are exactly 'debug'|'verbose', but T bound to `array`
+```
+
+The unevaluated `key-of` widens rather than rejecting now, so this is
+silence rather than a false positive, but the precision is still gone:
+neither the true match above nor the genuine mismatch on an `int`
+parameter is decided. The fix is in template inference — an array
+literal argument should bind the template to its shape, not to the
+bound's erased form — after which the existing `key-of` evaluation
+handles the rest.
+
+Reproduced in `php-typing-conformance/conformance/tests/`:
+`phpdoc_advanced_fallback_key_of_template.php`,
+`phpdoc_advanced_fallback_value_of_template.php`.

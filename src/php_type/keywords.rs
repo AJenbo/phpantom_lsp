@@ -79,6 +79,44 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
     )
 }
 
+/// Whether `name` is a hyphenated PHPDoc pseudo-type spelling that no keyword
+/// in [`is_keyword_type`] covers.
+///
+/// PHP identifiers cannot contain `-`, so such a name can never name a class:
+/// it is a pseudo-type from some analyzer's vocabulary (`pure-callable`,
+/// `literal-int`, `stringable-object`, …) that we have no model for. Resolving
+/// it the way a class name is resolved qualifies it against the enclosing
+/// namespace and then enforces a type no value can ever satisfy, so callers
+/// degrade it to `mixed` instead.
+pub(crate) fn is_unmodelled_pseudo_type(name: &str) -> bool {
+    name.contains('-') && !is_keyword_type(name)
+}
+
+/// The type a PHPDoc refinement we have no model for widens to.
+///
+/// These spellings are recognized (the PHPDoc grammar has a keyword for each),
+/// but the property each one adds — that an int is known at analysis time, that
+/// a callable has no side effects, that an object has `__toString` — is not one
+/// we can decide.  What we can decide is the type being refined, and every
+/// value satisfying the refinement satisfies that, so widening keeps all the
+/// accuracy available without enforcing a constraint we cannot check.
+///
+/// Matched in lowercase only, like the other PHPDoc-only pseudo-types: these
+/// have no native spelling and any other casing is a class reference.
+pub(crate) fn unmodelled_refinement_base(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "literal-int" => "int",
+        "literal-float" => "float",
+        "lowercase-callable-string" | "uppercase-callable-string" => "callable-string",
+        "stringable-object" => "object",
+        "pure-callable" => "callable",
+        // Fully qualified: `Closure` is a class, and a bare one would be
+        // resolved against the docblock's own namespace.
+        "pure-closure" => "\\Closure",
+        _ => return None,
+    })
+}
+
 /// Whether a type name is a primitive scalar / built-in type: `int`,
 /// `float`, `string`, `bool`, `void`, `never`, `null`, `false`, `true`,
 /// `array`, `callable`, `iterable`, `resource` (and PHP aliases).

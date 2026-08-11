@@ -864,6 +864,43 @@ impl PhpType {
         }
     }
 
+    /// Whether a type operator that never got evaluated — `key-of<T>`,
+    /// `value-of<T>`, `T[K]` — appears anywhere in this type tree.
+    ///
+    /// Companion guard to [`PhpType::unevaluated_operators_as_bounds`], in the
+    /// same spirit as [`PhpType::contains_conditional`]: cheap enough to run on
+    /// every type, so the (cloning) rewrite only runs on the few that need it.
+    pub fn contains_unevaluated_operator(&self) -> bool {
+        match self.kind() {
+            TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => true,
+            TypeKind::Nullable(inner)
+            | TypeKind::Array(inner)
+            | TypeKind::ClassString(Some(inner))
+            | TypeKind::InterfaceString(Some(inner)) => inner.contains_unevaluated_operator(),
+            TypeKind::Union(members) | TypeKind::Intersection(members) => {
+                members.iter().any(|m| m.contains_unevaluated_operator())
+            }
+            TypeKind::Generic(g) => g.args.iter().any(|m| m.contains_unevaluated_operator()),
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
+                .iter()
+                .any(|e| e.value_type.contains_unevaluated_operator()),
+            TypeKind::Callable(c) => {
+                c.params
+                    .iter()
+                    .any(|p| p.type_hint.contains_unevaluated_operator())
+                    || c.return_type
+                        .as_ref()
+                        .is_some_and(|r| r.contains_unevaluated_operator())
+            }
+            TypeKind::Conditional(c) => {
+                c.condition.contains_unevaluated_operator()
+                    || c.then_type.contains_unevaluated_operator()
+                    || c.else_type.contains_unevaluated_operator()
+            }
+            _ => false,
+        }
+    }
+
     /// Whether this type is `bool` or `boolean` (case-insensitive).
     ///
     /// Also returns `true` when the type is `?bool` (nullable wrapper).

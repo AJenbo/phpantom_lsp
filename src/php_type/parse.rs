@@ -291,6 +291,14 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         // -- Named / Reference types ------------------------------------------
         cst::Type::Reference(r) => {
             let name = reference_kind_name(&r.kind);
+            // A hyphenated spelling no keyword covers is a pseudo-type from
+            // some analyzer's vocabulary, never a class name.  `mixed` is the
+            // honest reading of a type we have no model for; keeping the
+            // spelling would send it through class resolution and enforce it
+            // literally, so nothing would ever match it.
+            if is_unmodelled_pseudo_type(name) {
+                return PhpType::mixed();
+            }
             match &r.parameters {
                 Some(params) => {
                     let mut args: Vec<PhpType> =
@@ -380,7 +388,10 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
 
         // -- Callable types ---------------------------------------------------
         cst::Type::Callable(c) => {
-            let kind = bytes_to_str(c.keyword.value);
+            // `pure-callable` / `pure-closure` name a callable whose purity we
+            // do not model; the callable part of them we do.
+            let written = bytes_to_str(c.keyword.value);
+            let kind = unmodelled_refinement_base(written).unwrap_or(written);
             match &c.specification {
                 Some(spec) => {
                     let params: Vec<CallableParam> = spec
@@ -426,8 +437,12 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         }
 
         // -- key-of / value-of ------------------------------------------------
-        cst::Type::KeyOf(k) => PhpType::key_of(convert(&k.parameter.entry.inner)),
-        cst::Type::ValueOf(v) => PhpType::value_of(convert(&v.parameter.entry.inner)),
+        // Evaluated as soon as the operand is concrete: `key-of<array{a: int}>`
+        // is the union `'a'`, and only the unevaluated form (a class constant,
+        // an unsubstituted template) survives as `KeyOf`/`ValueOf` for a later
+        // pass to finish.
+        cst::Type::KeyOf(k) => evaluate_key_of(&convert(&k.parameter.entry.inner)),
+        cst::Type::ValueOf(v) => evaluate_value_of(&convert(&v.parameter.entry.inner)),
 
         // -- int range --------------------------------------------------------
         cst::Type::IntRange(r) => PhpType::int_range(r.min.to_string(), r.max.to_string()),
@@ -493,7 +508,11 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         | cst::Type::UnspecifiedLiteralString(k)
         | cst::Type::UnspecifiedLiteralFloat(k)
         | cst::Type::NonEmptyUnspecifiedLiteralString(k) => {
-            PhpType::named(atom(&normalize_keyword_casing(bytes_to_str(k.value))))
+            let canonical = normalize_keyword_casing(bytes_to_str(k.value));
+            match unmodelled_refinement_base(&canonical) {
+                Some(base) => PhpType::named(atom(base)),
+                None => PhpType::named(atom(&canonical)),
+            }
         }
 
         // -- Catch-all for anything else (non_exhaustive) ---------------------

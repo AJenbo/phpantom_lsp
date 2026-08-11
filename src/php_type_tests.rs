@@ -4384,3 +4384,157 @@ fn dropped_types_leave_the_interner() {
          forms — dead entries are not being reclaimed"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Unmodelled PHPDoc pseudo-types
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unrecognized_hyphenated_spelling_becomes_mixed() {
+    // Hyphens are not valid PHP identifier characters, so none of these can
+    // name a class.  Keeping the spelling would send it through class
+    // resolution, where it is qualified against the file's namespace and then
+    // enforced as a type no value can satisfy.
+    for spelling in [
+        "decimal-int-string",
+        "non-decimal-int-string",
+        "static-closure",
+        "static-pure-closure",
+        "non-null-mixed",
+        "arraylike-object",
+    ] {
+        assert_eq!(
+            PhpType::parse(spelling),
+            PhpType::mixed(),
+            "{spelling} should degrade to mixed"
+        );
+    }
+}
+
+#[test]
+fn unrecognized_hyphenated_generic_becomes_mixed() {
+    for spelling in [
+        "non-empty-associative-array<string, int>",
+        "int-range<0, 255>",
+    ] {
+        assert_eq!(
+            PhpType::parse(spelling),
+            PhpType::mixed(),
+            "{spelling} should degrade to mixed"
+        );
+    }
+}
+
+#[test]
+fn modelled_hyphenated_keywords_keep_their_spelling() {
+    // The degradation must not swallow the pseudo-types we do model.
+    for spelling in [
+        "non-empty-string",
+        "positive-int",
+        "class-string",
+        "array-key",
+        "non-empty-list",
+        "int-mask-of<Foo::*>",
+    ] {
+        assert_ne!(
+            PhpType::parse(spelling),
+            PhpType::mixed(),
+            "{spelling} is a keyword we model and must survive parsing"
+        );
+    }
+}
+
+#[test]
+fn unmodelled_refinements_widen_to_the_type_they_refine() {
+    // These spellings are recognized; the property each adds (literalness,
+    // purity, having __toString) is not one we can decide, so each widens to
+    // the type it refines rather than being enforced or thrown away.
+    for (spelling, expected) in [
+        ("literal-int", "int"),
+        ("literal-float", "float"),
+        ("stringable-object", "object"),
+        ("pure-callable", "callable"),
+        ("lowercase-callable-string", "callable-string"),
+        ("uppercase-callable-string", "callable-string"),
+    ] {
+        assert_eq!(PhpType::parse(spelling).to_string(), expected, "{spelling}");
+    }
+    // `Closure` is a class, so the widened form has to be fully qualified or
+    // it would be resolved against the docblock's own namespace.
+    assert_eq!(PhpType::parse("pure-closure").to_string(), "\\Closure");
+}
+
+#[test]
+fn pure_callable_specification_keeps_its_signature() {
+    // Only the purity is unmodelled — the parameter and return types are not.
+    assert_eq!(
+        PhpType::parse("pure-callable(int): string").to_string(),
+        "callable(int): string"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// key-of / value-of evaluation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn key_of_concrete_shape_is_evaluated_at_parse_time() {
+    // Nothing else runs before a declared type is enforced, so an operand that
+    // is already concrete has to be projected here or every call site is
+    // checked against a type expression instead of a set of values.
+    assert_eq!(
+        PhpType::parse("key-of<array{name: string, age: int}>").to_string(),
+        "'name'|'age'"
+    );
+    assert_eq!(
+        PhpType::parse("value-of<array{a: int, b: int}>").to_string(),
+        "int"
+    );
+    assert_eq!(
+        PhpType::parse("value-of<array{a: int, b: string}>").to_string(),
+        "int|string"
+    );
+    assert_eq!(PhpType::parse("key-of<list<string>>").to_string(), "int");
+}
+
+#[test]
+fn key_of_unevaluated_operand_survives_for_a_later_pass() {
+    // A template that has not been substituted yet must stay a `key-of` so
+    // `substitute` can finish the projection at the call site.
+    assert!(matches!(
+        PhpType::parse("key-of<T>").kind(),
+        TypeKind::KeyOf(_)
+    ));
+    assert!(matches!(
+        PhpType::parse("value-of<Config::MAP>").kind(),
+        TypeKind::ValueOf(_)
+    ));
+}
+
+#[test]
+fn unevaluated_operators_widen_to_their_bounds() {
+    // An operator whose operand we could not read is an unknown type, not an
+    // empty one: `key-of` lands somewhere in `array-key`, `value-of` and an
+    // index access anywhere at all.
+    assert_eq!(
+        PhpType::parse("key-of<T>")
+            .unevaluated_operators_as_bounds()
+            .to_string(),
+        "array-key"
+    );
+    assert_eq!(
+        PhpType::parse("value-of<T>")
+            .unevaluated_operators_as_bounds()
+            .to_string(),
+        "mixed"
+    );
+    // Nested inside a wrapper, and left alone when there is nothing to widen.
+    assert_eq!(
+        PhpType::parse("list<key-of<T>>")
+            .unevaluated_operators_as_bounds()
+            .to_string(),
+        "list<array-key>"
+    );
+    let concrete = PhpType::parse("list<string>");
+    assert_eq!(concrete.unevaluated_operators_as_bounds(), concrete);
+}

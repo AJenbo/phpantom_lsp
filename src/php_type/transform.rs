@@ -640,6 +640,83 @@ impl PhpType {
         }
     }
 
+    /// Replace every type operator that never got evaluated with the widest
+    /// type its result can have: `key-of<T>` with `array-key`, `value-of<T>`
+    /// and `T[K]` with `mixed`.
+    ///
+    /// `key-of<array{a: int}>` is evaluated the moment it is parsed; what
+    /// survives is the form whose operand we could not read (a class constant,
+    /// a template that was never substituted).  That leftover is a type
+    /// *expression*, not a set of values, so anything comparing a concrete type
+    /// against it — argument compatibility above all — has to widen it first or
+    /// every value, valid or not, comes back as a mismatch.  The bounds are the
+    /// ones PHPStan falls back to: an array key is an `int|string` whichever
+    /// key it turns out to be, and a value can be anything.
+    pub fn unevaluated_operators_as_bounds(&self) -> PhpType {
+        if !self.contains_unevaluated_operator() {
+            return self.clone();
+        }
+        let recurse = |inner: &PhpType| inner.unevaluated_operators_as_bounds();
+        match self.kind() {
+            TypeKind::KeyOf(_) => PhpType::named(atom("array-key")),
+            TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => PhpType::mixed(),
+            TypeKind::Nullable(inner) => PhpType::nullable(recurse(inner)),
+            TypeKind::Array(inner) => PhpType::array_of(recurse(inner)),
+            TypeKind::Union(members) => PhpType::union(members.iter().map(recurse).collect()),
+            TypeKind::Intersection(members) => {
+                PhpType::intersection(members.iter().map(recurse).collect())
+            }
+            TypeKind::Generic(g) => {
+                PhpType::generic_atom(g.name, g.args.iter().map(recurse).collect())
+            }
+            TypeKind::ArrayShape(entries) => PhpType::array_shape(
+                entries
+                    .iter()
+                    .map(|e| ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: recurse(&e.value_type),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            TypeKind::ObjectShape(entries) => PhpType::object_shape(
+                entries
+                    .iter()
+                    .map(|e| ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: recurse(&e.value_type),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            TypeKind::Callable(c) => PhpType::callable_type(CallableType {
+                kind: c.kind,
+                params: c
+                    .params
+                    .iter()
+                    .map(|p| CallableParam {
+                        type_hint: recurse(&p.type_hint),
+                        optional: p.optional,
+                        variadic: p.variadic,
+                    })
+                    .collect(),
+                return_type: c.return_type.as_ref().map(recurse),
+            }),
+            TypeKind::ClassString(inner) => PhpType::class_string(inner.as_ref().map(recurse)),
+            TypeKind::InterfaceString(inner) => {
+                PhpType::interface_string(inner.as_ref().map(recurse))
+            }
+            TypeKind::Conditional(c) => PhpType::conditional_type(ConditionalType {
+                param: c.param,
+                negated: c.negated,
+                condition: recurse(&c.condition),
+                then_type: recurse(&c.then_type),
+                else_type: recurse(&c.else_type),
+            }),
+            _ => self.clone(),
+        }
+    }
+
     /// Walk the type tree looking for a named type whose name satisfies
     /// `pred`.
     fn contains_name_matching(&self, pred: &dyn Fn(&str) -> bool) -> bool {

@@ -106,6 +106,27 @@ pub(crate) fn is_type_compatible(
         );
     }
 
+    // A `key-of<T>` / `value-of<T>` / `T[K]` that survived resolution is a type
+    // expression too: its operand was a class constant we could not read or a
+    // template that was never substituted, so it names no set of values and
+    // every comparison against it fails.  The two sides need opposite
+    // treatment.  As an argument it is simply an unknown type — widening it to
+    // the bound its result falls within and then demanding the *bound* fit the
+    // parameter reports every call, however narrow the real value turns out to
+    // be.  As a parameter the bound is a genuine constraint the value has to
+    // satisfy however the operator evaluates, so it is worth keeping.
+    if arg_type.contains_unevaluated_operator() {
+        return true;
+    }
+    if param_type.contains_unevaluated_operator() {
+        return is_type_compatible(
+            arg_type,
+            &param_type.unevaluated_operators_as_bounds(),
+            class_loader,
+            strict_types,
+        );
+    }
+
     // `array-key` is exactly `int|string`, so it has to be judged as
     // that union: written as one name it matches neither half, and every
     // rule below that reasons about a union member (including the

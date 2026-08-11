@@ -1081,4 +1081,31 @@ class MyProvider {
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    /// A hyphenated PHPDoc spelling no keyword covers is a pseudo-type, not a
+    /// class — PHP identifiers cannot contain `-`, so there is nothing to
+    /// report as missing.
+    #[test]
+    fn no_unknown_class_for_an_unmodelled_pseudo_type_spelling() {
+        let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+/**
+ * @param pure-callable $callback
+ * @param decimal-int-string $value
+ * @return non-null-mixed
+ */
+function takesPseudoTypes($callback, $value) { return 1; }
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "pseudo-type spellings must not be reported as missing classes, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }

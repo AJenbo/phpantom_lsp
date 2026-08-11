@@ -49,7 +49,10 @@ pub(crate) fn is_navigable_type(name: &str) -> bool {
     if base.is_empty() {
         return false;
     }
-    !crate::php_type::is_keyword_type(base)
+    // A hyphenated spelling no keyword covers is a pseudo-type we have no model
+    // for, not a class — PHP identifiers cannot contain `-`, so there is
+    // nothing to navigate to and nothing to report as missing.
+    !crate::php_type::is_keyword_type(base) && !crate::php_type::is_unmodelled_pseudo_type(base)
 }
 
 // ─── Span construction helpers ──────────────────────────────────────────────
