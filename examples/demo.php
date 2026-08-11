@@ -1123,6 +1123,38 @@ class ClosureParamTemplateDemo
 }
 
 
+// ── Template Bound From Several Parameters ──────────────────────────────────
+
+class MultiBoundTemplateDemo
+{
+    public function demo(): void
+    {
+        $box = new ScaffoldingToolbox();
+
+        // Both arguments bind the same `@template T`, so `T` is what the two
+        // of them have in common.  Neither is measured against the other:
+        // handing one pens and the other pencils reports nothing.
+        $mixed = $box->combine([new Pen('red')], [new Pencil()]);
+        foreach ($mixed as $tool) {
+            $tool->label();     // Try: `$tool->` — T = Pen|Pencil, so label() only
+        }
+
+        // Two arguments holding the same thing keep `T` narrow.
+        $pens = $box->combine([new Pen('red')], [new Pen('blue')]);
+        foreach ($pens as $pen) {
+            $pen->write();      // T = Pen
+        }
+
+        // An empty literal has no elements to contribute, so the other
+        // argument alone settles `T`.
+        $onlySecond = $box->combine([], [new Pen('blue')]);
+        foreach ($onlySecond as $pen) {
+            $pen->color();      // T = Pen
+        }
+    }
+}
+
+
 // ── Trait Generic Substitution ──────────────────────────────────────────────
 
 class TraitGenericDemo
@@ -5454,6 +5486,25 @@ class ScaffoldingReducible
 }
 
 /**
+ * Two parameters binding the same `@template T`. `T` is the union of
+ * every binding site, so each argument is checked against what all of
+ * them have in common rather than against whichever one resolved last.
+ */
+class ScaffoldingToolbox
+{
+    /**
+     * @template T
+     * @param T[] $first
+     * @param T[] $second
+     * @return list<T>
+     */
+    public function combine(array $first, array $second): array
+    {
+        return array_values(array_merge($first, $second));
+    }
+}
+
+/**
  * Cache-like helper whose `@template T` is bound from the callback's
  * return type. Mirrors Laravel's `Cache::remember()` so an unannotated
  * `fn() => new Pen()` callback resolves the result to `Pen`.
@@ -7244,6 +7295,16 @@ function runDemoAssertions(): void
     $renamedMarker = new Marker('yellow');
     $cachedRenamed = $cache->remember('renamed', fn() => $renamedMarker->rename('bold'));
     assert($cachedRenamed instanceof Marker, 'remember(fn() => $marker->rename(...)) must return Marker (T from a method-call body)');
+
+    // ── ScaffoldingToolbox::combine() — one template, two binding sites ─
+    $toolbox = new ScaffoldingToolbox();
+    $mixedTools = $toolbox->combine([new Pen('red')], [new Pencil()]);
+    assert($mixedTools[0] instanceof Pen, 'combine() must keep the first argument\'s elements first');
+    assert($mixedTools[1] instanceof Pencil, 'combine() must return both arguments\' elements, so T is Pen|Pencil');
+    $combinedPens = $toolbox->combine([new Pen('red')], [new Pen('blue')]);
+    assert(count($combinedPens) === 2, 'combine() of two Pen lists must return both, keeping T at Pen');
+    $secondOnly = $toolbox->combine([], [new Pen('blue')]);
+    assert($secondOnly[0] instanceof Pen, 'combine([], [new Pen()]) must return the Pen — an empty literal contributes nothing to T');
 
     // ── ScaffoldingEventBus::listen() — closure param type binding ──────
     $bus = new ScaffoldingEventBus();

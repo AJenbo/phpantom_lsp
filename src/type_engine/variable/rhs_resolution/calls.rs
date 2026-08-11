@@ -37,6 +37,13 @@ use super::{
 ///   - Array type: `@param T[] $items` + `func([new X()])` → `T = X`
 ///   - Generic wrapper: `@param array<TKey, TValue> $v` + `func($users)` →
 ///     positional resolution through the wrapper's generic arguments.
+///
+/// Every binding site unions into the substitution rather than
+/// overwriting it, so a template bound from several parameters resolves
+/// to what all of its arguments have in common: `@param T[] $a, T[] $b`
+/// with `combine([1], ['x'])` binds `T` to `int|string`.  Letting the
+/// last binding site win would leave every other argument measured
+/// against a type taken from one of its siblings.
 pub(crate) fn build_function_template_subs(
     func_info: &crate::types::FunctionInfo,
     arg_texts: &[String],
@@ -150,7 +157,7 @@ pub(crate) fn build_function_template_subs(
                     let inner = arg_text[1..arg_text.len() - 1].trim();
                     if inner.is_empty() {
                         // Empty array `[]` → element type is `never`.
-                        subs.insert(tpl_name.to_string(), PhpType::never());
+                        insert_or_union(&mut subs, tpl_name.to_string(), PhpType::never());
                     } else {
                         let first_elem =
                             crate::type_engine::conditional_resolution::split_text_args(inner);
@@ -158,7 +165,7 @@ pub(crate) fn build_function_template_subs(
                             && let Some(resolved_type) =
                                 Backend::resolve_arg_text_to_type(elem.trim(), rctx)
                         {
-                            subs.insert(tpl_name.to_string(), resolved_type);
+                            insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                         }
                     }
                 } else if let Some(resolved_type) =
@@ -212,7 +219,7 @@ pub(crate) fn build_function_template_subs(
                     && let Some(resolved) = resolve_arg_iterable_raw_type(arg_text, rctx)
                     && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
                 {
-                    subs.insert(tpl_name.to_string(), concrete);
+                    insert_or_union(&mut subs, tpl_name.to_string(), concrete);
                     continue;
                 }
                 // Array literal argument for array-like wrappers:
@@ -224,7 +231,7 @@ pub(crate) fn build_function_template_subs(
                     let inner = arg_text[1..arg_text.len() - 1].trim();
                     if inner.is_empty() {
                         // Empty array `[]` → element type is `never`.
-                        subs.insert(tpl_name.to_string(), PhpType::never());
+                        insert_or_union(&mut subs, tpl_name.to_string(), PhpType::never());
                         continue;
                     } else {
                         let elems =
@@ -237,7 +244,7 @@ pub(crate) fn build_function_template_subs(
                             && let Some(resolved_type) =
                                 Backend::resolve_arg_text_to_type(elem.trim(), rctx)
                         {
-                            subs.insert(tpl_name.to_string(), resolved_type);
+                            insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                             continue;
                         }
                     }
@@ -248,9 +255,9 @@ pub(crate) fn build_function_template_subs(
                     && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
                 {
                     if let Some(inner) = resolved_type.unwrap_class_string_inner() {
-                        subs.insert(tpl_name.to_string(), inner.clone());
+                        insert_or_union(&mut subs, tpl_name.to_string(), inner.clone());
                     } else {
-                        subs.insert(tpl_name.to_string(), resolved_type);
+                        insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                     }
                 }
                 // ── Class generic wrapper resolution ────────────────
@@ -259,12 +266,6 @@ pub(crate) fn build_function_template_subs(
                 // resolve the argument type and walk its @extends chain
                 // to find the wrapper class's generic arg at the right
                 // position.
-                //
-                // Union rather than overwrite, as the direct binding mode
-                // does: `@param Wrap<T> $a, Wrap<T> $b` binds `T` at two
-                // sites, and letting the last one win would leave every
-                // other argument measured against a type taken from one
-                // of its siblings.
                 if !is_array_like_wrapper(wrapper_name)
                     && wrapper_name != "class-string"
                     && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)

@@ -306,8 +306,14 @@ pub(super) fn classify_array_index(index: &Expression<'_>) -> ArrayBracketSegmen
 /// When two arguments bind to the same `@template T`, the resolved type
 /// is the union of all inferred argument types (e.g. `T` from `$a: int`
 /// and `$b: float` becomes `int|float`).
+///
+/// `never` is the identity for the union: an empty array literal binds
+/// its element template to `never`, and `never|int` is just `int`.
 pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, value: PhpType) {
     use std::collections::hash_map::Entry;
+    if value.is_never() && subs.contains_key(&key) {
+        return;
+    }
     match subs.entry(key) {
         Entry::Vacant(e) => {
             e.insert(value);
@@ -315,6 +321,10 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
         Entry::Occupied(mut e) => {
             let existing = e.get().clone();
             if existing == value {
+                return;
+            }
+            if existing.is_never() {
+                e.insert(value);
                 return;
             }
             let mut parts = match existing.kind() {

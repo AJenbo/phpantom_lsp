@@ -4413,6 +4413,40 @@ combine(wrapInt(), wrapString());
 }
 
 #[test]
+fn no_diagnostic_for_template_bound_from_two_array_parameters() {
+    // `T[]` at two binding sites makes `T` the union of both arguments'
+    // element types, so `[1, 2]` must not be measured against the
+    // `string` taken from its sibling.
+    let php = r#"<?php
+declare(strict_types=1);
+
+/**
+ * @template T
+ * @param T[] $first
+ * @param T[] $second
+ */
+function combine(array $first, array $second): void {}
+
+combine([1, 2], ['a', 'b']);
+
+/**
+ * @template T
+ * @param array<T> $first
+ * @param array<T> $second
+ */
+function combineWrapped(array $first, array $second): void {}
+
+combineWrapped([1, 2], ['a', 'b']);
+combineWrapped([], ['a', 'b']);
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A template bound from two array parameters must union both element types, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_method_level_template_unbound() {
     // Method-level @template params that cannot be bound from call-site
     // arguments should resolve to their upper bound or `mixed`.
