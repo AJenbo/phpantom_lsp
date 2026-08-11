@@ -372,10 +372,39 @@ impl Backend {
                 self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 
-            SymbolKind::FunctionCall { name, .. } => {
+            SymbolKind::FunctionCall {
+                name,
+                is_docblock_reference,
+                ..
+            } => {
                 // Build FQN candidates: the resolved name, the raw name,
                 // and (if namespaced) the namespace-qualified version.
                 let ctx = self.file_context(uri);
+
+                // An unqualified `@see name()` names the documented class's
+                // own member first, as phpDocumentor reads it, and only
+                // falls through to a global function when it has none.
+                if *is_docblock_reference
+                    && let Some((class, kind)) =
+                        self.docblock_scope_member(&ctx, content, cursor_offset, name)
+                {
+                    let subject = class.fqn();
+                    let mctx = MemberDefinitionCtx {
+                        member_name: name,
+                        subject: &subject,
+                        access_kind: AccessKind::DoubleColon,
+                        access_hint: match kind {
+                            MemberKind::Method => MemberAccessHint::MethodCall,
+                            _ => MemberAccessHint::PropertyAccess,
+                        },
+                    };
+                    if let Some(loc) =
+                        self.resolve_member_definition_with(uri, content, position, &mctx)
+                    {
+                        return Some(vec![loc]);
+                    }
+                }
+
                 let fqn = ctx.resolve_name_at(name, cursor_offset);
                 let mut candidates = vec![fqn];
                 if name.contains('\\') && !candidates.iter().any(|c| c == name) {

@@ -248,7 +248,16 @@ pub(crate) enum SymbolKind {
     /// unknown-function diagnostic (which must skip definitions) and by
     /// find-references / document-highlight (which may want to include
     /// both).
-    FunctionCall { name: Atom, is_definition: bool },
+    FunctionCall {
+        name: Atom,
+        is_definition: bool,
+        /// `true` when this span was extracted from an unqualified
+        /// `@see`-family docblock reference (`{@see covers()}`) rather than
+        /// real PHP code.  Such a reference names a member of the class the
+        /// docblock documents before it names a global function, which is
+        /// how phpDocumentor and PHPStorm read it.
+        is_docblock_reference: bool,
+    },
 
     /// `self`, `static`, `parent`, or `$this` in a navigable context.
     SelfStaticParent(SelfStaticParentKind),

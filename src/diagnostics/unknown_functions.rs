@@ -106,6 +106,7 @@ impl Backend {
                 SymbolKind::FunctionCall {
                     name,
                     is_definition: true,
+                    ..
                 } => {
                     let mut names = vec![name.to_string()];
                     if let Some(ns) = file_namespace {
@@ -120,11 +121,12 @@ impl Backend {
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
-            let name = match &span.kind {
+            let (name, is_docblock_reference) = match &span.kind {
                 SymbolKind::FunctionCall {
                     name,
                     is_definition: false,
-                } => name,
+                    is_docblock_reference,
+                } => (name, *is_docblock_reference),
                 _ => continue,
             };
 
@@ -156,6 +158,18 @@ impl Backend {
 
             // ── Skip functions guarded by function_exists() ──────────────
             if existence_guards.is_function_guarded(name, span.start) {
+                continue;
+            }
+
+            // ── An unqualified `@see` reference may name a member ───────
+            // The global-function lookup runs first because it is by far
+            // the cheaper of the two; which one answers does not change
+            // whether the reference is dangling.
+            if is_docblock_reference
+                && self
+                    .docblock_scope_member(&ctx.file, content, span.start, name)
+                    .is_some()
+            {
                 continue;
             }
 

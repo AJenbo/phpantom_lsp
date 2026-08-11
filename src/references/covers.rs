@@ -15,7 +15,7 @@
 use super::*;
 
 use crate::atom::Atom;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::find_documented_class_at_offset;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::ClassInfo;
 
@@ -56,6 +56,10 @@ impl Backend {
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
+            // Only a tag on a class docblock needs the source text, to tell a
+            // block that documents the class from one that documents whatever
+            // sits between it and the declaration.
+            let file_content = std::cell::OnceCell::new();
 
             let classes = match self.symbols.uri_classes_index.read().get(file_uri) {
                 Some(classes) => classes.clone(),
@@ -97,7 +101,9 @@ impl Backend {
 
                 // The class the metadata belongs to is the covering test,
                 // whether the tag sat on the class or on one of its methods.
-                let Some(covering_fqn) = covering_class_fqn(&classes, span.start) else {
+                let content = file_content
+                    .get_or_init(|| self.get_file_content_arc(file_uri).unwrap_or_default());
+                let Some(covering_fqn) = covering_class_fqn(&classes, content, span.start) else {
                     continue;
                 };
                 if found.iter().any(|(fqn, _)| *fqn == covering_fqn) {
@@ -114,21 +120,8 @@ impl Backend {
     }
 }
 
-/// The class a coverage tag at `offset` belongs to.
-///
-/// A tag on a *method* docblock sits inside the class body, which
-/// [`find_class_at_offset`] resolves directly.  A tag on the *class*
-/// docblock does not: a docblock is trivia preceding the declaration, so it
-/// starts before even `decl_start_offset` (which covers attributes but not
-/// comments).  For that case the owner is the next declaration to start,
-/// since a docblock binds to whatever immediately follows it.
-fn covering_class_fqn(classes: &[Arc<ClassInfo>], offset: u32) -> Option<Atom> {
-    if let Some(class) = find_class_at_offset(classes, offset) {
-        return Some(class.fqn());
-    }
-    classes
-        .iter()
-        .filter(|class| class.decl_start_offset > offset)
-        .min_by_key(|class| class.decl_start_offset)
-        .map(|class| class.fqn())
+/// The class a coverage tag at `offset` belongs to, whether the tag sat on
+/// the class docblock or on one of its methods.
+fn covering_class_fqn(classes: &[Arc<ClassInfo>], content: &str, offset: u32) -> Option<Atom> {
+    find_documented_class_at_offset(classes, content, offset).map(|class| class.fqn())
 }

@@ -447,4 +447,149 @@ function test(): void {
             diags,
         );
     }
+
+    // ─── Unqualified `@see` references ──────────────────────────────────
+
+    #[test]
+    fn no_diagnostic_for_see_naming_own_method_from_class_docblock() {
+        let php = r#"<?php
+/**
+ * Decides what a test covers. {@see covers()} draws that line.
+ */
+final class QodanaChecker
+{
+    public function covers(int $case): bool { return true; }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "A class docblock naming one of its own methods is not a global function call, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_see_naming_own_method_from_method_docblock() {
+        let php = r#"<?php
+final class QodanaChecker
+{
+    /**
+     * @see covers
+     */
+    public function report(): void {}
+
+    public function covers(int $case): bool { return true; }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "A method docblock naming a sibling method is not a global function call, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_see_naming_inherited_method() {
+        let php = r#"<?php
+abstract class BaseChecker
+{
+    public function covers(int $case): bool { return true; }
+}
+
+/**
+ * {@see covers()} is inherited, not global.
+ */
+final class QodanaChecker extends BaseChecker {}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "An inherited method reached through @see should resolve, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_see_naming_own_property() {
+        let php = r#"<?php
+/**
+ * @see cases
+ */
+final class QodanaChecker
+{
+    public array $cases = [];
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "A property reached through @see should resolve, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn still_flags_see_naming_nothing_in_scope() {
+        let php = r#"<?php
+/**
+ * {@see covers()} names nothing.
+ */
+final class QodanaChecker
+{
+    public function report(): void {}
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.iter().any(|d| d.message.contains("covers")),
+            "A @see reference that matches no member and no function is still dangling, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn still_flags_see_in_a_docblock_that_documents_no_class() {
+        let php = r#"<?php
+/**
+ * {@see covers()} names nothing.
+ */
+function report(): void {}
+
+final class QodanaChecker
+{
+    public function covers(int $case): bool { return true; }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.iter().any(|d| d.message.contains("covers")),
+            "A function's docblock must not borrow members from a later class, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn still_flags_covers_tag_naming_a_test_class_method() {
+        // PHPUnit spells "a member of this class" as `@covers ::name`; a
+        // bare name is always a global function.
+        let php = r#"<?php
+final class QodanaCheckerTest
+{
+    /**
+     * @covers covers
+     */
+    public function testCovers(): void {}
+
+    public function covers(int $case): bool { return true; }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.iter().any(|d| d.message.contains("covers")),
+            "@covers names a global function, not a method of the test class, got: {:?}",
+            diags,
+        );
+    }
 }

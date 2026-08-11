@@ -84,6 +84,7 @@ impl Backend {
                 if let SymbolKind::FunctionCall {
                     name,
                     is_definition,
+                    ..
                 } = &span.kind
                 {
                     if *is_definition && !include_declaration {

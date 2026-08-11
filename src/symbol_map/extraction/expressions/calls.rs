@@ -120,6 +120,7 @@ fn extract_call<'a>(
                         kind: SymbolKind::FunctionCall {
                             name: crate::atom::atom(name_clean),
                             is_definition: false,
+                            is_docblock_reference: false,
                         },
                     });
                     // `@includeFirst` and its `@componentFirst` /
@@ -770,6 +771,7 @@ pub(super) fn extract_partial_application_expr<'a>(
                     kind: SymbolKind::FunctionCall {
                         name: crate::atom::atom(name_clean),
                         is_definition: false,
+                        is_docblock_reference: false,
                     },
                 });
             }

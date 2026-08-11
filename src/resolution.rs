@@ -41,6 +41,7 @@ use tower_lsp::lsp_types::Url;
 use crate::Backend;
 use crate::class_loader_memo;
 use crate::composer;
+use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
 use crate::types::{ClassInfo, FacadeAccessor, FileContext, FunctionInfo, PhpVersion};
 use crate::util::short_name;
@@ -1504,6 +1505,43 @@ impl Backend {
     /// found.
     pub(crate) fn constant_loader(&self) -> impl Fn(&str) -> Option<Option<String>> + '_ {
         move |name: &str| self.lookup_global_constant(name)
+    }
+
+    /// The member that an unqualified `@see` reference at `offset` names on
+    /// the class whose docblock it sits in.
+    ///
+    /// phpDocumentor and PHPStorm both read a bare `name()` in `@see` as the
+    /// enclosing class's own member before they read it as a global
+    /// function, and docblocks in the wild are written against that
+    /// convention.  Returns the class with its inherited and virtual members
+    /// merged in, alongside the kind of member that matched, so callers can
+    /// navigate to it or describe it.
+    pub(crate) fn docblock_scope_member(
+        &self,
+        file: &FileContext,
+        content: &str,
+        offset: u32,
+        name: &str,
+    ) -> Option<(Arc<ClassInfo>, MemberKind)> {
+        let class =
+            crate::class_lookup::find_documented_class_at_offset(&file.classes, content, offset)?;
+        let class_loader = self.class_loader(file);
+        let resolved = crate::virtual_members::resolve_class_fully_cached(
+            class,
+            &class_loader,
+            &self.resolved_class_cache,
+        );
+
+        let kind = if resolved.get_method_ci(name).is_some() {
+            MemberKind::Method
+        } else if resolved.properties.iter().any(|p| p.name == name) {
+            MemberKind::Property
+        } else if resolved.constants.iter().any(|c| c.name == name) {
+            MemberKind::Constant
+        } else {
+            return None;
+        };
+        Some((resolved, kind))
     }
 }
 

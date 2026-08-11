@@ -468,11 +468,23 @@ fn emit_covers_tag_symbol(
     retag_as_covers_target(&mut spans[first_new..]);
 }
 
-/// Mark every class reference among `spans` as PHPUnit coverage metadata.
+/// Mark every reference among `spans` as PHPUnit coverage metadata.
+///
+/// Besides tagging the class references, this undoes the `@see` emitter's
+/// assumption that a bare lowercase name may be a member of the enclosing
+/// class: a coverage target that names no class is a *global* function, and
+/// PHPUnit spells the test class's own members `::name` instead.
 pub(super) fn retag_as_covers_target(spans: &mut [SymbolSpan]) {
     for span in spans {
-        if let SymbolKind::ClassReference { context, .. } = &mut span.kind {
-            *context = ClassRefContext::CoversTarget;
+        match &mut span.kind {
+            SymbolKind::ClassReference { context, .. } => {
+                *context = ClassRefContext::CoversTarget;
+            }
+            SymbolKind::FunctionCall {
+                is_docblock_reference,
+                ..
+            } => *is_docblock_reference = false,
+            _ => {}
         }
     }
 }
@@ -525,6 +537,10 @@ fn emit_covers_reference(
         None => SymbolKind::FunctionCall {
             name: crate::atom::atom(member.trim_start_matches('\\')),
             is_definition: false,
+            // Without a `@coversDefaultClass` this shape is PHPUnit's spelling
+            // for a *global* function, not shorthand for a member of the test
+            // class, so the enclosing class must not be consulted for it.
+            is_docblock_reference: false,
         },
     };
 
@@ -1121,6 +1137,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 kind: SymbolKind::FunctionCall {
                     name: crate::atom::atom(clean),
                     is_definition: false,
+                    is_docblock_reference: true,
                 },
             });
         }

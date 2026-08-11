@@ -109,6 +109,7 @@ pub(super) fn try_emit_coverage_attribute_spans(
                 kind: SymbolKind::FunctionCall {
                     name: crate::atom::atom(name.trim_start_matches('\\')),
                     is_definition: false,
+                    is_docblock_reference: false,
                 },
             });
         }

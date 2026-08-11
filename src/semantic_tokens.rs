@@ -379,10 +379,7 @@ impl Backend {
                     (tt, mods)
                 }
 
-                SymbolKind::FunctionCall {
-                    name: _,
-                    is_definition,
-                } => {
+                SymbolKind::FunctionCall { is_definition, .. } => {
                     if mode == SemanticTokensMode::Contextual {
                         continue;
                     }

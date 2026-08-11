@@ -287,6 +287,7 @@ impl Backend {
                 SymbolKind::FunctionCall {
                     name,
                     is_definition,
+                    ..
                 } => {
                     // Skip the declaration site — only flag call sites.
                     if *is_definition {

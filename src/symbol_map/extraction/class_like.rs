@@ -864,6 +864,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
         kind: SymbolKind::FunctionCall {
             name,
             is_definition: true,
+            is_docblock_reference: false,
         },
     });
 

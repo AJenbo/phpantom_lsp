@@ -26,7 +26,6 @@ within the same impact tier.
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | T35 | [Readonly property reassignment outside its declaring scope is never flagged](todo/type-inference.md#t35-readonly-property-reassignment-outside-its-declaring-scope-is-never-flagged) | Medium      | Low-Medium  |
-| B76 | [`{@see method()}` unqualified inside its own class resolves as a global function](todo/bugs.md#b76-see-method-unqualified-inside-its-own-class-resolves-as-a-global-function) | Medium      | Medium      |
 | T36 | [Array-shape and generic enforcement gaps mir already covers](todo/type-inference.md#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers)                       | Medium      | Medium      |
 |     | **Release 0.10.0**                                                                                                                              |             |             |
 

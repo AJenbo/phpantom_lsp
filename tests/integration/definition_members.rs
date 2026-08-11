@@ -4307,6 +4307,62 @@ async fn test_goto_definition_see_tag_self_member_in_class_docblock() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_see_tag_unqualified_own_method() {
+    // phpDocumentor reads a bare `name()` in @see as the documented
+    // class's own member before it reads it as a global function.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test_unqualified_see.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * Decides what a test covers. {@see covers()} draws that line.\n",
+        " */\n",
+        "final class QodanaChecker {\n",
+        "    public function covers(int $case): bool { return true; }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 2,
+                character: 39, // within "covers"
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve an unqualified @see reference to the documented class's method"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 5,
+                "covers() is defined on line 5"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn test_goto_definition_chained_property_cross_file() {
     let (backend, dir) = create_psr4_workspace(
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,

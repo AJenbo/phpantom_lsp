@@ -380,10 +380,7 @@ impl Backend {
                 fqn.map(|name| class_keys(&name, short_name(&name)))
                     .unwrap_or_default()
             }
-            SymbolKind::FunctionCall {
-                name,
-                is_definition: _,
-            } => {
+            SymbolKind::FunctionCall { name, .. } => {
                 let resolved = if let Some(fqn) = self.resolved_name_at(uri, span.start) {
                     fqn
                 } else {

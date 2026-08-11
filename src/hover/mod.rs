@@ -28,6 +28,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
+use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
 use crate::type_engine::resolver::ResolutionCtx;
@@ -400,7 +401,32 @@ impl Backend {
                 None
             }
 
-            SymbolKind::FunctionCall { name, .. } => {
+            SymbolKind::FunctionCall {
+                name,
+                is_docblock_reference,
+                ..
+            } => {
+                // An unqualified `@see name()` describes the documented
+                // class's own member first, as phpDocumentor reads it.
+                if *is_docblock_reference
+                    && let Some((class, kind)) =
+                        self.docblock_scope_member(&ctx, content, symbol.start, name)
+                    && let Some(hit) =
+                        Self::find_member_for_hover(&class, name, kind == MemberKind::Method)
+                {
+                    return Some(match hit {
+                        HoverMemberHit::Method(m) => {
+                            self.hover_for_method(&m, &class, &class_loader, uri, content)
+                        }
+                        HoverMemberHit::Property(p) => {
+                            self.hover_for_property(&p, &class, &class_loader)
+                        }
+                        HoverMemberHit::Constant(c) => {
+                            self.hover_for_constant(&c, &class, &class_loader)
+                        }
+                    });
+                }
+
                 self.hover_function_call(name, uri, content, &ctx, &function_loader, symbol.start)
             }
 

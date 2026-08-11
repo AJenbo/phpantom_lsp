@@ -4357,6 +4357,30 @@ class Formatter {
 }
 
 #[test]
+fn hover_on_unqualified_see_reference_describes_own_method() {
+    // A bare `name()` in @see is the documented class's own member, so
+    // hovering it must describe that method rather than report nothing.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * Decides what a test covers. {@see covers()} draws that line.
+ */
+final class QodanaChecker {
+    public function covers(int $case): bool { return true; }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 2, 39).expect("expected hover on covers");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("function covers(int $case): bool"),
+        "should describe the documented class's own method, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_class_shows_see_reference() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
