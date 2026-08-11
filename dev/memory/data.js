@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786409299816,
+  "lastUpdate": 1786410051659,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18189,6 +18189,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "df3e3f491b344ed97a010bc1a219ea4c833a7534",
+          "message": "`key-of<T>` no longer widens to a template's declared bound when the\nargument is an array literal",
+          "timestamp": "2026-08-11T02:43:49+02:00",
+          "tree_id": "230c45e1c5e8e1c79337411c2ad7af1317ea3ed5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/df3e3f491b344ed97a010bc1a219ea4c833a7534"
+        },
+        "date": 1786410046029,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.4,
             "unit": "MiB"
           }
         ]
