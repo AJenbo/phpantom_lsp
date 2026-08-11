@@ -7508,3 +7508,29 @@ acceptsInt(firstValue());
         "expected no type error while the operand is unreadable, got {messages:?}"
     );
 }
+
+/// A `@template T of array<array-key, mixed>` bound from an array-literal
+/// argument takes the argument's own shape, not the erased bound, so
+/// `key-of<T>` projects the literal's actual keys.
+#[test]
+fn key_of_template_binds_to_call_site_array_literal_shape() {
+    let php = r#"<?php
+namespace App;
+
+/**
+ * @template T of array<array-key, mixed>
+ * @param T $items
+ * @return key-of<T>
+ */
+function firstKey(array $items) { return array_key_first($items); }
+
+/** @param 'debug'|'verbose' $flag */
+function acceptsFlagName(string $flag): void {}
+
+acceptsFlagName(firstKey(['debug' => false, 'verbose' => true]));
+acceptsFlagName(firstKey(['other' => false]));
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'other'"), "{messages:?}");
+}

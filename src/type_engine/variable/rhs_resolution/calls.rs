@@ -97,7 +97,21 @@ pub(crate) fn build_function_template_subs(
         match binding_mode {
             TemplateBindingMode::Direct => {
                 if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-                    insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                    // An array-literal argument resolves only to the bare
+                    // `array` keyword, which erases its own keys. Bound
+                    // directly (no wrapping hint to unify against), that
+                    // erased shape is all downstream `key-of<T>`/
+                    // `value-of<T>` would have to work with, so build the
+                    // literal's real key/value shape instead.
+                    let bound_type = if resolved_type.is_bare_array() {
+                        crate::type_engine::call_resolution::array_literal_shape_type(
+                            arg_text, rctx,
+                        )
+                        .unwrap_or(resolved_type)
+                    } else {
+                        resolved_type
+                    };
+                    insert_or_union(&mut subs, tpl_name.to_string(), bound_type);
                 }
             }
             TemplateBindingMode::CallableReturnType => {

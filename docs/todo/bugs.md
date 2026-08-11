@@ -283,37 +283,3 @@ naming one has to resolve to the class when the project declares it.
 Reproduced in `php-typing-conformance/conformance/tests/`:
 `phpdoc_advanced_pseudotype_class_precedence.php`.
 
-### B81. `key-of<T>` widens to the bound array instead of the argument's own shape
-**Impact: Medium · Effort: Medium**
-
-A `@template T of array<array-key, mixed>` bound to a call's argument
-should take that argument's shape, so `key-of<T>` projects the keys the
-caller actually passed. Instead `T` binds to the bare bound (`array`),
-`key-of<array>` cannot be evaluated, and the projection is lost:
-
-```php
-/**
- * @template T of array<array-key, mixed>
- * @param T $items
- * @return key-of<T>
- */
-function firstKey(array $items) { /* … */ }
-
-/** @param 'debug'|'verbose' $flag */
-function acceptsFlagName(string $flag): void {}
-
-acceptsFlagName(firstKey(['debug' => false, 'verbose' => true]));
-// the keys are exactly 'debug'|'verbose', but T bound to `array`
-```
-
-The unevaluated `key-of` widens rather than rejecting now, so this is
-silence rather than a false positive, but the precision is still gone:
-neither the true match above nor the genuine mismatch on an `int`
-parameter is decided. The fix is in template inference — an array
-literal argument should bind the template to its shape, not to the
-bound's erased form — after which the existing `key-of` evaluation
-handles the rest.
-
-Reproduced in `php-typing-conformance/conformance/tests/`:
-`phpdoc_advanced_fallback_key_of_template.php`,
-`phpdoc_advanced_fallback_value_of_template.php`.

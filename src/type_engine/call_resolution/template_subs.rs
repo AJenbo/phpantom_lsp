@@ -135,6 +135,21 @@ impl Backend {
             match binding_mode {
                 TemplateBindingMode::Direct => {
                     if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
+                        // `resolve_arg_text_to_type` collapses any `[...]`
+                        // literal to the bare `array` keyword, which loses
+                        // the argument's own keys. When the template binds
+                        // directly (e.g. `@template T of array<array-key,
+                        // mixed>` with `@param T $items`), that erased
+                        // shape is the only source of type information —
+                        // there is no wrapping hint to unify against — so
+                        // build the literal's real key/value shape here
+                        // instead, letting `key-of<T>`/`value-of<T>` on the
+                        // bound template project the caller's actual keys.
+                        let literal_shape = resolved_type
+                            .is_bare_array()
+                            .then(|| array_literal_shape_type(arg_text, ctx))
+                            .flatten();
+
                         // `Direct` is also where the classifier lands for a
                         // hint that buries the template deeper than it
                         // models (`array<string, array<string, T>>`).
@@ -168,6 +183,7 @@ impl Backend {
                                 }
                                 unify_template(h, &resolved_type, tpl_name)
                             })
+                            .or(literal_shape)
                             .unwrap_or(resolved_type);
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
@@ -1008,6 +1024,71 @@ fn first_array_literal_element_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> 
     let elems = crate::type_engine::types::conditional::split_text_args(inner);
     let elem = elems.first()?;
     Backend::resolve_arg_text_to_type(elem.trim(), ctx)
+}
+
+/// Build an `array{key: type, ...}` shape from an array literal argument's
+/// own keys and values.
+///
+/// `resolve_arg_text_to_type("['debug' => false]")` collapses the whole
+/// literal to the bare `array` keyword, which is enough for most callers
+/// but erases the literal's own keys. A template bound directly to the
+/// whole argument (no wrapping hint to unify against) needs those keys
+/// preserved so `key-of<T>`/`value-of<T>` on the bound template can still
+/// project them out.
+///
+/// Only keyed entries are recorded — a mixed literal's positional elements
+/// are dropped, matching the AST-based array literal inference in
+/// `raw_type_inference.rs`. Returns `None` when `arg_text` is not a
+/// `[...]`/`array(...)` literal, or none of its entries have a literal
+/// string/int key.
+pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let trimmed = arg_text.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix("array(")
+                .and_then(|s| s.strip_suffix(')'))
+        })?
+        .trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    let mut entries = Vec::new();
+    for elem in crate::type_engine::types::conditional::split_text_args(inner) {
+        let elem = elem.trim();
+        let Some(arrow_pos) = elem.find("=>") else {
+            continue;
+        };
+        let Some(key) = literal_array_key_text(elem[..arrow_pos].trim()) else {
+            continue;
+        };
+        let value_text = elem[arrow_pos + 2..].trim();
+        let value_type =
+            Backend::resolve_arg_text_to_type(value_text, ctx).unwrap_or_else(PhpType::mixed);
+        entries.push(crate::php_type::ShapeEntry {
+            key: Some(key),
+            value_type,
+            optional: false,
+        });
+    }
+
+    (!entries.is_empty()).then(|| PhpType::array_shape(entries))
+}
+
+/// Extract the literal key text of an array literal's key expression
+/// (`'debug'`, `"verbose"`, `42`), unquoting string keys. Returns `None`
+/// for any key that is not a literal (e.g. a constant or variable), since
+/// those cannot be projected into a shape's key set.
+fn literal_array_key_text(key_text: &str) -> Option<String> {
+    if let Some(unquoted) = crate::text_scan::unquote_php_string(key_text) {
+        return Some(unquoted.to_string());
+    }
+    let numeric = key_text.strip_prefix('-').unwrap_or(key_text);
+    (!numeric.is_empty() && numeric.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| key_text.to_string())
 }
 
 /// Bind the template a `@param callable(...): …` hint names in its return
