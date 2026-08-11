@@ -3557,6 +3557,42 @@ class TypeErrorDemo
 }
 
 
+// ── Diagnostic: Readonly Property Writes ────────────────────────────────────
+// A `readonly` property may be initialized once, and only from inside the
+// class that declares it.  PHPantom flags every other write.  Writes the
+// language allows (the constructor initializing its own properties, a
+// property the constructor may leave uninitialized, `__clone` reinitializing
+// one on PHP 8.3+) are left alone.
+
+class ReadonlyWriteDemo
+{
+    public function __construct(public readonly int $version = 1) {}
+
+    public function bump(): void
+    {
+        // Error — the constructor already initialized `$version`:
+        $this->version++;
+    }
+
+    public function demo(): void
+    {
+        $coordinate = new ScaffoldingCoordinate(1, 2);
+
+        // Error — the write happens outside the declaring class:
+        $coordinate->x = 10;
+
+        // Error — compound operators and increments modify it too:
+        $coordinate->y += 5;
+
+        // No diagnostic — reading is always fine:
+        echo $coordinate->x + $coordinate->y;
+
+        // No diagnostic — `$label` is writable:
+        $coordinate->label = 'origin';
+    }
+}
+
+
 // ── Implement Missing Methods (Code Action) ─────────────────────────────────
 // Uncomment the class below, place the cursor inside it, and trigger
 // "Quick Fix" or "Code Action" to see "Implement 3 missing methods".
@@ -6816,6 +6852,18 @@ class BrokenDocRecovery
     {
         return 'hello';
     }
+}
+
+// ── Readonly write scaffolding ──────────────────────────────────────────────
+
+class ScaffoldingCoordinate
+{
+    public string $label = '';
+
+    public function __construct(
+        public readonly int $x,
+        public readonly int $y,
+    ) {}
 }
 
 // ── Runtime Assertions ──────────────────────────────────────────────────────

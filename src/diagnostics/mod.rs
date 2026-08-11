@@ -104,6 +104,10 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **Readonly write diagnostics** — report writes to a `readonly`
+//!   property from outside the class that declares it, and second
+//!   writes from inside it once the constructor has initialized the
+//!   property.
 //! - **Invalid class kind diagnostics** — report a class-like name used
 //!   in a syntactic position (`new`, `implements`, `instanceof`, …) that
 //!   its kind (class/interface/trait/enum) cannot satisfy.
@@ -222,6 +226,7 @@ mod match_type_errors;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
+mod readonly_writes;
 mod return_type_errors;
 mod stale;
 pub(crate) mod state;
@@ -427,6 +432,10 @@ impl Backend {
             self.collect_property_type_diagnostics(uri_str, content, out)
         );
         if let Some(ctx) = &file_ctx {
+            step!(
+                "invalid_readonly_write",
+                self.collect_readonly_write_diagnostics_with_context(ctx, uri_str, content, out)
+            );
             step!(
                 "missing_implementation",
                 self.collect_implementation_error_diagnostics_with_context(

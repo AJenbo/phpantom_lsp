@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| T35 | [Readonly property reassignment outside its declaring scope is never flagged](todo/type-inference.md#t35-readonly-property-reassignment-outside-its-declaring-scope-is-never-flagged) | Medium      | Low-Medium  |
 | T36 | [Array-shape and generic enforcement gaps mir already covers](todo/type-inference.md#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers)                       | Medium      | Medium      |
 |     | **Release 0.10.0**                                                                                                                              |             |             |
 
@@ -91,6 +90,7 @@ unlikely to move the needle for most users.
 | T26 | [Globbed constant unions (`Foo::BAR_*`)](todo/type-inference.md#t26-globbed-constant-unions-foobar_)                                                                        | Low-Medium  | Medium      |
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium      |
 | T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Low-Medium  |
+| T37 | [Readonly write forms the `invalid_readonly_write` diagnostic still misses](todo/type-inference.md#t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses) | Low-Medium  | Medium      |
 | T4  | Non-empty-\* type narrowing and propagation                                                                                                                                 | Low         | Low         |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Low         |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium  |

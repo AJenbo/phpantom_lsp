@@ -882,41 +882,6 @@ upstream's `nsrt/class-constant-types.php` were dropped when
 
 ---
 
-## T35. Readonly property reassignment outside its declaring scope is never flagged
-**Impact: Medium · Effort: Low-Medium**
-
-`is_readonly` is already tracked on `PropertyInfo` (set in
-`src/parser/mod.rs` and `src/parser/classes.rs` for both the
-`readonly` modifier and constructor-promoted properties), but nothing
-in `src/diagnostics/` reads it. Reassigning a `readonly` property from
-outside the class that declares it — or a second write from inside it,
-after the constructor has already initialized it — is a hard error in
-PHP and goes completely unreported:
-
-```php
-final class Box {
-    public function __construct(public readonly int $value) {}
-}
-
-$box = new Box(1);
-$box->value = 2; // Error: Cannot modify readonly property Box::$value
-```
-
-Every comparable tool (PHPStan, Psalm, Mago, mir, Intelephense) flags
-this; it is one of the cleanest gaps the php-typing-conformance corpus
-turned up (`properties_readonly_assignment.php`), since the metadata
-already exists and this is purely additive — no existing diagnostic
-narrows or changes shape.
-
-**Fix:** in the property-assignment diagnostic path, when the subject
-resolves to a class and the target property is `is_readonly`, flag the
-write unless it is the first write to that property from inside the
-declaring class (constructor or otherwise). Scope this the same way
-the rest of the diagnostics module resolves a subject's class, rather
-than adding a second subject-resolution path.
-
----
-
 ## T36. Array-shape and generic enforcement gaps mir already covers
 
 **Impact: Medium · Effort: Medium**
@@ -954,3 +919,36 @@ Each row needs its own root-cause pass — they were only confirmed
 silent (not misclassified), not yet traced to a specific resolver.
 Fix one at a time rather than as a single PR; several likely share a
 cause (the four `generics_template_*` cases almost certainly do).
+
+---
+
+## T37. Readonly write forms the `invalid_readonly_write` diagnostic still misses
+
+**Impact: Low-Medium · Effort: Medium**
+
+`src/diagnostics/readonly_writes.rs` flags assignments, compound
+assignments, and increments whose target is a `readonly` property. Four
+write forms PHP rejects just as hard are still silent:
+
+```php
+readonly class Point {          // 1. every property is implicitly readonly
+    public function __construct(public int $x) {}
+}
+
+unset($box->value);             // 2. Cannot unset readonly property
+$box->items[] = 'x';            // 3. Cannot modify readonly property
+[$box->value, $other] = $pair;  // 4. destructuring is a write too
+$ref = &$box->value;            // 5. Cannot acquire reference
+```
+
+The `readonly class` case is the one that matters most, and it is the
+one that needs new metadata: `PropertyInfo::is_readonly` is deliberately
+`false` for the properties of a `readonly class` (a subclass of one may
+not repeat the keyword, and override completion depends on that), so
+`ClassInfo` needs an `is_readonly` flag of its own, set from the class
+modifiers in `src/parser/classes.rs` and inherited by subclasses the way
+PHP inherits it.
+
+Case 3 needs the property's type checked first: `$obj->offsetSet(…)` on
+a readonly property holding an `ArrayAccess` object is legal, so only an
+array-typed property may be flagged.
