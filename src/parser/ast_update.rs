@@ -949,52 +949,41 @@ impl Backend {
         // full-map scan that eviction costs.
         let mut reowned_fqns: Vec<String> = Vec::new();
 
-        {
-            let mut idx = self.symbols.fqn_uri_index.write();
-            let mut fqn_idx = self.symbols.fqn_class_index.write();
-
-            // Only evict a fqn this update no longer declares, and only if
-            // this update's own URI is the one currently indexed for it.
-            // `all_old_fqns` mixes together every URI's prior declarations,
-            // so removing by fqn alone would delete a *different* file's
-            // still-valid winning entry whenever a losing duplicate (see the
-            // tie-break below) gets reparsed on its own.
+        self.symbols.with_class_declarations(|decls| {
+            // Withdraw the declarations this parse no longer makes.  A name
+            // another file also declares is handed to that file rather than
+            // disappearing with this one; `all_old_fqns` mixes together
+            // every URI's prior declarations, so dropping by fqn alone would
+            // also delete a different file's still-valid entry whenever a
+            // losing duplicate gets reparsed on its own.
             for update in &prepared {
                 for old_fqn in &update.old_fqns {
                     if update.new_fqns.contains(old_fqn) {
                         continue;
                     }
-                    if idx.get(old_fqn).is_some_and(|owner| *owner == update.uri) {
-                        idx.remove(old_fqn);
-                        fqn_idx.remove(old_fqn);
-                    }
+                    decls.withdraw(old_fqn, &update.uri);
                 }
             }
 
+            // A package may declare the same class in more than one file
+            // behind a `class_exists` guard — Carbon ships an empty
+            // `DatePeriodBase` alongside one that carries the pre-8.2
+            // properties.  Both get declared, and the lowest-sorting URI
+            // wins, instead of whichever parse worker happened to finish
+            // last deciding the members the name resolves to (and the
+            // diagnostics that follow) anew on every run.
             for update in &prepared {
                 for class in &update.classes {
                     if class.name.starts_with("__anonymous@") {
                         continue;
                     }
-                    let fqn = class.fqn().to_string();
-                    // A package may declare the same class in more than one
-                    // file behind a `class_exists` guard — Carbon ships an
-                    // empty `DatePeriodBase` alongside one that carries the
-                    // pre-8.2 properties.  Both get indexed, so settle the
-                    // duplicate on the lowest-sorting URI instead of on
-                    // whichever parse worker happened to finish last, which
-                    // decided the members the name resolved to (and the
-                    // diagnostics that followed) anew on every run.
-                    match idx.get(&fqn) {
-                        Some(existing) if existing.as_str() < update.uri.as_str() => continue,
-                        Some(existing) if *existing != update.uri => reowned_fqns.push(fqn.clone()),
-                        _ => {}
+                    let fqn = class.fqn();
+                    if decls.declare(&fqn, &update.uri, class).reowned {
+                        reowned_fqns.push(fqn.to_string());
                     }
-                    idx.insert(fqn.clone(), update.uri.clone());
-                    fqn_idx.insert(fqn, Arc::clone(class));
                 }
             }
-        }
+        });
         {
             let nf_cache = self.symbols.class_not_found_cache.read();
             if !nf_cache.is_empty() {
@@ -2207,6 +2196,51 @@ class User extends Model {
                 .get("Vendor\\Base")
                 .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Fresh")),
             "a first-parse class must populate the reverse-inheritance index"
+        );
+    }
+
+    /// When the winning file stops declaring a duplicated name, the
+    /// derived indexes must be rebuilt from the declaration that takes
+    /// over, not left describing the withdrawn one.
+    #[test]
+    fn promoted_class_declaration_refreshes_derived_indexes() {
+        let backend = Backend::new_test();
+
+        backend.update_ast(
+            "file:///a_rich.php",
+            "<?php namespace Vendor; class Variant extends Rich { public function rich() {} }",
+        );
+        backend.update_ast(
+            "file:///b_bare.php",
+            "<?php namespace Vendor; class Variant extends Bare { public function bare() {} }",
+        );
+
+        // The winner is renamed, so only b_bare.php declares the name.
+        backend.update_ast(
+            "file:///a_rich.php",
+            "<?php namespace Vendor; class Renamed extends Rich { public function rich() {} }",
+        );
+
+        let store = backend.symbols.method_store.read();
+        assert!(
+            store.contains_key(&("Vendor\\Variant".to_string(), "bare".to_string())),
+            "the promoted declaration's members must be indexed"
+        );
+        assert!(
+            !store.contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
+            "the withdrawn declaration's members must be gone"
+        );
+
+        let gti = backend.symbols.gti_index.read();
+        assert!(
+            gti.get("Vendor\\Bare")
+                .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Variant")),
+            "the promoted declaration's parent must list it as an implementor"
+        );
+        assert!(
+            !gti.get("Vendor\\Rich")
+                .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Variant")),
+            "the withdrawn declaration's parent must not still list it"
         );
     }
 }

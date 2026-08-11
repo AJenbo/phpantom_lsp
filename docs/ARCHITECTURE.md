@@ -419,10 +419,40 @@ survives file close.
 Drupal scans, PSR-0, phar archives, or full workspace scans. All
 paths are converted to URI strings at init time.
 
+### Duplicate Declarations
+
+A class or function name can be declared by more than one file, which is
+how a package ships a variant behind a `class_exists` / `function_exists`
+guard. The lowest-sorting URI wins, so the name resolves to the same
+declaration however the parse workers were scheduled, and the
+declarations that lost are kept in `duplicate_classes` /
+`duplicate_functions` (keyed by name, then by declaring URI). A name only
+appears there once a second file declares it, so the overwhelming
+majority of symbols cost nothing, and keeping the runners-up is what lets
+the name pass to the next declarant when the winning file stops declaring
+it (rename, deletion, or an edit that removes it) instead of vanishing.
+
+Both class indexing paths (`apply_ast_index_updates_batch` for editor
+files, `parse_and_cache_content_versioned` for lazily loaded ones) and the
+watched-file purge record declarations through
+`SymbolIndex::with_class_declarations`, which locks `fqn_uri_index`,
+`fqn_class_index`, and `duplicate_classes` together in that order. That is
+what keeps the two class indexes from describing different files for one
+name, and keeps a runner-up recorded by one path from going stale when the
+other withdraws a declaration. Readers that take more than one of these
+locks must take them in the same order.
+
+The indexes derived from the class index (`method_store`, `gti_index`) are
+keyed by FQN, so they are repopulated from whichever declaration won
+rather than from the classes the current parse produced.
+
 ### Lifecycle Invariants
 
 1. Every class in `uri_classes_index` has a corresponding entry in
-   `fqn_class_index`. Both write sites maintain this.
+   `fqn_class_index`. Both write sites maintain this. For a name two
+   files declare, that entry is the winning declaration, so the losing
+   file's `uri_classes_index` entry is described by `duplicate_classes`
+   instead.
 2. Every FQN in `fqn_class_index` has a corresponding entry in
    `fqn_uri_index`. Violating this breaks GTD after `didClose`.
 3. `fqn_uri_index` entries are never removed by `didClose`. Once a

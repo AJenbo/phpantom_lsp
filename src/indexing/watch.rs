@@ -187,4 +187,112 @@ mod tests {
         backend.resolved_class_cache.write().set_laravel(true);
         assert!(backend.apply_watched_file_changes(&params, dir.path()));
     }
+
+    /// Deleting one of two files that declare the same class hands the
+    /// name to the surviving file.  The purge used to drop every index
+    /// entry the deleted file owned, so a class shipped in two variants
+    /// behind a `class_exists` guard became unresolvable.
+    #[test]
+    fn deleting_one_of_two_declaring_files_keeps_the_class() {
+        let backend = Backend::new_test();
+
+        backend.update_ast(
+            "file:///a_rich.php",
+            "<?php namespace Vendor; class Variant { public function rich() {} }",
+        );
+        backend.update_ast(
+            "file:///b_bare.php",
+            "<?php namespace Vendor; class Variant { public function bare() {} }",
+        );
+
+        backend.reindex_files_batch(&[(
+            "file:///a_rich.php".to_string(),
+            PathBuf::from("/a_rich.php"),
+            FileChangeType::DELETED,
+        )]);
+
+        assert_eq!(
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Vendor\\Variant")
+                .cloned(),
+            Some("file:///b_bare.php".to_string()),
+            "the surviving file should take over the name"
+        );
+        assert!(
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Vendor\\Variant")
+                .is_some_and(|cls| cls.methods.iter().any(|m| m.name == "bare")),
+            "the class index must describe the surviving declaration"
+        );
+        assert!(
+            backend
+                .symbols
+                .method_store
+                .read()
+                .contains_key(&("Vendor\\Variant".to_string(), "bare".to_string())),
+            "the method store must follow the surviving declaration"
+        );
+        assert!(
+            !backend
+                .symbols
+                .method_store
+                .read()
+                .contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
+            "the deleted file's members must be gone"
+        );
+    }
+
+    /// ...and the name still goes away once the last declaring file is
+    /// deleted.
+    #[test]
+    fn deleting_the_last_declaring_file_drops_the_class() {
+        let backend = Backend::new_test();
+
+        backend.update_ast(
+            "file:///a_rich.php",
+            "<?php namespace Vendor; class Variant { public function rich() {} }",
+        );
+        backend.update_ast(
+            "file:///b_bare.php",
+            "<?php namespace Vendor; class Variant { public function bare() {} }",
+        );
+
+        backend.reindex_files_batch(&[
+            (
+                "file:///a_rich.php".to_string(),
+                PathBuf::from("/a_rich.php"),
+                FileChangeType::DELETED,
+            ),
+            (
+                "file:///b_bare.php".to_string(),
+                PathBuf::from("/b_bare.php"),
+                FileChangeType::DELETED,
+            ),
+        ]);
+
+        assert!(
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Vendor\\Variant")
+                .is_none(),
+            "no file declares Vendor\\Variant any more"
+        );
+        assert!(
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Vendor\\Variant")
+                .is_none(),
+            "the class index must not outlive the last declaration"
+        );
+    }
 }

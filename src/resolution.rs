@@ -827,32 +827,64 @@ impl Backend {
         // fqn_uri_index (FQN → URI) so that go-to-definition can locate
         // the source file even after the uri_classes_index entry is
         // cleared by didClose.
-        {
+        //
+        // The declarations go through the same bookkeeping the editor path
+        // (`apply_ast_index_updates_batch`) uses, so a class name two files
+        // declare settles on the same one of them whichever path indexed
+        // it, and the two indexes cannot end up describing different files.
+        let (winning_classes, reowned_fqns) = {
             // Build the new entries outside the lock so the FQN-string
             // formatting and Arc clones don't serialize concurrent readers.
-            // Only the brief insert below holds the `.write()` guards.
+            // Only the brief update below holds the `.write()` guards.
             let new_entries: Vec<(String, Arc<ClassInfo>)> = arc_classes
                 .iter()
                 .filter(|cls| !cls.name.starts_with("__anonymous@"))
                 .map(|cls| (cls.fqn().to_string(), Arc::clone(cls)))
                 .collect();
 
-            let mut class_idx = self.symbols.fqn_uri_index.write();
-            let mut fqn_idx = self.symbols.fqn_class_index.write();
-            // On re-parse, drop entries for classes that this file no
-            // longer defines before re-inserting the current set.  This
-            // repoints/removes the FQN → URI and FQN → ClassInfo mappings
-            // so a renamed or deleted class stops resolving from the old
-            // ClassInfo.
-            for old_fqn in &old_fqns {
-                class_idx.remove(old_fqn);
-                fqn_idx.remove(old_fqn);
-            }
-            for (fqn, cls) in new_entries {
-                class_idx.or_insert_with(fqn.as_str(), || uri.to_owned());
-                fqn_idx.insert(fqn, cls);
-            }
-        }
+            self.symbols.with_class_declarations(|decls| {
+                // The method store and the reverse-inheritance index are
+                // keyed by fqn, so they must be repopulated from whichever
+                // declaration won rather than from this file's copy of a
+                // duplicated name.
+                let mut winners: Vec<Arc<ClassInfo>> = Vec::with_capacity(arc_classes.len());
+
+                // On re-parse, withdraw the classes this file no longer
+                // defines, so a renamed or deleted class stops resolving
+                // from the old ClassInfo.  A name another file also
+                // declares is handed to that file instead of vanishing.
+                for old_fqn in &old_fqns {
+                    if new_entries.iter().any(|(fqn, _)| fqn == old_fqn) {
+                        continue;
+                    }
+                    decls.withdraw(old_fqn, uri);
+                    if let Some(promoted) = decls.winner(old_fqn) {
+                        winners.push(Arc::clone(promoted));
+                    }
+                }
+
+                let mut reowned: Vec<String> = Vec::new();
+                for (fqn, cls) in &new_entries {
+                    let declared = decls.declare(fqn, uri, cls);
+                    if declared.reowned {
+                        reowned.push(fqn.clone());
+                    }
+                    if declared.won {
+                        winners.push(Arc::clone(cls));
+                    } else if let Some(other) = decls.winner(fqn) {
+                        winners.push(Arc::clone(other));
+                    }
+                }
+
+                winners.extend(
+                    arc_classes
+                        .iter()
+                        .filter(|cls| cls.name.starts_with("__anonymous@"))
+                        .map(Arc::clone),
+                );
+                (winners, reowned)
+            })
+        };
         // On re-parse, evict the method_store and gti_index entries for
         // the classes this file previously defined before re-populating.
         // Evicting the *old* FQN set (rather than the new one) removes
@@ -863,8 +895,12 @@ impl Backend {
         // early-return.
         self.evict_methods_for_fqns(&old_fqns);
         self.evict_gti_for_fqns(&old_fqns);
-        self.populate_method_store(&arc_classes);
-        self.populate_gti_index(&arc_classes);
+        // Same for a name this parse took over from another file: those
+        // entries describe the declaration that just lost.
+        self.evict_methods_for_fqns(&reowned_fqns);
+        self.evict_gti_for_fqns(&reowned_fqns);
+        self.populate_method_store(&winning_classes);
+        self.populate_gti_index(&winning_classes);
 
         // Remove newly-discovered FQNs from the negative-result cache.
         {
@@ -1814,6 +1850,103 @@ mod tests {
                 .get("Lib\\NewName")
                 .is_some(),
             "new name must be indexed after rename"
+        );
+    }
+
+    /// The lazily-loaded path settles a class name two files declare the
+    /// same way the editor path does: on the lowest-sorting URI, with both
+    /// indexes describing that one file.  It used to keep the first URI it
+    /// saw but the last `ClassInfo`, so go-to-definition and member
+    /// resolution could land on different declarations.
+    #[test]
+    fn lazy_parse_settles_duplicate_on_the_lowest_uri() {
+        let backend = Backend::new_test();
+
+        backend.parse_and_cache_content(
+            "<?php namespace Vendor; class Variant {}",
+            "file:///b_bare.php",
+        );
+        backend.parse_and_cache_content(
+            "<?php namespace Vendor; class Variant { public function rich() {} }",
+            "file:///a_rich.php",
+        );
+
+        assert_eq!(
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Vendor\\Variant")
+                .cloned(),
+            Some("file:///a_rich.php".to_string()),
+            "the lowest-sorting URI should win"
+        );
+        assert!(
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Vendor\\Variant")
+                .is_some_and(|cls| cls.methods.iter().any(|m| m.name == "rich")),
+            "the class index must describe the file the URI index points at"
+        );
+    }
+
+    /// ...and when that file stops declaring the name, the other file's
+    /// declaration takes over instead of the name becoming unresolvable.
+    #[test]
+    fn lazy_parse_promotes_the_runner_up_when_the_winner_drops_the_name() {
+        let backend = Backend::new_test();
+
+        backend.parse_and_cache_content(
+            "<?php namespace Vendor; class Variant { public function rich() {} }",
+            "file:///a_rich.php",
+        );
+        backend.parse_and_cache_content(
+            "<?php namespace Vendor; class Variant { public function bare() {} }",
+            "file:///b_bare.php",
+        );
+
+        // The winner is re-parsed without the class (renamed on disk).
+        backend.parse_and_cache_content(
+            "<?php namespace Vendor; class Renamed {}",
+            "file:///a_rich.php",
+        );
+
+        assert_eq!(
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Vendor\\Variant")
+                .cloned(),
+            Some("file:///b_bare.php".to_string()),
+            "b_bare.php still declares the name"
+        );
+        assert!(
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Vendor\\Variant")
+                .is_some_and(|cls| cls.methods.iter().any(|m| m.name == "bare")),
+            "the promoted declaration's members must be the ones indexed"
+        );
+        assert!(
+            backend
+                .symbols
+                .method_store
+                .read()
+                .contains_key(&("Vendor\\Variant".to_string(), "bare".to_string())),
+            "the method store must follow the promoted declaration"
+        );
+        assert!(
+            !backend
+                .symbols
+                .method_store
+                .read()
+                .contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
+            "the withdrawn declaration's members must be gone"
         );
     }
 }

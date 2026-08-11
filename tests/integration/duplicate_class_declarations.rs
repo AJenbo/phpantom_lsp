@@ -5,7 +5,8 @@
 //! (Carbon's `DatePeriodBase`, Symfony's polyfilled `RoundingMode`), and
 //! the analyzer parses files in parallel, so "whichever parse finished
 //! last" made the members such a name resolved to differ from run to run.
-//! The lowest-sorting URI wins instead.
+//! The lowest-sorting URI wins instead, and the declarations that lost are
+//! kept so the name survives the winning file dropping it.
 
 use crate::common::create_test_backend;
 
@@ -97,6 +98,71 @@ async fn winning_file_can_still_be_reparsed() {
     assert!(
         !class.methods.iter().any(|m| m.name == "rich"),
         "the pre-edit member should be gone"
+    );
+}
+
+/// When the winning file stops declaring the name, the other file's
+/// declaration takes over rather than the name disappearing.
+#[tokio::test]
+async fn losing_declaration_takes_over_when_the_winner_drops_it() {
+    let backend = create_test_backend();
+
+    backend.update_ast("file:///a_rich.php", RICH);
+    backend.update_ast("file:///b_bare.php", BARE);
+
+    // The winner is renamed, so it no longer declares the name.
+    backend.update_ast(
+        "file:///a_rich.php",
+        "<?php\nnamespace Vendor;\nclass Renamed { public function rich(): int { return 1; } }\n",
+    );
+
+    let class = backend
+        .fqn_class_index()
+        .read()
+        .get("Vendor\\Variant")
+        .cloned()
+        .expect("b_bare.php still declares Vendor\\Variant");
+    assert!(
+        !class.methods.iter().any(|m| m.name == "rich"),
+        "the surviving entry should be b_bare.php's declaration"
+    );
+    assert_eq!(
+        backend
+            .fqn_uri_index()
+            .read()
+            .get("Vendor\\Variant")
+            .cloned(),
+        Some("file:///b_bare.php".to_string()),
+        "the URI index should follow the promoted declaration"
+    );
+}
+
+/// ...and the name goes away only once no file declares it.
+#[tokio::test]
+async fn name_disappears_once_every_declaration_is_gone() {
+    let backend = create_test_backend();
+
+    backend.update_ast("file:///a_rich.php", RICH);
+    backend.update_ast("file:///b_bare.php", BARE);
+
+    backend.update_ast("file:///a_rich.php", "<?php\n");
+    backend.update_ast("file:///b_bare.php", "<?php\n");
+
+    assert!(
+        backend
+            .fqn_class_index()
+            .read()
+            .get("Vendor\\Variant")
+            .is_none(),
+        "no file declares Vendor\\Variant any more"
+    );
+    assert!(
+        backend
+            .fqn_uri_index()
+            .read()
+            .get("Vendor\\Variant")
+            .is_none(),
+        "the URI index should not outlive the last declaration"
     );
 }
 

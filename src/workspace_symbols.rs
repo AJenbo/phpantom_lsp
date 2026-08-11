@@ -433,8 +433,13 @@ impl Backend {
         // would dump thousands of vendor classes into the picker.
         if !query_lower.is_empty() {
             // Grab the fqn_index for rich metadata (kind, deprecation).
-            let fqn_idx = self.symbols.fqn_class_index.read();
+            // The indexing paths take these two write locks in URI-then-class
+            // order, so read them in that order as well: a writer parked
+            // between its two acquisitions blocks new readers of the second
+            // lock, and a reader holding them the other way round would then
+            // be waiting for that writer to finish.
             let idx = self.symbols.fqn_uri_index.read();
+            let fqn_idx = self.symbols.fqn_class_index.read();
             for (fqn, file_uri) in idx.iter() {
                 if seen_fqns.contains(fqn) {
                     continue;

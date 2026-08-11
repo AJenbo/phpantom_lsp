@@ -165,6 +165,10 @@ impl Backend {
         // three: it also retires the memoised class lookups, which must
         // happen after the index it memoises has been emptied.
         self.symbols.fqn_class_index.write().clear();
+        // The runner-up declarations describe the vendor tree that was just
+        // rescanned; keeping them would promote a copy of a class that the
+        // update may have moved or removed.
+        self.symbols.duplicate_classes.write().clear();
         self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
         self.clear_class_not_found_cache();

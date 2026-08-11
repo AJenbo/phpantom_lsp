@@ -1608,31 +1608,38 @@ impl Backend {
             path_set.insert(path.clone());
         }
 
-        // FQN → URI: drop every entry sourced from a changed file in one
-        // pass, collecting the dropped FQNs so the dependent caches can be
-        // evicted without re-scanning.
-        let mut dropped_fqns: Vec<String> = Vec::new();
-        {
-            let mut idx = self.symbols.fqn_uri_index.write();
-            idx.retain(|fqn, v| {
-                if uri_set.contains(v.as_str()) {
-                    dropped_fqns.push(fqn.to_owned());
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-        {
-            let mut fci = self.symbols.fqn_class_index.write();
-            for fqn in &dropped_fqns {
-                fci.remove(fqn);
-            }
-        }
-        // These FQNs no longer resolve; retire the memoised lookups.
+        // Drop every class declaration sourced from a changed file in one
+        // pass, collecting the affected FQNs so the dependent caches can be
+        // evicted without re-scanning.  A name a purged file shared with
+        // another declaration is promoted to that one rather than dropped,
+        // so deleting one of two files declaring a class does not make the
+        // class unresolvable.
+        let crate::symbol_index::WithdrawnClasses {
+            dropped: dropped_fqns,
+            promoted: promoted_fqns,
+        } = self
+            .symbols
+            .with_class_declarations(|decls| decls.withdraw_uris(&uri_set));
+        // These FQNs no longer resolve, and the promoted ones resolve
+        // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
+        if !promoted_fqns.is_empty() {
+            // The indexes derived from the class index still describe the
+            // purged declaration, so rebuild them from the survivor.
+            let winners: Vec<Arc<ClassInfo>> = {
+                let fci = self.symbols.fqn_class_index.read();
+                promoted_fqns
+                    .iter()
+                    .filter_map(|fqn| fci.get(fqn).map(Arc::clone))
+                    .collect()
+            };
+            self.evict_methods_for_fqns(&promoted_fqns);
+            self.evict_gti_for_fqns(&promoted_fqns);
+            self.populate_method_store(&winners);
+            self.populate_gti_index(&winners);
+        }
 
         self.symbols
             .autoload_function_index
@@ -1685,12 +1692,11 @@ impl Backend {
             }
 
             let classes = crate::classmap_scanner::scan_file(path);
-            {
-                let mut idx = self.symbols.fqn_uri_index.write();
+            self.symbols.with_class_declarations(|decls| {
                 for fqn in classes {
-                    idx.insert(fqn, uri_str.clone());
+                    decls.note_discovered(&fqn, uri_str.clone());
                 }
-            }
+            });
 
             let scan = crate::classmap_scanner::scan_file_full(path);
             {
