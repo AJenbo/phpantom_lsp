@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786573697552,
+  "lastUpdate": 1786573867256,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19787,6 +19787,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7cec79a45300520973374e4577147b5c0bf397cc",
+          "message": "A scalar check on an argument-less method call narrows the call the same\nway it narrows a property",
+          "timestamp": "2026-08-13T00:13:30+02:00",
+          "tree_id": "9b620fbe6ccebd917df2ca8c038649d29a650fef",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7cec79a45300520973374e4577147b5c0bf397cc"
+        },
+        "date": 1786573861571,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.3,
             "unit": "MiB"
           }
         ]
