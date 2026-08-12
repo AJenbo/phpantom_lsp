@@ -1531,6 +1531,18 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
+<td>T38</td>
+<td><a href="../todo/type-inference/#t38-several-core-builtins-have-a-return-type-that-depends-on-an-arguments-value-or-shape">Several core builtins have a return type that depends on an argument's value or shape</a> (<code>preg_replace</code>/<code>str_replace</code> family, <code>json_encode</code>/<code>json_decode</code>)</td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>T39</td>
+<td><a href="../todo/type-inference/#t39-no-leniency-modelling-for-builtin-functions-whose-failure-branch-is-conventionally-never-checked">No leniency modelling for builtin functions whose failure branch is conventionally never checked</a> (<code>tempnam</code>, <code>fopen</code>, …)</td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>T20</td>
 <td><a href="../todo/type-inference/#t20-type-narrowing-reconciliation-engine">Type narrowing reconciliation engine</a> (CNF clause algebra, sure/sureNot tracking)</td>
 <td>Medium-High</td>
@@ -1697,6 +1709,78 @@ unlikely to move the needle for most users.</p>
 <td><strong><a href="../todo/bugs/">Bug Fixes</a></strong></td>
 <td></td>
 <td></td>
+</tr>
+<tr>
+<td>B119</td>
+<td><a href="../todo/bugs/#b119-eloquent-factory-count-narrowing-exists-but-only-reaches-one-of-two-call-resolution-paths">Eloquent factory count narrowing exists but only reaches one of two call-resolution paths</a></td>
+<td>High</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B120</td>
+<td><a href="../todo/bugs/#b120-the-short-ternary--keeps-the-conditions-falsy-branch-in-its-own-result">The short ternary (<code>?:</code>) keeps the condition's falsy branch in its own result</a></td>
+<td>Medium-High</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B89</td>
+<td><a href="../todo/bugs/#b89-assertx--null--assertx--false-does-not-narrow"><code>assert($x !== null)</code> / <code>assert($x !== false)</code> does not narrow</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B88</td>
+<td><a href="../todo/bugs/#b88-false-does-not-narrow-inside-a-plain-ifwhile-truthy-branch"><code>!== false</code> does not narrow inside a plain <code>if</code>/<code>while</code> truthy branch</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B90</td>
+<td><a href="../todo/bugs/#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check">An object union is not narrowed by a discriminating property check</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B91</td>
+<td><a href="../todo/bugs/#b91-a-native-type-hint-silently-accepts-a-phpdoc-only-pseudo-type">A native type hint silently accepts a PHPDoc-only pseudo-type</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B121</td>
+<td><a href="../todo/bugs/#b121-assertarraykey-instanceof-foo-does-not-narrow-the-array-access-subject"><code>assert($array[$key] instanceof Foo)</code> does not narrow the array-access subject</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B123</td>
+<td><a href="../todo/bugs/#b123-a-docblock-cannot-refine-one-member-of-an-all-scalar-native-return-union">A docblock cannot refine one member of an all-scalar native return union</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B122</td>
+<td><a href="../todo/bugs/#b122-repeated-conditional-writes-to-the-same-array-key-accumulate-redundant-union-snapshots">Repeated conditional writes to the same array key accumulate redundant union snapshots</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B92</td>
+<td><a href="../todo/bugs/#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read">An array literal's element types widen to base scalar types on a dynamic-key read</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>B93</td>
+<td><a href="../todo/bugs/#b93-constantt-does-not-resolve-per-templated-key"><code>CONSTANT[T]</code> does not resolve per templated key</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>B94</td>
+<td><a href="../todo/bugs/#b94-psalm-this-out--phpstan-self-out-method-level-template-mutation-is-not-modelled"><code>@psalm-this-out</code> / <code>@phpstan-self-out</code> method-level template mutation is not modelled</a></td>
+<td>Low</td>
+<td>High</td>
 </tr>
 <tr>
 <td></td>
