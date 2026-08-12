@@ -30,7 +30,6 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
 
     let mut types: Vec<PhpType> = Vec::new();
-    let mut positional: Vec<PhpType> = Vec::new();
     let mut has_string_keys = false;
     let mut saw_spread = false;
     let mut shape_entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
@@ -52,8 +51,16 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                 // A positional shape must keep one entry per element to
                 // preserve arity, so an unresolvable element becomes
                 // `mixed`. The `list<T>` fallback keeps its original
-                // behaviour of ignoring unresolvable elements.
-                positional.push(resolved.clone().unwrap_or_else(PhpType::mixed));
+                // behaviour of ignoring unresolvable elements. Recorded
+                // in `shape_entries` (key: None) at the position it was
+                // written so PHP's sequential auto-index numbering,
+                // which `shape_keys` and `shape_value_type` both assume,
+                // stays intact even when later entries have string keys.
+                shape_entries.push(crate::php_type::ShapeEntry {
+                    key: None,
+                    value_type: resolved.clone().unwrap_or_else(PhpType::mixed),
+                    optional: false,
+                });
                 if let Some(t) = resolved
                     && !types.contains(&t)
                 {
@@ -99,18 +106,10 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     // back by position.
     if nested
         && !saw_spread
-        && !positional.is_empty()
-        && positional.len() <= MAX_POSITIONAL_SHAPE_LEN
+        && !shape_entries.is_empty()
+        && shape_entries.len() <= MAX_POSITIONAL_SHAPE_LEN
     {
-        let entries = positional
-            .into_iter()
-            .map(|value_type| crate::php_type::ShapeEntry {
-                key: None,
-                value_type,
-                optional: false,
-            })
-            .collect();
-        return Some(PhpType::array_shape(entries));
+        return Some(PhpType::array_shape(shape_entries));
     }
 
     let elem_type = if types.len() == 1 {

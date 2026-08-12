@@ -13086,6 +13086,35 @@ fn hover_nested_array_literal_keeps_positional_shape() {
     );
 }
 
+/// A literal that mixes a positional entry with a keyed one keeps both:
+/// the positional entry gets the sequential integer key PHP would assign
+/// it (`0`), rather than being dropped from the inferred shape.
+#[test]
+fn hover_array_literal_mixed_positional_and_keyed_entries() {
+    let backend = create_test_backend();
+    let uri = "file:///mixed_shape.php";
+    let content = concat!(
+        "<?php\n",
+        "function demo(): void {\n",
+        "    $row = ['first', 'b' => 1];\n",
+        "    $first = $row[0];\n",
+        "    $second = $row['b'];\n",
+        "}\n",
+    );
+    let h_first = hover_at(&backend, uri, content, 3, 6).expect("hover $first");
+    let first = hover_text(&h_first);
+    assert!(
+        first.contains("string"),
+        "$row[0] should resolve to the dropped positional entry's type (string), got: {first}"
+    );
+    let h_second = hover_at(&backend, uri, content, 4, 6).expect("hover $second");
+    let second = hover_text(&h_second);
+    assert!(
+        second.contains("int"),
+        "$row['b'] should still resolve to the keyed entry's type (int), got: {second}"
+    );
+}
+
 /// `@template T of Token[]` used as a pass-through (`@param T $tokens` /
 /// `@return T`) is an identity generic: `T` binds to whatever array-like
 /// type the caller passes in.  Hovering on a member accessed through

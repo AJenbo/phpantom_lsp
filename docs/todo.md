@@ -104,7 +104,6 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B86 | [A check on a method call does not reach the argument that repeats it](todo/bugs.md#b86-a-check-on-a-method-call-does-not-reach-the-argument-that-repeats-it)                | Medium      | Medium      |
 | B87 | [An `instanceof` on a two-level property path drops the declared class](todo/bugs.md#b87-an-instanceof-on-a-two-level-property-path-drops-the-declared-class)               | Medium      | Medium      |
-| B88 | [A literal that mixes positional and keyed entries loses its positional ones](todo/bugs.md#b88-a-literal-that-mixes-positional-and-keyed-entries-loses-its-positional-ones)   | Low-Medium  | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

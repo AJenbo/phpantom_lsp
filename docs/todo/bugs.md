@@ -60,28 +60,3 @@ class is reported.
 **Fix:** make the seeding resolve a multi-level property path to the same
 type the one-level path resolves to, so the merge sees a declared type to
 intersect with.
-
-### B88. A literal that mixes positional and keyed entries loses its positional ones
-
-**Impact: Low-Medium · Effort: Low**
-
-```php
-$row = ['first', 'b' => 1];   // array{0: string, b: int}
-$row[0];                      // resolves to nothing — the `0` entry was dropped
-```
-
-`infer_array_literal_raw_type`
-(`type_engine/variable/raw_type_inference.rs`) builds `shape_entries`
-from `ArrayElement::KeyValue` only, and collects positional elements
-into a separate `positional` vector. As soon as the literal has one
-string key it returns the shape built from `shape_entries` and discards
-`positional` entirely, so every entry written without a key vanishes
-from the type. PHP gives those entries the sequential integer keys the
-shape should record (`0`, `1`, … counting up past any explicit integer
-key), which is what `shape_keys` in
-`diagnostics/type_errors/compatibility.rs` already assumes when it
-compares two shapes.
-
-**Fix:** merge the positional elements into `shape_entries` at the
-position they were written, keyed by the index PHP would assign them,
-rather than returning a shape built from the keyed elements alone.
