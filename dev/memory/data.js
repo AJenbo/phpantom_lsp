@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786573867256,
+  "lastUpdate": 1786577596244,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19821,6 +19821,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e6e7c1b38f121413b8cf9bc17732055f65148a27",
+          "message": "A `false` check narrows its `else` branch too, not just the guard clause\nthat returns",
+          "timestamp": "2026-08-13T01:16:27+02:00",
+          "tree_id": "ec0826c468aa6f528efcde7ee93f8e11b548ea29",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e6e7c1b38f121413b8cf9bc17732055f65148a27"
+        },
+        "date": 1786577591544,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73,
             "unit": "MiB"
           }
         ]
