@@ -87,9 +87,11 @@ class NullableIntReplacement {
 			$a = 3;
 		}
 
-		// PHPantom is more precise than Psalm here: both the assigned `3`
-		// and the original `5|null` survive the merge as literals.
-		assertType('3|5|null', $a);
+		// Either the guard fired and `$a` is `3`, or it did not — which
+		// only happens when `$a` was `null` and `$b` was false, since the
+		// `5` branch always makes `$a !== null` true on its own. So `5`
+		// cannot survive to this merge.
+		assertType('null|3', $a);
 	}
 }
 

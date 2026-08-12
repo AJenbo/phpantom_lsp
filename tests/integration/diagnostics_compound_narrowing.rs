@@ -800,3 +800,85 @@ class C {{
     let messages = type_error_messages(&backend, uri, &text);
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+// ─── `false` narrowing in the inverse direction (B136) ──────────────────────
+//
+// The guard-clause form (`if ($value === false) { return; }`) already
+// narrowed correctly; what was missing was the inverse direction: an
+// explicit `else`, `!empty()`, and the implicit else an `||` guard's De
+// Morgan expansion produces.
+
+const READ_IT_SCAFFOLD: &str = r#"<?php
+namespace ReadIt;
+
+function useString(string $value): void {}
+
+/** @return string|false */
+function readIt() {
+    return false;
+}
+"#;
+
+/// The `else` branch of `$value === false` proves the opposite of the
+/// then-branch: `$value` is not `false` there.
+#[test]
+fn a_false_equality_check_narrows_the_else_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///read_it_else.php";
+    let text = format!(
+        "{READ_IT_SCAFFOLD}
+function run(): void {{
+    $value = readIt();
+    if ($value === false) {{
+        // ...
+    }} else {{
+        useString($value);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `!empty($value)` rules out every falsy value, `false` included, not
+/// just `null`.
+#[test]
+fn a_not_empty_check_narrows_out_false() {
+    let backend = create_test_backend();
+    let uri = "file:///read_it_not_empty.php";
+    let text = format!(
+        "{READ_IT_SCAFFOLD}
+function run(): void {{
+    $value = readIt();
+    if (!empty($value)) {{
+        useString($value);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The implicit else an `||` guard clause's De Morgan expansion produces:
+/// falling through past the guard means every operand was false, so
+/// `$value === false` being false proves `$value` is not `false`.
+#[test]
+fn an_or_guard_clause_narrows_out_false() {
+    let backend = create_test_backend();
+    let uri = "file:///read_it_or_guard.php";
+    let text = format!(
+        "{READ_IT_SCAFFOLD}
+function run(): void {{
+    $value = readIt();
+    if ($value === false || rand(0, 1)) {{
+        return;
+    }}
+    useString($value);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}

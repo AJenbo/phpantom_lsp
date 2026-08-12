@@ -1901,10 +1901,10 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         narrow_to_null_in_scope(&var_name, scope);
     }
     // `!empty($x)` — truthy branch means $x is non-empty (truthy):
-    // strip null (and false) from the type.
+    // strip null and false from the type.
     if let Some(var_name) = extract_not_empty_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        strip_null_from_scope(&var_name, scope);
+        strip_falsy_from_scope(&var_name, scope);
     }
     // Bare truthy check: `if ($x) { ... }` — $x is truthy in the
     // then-body, so strip null and false from its type.
@@ -1922,6 +1922,19 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // Decompose `||` chains: `if (A || B) { return; }` only falls
+    // through to the rest of the function when every operand is false,
+    // so each operand's own inverse narrowing holds on its own — the
+    // same De Morgan reasoning `apply_condition_narrowing_inverse` uses
+    // for instanceof checks, applied here to null/false checks.
+    let or_operands = collect_or_chain_operands(condition);
+    if or_operands.len() > 1 {
+        for operand in &or_operands {
+            apply_null_narrowing_inverse(operand, scope, ctx);
+        }
+        return;
+    }
+
     // When the condition is `$x === null` (equality check for null),
     // the inverse (else/guard) means $x is NOT null.
     if let Some(var_name) = extract_null_equality_check_var(condition) {
@@ -1947,6 +1960,19 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some(var_name) = extract_falsy_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_null_from_scope(&var_name, scope);
+    }
+    // When the condition is `$x === false`, the inverse (else/guard)
+    // means $x is NOT false — strip false only, mirroring the null
+    // equality case above.
+    if let Some(var_name) = extract_false_equality_check_var(condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        strip_false_from_scope(&var_name, scope);
+    }
+    // When the condition is `$x !== false`, the inverse (else/guard)
+    // means $x IS false — narrow to false only.
+    if let Some(var_name) = extract_non_false_check_var(condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        narrow_to_false_in_scope(&var_name, scope);
     }
     // When the condition is a bare `$x` (truthy check), the inverse means
     // $x is falsy.  For nullable types (`T|null`), narrow to null.
@@ -2221,6 +2247,29 @@ pub(crate) fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
         scope.set(
             var_name,
             vec![ResolvedType::from_type_string(PhpType::null())],
+        );
+    }
+}
+
+/// Narrow a variable in scope to `false` only.
+///
+/// Mirrors [`narrow_to_null_in_scope`] but for `false`: used when a
+/// condition like `$x !== false` is known to be false, so the variable
+/// must be `false`.
+pub(crate) fn narrow_to_false_in_scope(var_name: &str, scope: &mut ScopeState) {
+    let types = scope.get(var_name).to_vec();
+    if types.is_empty() {
+        return;
+    }
+    let is_false = |t: &PhpType| matches!(t.kind(), TypeKind::Named(n) if n == "false");
+    let has_false = types.iter().any(|rt| match rt.type_string.kind() {
+        TypeKind::Union(members) => members.iter().any(is_false),
+        _ => is_false(&rt.type_string),
+    });
+    if has_false {
+        scope.set(
+            var_name,
+            vec![ResolvedType::from_type_string(PhpType::false_())],
         );
     }
 }

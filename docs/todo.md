@@ -102,8 +102,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B136 | [A `false` check narrows nothing in its else branch](todo/bugs.md#b136-a-false-check-narrows-nothing-in-its-else-branch)                                                 | Medium      | Low-Medium  |
-on an argument-less method call narrows the call the same)
 | B134 | [A constant operand is only read where a `@template` is bound](todo/bugs.md#b134-a-constant-operand-is-only-read-where-a-template-is-bound)                               | Low         | Medium      |
 | B135 | [A conditional return type is not resolved from an argument's default](todo/bugs.md#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default) | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
