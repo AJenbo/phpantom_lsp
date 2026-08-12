@@ -1131,6 +1131,14 @@ class ConditionalReturnDemo
         if (is_string($unknown)) {
             strtoupper($unknown);                 // narrowed from mixed to string
         }
+
+        // A conditional keyed on an argument's *value* reads the literal at
+        // the call site, and the parameter's declared default when the
+        // argument is left out, instead of every branch at once.
+        $wordCount = str_word_count('two words'); // $format defaults to 0 → int
+        echo $wordCount + 1;
+        $wordList = str_word_count('two words', 1);
+        strtoupper($wordList[0]);                 // format 1 → list<string>
     }
 }
 
@@ -8113,6 +8121,11 @@ function runDemoAssertions(): void
     $unknown = sessionValue('file');
     assert(is_string($unknown), 'sessionValue("file") returns a mixed value narrowable to string');
     assert(sessionValue() === null, 'sessionValue() with no args returns null');
+
+    // ── Value-keyed conditional return type (str_word_count) ────────────
+    assert(str_word_count('two words') === 2, 'the default $format of 0 counts the words');
+    assert(str_word_count('two words', 1) === ['two', 'words'], 'format 1 lists the words');
+    assert(str_word_count('two words', 2) === [0 => 'two', 4 => 'words'], 'format 2 keys the words by offset');
 
     // ── Closure / arrow function return types ───────────────────────────
     $makePenClosure = function(): Pen { return new Pen(); };

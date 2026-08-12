@@ -28,14 +28,19 @@
 //! 1. **`range`** -- phpstorm-stubs return bare `array`.  We patch with a
 //!    conditional return type: `($start is string ? list<string> : list<int|float>)`.
 //!
-//! 2. **`stream_bucket_make_writeable`** -- phpstorm-stubs type the
+//! 2. **`str_word_count`** -- phpstorm-stubs declare the flat union
+//!    `string[]|int`.  We patch with a conditional return type keyed on
+//!    `$format`, so the count, the word list, and the offset-keyed map each
+//!    resolve on their own.
+//!
+//! 3. **`stream_bucket_make_writeable`** -- phpstorm-stubs type the
 //!    return as `object|null` below PHP 8.4 (the `StreamBucket` class
 //!    only exists from 8.4 onward). Bare `object` in a union is not
 //!    recognised as the universal-container case, so property access
 //!    on the result is unverifiable. We override the pre-8.4 case to
 //!    `stdClass|null`, matching PHPStan's function map.
 //!
-//! 3. **`array_map`** / **`array_filter`** -- phpstorm-stubs type the
+//! 4. **`array_map`** / **`array_filter`** -- phpstorm-stubs type the
 //!    callback as bare `callable` and the array as bare `array`, so a
 //!    closure passed to them (`array_map(fn($x) => …, $items)`) leaves
 //!    its parameter untyped. We add `@template TValue`, retype the
@@ -45,7 +50,7 @@
 //!    return type (and thus the function's own return) stays in the
 //!    value-inspecting logic in `raw_type_inference.rs`.
 //!
-//! 4. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//! 5. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
 //!    `mktime` and the rest of [`crate::benevolent_builtins`] declare a
 //!    failure branch that idiomatic PHP never checks. Their return type is
 //!    tagged so the diagnostics stop enforcing that branch. Unlike the
@@ -84,7 +89,7 @@
 //!    `@param` is untyped `object|array`.  We bind `TKey`/`TValue` from
 //!    the `$array` argument, matching PHPStan's stubs.
 //!
-//! 7. **Benevolent methods** -- the class-level half of function patch 4,
+//! 7. **Benevolent methods** -- the class-level half of function patch 5,
 //!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
 //!    `DateTime::modify` and `Closure::bind`.
 //!
@@ -112,6 +117,7 @@ use crate::types::{ClassInfo, FunctionInfo};
 pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
     match func.name.as_str() {
         "range" => patch_range(func),
+        "str_word_count" => patch_str_word_count(func),
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
@@ -223,6 +229,40 @@ fn patch_range(func: &mut FunctionInfo) {
         PhpType::named(atom("string")),
         PhpType::list(PhpType::string()),
         PhpType::list(PhpType::union(vec![PhpType::int(), PhpType::float()])),
+    ));
+}
+
+/// Patch `str_word_count()` to have a conditional return type.
+///
+/// phpstorm-stubs declare the flat union `string[]|int`, but the return type
+/// is decided by `$format`: `0` (the default) counts the words, `1` lists
+/// them, and `2` maps each word to the offset it starts at. A `$format` that
+/// isn't a literal leaves the declared union, which is all the call site can
+/// promise.
+fn patch_str_word_count(func: &mut FunctionInfo) {
+    let count = PhpType::int();
+    let words = PhpType::list(PhpType::string());
+    let words_by_offset = PhpType::generic_array(PhpType::int(), PhpType::string());
+    let unknown_format = PhpType::union(vec![words.clone(), count.clone()]);
+
+    func.conditional_return = Some(PhpType::conditional(
+        "$format",
+        false,
+        PhpType::literal_int("0"),
+        count,
+        PhpType::conditional(
+            "$format",
+            false,
+            PhpType::literal_int("1"),
+            words,
+            PhpType::conditional(
+                "$format",
+                false,
+                PhpType::literal_int("2"),
+                words_by_offset,
+                unknown_format,
+            ),
+        ),
     ));
 }
 
@@ -801,6 +841,20 @@ mod tests {
         assert!(
             func.conditional_return.is_some(),
             "range() should have a conditional return type after patching"
+        );
+    }
+
+    #[test]
+    fn str_word_count_gets_conditional_return() {
+        let mut func = empty_function("str_word_count");
+        apply_function_stub_patches(&mut func);
+        let cond = func
+            .conditional_return
+            .expect("str_word_count() should have a conditional return type after patching");
+        assert_eq!(
+            cond.to_string(),
+            "$format is 0 ? int : $format is 1 ? list<string> : \
+             $format is 2 ? array<int, string> : list<string>|int"
         );
     }
 

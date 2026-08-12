@@ -15,7 +15,11 @@
 ///   raw argument text between parentheses is available.
 /// - **No-args** ([`resolve_conditional_without_args`]): used when no
 ///   arguments were provided (or none were preserved); walks the
-///   conditional tree taking the "null default" branch at each level.
+///   conditional tree deciding each condition against the parameter's
+///   declared default.
+///
+/// All three decide an omitted argument by that declared default, since that
+/// is the value the parameter takes at runtime.
 use crate::atom::atom;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -23,7 +27,7 @@ use std::sync::Arc;
 
 use mago_syntax::cst::*;
 
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::{ClassInfo, ParameterInfo};
 
 /// Groups template-related context for conditional return type resolution.
@@ -186,7 +190,12 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             let args = split_text_args(text_args);
             let bound_text = crate::call_args::bind_text_args_to_params(params, &args);
             let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
-            let arg_text = arg_text_owned.as_deref();
+            // An omitted argument takes the parameter's declared default at
+            // runtime, so the condition is decided against that default
+            // rather than being left undecidable.
+            let arg_text = arg_text_owned
+                .as_deref()
+                .or_else(|| param_default_text(params.get(param_idx)));
 
             if matches!(condition.kind(), TypeKind::ClassString(_)) {
                 // Extract the bound type from `class-string<Bound>`, if any.
@@ -355,21 +364,12 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     );
                 }
 
-                // Check if the argument text matches `X::class`.  When the
-                // argument is omitted entirely, fall back to a `Foo::class`
-                // parameter default so `app()` resolves the same as
-                // `app(Foo::class)`.
-                let class_name = arg_text
-                    .and_then(extract_class_name_from_text)
-                    .or_else(|| {
-                        arg_text.and_then(|text| class_named_by_quoted_string(text, class_loader))
-                    })
-                    .or_else(|| {
-                        arg_text
-                            .is_none()
-                            .then(|| default_class_string_name(params.get(param_idx)))
-                            .flatten()
-                    });
+                // Check if the argument text matches `X::class`.  An omitted
+                // argument already reads back as its `Foo::class` default, so
+                // `app()` resolves the same as `app(Foo::class)`.
+                let class_name = arg_text.and_then(extract_class_name_from_text).or_else(|| {
+                    arg_text.and_then(|text| class_named_by_quoted_string(text, class_loader))
+                });
                 if let Some(class_name) = class_name {
                     let class_name =
                         resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
@@ -463,38 +463,16 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         tpl,
                     )
                 }
-            } else if let TypeKind::Literal(lit) = condition.kind() {
-                let expected = lit
-                    .string_content()
-                    .map(Cow::into_owned)
-                    .unwrap_or_else(|| lit.as_raw());
-
-                // Check if the argument is a quoted string literal
-                // matching the expected value (e.g. `'foo'` or `"foo"`).
-                if let Some(arg) = arg_text {
-                    let trimmed = arg.trim();
-                    let arg_value = if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
-                        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
-                    {
-                        Some(&trimmed[1..trimmed.len() - 1])
-                    } else {
-                        None
-                    };
-                    if arg_value == Some(expected.as_str()) {
-                        return resolve_conditional_with_text_args_and_defaults(
-                            then_type,
-                            params,
-                            text_args,
-                            var_resolver,
-                            calling_class_name,
-                            class_loader,
-                            tpl,
-                        );
-                    }
-                }
-                // Argument doesn't match the literal → else branch.
+            } else if matches!(condition.kind(), TypeKind::Literal(_)) {
+                // Value condition (`$format is 0`, `$value is ''`). The
+                // argument decides it only when it is itself a literal; any
+                // other expression leaves the broader else branch.
+                let matched = arg_text
+                    .and_then(|arg| condition_result_from_text(condition, arg))
+                    .unwrap_or(false);
+                let take_then = matched ^ *negated;
                 resolve_conditional_with_text_args_and_defaults(
-                    else_type,
+                    if take_then { then_type } else { else_type },
                     params,
                     text_args,
                     var_resolver,
@@ -536,8 +514,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // returns `string`). When neither is conclusive, fall
                 // through to the else branch as before.
                 let decided = arg_text.and_then(|arg| {
-                    let form = classify_arg_form(arg);
-                    text_condition_result(condition, &form).or_else(|| {
+                    condition_result_from_text(condition, arg).or_else(|| {
                         tpl.arg_type_resolver
                             .and_then(|resolve| resolve(arg))
                             .and_then(|arg_ty| type_condition_result(&arg_ty, condition))
@@ -601,11 +578,31 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     }
 }
 
-/// Checks whether a condition is a specific scalar type name.
-fn condition_is_scalar_type(condition: &PhpType, type_name: &str) -> bool {
-    match condition.kind() {
-        TypeKind::Named(n) => n == type_name,
-        _ => false,
+/// The source text of a literal argument expression, or `None` when the
+/// argument is any other expression (a variable, a call, a class constant).
+fn literal_expr_text<'a>(expr: &Expression<'a>) -> Option<&'a str> {
+    match expr {
+        Expression::Literal(Literal::String(s)) => Some(crate::atom::bytes_to_str(s.raw)),
+        Expression::Literal(Literal::Integer(i)) => Some(crate::atom::bytes_to_str(i.raw)),
+        Expression::Literal(Literal::Float(f)) => Some(crate::atom::bytes_to_str(f.raw)),
+        Expression::Literal(Literal::True(_)) => Some("true"),
+        Expression::Literal(Literal::False(_)) => Some("false"),
+        Expression::Literal(Literal::Null(_)) => Some("null"),
+        _ => None,
+    }
+}
+
+/// The syntactic form of an AST argument, with `arg_text` covering the literal
+/// and omitted-argument cases (see [`literal_expr_text`] and
+/// [`param_default_text`]).
+///
+/// Array literals have no source text to classify but are still a known form,
+/// and an interpolated string (`"a$b"`) is a string however its parts resolve.
+fn ast_arg_form(arg_expr: Option<&Expression<'_>>, arg_text: Option<&str>) -> ArgForm {
+    match arg_expr {
+        Some(Expression::Array(_) | Expression::LegacyArray(_)) => ArgForm::ArrayLit,
+        Some(Expression::CompositeString(_)) => ArgForm::StringLit,
+        _ => arg_text.map_or(ArgForm::Unknown, classify_arg_form),
     }
 }
 
@@ -615,11 +612,10 @@ fn arg_is_string_literal(arg: &str) -> bool {
     (t.starts_with('\'') && t.ends_with('\'')) || (t.starts_with('"') && t.ends_with('"'))
 }
 
-/// Checks whether the argument text is an integer literal.
+/// Checks whether the argument text is an integer literal, in any of the
+/// notations PHP accepts (`10`, `-10`, `0x0a`, `0b1010`, `012`, `1_0`).
 fn arg_is_int_literal(arg: &str) -> bool {
-    let t = arg.trim();
-    let t = t.strip_prefix('-').unwrap_or(t);
-    !t.is_empty() && t.chars().all(|c| c.is_ascii_digit())
+    crate::php_type::parse_php_int_literal(arg.trim()).is_some()
 }
 
 /// Checks whether the argument text is a float literal.
@@ -672,6 +668,91 @@ fn classify_arg_form(arg: &str) -> ArgForm {
     ArgForm::Unknown
 }
 
+/// The literal value an argument's source text denotes, when the text is a
+/// literal at all (`0`, `-1`, `1.5`, `'json'`).
+fn literal_value_from_text(arg_text: &str) -> Option<LiteralValue> {
+    let t = arg_text.trim();
+    match classify_arg_form(t) {
+        ArgForm::StringLit => Some(LiteralValue::string_raw(t)),
+        ArgForm::IntLit => Some(LiteralValue::int(t)),
+        ArgForm::FloatLit => Some(LiteralValue::float(t)),
+        _ => None,
+    }
+}
+
+/// The source text of a parameter's declared default value.
+///
+/// An omitted argument takes this value at runtime, so a conditional keyed on
+/// that parameter is decided against the default rather than being treated as
+/// undecidable.
+fn param_default_text(param: Option<&ParameterInfo>) -> Option<&str> {
+    param?.default_value.as_deref()
+}
+
+/// Decide a conditional's condition against an argument's source text.
+///
+/// A value condition (`$format is 0`) is settled by comparing literal values,
+/// so `0x1` satisfies `is 1` and `"foo"` satisfies `is 'foo'`. A type condition
+/// (`$x is string`, `$x is array|string`) is settled by the argument's
+/// syntactic form. Returns `None` when the text settles neither, which happens
+/// whenever the argument is an expression rather than a literal.
+fn condition_result_from_text(condition: &PhpType, arg_text: &str) -> Option<bool> {
+    match condition.kind() {
+        TypeKind::Union(members) => combine_union_results(
+            members
+                .iter()
+                .map(|member| condition_result_from_text(member, arg_text)),
+        ),
+        TypeKind::Literal(expected) => literal_value_from_text(arg_text)
+            .map(|actual| crate::php_type::literals_equal(expected, &actual)),
+        _ => condition_result_from_form(condition, classify_arg_form(arg_text)),
+    }
+}
+
+/// Decide a type condition (`$x is string`, `$x is array|string`) from the
+/// argument's syntactic form.
+///
+/// A literal argument has a fully known type, so the answer is conclusive;
+/// [`ArgForm::Unknown`] yields `None` for the caller to handle. Union
+/// conditions are satisfied when any member is.
+fn condition_result_from_form(condition: &PhpType, form: ArgForm) -> Option<bool> {
+    if form == ArgForm::Unknown {
+        return None;
+    }
+    match condition.kind() {
+        TypeKind::Union(members) => combine_union_results(
+            members
+                .iter()
+                .map(|member| condition_result_from_form(member, form)),
+        ),
+        _ => Some(scalar_condition_matches_form(condition, form)),
+    }
+}
+
+/// Combine the per-member results of a union condition: it is satisfied when
+/// any member is, and refuted only when every member is refuted.
+fn combine_union_results(results: impl Iterator<Item = Option<bool>>) -> Option<bool> {
+    let mut any_true = false;
+    let mut all_false = true;
+    for result in results {
+        match result {
+            Some(true) => {
+                any_true = true;
+                all_false = false;
+            }
+            Some(false) => {}
+            None => all_false = false,
+        }
+    }
+    if any_true {
+        Some(true)
+    } else if all_false {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Whether a single (non-union) type condition is satisfied by a literal
 /// argument form. A literal always has a fully known type, so this is
 /// conclusive (unlike [`ArgForm::Unknown`], which the caller handles).
@@ -684,42 +765,6 @@ fn scalar_condition_matches_form(condition: &PhpType, form: ArgForm) -> bool {
         ArgForm::Null => condition.is_null(),
         ArgForm::ArrayLit => condition.is_array_like(),
         ArgForm::Unknown => false,
-    }
-}
-
-/// Decide whether an argument of the given syntactic `form` satisfies a
-/// type `condition`. Returns `Some(true)`/`Some(false)` when the form is a
-/// literal (conclusive), and `None` when the form is unknown.
-///
-/// Union conditions (`array|string`) are satisfied when any member is, and
-/// definitely unsatisfied only when every member is.
-fn text_condition_result(condition: &PhpType, form: &ArgForm) -> Option<bool> {
-    if *form == ArgForm::Unknown {
-        return None;
-    }
-    match condition.kind() {
-        TypeKind::Union(members) => {
-            let mut any_true = false;
-            let mut all_false = true;
-            for m in members {
-                match text_condition_result(m, form) {
-                    Some(true) => {
-                        any_true = true;
-                        all_false = false;
-                    }
-                    Some(false) => {}
-                    None => all_false = false,
-                }
-            }
-            if any_true {
-                Some(true)
-            } else if all_false {
-                Some(false)
-            } else {
-                None
-            }
-        }
-        _ => Some(scalar_condition_matches_form(condition, *form)),
     }
 }
 
@@ -783,25 +828,11 @@ fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> 
     // Condition union (`array|string`): satisfied when any member matches,
     // refuted only when every member is refuted.
     if let TypeKind::Union(members) = condition.kind() {
-        let mut any_true = false;
-        let mut all_false = true;
-        for m in members {
-            match type_condition_result(arg_ty, m) {
-                Some(true) => {
-                    any_true = true;
-                    all_false = false;
-                }
-                Some(false) => {}
-                None => all_false = false,
-            }
-        }
-        return if any_true {
-            Some(true)
-        } else if all_false {
-            Some(false)
-        } else {
-            None
-        };
+        return combine_union_results(
+            members
+                .iter()
+                .map(|member| type_condition_result(arg_ty, member)),
+        );
     }
     // Argument union: satisfied only when every member matches, refuted only
     // when every member is refuted, otherwise indeterminate.
@@ -948,18 +979,6 @@ pub fn evaluate_nested_conditionals_text(
     }
 }
 
-/// Check whether a condition type includes `array` as one of its
-/// union members.
-fn condition_includes_array(condition: &PhpType) -> bool {
-    if condition.is_array_like() {
-        return true;
-    }
-    match condition.kind() {
-        TypeKind::Union(members) => members.iter().any(condition_includes_array),
-        _ => false,
-    }
-}
-
 /// Split a textual argument list by commas, respecting nested brackets
 /// so that `"foo(a, b), c"` splits into `["foo(a, b)", "c"]`.
 ///
@@ -1023,19 +1042,6 @@ fn resolve_self_keyword(name: &str, calling_class_name: Option<&str>) -> Option<
         "self" | "static" | "parent" => calling_class_name.map(|n| n.to_string()),
         _ => None,
     }
-}
-
-/// When a class-string conditional parameter receives no argument, fall back
-/// to a `Foo::class` default value so an omitted argument resolves the same as
-/// if the default had been passed explicitly.
-///
-/// For example, a helper `function app(string $name = Application::class)` with
-/// `@param class-string<T> $name` and `@return T` returns `Application` when
-/// called as `app()`, just as `app(Foo::class)` returns `Foo`. Returns `None`
-/// when the parameter has no default, or the default is not a `::class`
-/// expression (e.g. `null`), leaving the else branch to apply.
-fn default_class_string_name(param: Option<&ParameterInfo>) -> Option<String> {
-    extract_class_name_from_text(param?.default_value.as_deref()?)
 }
 
 /// Extract a class name from textual `X::class` syntax.
@@ -1137,10 +1143,12 @@ fn extract_class_const_from_expr(expr: &Expression<'_>) -> Option<(String, Strin
 /// the conditions:
 ///   - `class-string<T>`: checks if the positional argument is `X::class`
 ///     and returns `"X"`.
-///   - `is null`: satisfied when no argument is provided (parameter has
-///     a null default).
-///   - `is SomeType`: not statically resolvable from AST; falls through
-///     to the else branch.
+///   - `is null`: satisfied when `null` is passed or the omitted argument
+///     defaults to null.
+///   - `is 0` / `is 'json'`: satisfied when the argument is a literal of the
+///     same value.
+///   - `is SomeType`: satisfied when the argument is a literal of that type;
+///     any other expression falls through to the else branch.
 pub(crate) fn resolve_conditional_with_args<'b>(
     conditional: &PhpType,
     params: &[ParameterInfo],
@@ -1208,6 +1216,16 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     .get(param_idx)
                     .copied()
                     .flatten();
+
+            // The argument's source text, for the conditions that are decided
+            // by a literal value rather than by the expression's shape. A
+            // literal argument supplies its own text; an omitted one takes the
+            // parameter's declared default, which is what it evaluates to at
+            // runtime.
+            let arg_text: Option<&str> = match arg_expr {
+                Some(expr) => literal_expr_text(expr),
+                None => param_default_text(params.get(param_idx)),
+            };
 
             if matches!(condition.kind(), TypeKind::ClassString(_)) {
                 // Extract the bound from `class-string<Bound>` and determine
@@ -1279,8 +1297,8 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 };
 
                 // Check if the argument is `X::class`.  When the argument is
-                // omitted entirely, fall back to a `Foo::class` parameter
-                // default so `app()` resolves the same as `app(Foo::class)`.
+                // omitted entirely, its declared default supplies the name so
+                // `app()` resolves the same as `app(Foo::class)`.
                 let class_name = arg_expr
                     .and_then(extract_class_string_from_expr)
                     .or_else(|| {
@@ -1289,10 +1307,10 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                             .and_then(|name| class_named_by_string(name, class_loader))
                     })
                     .or_else(|| {
-                        arg_expr
-                            .is_none()
-                            .then(|| default_class_string_name(params.get(param_idx)))
-                            .flatten()
+                        arg_text.and_then(|text| {
+                            extract_class_name_from_text(text)
+                                .or_else(|| class_named_by_quoted_string(text, class_loader))
+                        })
                     });
                 if let Some(class_name) = class_name {
                     let class_name =
@@ -1347,10 +1365,11 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 )
             } else if condition.is_null() {
                 // The null (`then`) branch is taken when the argument is
-                // absent (the parameter falls back to its null default) or
-                // when `null` is passed explicitly.
+                // absent and defaults to null, or when `null` is passed
+                // explicitly. An absent argument with a non-null default is
+                // that default, so it takes the else branch.
                 let arg_is_null = match arg_expr {
-                    None => true,
+                    None => arg_text.is_none_or(|t| t.trim().eq_ignore_ascii_case("null")),
                     Some(expr) => matches!(expr, Expression::Literal(Literal::Null(_))),
                 };
                 if arg_is_null {
@@ -1376,53 +1395,23 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     )
                 }
-            } else if let TypeKind::Literal(lit) = condition.kind() {
-                let expected = lit
-                    .string_content()
-                    .map(Cow::into_owned)
-                    .unwrap_or_else(|| lit.as_raw());
-
-                // Check if the argument is a string literal matching
-                // the expected value.
-                let matches = match arg_expr {
-                    Some(Expression::Literal(Literal::String(lit_str))) => {
-                        // `value` is the unquoted content; fall back
-                        // to stripping quotes from `raw`.
-                        let inner = lit_str
-                            .value
-                            .map(|v| crate::atom::bytes_to_str(v).to_string())
-                            .unwrap_or_else(|| {
-                                crate::text_scan::unquote_php_string(crate::atom::bytes_to_str(
-                                    lit_str.raw,
-                                ))
-                                .unwrap_or(crate::atom::bytes_to_str(lit_str.raw))
-                                .to_string()
-                            });
-                        inner == expected
-                    }
-                    _ => false,
-                };
-                if matches {
-                    resolve_conditional_with_args_and_defaults(
-                        then_type,
-                        params,
-                        argument_list,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    )
-                } else {
-                    resolve_conditional_with_args_and_defaults(
-                        else_type,
-                        params,
-                        argument_list,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    )
-                }
+            } else if matches!(condition.kind(), TypeKind::Literal(_)) {
+                // Value condition (`$format is 0`, `$value is ''`), decided by
+                // comparing the argument's literal value against the expected
+                // one. Any non-literal argument leaves the else branch.
+                let matched = arg_text
+                    .and_then(|text| condition_result_from_text(condition, text))
+                    .unwrap_or(false);
+                let take_then = matched ^ *negated;
+                resolve_conditional_with_args_and_defaults(
+                    if take_then { then_type } else { else_type },
+                    params,
+                    argument_list,
+                    var_resolver,
+                    calling_class_name,
+                    class_loader,
+                    tpl,
+                )
             } else if let Some((cond_class, cond_const)) = class_const_condition_parts(condition) {
                 // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
                 let matched = arg_expr
@@ -1447,74 +1436,16 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     tpl,
                 )
             } else {
-                // IsType equivalent: check scalar types from AST literals.
-                if condition_is_scalar_type(condition, "string")
-                    && matches!(
-                        arg_expr,
-                        Some(
-                            Expression::Literal(Literal::String(_))
-                                | Expression::CompositeString(_)
-                        )
-                    )
-                {
-                    let take_then = !*negated;
-                    return resolve_conditional_with_args_and_defaults(
-                        if take_then { then_type } else { else_type },
-                        params,
-                        argument_list,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    );
-                }
-                if condition_is_scalar_type(condition, "int")
-                    && matches!(arg_expr, Some(Expression::Literal(Literal::Integer(_))))
-                {
-                    let take_then = !*negated;
-                    return resolve_conditional_with_args_and_defaults(
-                        if take_then { then_type } else { else_type },
-                        params,
-                        argument_list,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    );
-                }
-                if condition_is_scalar_type(condition, "float")
-                    && matches!(arg_expr, Some(Expression::Literal(Literal::Float(_))))
-                {
-                    let take_then = !*negated;
-                    return resolve_conditional_with_args_and_defaults(
-                        if take_then { then_type } else { else_type },
-                        params,
-                        argument_list,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    );
-                }
-                // Check if the condition mentions `array` and the
-                // argument is an array literal (`[...]`).
-                if condition_includes_array(condition)
-                    && let Some(Expression::Array(_)) = arg_expr
-                {
-                    return resolve_conditional_with_args_and_defaults(
-                        then_type,
-                        params,
-                        argument_list,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    );
-                }
-                // We can't statically determine the type of an
-                // arbitrary expression; fall through to else.
+                // IsType equivalent (`$x is string`, `$x is array|string`, …),
+                // decided from the argument's syntactic form. Anything whose
+                // type we can't read from its syntax alone is undecidable and
+                // falls through to the else branch.
+                let matched =
+                    condition_result_from_form(condition, ast_arg_form(arg_expr, arg_text))
+                        .unwrap_or(false);
+                let take_then = matched ^ *negated;
                 resolve_conditional_with_args_and_defaults(
-                    else_type,
+                    if take_then { then_type } else { else_type },
                     params,
                     argument_list,
                     var_resolver,
@@ -1583,9 +1514,26 @@ pub fn resolve_conditional_without_args_and_defaults(
                 return Some(resolved);
             }
 
-            // Without arguments we check whether the parameter has a
-            // null default — if so, the `is null` branch is taken.
+            // Every parameter takes its declared default, so a default the
+            // condition can be decided against settles the branch.
             let param_info = params.iter().find(|p| p.name == target);
+            if let Some(default_text) = param_info.and_then(|p| p.default_value.as_deref())
+                && let Some(matched) = condition_result_from_text(condition, default_text)
+            {
+                let branch = if matched ^ *negated {
+                    then_type
+                } else {
+                    else_type
+                };
+                return resolve_conditional_without_args_and_defaults(
+                    branch,
+                    params,
+                    template_defaults,
+                );
+            }
+
+            // Otherwise fall back to whether the parameter is optional at all:
+            // an omitted optional argument is most often defaulted to null.
             let has_null_default = param_info.is_some_and(|p| !p.is_required);
 
             if condition.is_null() && has_null_default {
@@ -1788,6 +1736,96 @@ mod tests {
             is_reference: false,
             closure_this_type: None,
         }
+    }
+
+    /// An optional parameter with the given declared default value.
+    fn param_with_default(name: &str, default: &str) -> ParameterInfo {
+        ParameterInfo {
+            is_required: false,
+            default_value: Some(default.to_string()),
+            ..param(name)
+        }
+    }
+
+    /// Resolve a `str_word_count`-style conditional keyed on the value of a
+    /// `$format` parameter that defaults to `0`.
+    fn resolve_word_count(text_args: &str) -> Option<String> {
+        let cond = PhpType::parse(
+            "($format is 0 ? int : ($format is 1 ? list<string> : ($format is 2 ? array<int, string> : list<string>|int)))",
+        );
+        let params = [param("$string"), param_with_default("$format", "0")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let tpl = TemplateContext::with_params(&[]);
+        resolve_conditional_with_text_args_and_defaults(
+            &cond, &params, text_args, None, None, loader, &tpl,
+        )
+        .map(|t| t.to_string())
+    }
+
+    /// An omitted argument takes the parameter's declared default, so the
+    /// condition on `$format` is decided by that `0` rather than left open.
+    #[test]
+    fn omitted_argument_is_decided_by_its_declared_default() {
+        assert_eq!(resolve_word_count("$text").as_deref(), Some("int"));
+    }
+
+    /// A value condition compares literal values, so an explicit int argument
+    /// picks its own branch.
+    #[test]
+    fn int_literal_argument_matches_value_condition() {
+        assert_eq!(
+            resolve_word_count("$text, 1").as_deref(),
+            Some("list<string>")
+        );
+        assert_eq!(
+            resolve_word_count("$text, 2").as_deref(),
+            Some("array<int, string>")
+        );
+        // Comparison is by value, not by spelling.
+        assert_eq!(
+            resolve_word_count("$text, 0x1").as_deref(),
+            Some("list<string>")
+        );
+    }
+
+    /// A named argument reaches the parameter it targets rather than the slot
+    /// it sits in.
+    #[test]
+    fn named_argument_matches_value_condition() {
+        assert_eq!(
+            resolve_word_count("$text, format: 1").as_deref(),
+            Some("list<string>")
+        );
+    }
+
+    /// An argument that is not a literal decides nothing, so the conditional
+    /// collapses to its final else branch — every value the call could return.
+    #[test]
+    fn non_literal_argument_leaves_value_condition_undecided() {
+        assert_eq!(
+            resolve_word_count("$text, $format").as_deref(),
+            Some("list<string>|int")
+        );
+    }
+
+    /// With no arguments at all, the no-args path decides the condition from
+    /// the declared default the same way the text path does.
+    #[test]
+    fn no_args_path_is_decided_by_declared_default() {
+        let cond = PhpType::parse("($format is 0 ? int : list<string>)");
+        let params = [param_with_default("$format", "0")];
+        assert_eq!(
+            resolve_conditional_without_args(&cond, &params).map(|t| t.to_string()),
+            Some("int".to_string())
+        );
+
+        // A non-null default no longer reads as null just because the
+        // parameter is optional.
+        let nullable = PhpType::parse("($format is null ? int : list<string>)");
+        assert_eq!(
+            resolve_conditional_without_args(&nullable, &params).map(|t| t.to_string()),
+            Some("list<string>".to_string())
+        );
     }
 
     /// Resolve a `PDOStatement::fetch`-style conditional keyed on the fetch

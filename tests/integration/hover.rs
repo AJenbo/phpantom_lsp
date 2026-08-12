@@ -12859,6 +12859,56 @@ function probe(\PDOStatement $stmt): void {
     );
 }
 
+/// `str_word_count()`'s return type is decided by its `$format` argument:
+/// omitting it takes the declared default of `0` and counts the words, `1`
+/// lists them, and `2` maps each word to its offset. A `$format` that isn't a
+/// literal keeps the declared union, which is all the call can promise.
+#[test]
+fn hover_str_word_count_format_dependent_return_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///str_word_count.php";
+    let content = r#"<?php
+function probe(string $text, int $format): void {
+    $count = str_word_count($text);
+    $count;
+    $words = str_word_count($text, 1);
+    $words;
+    $offsets = str_word_count($text, 2);
+    $offsets;
+    $unknown = str_word_count($text, $format);
+    $unknown;
+}
+"#;
+
+    let count =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $count")).to_string();
+    assert!(
+        count.contains("int") && !count.contains("string"),
+        "the default format counts words: {count}"
+    );
+
+    let words =
+        hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $words")).to_string();
+    assert!(
+        words.contains("list<string>"),
+        "format 1 lists the words: {words}"
+    );
+
+    let offsets =
+        hover_text(&hover_at(&backend, uri, content, 7, 6).expect("hover $offsets")).to_string();
+    assert!(
+        offsets.contains("array<int, string>"),
+        "format 2 maps offsets to words: {offsets}"
+    );
+
+    let unknown =
+        hover_text(&hover_at(&backend, uri, content, 9, 6).expect("hover $unknown")).to_string();
+    assert!(
+        unknown.contains("int") && unknown.contains("string"),
+        "a non-literal format keeps the whole union: {unknown}"
+    );
+}
+
 /// `+=` on arrays is an array union in PHP, not numeric addition.
 /// The inferred type must be `array`, not `int|float`.
 #[test]

@@ -3607,3 +3607,53 @@ function unknownKey() { return 'anything'; }
     let messages = return_error_messages(&collect(php));
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// A conditional return type keyed on an argument's value is decided by the
+/// literal passed, and by the parameter's declared default when the argument
+/// is omitted, rather than reading back the union of every branch.
+#[test]
+fn a_conditional_return_is_decided_by_the_argument_value_and_its_default() {
+    let php = r#"<?php
+namespace App;
+
+/** @return ($format is 0 ? int : list<string>) */
+function words(string $text, int $format = 0) { return $format === 0 ? 1 : ['a']; }
+
+function counted(string $text): int { return words($text); }
+
+function listed(string $text): array { return words($text, 1); }
+
+function countedByName(string $text): int { return words($text, format: 0); }
+
+function badCount(string $text): int { return words($text, 1); }
+
+function badList(string $text): array { return words($text); }
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("list<string>") && messages[0].contains("int"),
+        "{messages:?}"
+    );
+    assert!(
+        messages[1].contains("int") && messages[1].contains("array"),
+        "{messages:?}"
+    );
+}
+
+/// A `$format` that isn't a literal decides nothing, so the call keeps every
+/// branch it could return instead of committing to one.
+#[test]
+fn a_conditional_return_on_an_unknown_argument_keeps_every_branch() {
+    let php = r#"<?php
+namespace App;
+
+/** @return ($format is 0 ? int : list<string>) */
+function words(string $text, int $format = 0) { return $format === 0 ? 1 : ['a']; }
+
+function counted(string $text, int $format): int { return words($text, $format); }
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("list<string>"), "{messages:?}");
+}
