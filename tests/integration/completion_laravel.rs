@@ -8394,6 +8394,87 @@ class User extends Model {
     );
 }
 
+/// Collect the `type_mismatch_argument` messages a file reports, so the
+/// count-conditional return type can be checked on the AST-walking
+/// resolution path (arguments, assignments, property writes) and not only
+/// on the subject-expression path completion uses.
+async fn factory_argument_mismatches(body: &str) -> Vec<String> {
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", COUNT_USER_PHP),
+        ("database/factories/UserFactory.php", COUNT_USER_FACTORY_PHP),
+    ]);
+    backend.initialized(InitializedParams {}).await;
+
+    let content = format!(
+        "<?php\nuse App\\Models\\User;\nfunction needsUser(User $user): void {{}}\n{body}\n"
+    );
+    let uri = Url::from_file_path(dir.path().join("src/test.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: content.clone(),
+            },
+        })
+        .await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), &content, &mut diags);
+    diags
+        .into_iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(code)) if code == "type_mismatch_argument")
+        })
+        .map(|d| d.message)
+        .collect()
+}
+
+#[tokio::test]
+async fn test_factory_create_passed_as_argument_is_a_single_model() {
+    let messages = factory_argument_mismatches("needsUser(User::factory()->create());").await;
+    assert!(
+        messages.is_empty(),
+        "a countless factory chain builds one User, got: {messages:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_factory_create_through_a_variable_is_a_single_model() {
+    let messages =
+        factory_argument_mismatches("$user = User::factory()->create();\nneedsUser($user);").await;
+    assert!(
+        messages.is_empty(),
+        "a countless factory chain builds one User, got: {messages:?}"
+    );
+}
+
+/// State-setting calls between the factory and `create()` are stepped
+/// over on the AST path the same way they are on the subject path.
+#[tokio::test]
+async fn test_factory_create_after_state_calls_is_a_single_model() {
+    let messages =
+        factory_argument_mismatches("needsUser(User::factory()->state([])->create());").await;
+    assert!(
+        messages.is_empty(),
+        "state() does not set a count, got: {messages:?}"
+    );
+}
+
+/// The counted chain genuinely builds a collection, so passing it where a
+/// model is wanted still has to be reported.
+#[tokio::test]
+async fn test_counted_factory_create_passed_as_a_model_is_reported() {
+    let messages =
+        factory_argument_mismatches("needsUser(User::factory()->count(3)->create());").await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "a counted chain builds a Collection, got: {messages:?}"
+    );
+}
+
 /// The count state reaches the assigned variable, and indexing back
 /// through the collection recovers the model.
 #[tokio::test]

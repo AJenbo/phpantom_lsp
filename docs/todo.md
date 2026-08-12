@@ -103,7 +103,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B119 | [Eloquent factory count narrowing exists but only reaches one of two call-resolution paths](todo/bugs.md#b119-eloquent-factory-count-narrowing-exists-but-only-reaches-one-of-two-call-resolution-paths) | High        | Low         |
 | B120 | [The short ternary (`?:`) keeps the condition's falsy branch in its own result](todo/bugs.md#b120-the-short-ternary--keeps-the-conditions-falsy-branch-in-its-own-result) | Medium-High | Low         |
 | B89 | [`assert($x !== null)` / `assert($x !== false)` does not narrow](todo/bugs.md#b89-assertx--null--assertx--false-does-not-narrow)                                           | Medium-High | Medium      |
 | B88 | [`!== false` does not narrow inside a plain `if`/`while` truthy branch](todo/bugs.md#b88-false-does-not-narrow-inside-a-plain-ifwhile-truthy-branch)                       | Medium      | Low         |

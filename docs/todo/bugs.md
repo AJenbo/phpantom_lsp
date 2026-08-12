@@ -232,42 +232,6 @@ demonstrates users expect it.
 would need a mechanism to re-bind a receiver's template arguments after a
 method call the way an assignment re-binds a variable's type.
 
-### B119. Eloquent factory count narrowing exists but only reaches one of two call-resolution paths
-
-**Impact: High · Effort: Low**
-
-```php
-$order = Order::factory()->for($customer)->has($lineFactory, 'lines')->create();
-needsOrder($order); // reported: got OrderCollection|Order
-```
-
-`Factory::create()`/`createQuietly()`/`make()` declare
-`@return Collection<int, TModel>|TModel`, which is genuinely ambiguous
-without knowing whether the chain set a count. PHPantom already solves
-this: `virtual_members/laravel/factory_count.rs` walks the receiver
-chain, steps over non-count-setting calls (`for()`, `has()`, `state()`,
-…), and picks the branch the call actually builds — and it is wired into
-`resolve_call_return_types_on_receiver`
-(`type_engine/call_resolution/return_types.rs:361`), the `SubjectExpr`
-resolver used by narrowing keys, hover, and completion.
-
-`resolve_method_call_on_receiver` in
-`type_engine/variable/rhs_resolution/calls.rs` — the AST-walking path
-that resolves assignment/argument/property/return types for
-diagnostics — never calls `resolve_factory_count_return` at all, so
-every `Model::factory()->create()` assigned to a variable, passed as an
-argument, or stored in a property keeps the full `Collection|TModel`
-union. This is the single largest source of false positives found in
-the 2026-08-12 sample-project sweep: over 500 `type_mismatch_argument`
-diagnostics, plus dozens more `type_mismatch_property`/`_return`, traced
-to this one gap across the Laravel sample projects — `Model::factory()->create()`
-is one of the most common lines in any Laravel test suite.
-
-**Fix:** call `crate::virtual_members::laravel::resolve_factory_count_return`
-from `resolve_method_call_on_receiver` the same way
-`resolve_call_return_types_on_receiver` already does, before falling
-through to the method's declared return type.
-
 ### B120. The short ternary (`?:`) keeps the condition's falsy branch in its own result
 
 **Impact: Medium-High · Effort: Low**

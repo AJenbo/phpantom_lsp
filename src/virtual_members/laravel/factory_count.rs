@@ -17,7 +17,10 @@
 
 use std::sync::Arc;
 
-use crate::atom::atom;
+use mago_span::HasSpan;
+use mago_syntax::cst::{Argument, ArgumentList, Call, ClassLikeMemberSelector, Expression};
+
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::type_engine::conditional_resolution::split_text_args;
 use crate::type_engine::resolver::ResolutionCtx;
@@ -68,9 +71,11 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
         let SubjectExpr::CallExpr { callee, args_text } = current else {
             return FactoryCount::Unknown;
         };
+        let args = split_text_args(args_text);
+        let first_arg = args.first().map(|a| a.trim());
         match callee.as_ref() {
             SubjectExpr::MethodCall { base, method } => {
-                if let Some(state) = instance_count_state(method, args_text) {
+                if let Some(state) = instance_count_state(method, first_arg) {
                     return state;
                 }
                 current = base;
@@ -78,24 +83,83 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
             // A static call is the head of the chain: `Model::factory()`,
             // `UserFactory::new()`, `UserFactory::times(3)`.
             SubjectExpr::StaticMethodCall { method, .. } => {
-                return static_count_state(method, args_text);
+                return static_count_state(method, first_arg);
             }
             _ => return FactoryCount::Unknown,
         }
     }
 }
 
+/// Read the count state off a factory receiver chain in its AST form.
+///
+/// The AST-walking resolution path (assignments, arguments, property and
+/// return types) hands over an [`Expression`] rather than a parsed
+/// [`SubjectExpr`], so the same outermost-first walk runs over the call
+/// nodes directly.  Both walks share the per-call count rules below, so
+/// the two paths cannot drift apart on what a chain builds.
+pub(crate) fn chain_count_ast(receiver: &Expression<'_>, content: &str) -> FactoryCount {
+    // Every step descends into a strictly smaller sub-expression, so the
+    // walk terminates on any chain the parser can produce.
+    let mut current = receiver;
+    loop {
+        let call = match current {
+            Expression::Call(call) => call,
+            Expression::Parenthesized(inner) => {
+                current = inner.expression;
+                continue;
+            }
+            _ => return FactoryCount::Unknown,
+        };
+        let (object, selector, argument_list) = match call {
+            Call::Method(mc) => (Some(mc.object), &mc.method, &mc.argument_list),
+            Call::NullSafeMethod(mc) => (Some(mc.object), &mc.method, &mc.argument_list),
+            // A static call is the head of the chain: `Model::factory()`,
+            // `UserFactory::new()`, `UserFactory::times(3)`.
+            Call::StaticMethod(sc) => (None, &sc.method, &sc.argument_list),
+            Call::Function(_) => return FactoryCount::Unknown,
+        };
+        // A computed call target (`$factory->$method()`) says nothing
+        // about the count.
+        let ClassLikeMemberSelector::Identifier(ident) = selector else {
+            return FactoryCount::Unknown;
+        };
+        let method = bytes_to_str(ident.value);
+        let first_arg = first_argument_text(argument_list, content);
+        match object {
+            Some(base) => {
+                if let Some(state) = instance_count_state(method, first_arg) {
+                    return state;
+                }
+                current = base;
+            }
+            None => return static_count_state(method, first_arg),
+        }
+    }
+}
+
+/// The source text of a call's first argument, for the count rules that
+/// gate on how the argument was written.
+fn first_argument_text<'c>(argument_list: &ArgumentList<'_>, content: &'c str) -> Option<&'c str> {
+    let span = match argument_list.arguments.first()? {
+        Argument::Positional(pos) => pos.value.span(),
+        Argument::Named(named) => named.value.span(),
+    };
+    content
+        .get(span.start.offset as usize..span.end.offset as usize)
+        .map(str::trim)
+}
+
 /// Count state contributed by an instance call in the chain, or `None`
 /// when the call does not touch the count.
-fn instance_count_state(method: &str, args_text: &str) -> Option<FactoryCount> {
+fn instance_count_state(method: &str, first_arg: Option<&str>) -> Option<FactoryCount> {
     match method {
         // `count(?int $count)` — the only way to clear a count is to pass
         // a literal `null`.  A non-literal argument is assumed to be the
         // integer the parameter asks for.
-        "count" => Some(match split_text_args(args_text).first() {
+        "count" => Some(match first_arg {
             None => FactoryCount::One,
             Some(arg) => {
-                if arg.trim().eq_ignore_ascii_case("null") {
+                if arg.eq_ignore_ascii_case("null") {
                     FactoryCount::One
                 } else {
                     FactoryCount::Many
@@ -109,11 +173,11 @@ fn instance_count_state(method: &str, args_text: &str) -> Option<FactoryCount> {
 }
 
 /// Count state contributed by the static call that opens the chain.
-fn static_count_state(method: &str, args_text: &str) -> FactoryCount {
+fn static_count_state(method: &str, first_arg: Option<&str>) -> FactoryCount {
     match method {
         // `Model::factory(…)` forwards its first argument to `count()`
         // only when it is numeric; an array or callable is state.
-        "factory" => factory_argument_count(args_text),
+        "factory" => factory_argument_count(first_arg),
         "times" => FactoryCount::Many,
         // `Factory::new(array $attributes)` takes state, never a count.
         "new" => FactoryCount::One,
@@ -131,8 +195,8 @@ fn static_count_state(method: &str, args_text: &str) -> FactoryCount {
 /// it rejects (an array, a closure, `null`) is state.  A variable or a
 /// call could be either, and guessing wrong would turn one model into a
 /// collection or the reverse.
-fn factory_argument_count(args_text: &str) -> FactoryCount {
-    let Some(first) = split_text_args(args_text).first().map(|a| a.trim()) else {
+fn factory_argument_count(first_arg: Option<&str>) -> FactoryCount {
+    let Some(first) = first_arg else {
         return FactoryCount::One;
     };
     if !is_decidable_literal(first) {
@@ -193,13 +257,41 @@ pub(crate) fn resolve_factory_count_return(
     if !is_count_conditional_method(method_name) {
         return None;
     }
-
     // Read the count off the chain before touching the class loader.  The
     // walk is pure syntax, and it rules out the great majority of the
     // `create()`/`make()` calls in a codebase — every builder that is not
     // a factory, and every factory reached through a variable — without a
     // hierarchy walk per owner.
-    let count = chain_count(receiver);
+    resolve_for_count(chain_count(receiver), method_name, owners, ctx)
+}
+
+/// [`resolve_factory_count_return`] for the AST-walking resolution path.
+///
+/// Assignments, arguments, property writes and returns reach method calls
+/// as [`Expression`] nodes rather than parsed subject strings, so they
+/// read the chain's count with [`chain_count_ast`] and share everything
+/// downstream of it.
+pub(crate) fn resolve_factory_count_return_ast(
+    receiver: &Expression<'_>,
+    method_name: &str,
+    owners: &[ResolvedType],
+    content: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<(Vec<Arc<ClassInfo>>, PhpType)> {
+    if !is_count_conditional_method(method_name) {
+        return None;
+    }
+    resolve_for_count(chain_count_ast(receiver, content), method_name, owners, ctx)
+}
+
+/// Pick the type a count-conditional factory call builds, given the count
+/// state its receiver chain established.
+fn resolve_for_count(
+    count: FactoryCount,
+    method_name: &str,
+    owners: &[ResolvedType],
+    ctx: &ResolutionCtx<'_>,
+) -> Option<(Vec<Arc<ClassInfo>>, PhpType)> {
     if count == FactoryCount::Unknown {
         return None;
     }

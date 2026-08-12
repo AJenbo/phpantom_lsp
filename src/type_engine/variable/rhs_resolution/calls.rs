@@ -1236,6 +1236,25 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
         }
     }
 
+    // Laravel factory count state: `create()`/`make()` build a single
+    // model, or a collection of them when the chain set a count
+    // (`factory(3)`, `count(3)`, `times(3)`).  Laravel declares both
+    // outcomes as one `Collection<int, TModel>|TModel` return type, so
+    // without this the union survives into every assignment, argument and
+    // property write that a factory chain feeds.
+    if let Some((classes, hint)) = crate::virtual_members::laravel::resolve_factory_count_return_ast(
+        object,
+        &method_name,
+        &receiver_resolved,
+        ctx.content,
+        &rctx,
+    ) {
+        return vec![match classes.first() {
+            Some(class) => ResolvedType::from_both_arc(hint, Arc::clone(class)),
+            None => ResolvedType::from_type_string(hint),
+        }];
+    }
+
     let receiver_is_this = matches!(
         object,
         Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
