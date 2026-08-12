@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786556261356,
+  "lastUpdate": 1786557029478,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19515,6 +19515,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "99895c93057a447824595d31ab905fa4cbcb792d",
+          "message": "A `@method` tag's own inline template parameter is no longer read as a\nclass name",
+          "timestamp": "2026-08-12T19:34:31+02:00",
+          "tree_id": "55a57f8de779b8e77cbbaaa533df8e72d1a178b1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/99895c93057a447824595d31ab905fa4cbcb792d"
+        },
+        "date": 1786557024277,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.1,
             "unit": "MiB"
           }
         ]
