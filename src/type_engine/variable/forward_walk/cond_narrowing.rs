@@ -2327,6 +2327,10 @@ pub(crate) fn seed_assert_arg_subject_keys(
         {
             seed_synthetic_key_if_needed(&key, scope, ctx);
         }
+        // An argument that is itself a check (`assert($items[0] instanceof
+        // Foo)`) carries its subject one level further down, so it is
+        // seeded the same way an `if` condition's subject is.
+        seed_property_keys_into_scope(arg_expr, scope, ctx);
     }
 }
 
@@ -2432,11 +2436,12 @@ pub(crate) fn seed_property_keys_into_scope(
         return;
     }
     for key in &keys {
-        // Skip if already seeded (e.g. from a prior elseif condition).
-        if scope.contains(key) {
-            continue;
-        }
-        seed_member_key(key, scope, ctx);
+        // An array-access subject (`$items[0]`) is keyed and narrowed the
+        // same way a property is, so both go through the seeder that knows
+        // how to read an element type out of the base variable's type.
+        // `seed_synthetic_key_if_needed` skips a key already seeded (e.g.
+        // from a prior elseif condition).
+        seed_synthetic_key_if_needed(key, scope, ctx);
     }
 }
 

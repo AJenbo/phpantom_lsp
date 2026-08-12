@@ -310,31 +310,6 @@ same way `apply_null_narrowing_truthy` records it for an `if`/`while`
 body, so the then branch's offset resolves against the narrowed scope
 instead of the declared one.
 
-### B121. `assert($array[$key] instanceof Foo)` does not narrow the array-access subject
-
-**Impact: Medium · Effort: Low**
-
-```php
-assert($items[0] instanceof Foo);
-takesFoo($items[0]); // reported: got Foo|Bar (or whatever $items[0] was before)
-```
-
-The `assert($x instanceof Foo)` narrowing added for B86-style call
-subjects (`process_assert_narrowing`,
-`type_engine/variable/forward_walk/assignment.rs:2670`) only matches
-`Expression::Variable(Variable::Direct(_))` on the left-hand side of the
-`instanceof` check — an `Expression::ArrayAccess` subject
-(`$array[$key]`, `$array[$literalIndex]`) falls through and is never
-recorded, so a repeated read of the same array slot after the assert
-still carries its pre-assert type. `snapshot_narrowing.rs` already
-handles `Expression::ArrayAccess` as a narrowing key for `if`/`while`
-conditions, so the capability exists elsewhere in the narrowing code —
-`assert()`'s own handling just never reuses it for this subject shape.
-
-**Fix:** extend the LHS match in `process_assert_narrowing` to accept an
-`Expression::ArrayAccess` subject (keyed the same way
-`snapshot_narrowing.rs` keys one), not only a direct variable.
-
 ### B122. Repeated conditional writes to the same array key accumulate redundant union snapshots
 
 **Impact: Medium · Effort: Medium**

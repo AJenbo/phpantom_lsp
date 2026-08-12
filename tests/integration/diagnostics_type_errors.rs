@@ -8605,3 +8605,61 @@ if ($line !== false) {
         "only false should be narrowed away, got {messages:?}"
     );
 }
+
+// ─── `assert()` on an array element ─────────────────────────────────────────
+
+/// `assert($items[0] instanceof Foo)` narrows the element it names, the
+/// same way the check narrows it inside an `if`.
+#[test]
+fn an_assert_narrows_an_array_access_subject() {
+    let php = r#"<?php
+class Foo { }
+class Bar { }
+function takesFoo(Foo $f): void {}
+
+/** @param array<int, Foo|Bar> $items */
+function run(array $items): void {
+    assert($items[0] instanceof Foo);
+    takesFoo($items[0]);
+}
+"#;
+    let messages = type_error_messages(&collect_slow(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A string key is keyed and narrowed the same way a numeric index is.
+#[test]
+fn an_assert_narrows_a_string_keyed_array_subject() {
+    let php = r#"<?php
+class Foo { }
+class Bar { }
+function takesFoo(Foo $f): void {}
+
+/** @param array{main: Foo|Bar} $items */
+function run(array $items): void {
+    assert($items['main'] instanceof Foo);
+    takesFoo($items['main']);
+}
+"#;
+    let messages = type_error_messages(&collect_slow(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only the element the assert names is narrowed: a sibling key keeps
+/// the type it was declared with.
+#[test]
+fn an_assert_on_one_element_leaves_its_siblings_alone() {
+    let php = r#"<?php
+class Foo { }
+class Bar { }
+function takesFoo(Foo $f): void {}
+
+/** @param array{a: Foo|Bar, b: Foo|Bar} $items */
+function run(array $items): void {
+    assert($items['a'] instanceof Foo);
+    takesFoo($items['b']);
+}
+"#;
+    let messages = type_error_messages(&collect_slow(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
