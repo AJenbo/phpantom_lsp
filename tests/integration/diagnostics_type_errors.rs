@@ -7909,3 +7909,76 @@ acceptsMode(firstValue(['a' => 'maybe']));
     assert!(messages[0].contains("99"), "{messages:?}");
     assert!(messages[1].contains("'maybe'"), "{messages:?}");
 }
+
+// ── interface-string ────────────────────────────────────────────────
+
+#[test]
+fn a_class_name_is_not_an_interface_string() {
+    // `interface-string` constrains the name the string holds, not the
+    // type that name denotes, so a class that implements the interface
+    // is still the wrong kind of name.
+    let php = r#"<?php
+namespace App;
+
+interface SomeInterface {}
+
+final class SomeClass implements SomeInterface {}
+
+enum SomeEnum {}
+
+/** @param interface-string $value */
+function acceptsInterfaceString($value): void {}
+
+acceptsInterfaceString(SomeInterface::class);
+acceptsInterfaceString(SomeClass::class);
+acceptsInterfaceString(SomeEnum::class);
+acceptsInterfaceString('App\SomeClass');
+acceptsInterfaceString('App\SomeInterface');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("interface-string")),
+        "each message should name the expected type, got {messages:?}"
+    );
+}
+
+#[test]
+fn an_unknown_class_name_is_accepted_as_an_interface_string() {
+    // The name may well belong to an interface in a file we never
+    // indexed, and a bare `class-string` says nothing either way.
+    let php = r#"<?php
+namespace App;
+
+/** @param interface-string $value */
+function acceptsInterfaceString($value): void {}
+
+/** @param class-string $name */
+function forward(string $name): void {
+    acceptsInterfaceString($name);
+    acceptsInterfaceString('App\Unindexed');
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+#[test]
+fn an_interface_string_satisfies_a_string_parameter() {
+    let php = r#"<?php
+namespace App;
+
+/** @return interface-string */
+function returnsInterfaceString(): string { return \Countable::class; }
+
+function acceptsString(string $value): void {}
+
+/** @param class-string $name */
+function acceptsClassString(string $name): void {}
+
+acceptsString(returnsInterfaceString());
+acceptsClassString(returnsInterfaceString());
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}

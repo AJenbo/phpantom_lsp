@@ -3469,3 +3469,23 @@ class Holder {
         "the branch proves nothing about the implicit-else path"
     );
 }
+
+#[test]
+fn an_interface_name_returned_where_an_interface_string_is_declared() {
+    let php = r#"<?php
+namespace App;
+
+interface SomeInterface {}
+
+final class SomeClass implements SomeInterface {}
+
+/** @return interface-string */
+function returnsInterface() { return SomeInterface::class; }
+
+/** @return interface-string */
+function returnsClass() { return SomeClass::class; }
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("interface-string"), "{messages:?}");
+}

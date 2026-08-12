@@ -11,7 +11,7 @@ use crate::atom::atom;
 use crate::php_type::TypeKind;
 use std::sync::Arc;
 
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, ClassLikeKind};
 
 /// Find which class the cursor (byte offset) is inside.
 ///
@@ -521,6 +521,42 @@ pub(crate) fn is_subtype_of_typed(
         return is_subtype_of_typed(sub, sup, class_loader);
     }
 
+    // ── class-string <: interface-string ────────────────────────
+    // `interface-string` constrains the *name* a string holds, not the
+    // type that name denotes: `SomeClass::class` is not one even when
+    // `SomeClass implements SomeInterface`, while `SomeInterface::class`
+    // is.  Only a name we can load and see is not an interface is
+    // rejected — a bare `class-string`, and one whose class we cannot
+    // load, stay silent.
+    if let (TypeKind::ClassString(sub_inner), TypeKind::InterfaceString(sup_inner)) =
+        (subtype.kind(), supertype.kind())
+    {
+        if let (Some(sub), Some(sup)) = (sub_inner, sup_inner)
+            && !is_subtype_of_typed(sub, sup, class_loader)
+        {
+            return false;
+        }
+        return sub_inner
+            .as_ref()
+            .and_then(|inner| inner.base_name())
+            .and_then(class_loader)
+            .is_none_or(|cls| cls.kind == ClassLikeKind::Interface);
+    }
+
+    // ── interface-string <: class-string / interface-string ─────
+    // The value names a class-like either way, so only the bounds are
+    // left to line up.  A missing bound is `object`, which anything
+    // satisfies.
+    if let TypeKind::InterfaceString(sub_inner) = subtype.kind()
+        && let TypeKind::ClassString(sup_inner) | TypeKind::InterfaceString(sup_inner) =
+            supertype.kind()
+    {
+        let object_bound = PhpType::named(atom("object"));
+        let sub = sub_inner.as_ref().unwrap_or(&object_bound);
+        let sup = sup_inner.as_ref().unwrap_or(&object_bound);
+        return is_subtype_of_typed(sub, sup, class_loader);
+    }
+
     // ── String literal <: model-property<Model> ────────────────
     // Larastan's `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  A
@@ -573,6 +609,11 @@ pub(crate) fn is_subtype_of_typed(
         let Some(cls) = class_loader(class_name) else {
             return true;
         };
+        if matches!(supertype.kind(), TypeKind::InterfaceString(_))
+            && cls.kind != ClassLikeKind::Interface
+        {
+            return false;
+        }
         return match supertype.kind() {
             TypeKind::ClassString(Some(bound)) | TypeKind::InterfaceString(Some(bound)) => {
                 match bound.base_name() {

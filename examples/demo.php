@@ -3580,6 +3580,14 @@ class TypeErrorDemo
         // No diagnostic — a box of a User subclass satisfies it:
         $this->requiresUserBox(new ScaffoldingTypedBox($admin));
 
+        // Type error — `interface-string` constrains the name the string
+        // holds, so a class that implements the interface is still the
+        // wrong kind of name:
+        $this->requiresInterfaceName(SealedEnvelope::class);
+
+        // No diagnostic — the name of the interface itself:
+        $this->requiresInterfaceName(Printable::class);
+
         // No diagnostic — null is valid for nullable parameter:
         $this->acceptsNullable(null);
         $this->acceptsNullable("hello");
@@ -3593,6 +3601,8 @@ class TypeErrorDemo
     private function requiresUser(User $user): void {}
     /** @param ScaffoldingTypedBox<User> $box */
     private function requiresUserBox(ScaffoldingTypedBox $box): void {}
+    /** @param interface-string $name */
+    private function requiresInterfaceName(string $name): void {}
     private function acceptsNullable(?string $text): void {}
     private function requiresFloat(float $value): void {}
 }
@@ -8241,6 +8251,10 @@ function runDemoAssertions(): void
     // ── Lazy initialisation inside a guarded `if` ───────────────────────
     $lazy = new LazyInitNarrowingDemo();
     assert($lazy->marker() instanceof Marker, 'a property assigned inside a guard keeps that type after the block');
+
+    // ── interface-string names an interface, not a class ────────────────
+    assert(interface_exists(Printable::class), 'Printable::class is an interface-string');
+    assert(!interface_exists(SealedEnvelope::class), 'SealedEnvelope::class is not, however it is implemented');
 
     echo "All assertions passed.\n";
 }

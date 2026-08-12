@@ -901,7 +901,6 @@ than a case where nobody has solved it yet:
 | `callables_return_type_mismatch.php` | a callable's declared return type against what it actually returns |
 | `generics_extends_implements.php` | a `@template` bound carried through `extends`/`implements` |
 | `generics_template_bound_array.php` | a `@template T of array` bound rejecting a non-array constructor argument |
-| `phpdoc_advanced_fallback_interface_string.php` | an interface-backed string pseudo-type |
 
 None of these are things we should chase for their own sake — PHPStan
 and Mago already own deep static analysis and we proxy them rather
