@@ -1202,6 +1202,63 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
     array_literal_shape_type(&value, ctx)
 }
 
+/// The substitution map that resolves every constant operand a set of types
+/// reads through an unevaluated type operator.
+///
+/// Names in `skip` are left out: a surviving operator's operand is either a
+/// constant or a template parameter, and looking a template parameter up as
+/// a constant only wastes work.
+fn constant_operand_subs<'t>(
+    types: impl Iterator<Item = &'t PhpType>,
+    skip: &[Atom],
+    ctx: &ResolutionCtx<'_>,
+) -> HashMap<String, PhpType> {
+    let mut operands = Vec::new();
+    for ty in types {
+        if ty.contains_unevaluated_operator() {
+            ty.unevaluated_operator_operands(&mut operands);
+        }
+    }
+
+    let mut subs: HashMap<String, PhpType> = HashMap::new();
+    for operand in operands {
+        if subs.contains_key(&operand) || skip.iter().any(|p| p.as_str() == operand) {
+            continue;
+        }
+        if let Some(shape) = constant_operand_shape(&operand, ctx) {
+            subs.insert(operand, shape);
+        }
+    }
+    subs
+}
+
+/// Evaluate the type operators a declared type reads through a constant.
+///
+/// `key-of<ID_TABLE>` on a parameter and `value-of<ID_TABLE>` on a return
+/// describe a set of values as concrete as any written-out union, but the
+/// docblock parser only saw a name it could not read and left the operator
+/// standing. This reads the constant behind the name and finishes the
+/// operator, so the type constrains its call sites like the union it is.
+///
+/// Every consumer of a declared parameter or return type goes through here,
+/// not just the template path: a constant is no less readable from a
+/// signature that declares no `@template`.
+///
+/// Returns `None` when the type has no unevaluated operator, when no operand
+/// is a constant we can read, or when reading it changed nothing — in each
+/// case the caller keeps the type it already has.
+pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    if !ty.contains_unevaluated_operator() {
+        return None;
+    }
+    let subs = constant_operand_subs(std::iter::once(ty), &[], ctx);
+    if subs.is_empty() {
+        return None;
+    }
+    let evaluated = ty.substitute(&subs);
+    (evaluated != *ty).then_some(evaluated)
+}
+
 /// Finish a template substitution map: bind the constants its types read
 /// through a type operator, then fill in the template params no argument
 /// bound.
@@ -1224,29 +1281,13 @@ pub(crate) fn finish_template_subs(
     return_type: Option<&PhpType>,
     ctx: &ResolutionCtx<'_>,
 ) {
-    let mut operands = Vec::new();
-    if let Some(ret) = return_type.filter(|r| r.contains_unevaluated_operator()) {
-        ret.unevaluated_operator_operands(&mut operands);
-    }
-    for bound in template_param_bounds.values() {
-        if bound.contains_unevaluated_operator() {
-            bound.unevaluated_operator_operands(&mut operands);
-        }
-    }
-
-    let mut constant_subs: HashMap<String, PhpType> = HashMap::new();
-    for operand in operands {
-        // A template parameter is the other thing a surviving operator's
-        // operand can be, and looking one up as a constant only wastes work.
-        if constant_subs.contains_key(&operand)
-            || template_params.iter().any(|p| p.as_str() == operand)
-        {
-            continue;
-        }
-        if let Some(shape) = constant_operand_shape(&operand, ctx) {
-            constant_subs.insert(operand, shape);
-        }
-    }
+    let constant_subs = constant_operand_subs(
+        return_type
+            .into_iter()
+            .chain(template_param_bounds.values()),
+        template_params,
+        ctx,
+    );
 
     for tpl_name in template_params {
         subs.entry(tpl_name.to_string()).or_insert_with(|| {

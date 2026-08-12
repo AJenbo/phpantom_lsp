@@ -17,6 +17,7 @@ use crate::type_engine::resolver::ResolutionCtx;
 use tower_lsp::lsp_types::Position;
 
 use super::target_cache::CALLABLE_TARGET_CACHE;
+use super::template_subs::evaluate_constant_operands;
 
 impl Backend {
     /// Resolve an instance method base expression + method name to a
@@ -679,6 +680,16 @@ impl Backend {
             _ => None,
         };
 
+        // A signature that names a constant through a type operator
+        // (`@param key-of<ID_TABLE>`) only has the operator finished on the
+        // template path, which a plain function never takes.  Finish it here
+        // so every target carries the set of values it describes, whatever
+        // resolved it.
+        let result = result.map(|mut target| {
+            evaluate_constant_operands_in_target(&mut target, &rctx);
+            target
+        });
+
         // ── Call-result invocation ──────────────────────────────────
         // When the original expression was a `CallExpr`, the resolved
         // target describes the inner callee (e.g. `makeCallable`), but
@@ -703,6 +714,50 @@ impl Backend {
 
         result
     }
+}
+
+/// Evaluate the type operators a target's parameter and return types read
+/// through a constant, in place.
+///
+/// The parameter list is a [`SharedVec`](crate::types::SharedVec) shared with
+/// the callable-target cache, so it is only rebuilt when a hint actually has
+/// an operator left to finish.
+fn evaluate_constant_operands_in_target(
+    target: &mut ResolvedCallableTarget,
+    ctx: &ResolutionCtx<'_>,
+) {
+    if let Some(evaluated) = target
+        .return_type
+        .as_ref()
+        .and_then(|ret| evaluate_constant_operands(ret, ctx))
+    {
+        target.return_type = Some(evaluated);
+    }
+
+    if !target.parameters.iter().any(|p| {
+        p.type_hint
+            .as_ref()
+            .is_some_and(PhpType::contains_unevaluated_operator)
+    }) {
+        return;
+    }
+
+    let parameters: Vec<ParameterInfo> = target
+        .parameters
+        .iter()
+        .map(|p| {
+            let mut param = p.clone();
+            if let Some(evaluated) = param
+                .type_hint
+                .as_ref()
+                .and_then(|hint| evaluate_constant_operands(hint, ctx))
+            {
+                param.type_hint = Some(evaluated);
+            }
+            param
+        })
+        .collect();
+    target.parameters = parameters.into();
 }
 
 /// Convert a callable `PhpType` to a `ResolvedCallableTarget`.

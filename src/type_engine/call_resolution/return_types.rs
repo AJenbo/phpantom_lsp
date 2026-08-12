@@ -325,6 +325,51 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        let classes = Self::resolve_call_return_types_on_receiver_inner(
+            callee,
+            text_args,
+            receiver,
+            ctx,
+            return_type_hint_out.as_deref_mut(),
+        );
+
+        // A `@return value-of<ID_TABLE>` reaches here as the operator the
+        // docblock parser could not finish: only the template path reads the
+        // constant behind the name, and a plain function never takes it.
+        // Finish it on whatever hint came back, so the caller sees the value
+        // union rather than a type expression that widens to `mixed`.
+        let Some(hint_out) = return_type_hint_out else {
+            return classes;
+        };
+        let Some(evaluated) = hint_out
+            .as_ref()
+            .and_then(|hint| super::evaluate_constant_operands(hint, ctx))
+        else {
+            return classes;
+        };
+        // The operator stood in for the classes the resolution below could
+        // not name; now that it has evaluated, they can be named.
+        let classes = if classes.is_empty() {
+            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                &evaluated,
+                "",
+                ctx.all_classes,
+                ctx.class_loader,
+            )
+        } else {
+            classes
+        };
+        *hint_out = Some(evaluated);
+        classes
+    }
+
+    fn resolve_call_return_types_on_receiver_inner(
+        callee: &SubjectExpr,
+        text_args: &str,
+        receiver: Option<Vec<ResolvedType>>,
+        ctx: &ResolutionCtx<'_>,
+        mut return_type_hint_out: Option<&mut Option<PhpType>>,
+    ) -> Vec<Arc<ClassInfo>> {
         match callee {
             // ── Instance method call: base->method(…) ───────────────
             SubjectExpr::MethodCall { base, method } => {

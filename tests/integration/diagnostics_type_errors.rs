@@ -8197,20 +8197,19 @@ acceptsShapeKey('missing');
     assert!(messages[0].contains("'missing'"), "{messages:?}");
 }
 
-/// When the operand cannot be read, the operator names no set of values. It has
-/// to widen rather than reject: as a parameter to the bound its result falls
-/// within, as an argument to "unknown".
+/// When the operand cannot be read (here a constant on a class outside the
+/// project), the operator names no set of values. It has to widen rather than
+/// reject: as a parameter to the bound its result falls within, as an argument
+/// to "unknown".
 #[test]
 fn unevaluated_key_of_widens_instead_of_rejecting() {
     let php = r#"<?php
 namespace App;
 
-class Config { const MAP = ['debug' => 1, 'verbose' => 2]; }
-
-/** @param key-of<Config::MAP> $key */
+/** @param key-of<\Vendor\Config::MAP> $key */
 function acceptsConfigKey($key): void {}
 
-/** @return value-of<Config::MAP> */
+/** @return value-of<\Vendor\Config::MAP> */
 function firstValue() { return 1; }
 
 acceptsConfigKey('debug');
@@ -8335,6 +8334,74 @@ acceptsMode(firstValue(['a' => 'maybe']));
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(messages[0].contains("99"), "{messages:?}");
     assert!(messages[1].contains("'maybe'"), "{messages:?}");
+}
+
+/// A `key-of<CONSTANT>` parameter constrains the call even though the
+/// function declares no `@template`: the constant is as readable from a
+/// plain signature as it is from a templated one.
+#[test]
+fn key_of_over_a_constant_is_enforced_without_a_template() {
+    let php = r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+/** @param key-of<ID_TABLE> $key */
+function acceptsKey(string $key): void {}
+
+acceptsKey('immutable');
+acceptsKey('mutable');
+acceptsKey('nope');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'nope'"), "{messages:?}");
+}
+
+/// The same for a class constant read through a method parameter.
+#[test]
+fn key_of_over_a_class_constant_is_enforced_on_a_method() {
+    let php = r#"<?php
+namespace App;
+
+class Ids {
+    const TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+    /** @param key-of<Ids::TABLE> $key */
+    public function pick(string $key): void {}
+}
+
+function run(Ids $ids): void {
+    $ids->pick('mutable');
+    $ids->pick('nope');
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'nope'"), "{messages:?}");
+}
+
+/// And a `value-of<CONSTANT>` return is the table's value union, so a
+/// caller that only accepts one half of it is reported.
+#[test]
+fn value_of_over_a_constant_types_an_untemplated_return() {
+    let php = r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+/** @return value-of<ID_TABLE> */
+function anyValue() { return 1; }
+
+function takesInt(int $id): void {}
+function takesIntOrString(int|string $id): void {}
+
+takesIntOrString(anyValue());
+takesInt(anyValue());
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'two'"), "{messages:?}");
 }
 
 // ── interface-string ────────────────────────────────────────────────

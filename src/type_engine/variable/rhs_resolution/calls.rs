@@ -550,7 +550,7 @@ pub(super) fn resolve_rhs_call<'b>(
     expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    match call {
+    let mut resolved = match call {
         Call::Function(func_call) => resolve_rhs_function_call(func_call, expr, ctx),
         Call::Method(method_call) => resolve_rhs_method_call_inner(
             method_call.object,
@@ -565,7 +565,29 @@ pub(super) fn resolve_rhs_call<'b>(
             ctx,
         ),
         Call::StaticMethod(static_call) => resolve_rhs_static_call(static_call, ctx),
+    };
+
+    // A `@return value-of<ID_TABLE>` arrives here with the operator still
+    // standing: the docblock parser saw a name it could not read, and only
+    // the template path reads the constant behind it.  Finish it so the
+    // caller gets the value union the table describes rather than a type
+    // expression that widens to `mixed`.
+    if resolved
+        .iter()
+        .any(|rt| rt.type_string.contains_unevaluated_operator())
+    {
+        let rctx = ctx.as_resolution_ctx();
+        for rt in &mut resolved {
+            if let Some(evaluated) = crate::type_engine::call_resolution::evaluate_constant_operands(
+                &rt.type_string,
+                &rctx,
+            ) {
+                rt.type_string = evaluated;
+            }
+        }
     }
+
+    resolved
 }
 
 pub(crate) fn infer_closure_literal_type(

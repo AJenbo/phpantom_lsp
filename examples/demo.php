@@ -857,6 +857,12 @@ class ConstantTableLookupDemo
 
         $label = ScaffoldingLimits::lookUp('label');
         var_dump(strtoupper($label));              // LIMITS['label'] → 'off'
+
+        // A signature that declares no `@template` reads the constant just
+        // the same: the parameter accepts only the table's own keys, and the
+        // return is the union of its values.
+        var_dump(scaffoldingToolSettingName('ink'));  // key-of<TOOL_DEFAULTS> → 'width'|'ink'
+        var_dump(scaffoldingAnyToolDefault());        // value-of<TOOL_DEFAULTS> → 2|'black'
     }
 }
 
@@ -6514,6 +6520,18 @@ function scaffoldingToolDefault(string $setting): int|string
     return TOOL_DEFAULTS[$setting];
 }
 
+/** @param key-of<TOOL_DEFAULTS> $setting */
+function scaffoldingToolSettingName(string $setting): string
+{
+    return $setting;
+}
+
+/** @return value-of<TOOL_DEFAULTS> */
+function scaffoldingAnyToolDefault(): int|string
+{
+    return TOOL_DEFAULTS['width'];
+}
+
 class ScaffoldingLimits
 {
     const LIMITS = ['retries' => 3, 'label' => 'off'];
@@ -7388,6 +7406,8 @@ function runDemoAssertions(): void
     assert(scaffoldingToolDefault('ink') === 'black', "TOOL_DEFAULTS['ink'] really is the string 'black'");
     assert(ScaffoldingLimits::lookUp('retries') === 3, "LIMITS['retries'] really is the int 3");
     assert(ScaffoldingLimits::lookUp('label') === 'off', "LIMITS['label'] really is the string 'off'");
+    assert(scaffoldingToolSettingName('ink') === 'ink', "'ink' really is one of TOOL_DEFAULTS' keys");
+    assert(in_array(scaffoldingAnyToolDefault(), TOOL_DEFAULTS, true), "the untemplated return really is one of TOOL_DEFAULTS' values");
 
     // ── Receiver retyped by a call (@psalm-this-out) ─────────────────────
     /** @var ScaffoldingMutableBox<Pen> $selfOutBox */
