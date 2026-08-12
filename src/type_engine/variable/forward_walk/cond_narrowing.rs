@@ -2428,20 +2428,42 @@ pub(crate) fn seed_property_keys_into_scope(
 /// or `$var->method()` for an argument-less call — with the type its
 /// declaration promises.
 fn seed_member_key(key: &str, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    let types = resolve_member_key_type(key, scope, ctx);
+    scope.set(key, types);
+}
+
+/// Resolve what a member key's declaration promises, reading the scope
+/// but not writing to it.
+fn resolve_member_key_type(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
     let (head, is_call) = match key.strip_suffix("()") {
         Some(head) => (head, true),
         None => (key, false),
     };
     let Some(arrow_pos) = head.rfind("->") else {
-        return;
+        return Vec::new();
     };
     let obj_var = &head[..arrow_pos];
     let member_name = &head[arrow_pos + 2..];
 
-    // Resolve the object variable's type from scope.
-    let obj_types = scope.get(obj_var);
+    // Resolve the object part's type from scope.  Only the leading
+    // variable of a path is ever assigned there, so a deeper path
+    // (`$this->holder` in `$this->holder->service`) has to be resolved
+    // the same way this key is.  Each step drops one segment, so the
+    // recursion is bounded by the number of `->` in the key.
+    let resolved_prefix;
+    let obj_types: &[ResolvedType] = match scope.get(obj_var) {
+        [] if obj_var.contains("->") => {
+            resolved_prefix = resolve_member_key_type(obj_var, scope, ctx);
+            &resolved_prefix
+        }
+        from_scope => from_scope,
+    };
     if obj_types.is_empty() {
-        return;
+        return Vec::new();
     }
 
     // Look up the member's type on the resolved class(es).
@@ -2485,9 +2507,7 @@ fn seed_member_key(key: &str, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) 
         }
     }
 
-    if !member_results.is_empty() {
-        scope.set(key, member_results);
-    }
+    member_results
 }
 
 pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &mut Vec<String>) {

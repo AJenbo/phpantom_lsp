@@ -5230,6 +5230,47 @@ class TestCase {
 }
 
 #[test]
+fn no_false_positive_for_two_level_property_narrowed_via_instanceof() {
+    // The declared class of a two-level path must survive the check the
+    // same way a one-level path's does, so the value stays both types.
+    let php = r#"<?php
+interface MockInterface {
+    public function shouldReceive(string $name): self;
+}
+
+class EpaymentService {
+    public function annul(): bool { return true; }
+}
+
+class Holder {
+    public EpaymentService $service;
+}
+
+class TestCase {
+    private Holder $holder;
+
+    protected function mockMethod(MockInterface $mock, string $method): void {}
+
+    protected function realMethod(EpaymentService $service): void {}
+
+    public function test(): void {
+        if ($this->holder->service instanceof MockInterface) {
+            $x = $this->holder->service;
+            $this->mockMethod($x, 'annul');
+            $this->realMethod($x);
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "A two-level property narrowed via instanceof keeps its declared class, got: {msgs:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_compound_and_instanceof_narrowing() {
     // `$x instanceof Aye && $x instanceof Bee` proves both at once, so
     // `$x` is `Aye&Bee`.  Joining the two as `Aye|Bee` instead judged
