@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B135. A conditional return type is not resolved from an argument's default
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b138-a-param-on-a-docblocks-opening-line-is-ignored" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1317,17 +1306,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B135. A conditional return type is not resolved from an argument's default
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b138-a-param-on-a-docblocks-opening-line-is-ignored" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1371,32 +1349,14 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default">B135. A conditional return type is not resolved from an argument's default<a class="headerlink" href="#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function test(string $s): int {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    return str_word_count($s);          // reported: got array&lt;string&gt;|int</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>str_word_count()</code>'s return type depends on its <code>$format</code> argument: <code>0</code>
-(the default) returns <code>int</code>, <code>1</code> and <code>2</code> return <code>array&lt;string&gt;</code>. Neither
-the passed value nor the declared default narrows it, so every call reads
-back the full union and any use in a typed position is reported. Passing
-<code>1</code> explicitly is equally unresolved, so <code>return str_word_count($s, 1);</code>
-from an <code>array</code> return type is reported too.</p>
-<p>This is what <code>examples/laravel/app/View/Components/PostSummary.php:37</code>
-trips over, which is why the Laravel example reports four errors where
-<code>docs/CONTRIBUTING.md</code> documents three.</p>
-<p><strong>Fix:</strong> resolve a conditional return type against the call's arguments,
-falling back to a parameter's declared default when the argument is
-omitted, rather than joining every branch.</p>
 <h3 id="b138-a-param-on-a-docblocks-opening-line-is-ignored">B138. A <code>@param</code> on a docblock's opening line is ignored<a class="headerlink" href="#b138-a-param-on-a-docblocks-opening-line-is-ignored" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param &#39;a&#39;|&#39;b&#39; $key</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> *  @return string */</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">function pick(string $key): string {</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    takesInt($key);   // reported as `string`, not as &#39;a&#39;|&#39;b&#39;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    return $key;</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param &#39;a&#39;|&#39;b&#39; $key</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> *  @return string */</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">function pick(string $key): string {</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    takesInt($key);   // reported as `string`, not as &#39;a&#39;|&#39;b&#39;</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    return $key;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>A tag written on the same line as the opening <code>/**</code> of a <em>multi-line</em>
 docblock is not read for parameters. The fully single-line spelling

@@ -2798,13 +2798,11 @@ of returning the raw stub union. Start with <code>json_encode</code>/<code>json_
 (<code>JSON_THROW_ON_ERROR</code> bit test) and the <code>preg_replace</code>/<code>str_replace</code>
 family (array-vs-string <code>$subject</code>), since those account for most of
 the volume found.</p>
-<p>Another instance of the same shape: <code>str_word_count()</code>'s declared
-<code>array&lt;string&gt;|int</code> return actually depends on whether the <code>$format</code>
-argument is passed at all (absent or <code>0</code> → <code>int</code>; <code>1</code>/<code>2</code> → an array).
-<code>examples/laravel/app/View/Components/PostSummary.php</code> calls
-<code>str_word_count($title)</code> with no <code>$format</code> argument and gets the full
-union reported against its <code>int</code> return type — a live false positive
-in the demo project, found while fixing B130.</p>
+<p>A case the condition can name outright (an argument's value, or whether it
+is an array or a string) needs no new mechanism: a conditional return type
+in <code>stub_patches.rs</code> covers it, as <code>range()</code> and <code>str_word_count()</code> do. The
+<code>json_encode</code>/<code>json_decode</code> flag test is the case that does, since a bit
+test on the flags argument is not something a condition can express.</p>
 
 
 
