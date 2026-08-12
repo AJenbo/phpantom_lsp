@@ -707,13 +707,37 @@ impl Backend {
                 // branch-union collapse the compatibility check made, so
                 // an undecided conditional is named by the types it can
                 // actually be rather than as a type expression.
-                let message = format!(
+                let mut message = format!(
                     "Argument {} ({}) expects {}, got {}",
                     arg_idx + 1,
                     param_name,
                     effective_param_type.conditionals_as_branch_unions(),
                     arg_type,
                 );
+                // Name the specific member(s) that broke a partially
+                // compatible union, rather than leaving the developer to
+                // work out which one out of the full union is at fault.
+                if let TypeKind::Union(members) = arg_type.kind() {
+                    let unsatisfied: Vec<String> = members
+                        .iter()
+                        .filter(|m| {
+                            !is_type_compatible(
+                                m,
+                                effective_param_type,
+                                &class_loader,
+                                strict_types,
+                            )
+                        })
+                        .map(|m| m.to_string())
+                        .collect();
+                    if !unsatisfied.is_empty() && unsatisfied.len() < members.len() {
+                        message.push_str(&format!(
+                            " ({} does not satisfy {})",
+                            unsatisfied.join("|"),
+                            effective_param_type.conditionals_as_branch_unions(),
+                        ));
+                    }
+                }
 
                 out.push(make_diagnostic(
                     range,

@@ -6831,8 +6831,8 @@ fn no_false_positive_for_reflection_class_new_instance_args() {
 class ReflectionClass {
     /** @param class-string<T>|T $objectOrClass */
     public function __construct(#[LanguageLevelTypeAware(['8.0' => 'object|string'], default: '')] $objectOrClass) {}
-    /** @return T|null */
-    public function newInstanceArgs(array $args = []): ?object {}
+    /** @return T */
+    public function newInstanceArgs(array $args = []): object {}
 }
 "#;
     let mut class_stubs: std::collections::HashMap<&'static str, &'static str> =

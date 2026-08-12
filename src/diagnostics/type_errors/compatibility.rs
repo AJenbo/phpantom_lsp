@@ -284,19 +284,18 @@ pub(crate) fn is_type_compatible(
         return true;
     }
 
-    // ── Conservative union argument handling ─────────────────────
-    // When the argument is a union, require that *every* member is
-    // definitely incompatible before flagging.  If at least one
-    // member could be valid, the developer may have narrowed the
-    // type in a way we can't see (assert, instanceof, etc.).
-    // This avoids false positives like `null|Pen` vs `object|string`
-    // where `Pen` is clearly fine and the null path may be guarded.
-    if let TypeKind::Union(members) = arg_type.kind()
-        && members
+    // ── Union argument handling ───────────────────────────────────
+    // The runtime value can be any member of the union, so every
+    // member must independently satisfy the parameter type for the
+    // call to be sound — a single compatible member does not make the
+    // others disappear.  Each member is checked through the full
+    // `is_type_compatible` recursion (not the stricter structural
+    // `is_subtype_of_typed`) so it still benefits from the MAYBE rules
+    // above (Stringable, refined scalars, unloadable short names, …).
+    if let TypeKind::Union(members) = arg_type.kind() {
+        return members
             .iter()
-            .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
-    {
-        return true;
+            .all(|m| is_type_compatible(m, param_type, class_loader, strict_types));
     }
 
     // ── Intersection argument handling ───────────────────────────
@@ -752,52 +751,14 @@ pub(crate) fn is_type_compatible(
     // `array`, stay silent.  Note: Traversable alone does NOT
     // qualify — a Traversable is not substitutable for `array`
     // (e.g. you cannot pass a Collection to array_map()).
-    if is_bare_array(param_type) {
-        if let Some(class_name) = arg_type.base_name()
-            && let Some(cls) = class_loader(class_name)
-        {
-            let is_array_like =
-                crate::class_lookup::is_subtype_of(&cls, "ArrayAccess", class_loader)
-                    || crate::class_lookup::is_subtype_of(&cls, "Arrayable", class_loader);
-            if is_array_like {
-                return true;
-            }
-        }
-        // Union arg: accept if every member is array-like or
-        // implements ArrayAccess/Arrayable.  When a
-        // member's class can't be loaded (unresolved short name
-        // from a docblock), treat it as potentially array-like
-        // to avoid false positives on large collection union
-        // types (DataCollection|PaginatedDataCollection|...).
-        if let TypeKind::Union(members) = arg_type.kind() {
-            let all_array_like = members.iter().all(|m| {
-                if m.is_array_like()
-                    || matches!(m.kind(), TypeKind::Array(_) | TypeKind::ArrayShape(_))
-                {
-                    return true;
-                }
-                if let Some(name) = m.base_name() {
-                    if let Some(cls) = class_loader(name) {
-                        return crate::class_lookup::is_subtype_of(
-                            &cls,
-                            "ArrayAccess",
-                            class_loader,
-                        ) || crate::class_lookup::is_subtype_of(
-                            &cls,
-                            "Arrayable",
-                            class_loader,
-                        );
-                    }
-                    // Can't load class — stay permissive (the short
-                    // name likely comes from a docblock whose imports
-                    // we can't resolve in this context).
-                    return true;
-                }
-                false
-            });
-            if all_array_like {
-                return true;
-            }
+    if is_bare_array(param_type)
+        && let Some(class_name) = arg_type.base_name()
+        && let Some(cls) = class_loader(class_name)
+    {
+        let is_array_like = crate::class_lookup::is_subtype_of(&cls, "ArrayAccess", class_loader)
+            || crate::class_lookup::is_subtype_of(&cls, "Arrayable", class_loader);
+        if is_array_like {
+            return true;
         }
     }
 

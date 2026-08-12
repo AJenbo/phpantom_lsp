@@ -22,14 +22,25 @@ use super::*;
 ///   - positive match → narrow `results` to only the instanceof class
 ///   - negated match (`!($var instanceof ClassName)`) → *exclude* the
 ///     class from the current candidates
+///
+/// Returns `true` when the resulting `results` represents an
+/// *intersection* rather than the usual set of union alternatives —
+/// i.e. `apply_instanceof_inclusion` merged in an unrelated interface
+/// (a declared class narrowed by `instanceof` to an interface it
+/// doesn't implement, such as a mock/proxy that is both simultaneously).
+/// Callers that turn `results` into a `PhpType` must build a
+/// `TypeKind::Intersection` in that case instead of joining the entries
+/// as alternatives, or the value's compatibility with a parameter
+/// naming just one of the two members will be judged against the
+/// *other* member too and rejected.
 pub(in crate::type_engine) fn try_apply_instanceof_narrowing(
     condition: &Expression<'_>,
     body_span: mago_span::Span,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) {
+) -> bool {
     if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
-        return;
+        return false;
     }
 
     // ── Compound OR: `$x instanceof A || $x instanceof B` ──────────
@@ -49,7 +60,7 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing(
             results.clear();
             *results = union;
         }
-        return;
+        return false;
     }
 
     // ── Compound AND: `$x instanceof A && $x instanceof B` ─────────
@@ -64,16 +75,25 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing(
             results.clear();
             *results = union;
         }
-        return;
+        return false;
     }
 
     if let Some(mut extraction) = try_extract_instanceof_with_negation(condition, ctx.var_name) {
         resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
         if extraction.negated {
             apply_instanceof_exclusion(&extraction.class_type, ctx, results);
+            false
         } else {
+            let before = results.len();
             apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results);
+            // `apply_instanceof_inclusion` only grows a single starting
+            // class into two entries via its "keep both" branch — every
+            // other path clears and replaces, so growth here is an
+            // unambiguous signal (see its doc comment).
+            before <= 1 && results.len() > before
         }
+    } else {
+        false
     }
 }
 
@@ -83,14 +103,17 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing(
 /// A positive instanceof in the condition means the variable is NOT
 /// that class inside the else body (→ exclude), and vice-versa for a
 /// negated condition (→ include only that class).
+///
+/// Returns `true` under the same "intersection, not union" condition
+/// as [`try_apply_instanceof_narrowing`].
 pub(in crate::type_engine) fn try_apply_instanceof_narrowing_inverse(
     condition: &Expression<'_>,
     body_span: mago_span::Span,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) {
+) -> bool {
     if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
-        return;
+        return false;
     }
 
     // ── Compound OR inverse: after `if ($x instanceof A || $x instanceof B) { exit; }` ──
@@ -101,7 +124,7 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing_inverse(
         for cls_type in &classes {
             apply_instanceof_exclusion(cls_type, ctx, results);
         }
-        return;
+        return false;
     }
 
     // ── Compound AND inverse: after `if ($x instanceof A && $x instanceof B) { exit; }` ──
@@ -113,10 +136,15 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing_inverse(
         // Flip the polarity: positive condition → exclude in else,
         // negated condition → include in else.
         if extraction.negated {
+            let before = results.len();
             apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results);
+            before <= 1 && results.len() > before
         } else {
             apply_instanceof_exclusion(&extraction.class_type, ctx, results);
+            false
         }
+    } else {
+        false
     }
 }
 

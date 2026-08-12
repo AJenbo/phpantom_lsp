@@ -92,6 +92,27 @@ pub(crate) fn process_if_statement_body<'b>(
         ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset
     });
 
+    // Cursor inside an elseif's own condition (as opposed to its body,
+    // handled by `cursor_in_elseif` below): the if condition and every
+    // strictly preceding elseif condition were false to reach here, but
+    // this elseif's own condition is still being evaluated — it hasn't
+    // been narrowed on yet, and the if/preceding-elseif bodies never ran.
+    // Without this case the cursor falls through to the "after the whole
+    // chain" merge below, which pulls in assignments from the if-body
+    // (e.g. `if (...) { $value = true; } elseif (foo($value)) { ... }`
+    // must not see `$value` as `T|bool` while evaluating `foo($value)`).
+    for (idx, ei) in body.else_if_clauses.iter().enumerate() {
+        let cond_span = ei.condition.span();
+        if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset
+        {
+            apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
+            for prev_ei in body.else_if_clauses.iter().take(idx) {
+                apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
+            }
+            return;
+        }
+    }
+
     if cursor_in_then {
         // Cursor is inside the then-branch.  Apply instanceof narrowing
         // and walk only this branch.
@@ -328,7 +349,24 @@ pub(crate) fn process_if_colon_body<'b>(
         return;
     }
 
-    for ei in body.else_if_clauses.iter() {
+    // Cursor inside an elseif's own condition (before its `:`): only the
+    // if condition and strictly preceding elseif conditions are known
+    // false here — this elseif's own condition and every branch body are
+    // not yet in effect.  See the brace-body variant above for why this
+    // case must be handled separately from the body case below.
+    for (idx, ei) in body.else_if_clauses.iter().enumerate() {
+        let cond_span = ei.condition.span();
+        if ctx.cursor_offset >= cond_span.start.offset && ctx.cursor_offset <= cond_span.end.offset
+        {
+            apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
+            for prev_ei in body.else_if_clauses.iter().take(idx) {
+                apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
+            }
+            return;
+        }
+    }
+
+    for (idx, ei) in body.else_if_clauses.iter().enumerate() {
         let ei_start = ei.colon.start.offset;
         let ei_end = ei
             .statements
@@ -337,6 +375,9 @@ pub(crate) fn process_if_colon_body<'b>(
             .unwrap_or(ei_start);
         if ctx.cursor_offset >= ei_start && ctx.cursor_offset <= ei_end {
             apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
+            for prev_ei in body.else_if_clauses.iter().take(idx) {
+                apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
+            }
             apply_condition_narrowing(ei.condition, scope, ctx);
             process_condition_assignment(ei.condition, scope, ctx);
             seed_pass_by_ref_in_condition(ei.condition, scope, ctx);

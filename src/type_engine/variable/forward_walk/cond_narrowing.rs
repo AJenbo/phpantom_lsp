@@ -604,6 +604,34 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     // `null` entries that were preserved by
                     // `apply_narrowing`'s `None => true` rule.
                     results.retain(|rt| !rt.type_string.is_null());
+                    // `apply_instanceof_inclusion` merging in an
+                    // unrelated interface (the branch this call site
+                    // exists for) leaves both classes in `results` as
+                    // separate entries, each keeping its own
+                    // `class_info` so member lookup (completion, hover)
+                    // still finds members from both — but the value
+                    // satisfies both simultaneously (e.g. a mock that
+                    // IS the declared class AND implements the
+                    // interface it was narrowed to), so every entry's
+                    // `type_string` is overwritten with the *same*
+                    // intersection type.  `ResolvedType::types_joined`
+                    // already special-cases "every entry shares one
+                    // Intersection type_string" and returns it as-is
+                    // instead of wrapping it in a `Foo|Bar` union, which
+                    // is what the argument/return compatibility check
+                    // needs: every member must be satisfied, not just
+                    // one.
+                    if results.len() > 1
+                        && let Some(members) = results
+                            .iter()
+                            .map(|rt| rt.class_info.as_ref().map(|c| PhpType::named(c.fqn())))
+                            .collect::<Option<Vec<_>>>()
+                    {
+                        let intersection = PhpType::intersection(members);
+                        for rt in results.iter_mut() {
+                            rt.type_string = intersection.clone();
+                        }
+                    }
                     if !results.is_empty() {
                         scope.set(&var_name, results);
                     } else {
@@ -1722,6 +1750,40 @@ pub(crate) fn extract_falsy_check_var(expr: &Expression<'_>) -> Option<String> {
     }
 }
 
+/// Extract variable name from `$x === false` or `false === $x` patterns.
+///
+/// Mirrors [`extract_null_equality_check_var`] but for `false` — needed
+/// for the common "resource-like handle" idiom (`finfo_open()`,
+/// `pg_connect()`, …) that returns `T|false` and is guarded with a
+/// strict equality check rather than `!$x`/`empty($x)`.
+pub(crate) fn extract_false_equality_check_var(expr: &Expression<'_>) -> Option<String> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    match inner {
+        Expression::Binary(bin) => {
+            let is_identical = matches!(bin.operator, BinaryOperator::Identical(_));
+            let is_equal = matches!(bin.operator, BinaryOperator::Equal(_));
+
+            if (is_identical || is_equal) && !negated {
+                if is_false_expr(bin.rhs) {
+                    return expr_to_var_name(bin.lhs)
+                        .or_else(|| narrowing::expr_to_subject_key(bin.lhs));
+                }
+                if is_false_expr(bin.lhs) {
+                    return expr_to_var_name(bin.rhs)
+                        .or_else(|| narrowing::expr_to_subject_key(bin.rhs));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Check if an expression is the `false` literal.
+pub(crate) fn is_false_expr(expr: &Expression<'_>) -> bool {
+    matches!(expr, Expression::Literal(Literal::False(_)))
+}
+
 /// Check if an expression is `null`.
 pub(crate) fn is_null_expr(expr: &Expression<'_>) -> bool {
     match expr {
@@ -1841,6 +1903,45 @@ pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
     }
 }
 
+/// Strip `false` (but not `null`) from a variable's type in the scope.
+///
+/// Used after a strict-equality guard clause (`if ($var === false) {
+/// throw; }`) where only `false` was ruled out — unlike
+/// [`strip_falsy_from_scope`], which also strips `null` for the broader
+/// `!$var`/`empty($var)` idiom that guards against both.
+pub(crate) fn strip_false_from_scope(var_name: &str, scope: &mut ScopeState) {
+    let types = scope.get(var_name).to_vec();
+    if types.is_empty() {
+        return;
+    }
+
+    let is_false = |t: &PhpType| matches!(t.kind(), TypeKind::Named(n) if n == "false");
+
+    let stripped: Vec<ResolvedType> = types
+        .into_iter()
+        .filter_map(|mut rt| {
+            let ty = &rt.type_string;
+            if is_false(ty) {
+                return None;
+            }
+            if let TypeKind::Union(members) = ty.kind() {
+                let non_false: Vec<PhpType> =
+                    members.iter().filter(|m| !is_false(m)).cloned().collect();
+                rt.type_string = match non_false.len() {
+                    0 => return None,
+                    1 => non_false.into_iter().next().unwrap(),
+                    _ => PhpType::union(non_false),
+                };
+            }
+            Some(rt)
+        })
+        .collect();
+
+    if !stripped.is_empty() {
+        scope.set(var_name, stripped);
+    }
+}
+
 /// Split a single-level array access key like `$a["test"]` into base
 /// variable and key name.  Returns `None` for non-array-access keys and
 /// for multi-level access (`$a["x"]["y"]`), which this single-key
@@ -1946,6 +2047,12 @@ pub(crate) fn apply_guard_clause_null_narrowing<'b>(
     }
     if let Some(var_name) = extract_falsy_check_var(if_stmt.condition) {
         strip_falsy_from_scope(&var_name, scope);
+    }
+    // When `if ($x === false) { throw; }`, strip only `false` from $x
+    // after — the common "resource-like handle" idiom (`finfo_open()`,
+    // `pg_connect()`, …) that returns `T|false`.
+    if let Some(var_name) = extract_false_equality_check_var(if_stmt.condition) {
+        strip_false_from_scope(&var_name, scope);
     }
     // `if (!isset($x)) { return; }` — after the guard, $x is not null.
     for var_name in extract_not_isset_vars(if_stmt.condition) {

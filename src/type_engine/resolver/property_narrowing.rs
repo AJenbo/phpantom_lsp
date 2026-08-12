@@ -24,12 +24,13 @@ pub(crate) fn apply_property_narrowing(
     current_class: &ClassInfo,
     rctx: &ResolutionCtx<'_>,
     results: &mut Vec<Arc<ClassInfo>>, // still operates on Arc<ClassInfo> — called from property chain
-) {
+) -> bool {
     use crate::parser::with_parsed_program;
 
     // The narrowing walk functions operate on Vec<ClassInfo>, so unwrap
     // the Arcs, run narrowing, then re-wrap.
     let mut plain: Vec<ClassInfo> = results.drain(..).map(Arc::unwrap_or_clone).collect();
+    let mut is_intersection = false;
 
     with_parsed_program(
         rctx.content,
@@ -51,11 +52,17 @@ pub(crate) fn apply_property_narrowing(
                 match_arm_narrowing: HashMap::new(),
                 scope_var_resolver: None,
             };
-            walk_property_narrowing_in_statements(program.statements.iter(), &ctx, &mut plain);
+            walk_property_narrowing_in_statements(
+                program.statements.iter(),
+                &ctx,
+                &mut plain,
+                &mut is_intersection,
+            );
         },
     );
 
     *results = plain.into_iter().map(Arc::new).collect();
+    is_intersection
 }
 
 /// Walk top-level statements to find the class + method containing the
@@ -64,6 +71,7 @@ fn walk_property_narrowing_in_statements<'b>(
     statements: impl Iterator<Item = &'b mago_syntax::cst::Statement<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
+    is_intersection: &mut bool,
 ) {
     use mago_span::HasSpan;
     use mago_syntax::cst::*;
@@ -74,7 +82,12 @@ fn walk_property_narrowing_in_statements<'b>(
                 let start = class.left_brace.start.offset;
                 let end = class.right_brace.end.offset;
                 if ctx.cursor_offset >= start && ctx.cursor_offset <= end {
-                    walk_property_narrowing_in_members(class.members.iter(), ctx, results);
+                    walk_property_narrowing_in_members(
+                        class.members.iter(),
+                        ctx,
+                        results,
+                        is_intersection,
+                    );
                     return;
                 }
             }
@@ -82,7 +95,12 @@ fn walk_property_narrowing_in_statements<'b>(
                 let start = trait_def.left_brace.start.offset;
                 let end = trait_def.right_brace.end.offset;
                 if ctx.cursor_offset >= start && ctx.cursor_offset <= end {
-                    walk_property_narrowing_in_members(trait_def.members.iter(), ctx, results);
+                    walk_property_narrowing_in_members(
+                        trait_def.members.iter(),
+                        ctx,
+                        results,
+                        is_intersection,
+                    );
                     return;
                 }
             }
@@ -91,7 +109,12 @@ fn walk_property_narrowing_in_statements<'b>(
                 if ctx.cursor_offset >= ns_span.start.offset
                     && ctx.cursor_offset <= ns_span.end.offset
                 {
-                    walk_property_narrowing_in_statements(ns.statements().iter(), ctx, results);
+                    walk_property_narrowing_in_statements(
+                        ns.statements().iter(),
+                        ctx,
+                        results,
+                        is_intersection,
+                    );
                     return;
                 }
             }
@@ -100,7 +123,13 @@ fn walk_property_narrowing_in_statements<'b>(
                 let body_end = func.body.right_brace.end.offset;
                 if ctx.cursor_offset >= body_start && ctx.cursor_offset <= body_end {
                     let floor = stale_narrowing_floor(func.body.statements.iter(), ctx);
-                    walk_property_narrowing_stmts(func.body.statements.iter(), ctx, results, floor);
+                    walk_property_narrowing_stmts(
+                        func.body.statements.iter(),
+                        ctx,
+                        results,
+                        floor,
+                        is_intersection,
+                    );
                     return;
                 }
             }
@@ -115,7 +144,12 @@ fn walk_property_narrowing_in_statements<'b>(
                     && ctx.cursor_offset <= if_span.end.offset
                 {
                     for inner in if_stmt.body.statements().iter() {
-                        walk_property_narrowing_in_statements(std::iter::once(inner), ctx, results);
+                        walk_property_narrowing_in_statements(
+                            std::iter::once(inner),
+                            ctx,
+                            results,
+                            is_intersection,
+                        );
                     }
                 }
             }
@@ -124,7 +158,12 @@ fn walk_property_narrowing_in_statements<'b>(
                 if ctx.cursor_offset >= blk_span.start.offset
                     && ctx.cursor_offset <= blk_span.end.offset
                 {
-                    walk_property_narrowing_in_statements(block.statements.iter(), ctx, results);
+                    walk_property_narrowing_in_statements(
+                        block.statements.iter(),
+                        ctx,
+                        results,
+                        is_intersection,
+                    );
                 }
             }
             _ => {}
@@ -138,12 +177,19 @@ fn walk_property_narrowing_in_members<'b>(
     members: impl Iterator<Item = &'b mago_syntax::cst::class_like::member::ClassLikeMember<'b>>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
+    is_intersection: &mut bool,
 ) {
     if let Some(block) =
         crate::util::find_enclosing_method_block_in_members(members, ctx.cursor_offset)
     {
         let floor = stale_narrowing_floor(block.statements.iter(), ctx);
-        walk_property_narrowing_stmts(block.statements.iter(), ctx, results, floor);
+        walk_property_narrowing_stmts(
+            block.statements.iter(),
+            ctx,
+            results,
+            floor,
+            is_intersection,
+        );
     }
 }
 
@@ -158,6 +204,7 @@ fn walk_property_narrowing_stmts<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
     floor: Option<u32>,
+    is_intersection: &mut bool,
 ) {
     use mago_span::HasSpan;
     use mago_syntax::cst::*;
@@ -173,10 +220,16 @@ fn walk_property_narrowing_stmts<'b>(
 
         match stmt {
             Statement::If(if_stmt) => {
-                walk_property_narrowing_if(if_stmt, stmt, ctx, results, floor);
+                walk_property_narrowing_if(if_stmt, stmt, ctx, results, floor, is_intersection);
             }
             Statement::Block(block) => {
-                walk_property_narrowing_stmts(block.statements.iter(), ctx, results, floor);
+                walk_property_narrowing_stmts(
+                    block.statements.iter(),
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
             }
             Statement::Expression(expr_stmt) => {
                 // assert($this->prop instanceof Foo) — unconditional
@@ -190,41 +243,65 @@ fn walk_property_narrowing_stmts<'b>(
                 // `$x = $this->prop instanceof Foo ? … : …` and other
                 // ternaries nested in the expression narrow the property
                 // path inside the branch containing the cursor.
-                walk_property_narrowing_expr(expr_stmt.expression, ctx, results, floor);
+                walk_property_narrowing_expr(
+                    expr_stmt.expression,
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
             }
             Statement::Return(ret) => {
                 // `return $this->prop instanceof Foo ? … : …` — narrow the
                 // property path inside the ternary branch at the cursor.
                 if let Some(value) = ret.value {
-                    walk_property_narrowing_expr(value, ctx, results, floor);
+                    walk_property_narrowing_expr(value, ctx, results, floor, is_intersection);
                 }
             }
             Statement::Foreach(foreach) => match &foreach.body {
                 ForeachBody::Statement(inner) => {
-                    walk_property_narrowing_stmt(inner, ctx, results, floor);
+                    walk_property_narrowing_stmt(inner, ctx, results, floor, is_intersection);
                 }
                 ForeachBody::ColonDelimited(body) => {
-                    walk_property_narrowing_stmts(body.statements.iter(), ctx, results, floor);
+                    walk_property_narrowing_stmts(
+                        body.statements.iter(),
+                        ctx,
+                        results,
+                        floor,
+                        is_intersection,
+                    );
                 }
             },
             Statement::While(while_stmt) => match &while_stmt.body {
                 WhileBody::Statement(inner) => {
-                    walk_property_narrowing_stmt(inner, ctx, results, floor);
+                    walk_property_narrowing_stmt(inner, ctx, results, floor, is_intersection);
                 }
                 WhileBody::ColonDelimited(body) => {
-                    walk_property_narrowing_stmts(body.statements.iter(), ctx, results, floor);
+                    walk_property_narrowing_stmts(
+                        body.statements.iter(),
+                        ctx,
+                        results,
+                        floor,
+                        is_intersection,
+                    );
                 }
             },
             Statement::For(for_stmt) => match &for_stmt.body {
                 ForBody::Statement(inner) => {
-                    walk_property_narrowing_stmt(inner, ctx, results, floor);
+                    walk_property_narrowing_stmt(inner, ctx, results, floor, is_intersection);
                 }
                 ForBody::ColonDelimited(body) => {
-                    walk_property_narrowing_stmts(body.statements.iter(), ctx, results, floor);
+                    walk_property_narrowing_stmts(
+                        body.statements.iter(),
+                        ctx,
+                        results,
+                        floor,
+                        is_intersection,
+                    );
                 }
             },
             Statement::DoWhile(dw) => {
-                walk_property_narrowing_stmt(dw.statement, ctx, results, floor);
+                walk_property_narrowing_stmt(dw.statement, ctx, results, floor, is_intersection);
             }
             Statement::Try(try_stmt) => {
                 walk_property_narrowing_stmts(
@@ -232,6 +309,7 @@ fn walk_property_narrowing_stmts<'b>(
                     ctx,
                     results,
                     floor,
+                    is_intersection,
                 );
                 for catch in try_stmt.catch_clauses.iter() {
                     walk_property_narrowing_stmts(
@@ -239,6 +317,7 @@ fn walk_property_narrowing_stmts<'b>(
                         ctx,
                         results,
                         floor,
+                        is_intersection,
                     );
                 }
                 if let Some(finally) = &try_stmt.finally_clause {
@@ -247,12 +326,19 @@ fn walk_property_narrowing_stmts<'b>(
                         ctx,
                         results,
                         floor,
+                        is_intersection,
                     );
                 }
             }
             Statement::Switch(switch) => {
                 for case in switch.body.cases().iter() {
-                    walk_property_narrowing_stmts(case.statements().iter(), ctx, results, floor);
+                    walk_property_narrowing_stmts(
+                        case.statements().iter(),
+                        ctx,
+                        results,
+                        floor,
+                        is_intersection,
+                    );
                 }
             }
             _ => {}
@@ -267,6 +353,7 @@ fn walk_property_narrowing_if<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
     floor: Option<u32>,
+    is_intersection: &mut bool,
 ) {
     use mago_span::HasSpan;
     use mago_syntax::cst::*;
@@ -279,33 +366,39 @@ fn walk_property_narrowing_if<'b>(
         IfBody::Statement(body) => {
             // ── then-body narrowing ──
             if !condition_is_stale {
-                narrowing::try_apply_instanceof_narrowing(
+                *is_intersection |= narrowing::try_apply_instanceof_narrowing(
                     if_stmt.condition,
                     body.statement.span(),
                     ctx,
                     results,
                 );
             }
-            walk_property_narrowing_stmt(body.statement, ctx, results, floor);
+            walk_property_narrowing_stmt(body.statement, ctx, results, floor, is_intersection);
 
             // ── elseif narrowing ──
             for else_if in body.else_if_clauses.iter() {
                 if !check_is_stale(else_if.condition, floor) {
-                    narrowing::try_apply_instanceof_narrowing(
+                    *is_intersection |= narrowing::try_apply_instanceof_narrowing(
                         else_if.condition,
                         else_if.statement.span(),
                         ctx,
                         results,
                     );
                 }
-                walk_property_narrowing_stmt(else_if.statement, ctx, results, floor);
+                walk_property_narrowing_stmt(
+                    else_if.statement,
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
             }
 
             // ── else-body inverse narrowing ──
             if let Some(else_clause) = &body.else_clause {
                 let else_span = else_clause.statement.span();
                 if !condition_is_stale {
-                    narrowing::try_apply_instanceof_narrowing_inverse(
+                    *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
                         if_stmt.condition,
                         else_span,
                         ctx,
@@ -314,7 +407,7 @@ fn walk_property_narrowing_if<'b>(
                 }
                 for else_if in body.else_if_clauses.iter() {
                     if !check_is_stale(else_if.condition, floor) {
-                        narrowing::try_apply_instanceof_narrowing_inverse(
+                        *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
                             else_if.condition,
                             else_span,
                             ctx,
@@ -322,7 +415,13 @@ fn walk_property_narrowing_if<'b>(
                         );
                     }
                 }
-                walk_property_narrowing_stmt(else_clause.statement, ctx, results, floor);
+                walk_property_narrowing_stmt(
+                    else_clause.statement,
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
             }
         }
         IfBody::ColonDelimited(body) => {
@@ -345,14 +444,20 @@ fn walk_property_narrowing_if<'b>(
                 mago_span::Position::new(then_end),
             );
             if !condition_is_stale {
-                narrowing::try_apply_instanceof_narrowing(
+                *is_intersection |= narrowing::try_apply_instanceof_narrowing(
                     if_stmt.condition,
                     then_span,
                     ctx,
                     results,
                 );
             }
-            walk_property_narrowing_stmts(body.statements.iter(), ctx, results, floor);
+            walk_property_narrowing_stmts(
+                body.statements.iter(),
+                ctx,
+                results,
+                floor,
+                is_intersection,
+            );
 
             for else_if in body.else_if_clauses.iter() {
                 let ei_span = mago_span::Span::new(
@@ -367,14 +472,20 @@ fn walk_property_narrowing_if<'b>(
                     ),
                 );
                 if !check_is_stale(else_if.condition, floor) {
-                    narrowing::try_apply_instanceof_narrowing(
+                    *is_intersection |= narrowing::try_apply_instanceof_narrowing(
                         else_if.condition,
                         ei_span,
                         ctx,
                         results,
                     );
                 }
-                walk_property_narrowing_stmts(else_if.statements.iter(), ctx, results, floor);
+                walk_property_narrowing_stmts(
+                    else_if.statements.iter(),
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
             }
 
             if let Some(else_clause) = &body.else_clause {
@@ -390,7 +501,7 @@ fn walk_property_narrowing_if<'b>(
                     ),
                 );
                 if !condition_is_stale {
-                    narrowing::try_apply_instanceof_narrowing_inverse(
+                    *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
                         if_stmt.condition,
                         else_span,
                         ctx,
@@ -399,7 +510,7 @@ fn walk_property_narrowing_if<'b>(
                 }
                 for else_if in body.else_if_clauses.iter() {
                     if !check_is_stale(else_if.condition, floor) {
-                        narrowing::try_apply_instanceof_narrowing_inverse(
+                        *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
                             else_if.condition,
                             else_span,
                             ctx,
@@ -407,7 +518,13 @@ fn walk_property_narrowing_if<'b>(
                         );
                     }
                 }
-                walk_property_narrowing_stmts(else_clause.statements.iter(), ctx, results, floor);
+                walk_property_narrowing_stmts(
+                    else_clause.statements.iter(),
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
             }
         }
     }
@@ -426,8 +543,9 @@ fn walk_property_narrowing_stmt<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
     floor: Option<u32>,
+    is_intersection: &mut bool,
 ) {
-    walk_property_narrowing_stmts(std::iter::once(stmt), ctx, results, floor);
+    walk_property_narrowing_stmts(std::iter::once(stmt), ctx, results, floor, is_intersection);
 }
 
 /// Apply property-level narrowing inside ternary (conditional) expressions.
@@ -445,6 +563,7 @@ fn walk_property_narrowing_expr<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
     floor: Option<u32>,
+    is_intersection: &mut bool,
 ) {
     use mago_span::HasSpan;
     use mago_syntax::cst::*;
@@ -469,14 +588,14 @@ fn walk_property_narrowing_expr<'b>(
                     && ctx.cursor_offset <= then_span.end.offset
                 {
                     if !condition_is_stale {
-                        narrowing::try_apply_instanceof_narrowing(
+                        *is_intersection |= narrowing::try_apply_instanceof_narrowing(
                             cond.condition,
                             then_span,
                             ctx,
                             results,
                         );
                     }
-                    walk_property_narrowing_expr(then_expr, ctx, results, floor);
+                    walk_property_narrowing_expr(then_expr, ctx, results, floor, is_intersection);
                     return;
                 }
             }
@@ -485,25 +604,25 @@ fn walk_property_narrowing_expr<'b>(
                 && ctx.cursor_offset <= else_span.end.offset
             {
                 if !condition_is_stale {
-                    narrowing::try_apply_instanceof_narrowing_inverse(
+                    *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
                         cond.condition,
                         else_span,
                         ctx,
                         results,
                     );
                 }
-                walk_property_narrowing_expr(cond.r#else, ctx, results, floor);
+                walk_property_narrowing_expr(cond.r#else, ctx, results, floor, is_intersection);
             }
         }
         Expression::Assignment(assign) => {
-            walk_property_narrowing_expr(assign.rhs, ctx, results, floor);
+            walk_property_narrowing_expr(assign.rhs, ctx, results, floor, is_intersection);
         }
         Expression::Binary(bin) => {
-            walk_property_narrowing_expr(bin.lhs, ctx, results, floor);
-            walk_property_narrowing_expr(bin.rhs, ctx, results, floor);
+            walk_property_narrowing_expr(bin.lhs, ctx, results, floor, is_intersection);
+            walk_property_narrowing_expr(bin.rhs, ctx, results, floor, is_intersection);
         }
         Expression::Parenthesized(inner) => {
-            walk_property_narrowing_expr(inner.expression, ctx, results, floor);
+            walk_property_narrowing_expr(inner.expression, ctx, results, floor, is_intersection);
         }
         Expression::Call(call) => {
             let args = match call {
@@ -517,7 +636,7 @@ fn walk_property_narrowing_expr<'b>(
                     Argument::Positional(a) => a.value,
                     Argument::Named(a) => a.value,
                 };
-                walk_property_narrowing_expr(arg_expr, ctx, results, floor);
+                walk_property_narrowing_expr(arg_expr, ctx, results, floor, is_intersection);
             }
         }
         _ => {}
