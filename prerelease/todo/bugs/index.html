@@ -861,10 +861,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" class="md-nav__link">
+  <a href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B92. An array literal's element types widen to base scalar types on a dynamic-key read
+        B134. A constant operand is only read where a <code>@template</code> is bound
       </span>
     </span>
   </a>
@@ -872,10 +872,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" class="md-nav__link">
+  <a href="#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B134. A constant operand is only read where a <code>@template</code> is bound
+        B135. A conditional return type is not resolved from an argument's default
       </span>
     </span>
   </a>
@@ -1383,10 +1383,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" class="md-nav__link">
+  <a href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B92. An array literal's element types widen to base scalar types on a dynamic-key read
+        B134. A constant operand is only read where a <code>@template</code> is bound
       </span>
     </span>
   </a>
@@ -1394,10 +1394,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" class="md-nav__link">
+  <a href="#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B134. A constant operand is only read where a <code>@template</code> is bound
+        B135. A conditional return type is not resolved from an argument's default
       </span>
     </span>
   </a>
@@ -1525,38 +1525,18 @@ rival, not just a feature gap.</p>
 <code>cond_narrowing.rs</code> and add the property-access equivalent: when a type guard
 or equality check on <code>$subject-&gt;prop</code> is true only for one member of an
 object union, narrow the union to that member.</p>
-<h3 id="b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read">B92. An array literal's element types widen to base scalar types on a dynamic-key read<a class="headerlink" href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function takesInt(int $x): void {}</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$values = [1, 1.5, &#39;123&#39;];</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">$key = array_rand($values);</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">takesInt($values[$key]); // reported: got int|float|string</span>
-</code></pre></div>
-<p>Indexing a literal array with a non-literal key resolves the value to the
-union of the literal array's <em>base</em> member types (<code>int|float|string</code>)
-instead of the union of the <em>specific literal values</em> it was written with
-(<code>1|1.5|'123'</code>). The distinction matters for a return type like <code>@return
-numeric</code>: each literal individually satisfies <code>numeric</code> (<code>1</code>, <code>1.5</code>, and
-<code>'123'</code> are all trivially numeric), but the widened <code>string</code> member cannot be
-proven numeric on its own, so a value that is provably <code>numeric</code> at every
-possible branch is reported as a mismatch.</p>
-<p>Only Qodana passes this case in <code>php-typing-conformance</code>'s corpus (<code>phpy</code> and
-Intelephense do not), so the signal is weaker than the other entries here.</p>
-<p><strong>Fix:</strong> preserve literal member types through a dynamic-key array access the
-same way a literal-key access already does, rather than widening to base
-scalar types as soon as the key stops being a compile-time constant.</p>
 <h3 id="b134-a-constant-operand-is-only-read-where-a-template-is-bound">B134. A constant operand is only read where a <code>@template</code> is bound<a class="headerlink" href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">/** @param key-of&lt;ID_TABLE&gt; $key */</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">function acceptsKey(string $key): void {}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">/** @return value-of&lt;ID_TABLE&gt; */</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">function anyValue() { return 1; }</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">acceptsKey(&#39;nope&#39;);            // not reported: should be &#39;immutable&#39;|&#39;mutable&#39;</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">takesInt(anyValue());          // not reported: should be int|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">/** @param key-of&lt;ID_TABLE&gt; $key */</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">function acceptsKey(string $key): void {}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">/** @return value-of&lt;ID_TABLE&gt; */</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">function anyValue() { return 1; }</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">acceptsKey(&#39;nope&#39;);            // not reported: should be &#39;immutable&#39;|&#39;mutable&#39;</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">takesInt(anyValue());          // not reported: should be int|string</span>
 </code></pre></div>
 <p>A constant holding an array literal is now read as its own array shape, so
 <code>key-of&lt;ID_TABLE&gt;</code> and <code>ID_TABLE[K]</code> evaluate — but only along the path that
@@ -1571,6 +1551,24 @@ containing an unevaluated operator is read, not only from
 <code>ResolutionCtx</code> while the sites that read those types (the argument
 compatibility check, the untemplated return path) have varying access to
 one, so the shared entry point has to come first.</p>
+<h3 id="b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default">B135. A conditional return type is not resolved from an argument's default<a class="headerlink" href="#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function test(string $s): int {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    return str_word_count($s);          // reported: got array&lt;string&gt;|int</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>str_word_count()</code>'s return type depends on its <code>$format</code> argument: <code>0</code>
+(the default) returns <code>int</code>, <code>1</code> and <code>2</code> return <code>array&lt;string&gt;</code>. Neither
+the passed value nor the declared default narrows it, so every call reads
+back the full union and any use in a typed position is reported. Passing
+<code>1</code> explicitly is equally unresolved, so <code>return str_word_count($s, 1);</code>
+from an <code>array</code> return type is reported too.</p>
+<p>This is what <code>examples/laravel/app/View/Components/PostSummary.php:37</code>
+trips over, which is why the Laravel example reports four errors where
+<code>docs/CONTRIBUTING.md</code> documents three.</p>
+<p><strong>Fix:</strong> resolve a conditional return type against the call's arguments,
+falling back to a parameter's declared default when the argument is
+omitted, rather than joining every branch.</p>
 
 
 
