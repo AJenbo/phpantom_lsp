@@ -937,17 +937,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B124. A ternary's truthy condition does not narrow its own then branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1525,17 +1514,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B124. A ternary's truthy condition does not narrow its own then branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1842,29 +1820,6 @@ demonstrates users expect it.</p>
 <p><strong>Fix:</strong> not investigated beyond confirming the annotation has no effect;
 would need a mechanism to re-bind a receiver's template arguments after a
 method call the way an assignment re-binds a variable's type.</p>
-<h3 id="b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch">B124. A ternary's truthy condition does not narrow its own then branch<a class="headerlink" href="#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @return string|false */</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function content() { return &#39;&#39;; }</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">$x = content();</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">useString($x ? $x : &#39;&#39;); // reported: got string|false</span>
-</code></pre></div>
-<p>The then branch of a full ternary is resolved with the cursor placed
-inside it (<code>resolve_conditional_chain</code>,
-<code>type_engine/variable/rhs_resolution/mod.rs</code>) precisely so the
-forward walker's condition narrowing applies there, and an <code>instanceof</code>
-condition does narrow that way. A <em>truthiness</em> condition on a plain
-variable does not: <code>if ($x) { … }</code> strips <code>null</code>/<code>false</code> from <code>$x</code>
-inside the block, but the equivalent ternary leaves the then branch
-reading the un-narrowed type, so the idiomatic <code>$x ? $x : $default</code>
-keeps the falsy members the ternary exists to replace. The short form
-(<code>$x ?: $default</code>) resolves correctly, since it narrows the reused
-condition directly rather than relying on the walker.</p>
-<p><strong>Fix:</strong> record the truthy-branch narrowing for a ternary condition the
-same way <code>apply_null_narrowing_truthy</code> records it for an <code>if</code>/<code>while</code>
-body, so the then branch's offset resolves against the narrowed scope
-instead of the declared one.</p>
 
 
 
