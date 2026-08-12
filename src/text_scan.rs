@@ -8,6 +8,8 @@
 //! track heredoc/nowdoc bodies and is a hot path over entire files; it is
 //! kept separate rather than routed through here.
 
+use std::borrow::Cow;
+
 /// Skip past a string literal starting at `pos` (which must point to the
 /// opening quote). Returns the position after the closing quote.
 pub(crate) fn skip_string_forward(bytes: &[u8], pos: usize) -> usize {
@@ -82,6 +84,142 @@ pub(crate) fn unquote_php_string(raw: &str) -> Option<&str> {
     raw.strip_prefix('\'')
         .and_then(|r| r.strip_suffix('\''))
         .or_else(|| raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
+}
+
+/// Decode a PHP string literal's source spelling (including its
+/// surrounding quotes) into the value PHP produces at runtime.
+///
+/// Single-quoted literals only recognize `\\` and `\'`; every other
+/// backslash is copied through unchanged. Double-quoted literals apply
+/// PHP's full escape table: control-character escapes (`\n`, `\t`, `\r`,
+/// `\v`, `\e`, `\f`), `\\`, `\"`, `\$`, hex byte escapes (`\xHH`), octal
+/// byte escapes (`\NNN`), and Unicode escapes (`\u{...}`).
+///
+/// Returns `None` when `raw` is not a quoted literal, or when a
+/// `\u{...}` escape encodes a code point PHP itself would reject
+/// (out of range, or a surrogate half).
+pub(crate) fn decode_php_string_literal(raw: &str) -> Option<Cow<'_, str>> {
+    let (double_quoted, content) =
+        if let Some(r) = raw.strip_prefix('\'').and_then(|r| r.strip_suffix('\'')) {
+            (false, r)
+        } else {
+            let r = raw.strip_prefix('"').and_then(|r| r.strip_suffix('"'))?;
+            (true, r)
+        };
+
+    if !content.contains('\\') {
+        return Some(Cow::Borrowed(content));
+    }
+
+    let bytes = content.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b != b'\\' {
+            result.push(b);
+            i += 1;
+            continue;
+        }
+        let Some(&next) = bytes.get(i + 1) else {
+            result.push(b'\\');
+            i += 1;
+            continue;
+        };
+        let mut consumed = 2;
+        if !double_quoted {
+            match next {
+                b'\\' => result.push(b'\\'),
+                b'\'' => result.push(b'\''),
+                _ => {
+                    result.push(b'\\');
+                    result.push(next);
+                }
+            }
+        } else {
+            match next {
+                b'\\' => result.push(b'\\'),
+                b'"' => result.push(b'"'),
+                b'$' => result.push(b'$'),
+                b'n' => result.push(b'\n'),
+                b't' => result.push(b'\t'),
+                b'r' => result.push(b'\r'),
+                b'v' => result.push(0x0B),
+                b'e' => result.push(0x1B),
+                b'f' => result.push(0x0C),
+                b'x' => {
+                    let mut value = 0u8;
+                    let mut len = 0;
+                    while len < 2 {
+                        let Some(digit) = bytes
+                            .get(i + 2 + len)
+                            .and_then(|c| (*c as char).to_digit(16))
+                        else {
+                            break;
+                        };
+                        value = value * 16 + digit as u8;
+                        len += 1;
+                    }
+                    if len > 0 {
+                        result.push(value);
+                        consumed = 2 + len;
+                    } else {
+                        result.push(b'\\');
+                        result.push(b'x');
+                    }
+                }
+                b'u' if bytes.get(i + 2) == Some(&b'{') => {
+                    let mut code_point: u32 = 0;
+                    let mut len = 0;
+                    let mut overflowed = false;
+                    while let Some(digit) = bytes
+                        .get(i + 3 + len)
+                        .and_then(|c| (*c as char).to_digit(16))
+                    {
+                        match code_point
+                            .checked_mul(16)
+                            .and_then(|v| v.checked_add(digit))
+                        {
+                            Some(v) => code_point = v,
+                            None => {
+                                overflowed = true;
+                                break;
+                            }
+                        }
+                        len += 1;
+                    }
+                    let closed = bytes.get(i + 3 + len) == Some(&b'}');
+                    let ch = (len > 0 && !overflowed && closed)
+                        .then(|| char::from_u32(code_point))
+                        .flatten()?;
+                    let mut buf = [0u8; 4];
+                    result.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                    consumed = 4 + len;
+                }
+                b'0'..=b'7' => {
+                    let mut value: u16 = (next - b'0') as u16;
+                    let mut len = 1;
+                    while len < 3 {
+                        let Some(&d) = bytes.get(i + 1 + len).filter(|c| (b'0'..=b'7').contains(c))
+                        else {
+                            break;
+                        };
+                        value = value * 8 + (d - b'0') as u16;
+                        len += 1;
+                    }
+                    result.push(value as u8);
+                    consumed = 1 + len;
+                }
+                _ => {
+                    result.push(b'\\');
+                    result.push(next);
+                }
+            }
+        }
+        i += consumed;
+    }
+
+    String::from_utf8(result).ok().map(Cow::Owned)
 }
 
 /// Return the namespace in force at `offset`, or `None` for the global

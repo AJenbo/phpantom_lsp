@@ -17,6 +17,7 @@
 ///   arguments were provided (or none were preserved); walks the
 ///   conditional tree taking the "null default" branch at each level.
 use crate::atom::atom;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -465,7 +466,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             } else if let TypeKind::Literal(lit) = condition.kind() {
                 let expected = lit
                     .string_content()
-                    .map(ToOwned::to_owned)
+                    .map(Cow::into_owned)
                     .unwrap_or_else(|| lit.as_raw());
 
                 // Check if the argument is a quoted string literal
@@ -1378,7 +1379,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
             } else if let TypeKind::Literal(lit) = condition.kind() {
                 let expected = lit
                     .string_content()
-                    .map(ToOwned::to_owned)
+                    .map(Cow::into_owned)
                     .unwrap_or_else(|| lit.as_raw());
 
                 // Check if the argument is a string literal matching
@@ -1643,12 +1644,12 @@ fn try_resolve_with_template_default(
     } else if let TypeKind::Literal(lit) = condition.kind() {
         let expected = lit
             .string_content()
-            .map(ToOwned::to_owned)
+            .map(Cow::into_owned)
             .unwrap_or_else(|| lit.as_raw());
         match default_value.kind() {
             TypeKind::Literal(dv) => {
                 dv.string_content()
-                    .map(ToOwned::to_owned)
+                    .map(Cow::into_owned)
                     .unwrap_or_else(|| dv.as_raw())
                     == expected
             }

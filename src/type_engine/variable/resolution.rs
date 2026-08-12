@@ -1931,23 +1931,15 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
                 true
             }
             TypeKind::Literal(value) if matches!(&**value, LiteralValue::String(_)) => {
-                if let Some(content) = value.plain_string_content() {
-                    push_unique(
-                        normalized,
-                        if is_decimal_int_array_key(content) {
-                            PhpType::int()
-                        } else {
-                            PhpType::string()
-                        },
-                    );
-                } else {
-                    // Quote-specific escape decoding is not represented in
-                    // LiteralValue. The runtime key may therefore be a
-                    // canonical decimal string (for example `"\x38"`), so
-                    // retain both legal PHP array-key domains.
-                    push_unique(normalized, PhpType::int());
-                    push_unique(normalized, PhpType::string());
-                }
+                let content = value.string_content().unwrap_or_default();
+                push_unique(
+                    normalized,
+                    if is_decimal_int_array_key(&content) {
+                        PhpType::int()
+                    } else {
+                        PhpType::string()
+                    },
+                );
                 true
             }
             _ if ty.is_array_key() => {

@@ -565,7 +565,7 @@ fn hash_for_dedup<H: Hasher>(ty: &PhpType, state: &mut H) {
             }
             LiteralValue::String(raw) => {
                 2_u8.hash(state);
-                match value.plain_string_content() {
+                match value.string_content() {
                     Some(content) => {
                         0_u8.hash(state);
                         content.hash(state);

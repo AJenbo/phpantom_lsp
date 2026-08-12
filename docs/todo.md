@@ -104,7 +104,6 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B83 | [A partially-compatible union argument is not reported](todo/bugs.md#b83-a-partially-compatible-union-argument-is-not-reported)                                        | Medium      | Low-Medium  |
-| B84 | [A class name written with an escaped backslash is never resolved](todo/bugs.md#b84-a-class-name-written-with-an-escaped-backslash-is-never-resolved)                       | Low-Medium  | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

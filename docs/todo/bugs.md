@@ -39,35 +39,3 @@ will raise at runtime for the `string` case.
 Fix: change the union-argument compatibility check so every member of
 the argument type must satisfy the parameter type, and report the
 offending members in the message.
-
----
-
-### B84. A class name written with an escaped backslash is never resolved
-
-**Impact: Low-Medium · Effort: Low**
-
-`LiteralValue::string_content` hands back the text between the quotes
-without applying PHP's escape rules, so `'App\\Model'` and `"App\\Model"`
-arrive as `App\\Model`, two backslashes where the runtime value has
-one. Every check that resolves a string literal to a class silently
-gives up on that spelling, because an unloadable name is (correctly)
-treated as one we simply have not indexed:
-
-```php
-/** @param class-string<\Throwable> $name */
-function takesThrowable(string $name): void {}
-
-takesThrowable('App\Model');    // reported: App\Model is not a Throwable
-takesThrowable('App\\Model');   // silent: the same value, not resolved
-```
-
-The same applies to the `interface-string` check next to it and to
-Larastan's `model-property<Model>` literal check, and to the
-double-quoted spelling of either, which is how a name pasted out of a
-double-quoted context is usually written.
-
-**Fix:** decode the literal in `string_content` the way PHP does per
-quote style (`\\` and `\'` for single quotes, the full escape table for
-double quotes) rather than returning the raw source text.
-`plain_string_content` exists precisely because the decoder does not,
-and can go once it does.

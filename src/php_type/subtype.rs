@@ -775,7 +775,7 @@ pub(crate) fn literals_equal(left: &LiteralValue, right: &LiteralValue) -> bool 
             }
         }
         (LiteralValue::String(left_raw), LiteralValue::String(right_raw)) => {
-            match (left.plain_string_content(), right.plain_string_content()) {
+            match (left.string_content(), right.string_content()) {
                 (Some(left), Some(right)) => left == right,
                 _ => left_raw == right_raw,
             }

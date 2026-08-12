@@ -508,10 +508,10 @@ pub(crate) fn is_type_compatible(
                     class_loader,
                     crate::virtual_members::active_resolved_class_cache(),
                 );
-                let found = resolved.properties.iter().any(|p| &*p.name == prop_name)
+                let found = resolved.properties.iter().any(|p| *p.name == *prop_name)
                     || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
                         .iter()
-                        .any(|col| col == prop_name);
+                        .any(|col| *col == *prop_name);
                 return found;
             }
             return true;

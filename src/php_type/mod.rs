@@ -15,6 +15,7 @@
 //! `PhpType::parse()` never fails. If the input cannot be parsed or mapped,
 //! it returns `PhpType::raw(input)`.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -313,25 +314,18 @@ impl LiteralValue {
         }
     }
 
-    pub fn string_content(&self) -> Option<&str> {
+    /// Return the runtime value of a string literal, decoding quote-specific
+    /// escapes (`'x\\y'` and `"x\y"` both yield `x\y`) so callers can compare
+    /// or resolve by the literal's actual value rather than its spelling.
+    pub fn string_content(&self) -> Option<Cow<'_, str>> {
         let LiteralValue::String(raw) = self else {
             return None;
         };
-        crate::text_scan::unquote_php_string(raw).or(Some(raw))
-    }
-
-    /// Return the unquoted content when its source spelling has no escapes.
-    ///
-    /// Plain single- and double-quoted literals can be compared by content
-    /// (`'x'` and `"x"` are the same runtime value). Once a backslash occurs,
-    /// PHP applies quote-specific escape rules, so callers that do not perform
-    /// a full decoder must conservatively compare the raw source spelling.
-    pub(crate) fn plain_string_content(&self) -> Option<&str> {
-        let LiteralValue::String(raw) = self else {
-            return None;
-        };
-        let content = crate::text_scan::unquote_php_string(raw)?;
-        (!content.contains('\\')).then_some(content)
+        Some(
+            crate::text_scan::decode_php_string_literal(raw).unwrap_or_else(|| {
+                Cow::Borrowed(crate::text_scan::unquote_php_string(raw).unwrap_or(raw))
+            }),
+        )
     }
 
     pub fn parse_i64(&self) -> Option<i64> {
@@ -349,7 +343,8 @@ impl LiteralValue {
     }
 
     pub fn is_numeric_string(&self) -> bool {
-        self.string_content().is_some_and(is_php_numeric_string)
+        self.string_content()
+            .is_some_and(|content| is_php_numeric_string(&content))
     }
 }
 

@@ -148,7 +148,10 @@ fn proxy_name_and_args(type_hint: Option<&PhpType>) -> Option<(Atom, &[PhpType])
 /// Only used for the proxied method name, which never contains an escape
 /// sequence, so the raw literal spelling is the content.
 fn literal_text(ty: &PhpType) -> Option<&str> {
-    ty.as_literal().and_then(|literal| literal.string_content())
+    match ty.as_literal()?.string_content()? {
+        std::borrow::Cow::Borrowed(s) => Some(s),
+        std::borrow::Cow::Owned(_) => None,
+    }
 }
 
 // ─── Member injection ───────────────────────────────────────────────────────

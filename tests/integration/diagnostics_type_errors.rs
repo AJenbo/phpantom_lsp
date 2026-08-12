@@ -1961,6 +1961,53 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_escaped_backslash_string_literal_naming_subclass() {
+    // `'App\\Vehicle'` is the single-quoted spelling of the runtime value
+    // `App\Vehicle` (PHP decodes `\\` to `\`). The literal's decoded content,
+    // not its source spelling, must resolve to the class.
+    let php = r#"<?php
+namespace App;
+
+class Animal {}
+class Vehicle extends Animal {}
+
+/** @param class-string<\App\Animal> $cls */
+function takes_animal_class(string $cls): void {}
+
+function test(): void {
+    takes_animal_class('App\\Vehicle');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag 'App\\\\Vehicle' passed to class-string<App\\Animal>, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_escaped_backslash_string_literal_naming_unrelated_class() {
+    let php = r#"<?php
+namespace App;
+
+class Animal {}
+class Vehicle {}
+
+/** @param class-string<\App\Animal> $cls */
+function takes_animal_class(string $cls): void {}
+
+function test(): void {
+    takes_animal_class('App\\Vehicle');
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Should flag 'App\\\\Vehicle' passed to class-string<App\\Animal> once the escaped literal is resolved, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_union_of_class_strings_bound_by_template() {
     // Regression: `$className` iterated over a class-constant array is a
     // union of `class-string`s.  Passing it to a `@template T of Bound`

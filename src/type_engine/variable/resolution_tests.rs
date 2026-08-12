@@ -945,11 +945,13 @@ fn collection_key_normalization_preserves_non_numeric_string_domains() {
         normalize_array_key_type(&PhpType::named(atom("Number"))),
         None
     );
+    // `\x38` decodes to `"8"`, a canonical decimal integer key, once
+    // escapes are decoded.
     assert_eq!(
         normalize_array_key_type(&PhpType::literal_string_raw("\"\\x38\""))
             .unwrap()
             .to_string(),
-        "int|string"
+        "int"
     );
 }
 

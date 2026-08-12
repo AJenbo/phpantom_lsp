@@ -144,7 +144,7 @@ fn facade_accessor_class_name(ty: &PhpType, backend: Option<&Backend>) -> Option
         // core container alias table, same as the `::class` case above.
         TypeKind::Literal(value) => {
             let key = value.string_content()?;
-            backend?.container_alias_concrete_fqn(key)
+            backend?.container_alias_concrete_fqn(&key)
         }
         _ => None,
     }

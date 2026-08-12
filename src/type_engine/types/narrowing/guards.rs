@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::bytes_to_str;
-use crate::php_type::{LiteralValue, PhpType, TypeKind};
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ResolvedType};
 
 use mago_span::HasSpan;
@@ -950,14 +950,7 @@ fn narrow_single_type_to_numeric(ty: &PhpType) -> Option<PhpType> {
     // An exact non-numeric literal cannot become numeric merely because its
     // broad scalar type is string. Only an imprecise string-like type can be
     // refined to `numeric-string`.
-    if let TypeKind::Literal(literal) = ty.kind() {
-        if matches!(&**literal, LiteralValue::String(_)) && literal.plain_string_content().is_none()
-        {
-            // The raw spelling contains quote-specific escapes that this
-            // layer does not decode. Keep the feasible then-branch without
-            // claiming the exact literal is definitely numeric.
-            return Some(PhpType::parse("numeric-string"));
-        }
+    if matches!(ty.kind(), TypeKind::Literal(_)) {
         return None;
     }
     if ty.is_subtype_of(&PhpType::string()) {
@@ -1011,10 +1004,12 @@ mod tests {
     fn numeric_guard_accepts_only_numeric_string_literals() {
         let numeric_string = PhpType::literal_string_raw("'1.5'");
         let text = PhpType::literal_string_raw("'draft'");
+        // `\x31` decodes to `"1"`, a numeric string, once escapes are decoded.
         let escaped = PhpType::literal_string_raw("\"\\x31\"");
 
         assert!(type_matches_guard(&numeric_string, TypeGuardKind::Numeric));
         assert!(!type_matches_guard(&text, TypeGuardKind::Numeric));
+        assert!(type_matches_guard(&escaped, TypeGuardKind::Numeric));
         assert_eq!(
             filter_type_by_guard(&numeric_string, TypeGuardKind::Numeric, true),
             None
@@ -1033,7 +1028,7 @@ mod tests {
         );
         assert_eq!(
             filter_type_by_guard(&escaped, TypeGuardKind::Numeric, true),
-            Some(PhpType::parse("numeric-string"))
+            None
         );
     }
 }

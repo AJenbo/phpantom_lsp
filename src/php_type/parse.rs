@@ -685,7 +685,7 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
 
 pub(crate) fn literal_or_named_shape_key(ty: &PhpType) -> Option<String> {
     match ty.kind() {
-        TypeKind::Literal(lit) => lit.string_content().map(ToOwned::to_owned),
+        TypeKind::Literal(lit) => lit.string_content().map(Cow::into_owned),
         TypeKind::Named(key) => Some(key.to_string()),
         _ => None,
     }

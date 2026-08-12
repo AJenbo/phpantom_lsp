@@ -578,10 +578,10 @@ pub(crate) fn is_subtype_of_typed(
                 class_loader,
                 crate::virtual_members::active_resolved_class_cache(),
             );
-            return resolved.properties.iter().any(|p| &*p.name == prop_name)
+            return resolved.properties.iter().any(|p| *p.name == *prop_name)
                 || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
                     .iter()
-                    .any(|col| col == prop_name);
+                    .any(|col| *col == *prop_name);
         }
         return true;
     }
@@ -606,7 +606,7 @@ pub(crate) fn is_subtype_of_typed(
         let Some(class_name) = lit.string_content() else {
             return true;
         };
-        let Some(cls) = class_loader(class_name) else {
+        let Some(cls) = class_loader(&class_name) else {
             return true;
         };
         if matches!(supertype.kind(), TypeKind::InterfaceString(_))
