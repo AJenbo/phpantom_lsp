@@ -1749,7 +1749,9 @@ impl PhpType {
                 if g.args.len() == 1
                     && matches!(
                         g.name.to_ascii_lowercase().as_str(),
-                        "list" | "non-empty-list"
+                        // A single-argument `array<T>` names its value type,
+                        // leaving the same implicit integer keys as `T[]`.
+                        "list" | "non-empty-list" | "array" | "non-empty-array"
                     ) =>
             {
                 Some(PhpType::int())

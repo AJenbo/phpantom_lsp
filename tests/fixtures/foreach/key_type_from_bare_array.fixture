@@ -1,0 +1,11 @@
+// test: foreach key over a bare array keeps the full array-key domain
+// feature: hover
+// expect: $k = int|string
+---
+<?php
+
+function f(array $rows): void {
+    foreach ($rows as $k => $row) {
+        $<>k;
+    }
+}

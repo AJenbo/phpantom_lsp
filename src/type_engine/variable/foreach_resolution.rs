@@ -88,11 +88,13 @@ pub(crate) fn iteration_value_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -
 /// The type `foreach ($expr as $key => $value)` binds `$key` to, given
 /// the iterable's own resolved type.
 ///
-/// `None` when the iterable says nothing about its keys — a `list<T>` has
-/// no key slot of its own, and the caller falls back to `int|string`.
+/// `None` when the iterable says nothing about its keys — a bare `array`
+/// carries no key information, and the caller falls back to `int|string`.
 pub(crate) fn iteration_key_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -> Option<PhpType> {
-    if let Some(kt) = iter_type.extract_key_type(false) {
-        return Some(kt.clone());
+    // `iterable_key_type` (rather than `extract_key_type`) so the implicit
+    // keys of a list, a `T[]`, and an array shape come out explicit.
+    if let Some(kt) = iter_type.iterable_key_type() {
+        return Some(kt);
     }
     let key_type = resolve_iterable_key_via_class(iter_type, ctx)?;
     (!is_unsubstituted_template_param(&key_type)).then_some(key_type)

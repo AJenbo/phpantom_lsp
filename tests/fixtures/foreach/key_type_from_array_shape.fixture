@@ -1,0 +1,13 @@
+// test: foreach key over an array shape with string keys is string
+// feature: hover
+// expect: $k = string
+// expect_absent: int|string
+---
+<?php
+
+/** @param array{name: string, city: string} $row */
+function f(array $row): void {
+    foreach ($row as $k => $v) {
+        $<>k;
+    }
+}

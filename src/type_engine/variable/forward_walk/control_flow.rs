@@ -1657,7 +1657,7 @@ pub(crate) fn bind_foreach_key<'b>(
 ) {
     if let Expression::Variable(Variable::Direct(dv)) = key_expr {
         let var_name = bytes_to_str(dv.name).to_string();
-        // A bare `list<T>` says nothing about its keys, and neither does an
+        // A bare `array` says nothing about its keys, and neither does an
         // untyped iterable: both leave the key `int|string`.
         let key_type = iter_type.as_ref().and_then(|it| {
             crate::type_engine::variable::foreach_resolution::iteration_key_type(

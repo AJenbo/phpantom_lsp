@@ -2217,6 +2217,18 @@ class IterationDemo
             $pencil->sketch();            // Pencil (value type)
         }
 
+        // Scalar key types: the key comes from what is being iterated
+        foreach ($src->allPens() as $listKey => $listPen) {
+            abs($listKey);                // int (list keys are ints, not int|string)
+            $listPen->write();
+        }
+        /** @var array{tool: Pen, spare: Pen} $kit */
+        $kit = ['tool' => new Pen(), 'spare' => new Pen()];
+        foreach ($kit as $shapeKey => $shapePen) {
+            strlen($shapeKey);            // string (this shape's keys are all strings)
+            $shapePen->write();
+        }
+
         // WeakMap keys
         /** @var \WeakMap<Pen, Pencil> $mapping */
         $mapping = new \WeakMap();
@@ -8102,6 +8114,20 @@ function runDemoAssertions(): void
     foreach ($foreachDestrInv as ['tool' => $fTool, 'count' => $fCount]) {
         assert($fTool instanceof Pen, 'Foreach destructured tool must be Pen');
         assert(is_int($fCount), 'Foreach destructured count must be int');
+    }
+
+    // ── Foreach key types ───────────────────────────────────────────────
+    /** @var list<Pen> $keyedPens */
+    $keyedPens = [new Pen(), new Pen()];
+    foreach ($keyedPens as $listKey => $listPen) {
+        assert(is_int($listKey), 'A list foreach key must be int');
+        assert($listPen instanceof Pen, 'A list foreach value must be Pen');
+    }
+    /** @var array{tool: Pen, spare: Pen} $keyedKit */
+    $keyedKit = ['tool' => new Pen(), 'spare' => new Pen()];
+    foreach ($keyedKit as $shapeKey => $shapePen) {
+        assert(is_string($shapeKey), 'A string-keyed shape foreach key must be string');
+        assert($shapePen instanceof Pen, 'A shape foreach value must be Pen');
     }
 
     // ── Dynamic (non-literal) key on a shape ────────────────────────────

@@ -1,0 +1,13 @@
+// test: foreach key over a list is int, not the full array-key domain
+// feature: hover
+// expect: $i = int
+// expect_absent: int|string
+---
+<?php
+
+/** @param list<int> $xs */
+function f(array $xs): void {
+    foreach ($xs as $i => $x) {
+        $<>i;
+    }
+}

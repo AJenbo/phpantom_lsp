@@ -1,0 +1,13 @@
+// test: foreach key over a `T[]` annotation is int
+// feature: hover
+// expect: $k = int
+// expect_absent: int|string
+---
+<?php
+
+/** @param string[] $names */
+function f(array $names): void {
+    foreach ($names as $k => $name) {
+        $<>k;
+    }
+}

@@ -1,0 +1,14 @@
+// test: writing through a list's foreach key does not widen the array key type
+// feature: hover
+// expect: $rows = array<int, int>
+---
+<?php
+
+/** @param list<int> $xs */
+function f(array $xs): void {
+    $rows = [];
+    foreach ($xs as $i => $x) {
+        $rows[$i] = $x;
+    }
+    $<>rows;
+}

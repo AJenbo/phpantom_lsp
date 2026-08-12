@@ -671,6 +671,25 @@ fn iterable_key_type_normalizes_explicit_numeric_shape_keys() {
 }
 
 #[test]
+fn iterable_key_type_makes_implicit_int_keys_explicit() {
+    for spelling in [
+        "list<User>",
+        "non-empty-list<User>",
+        "array<User>",
+        "non-empty-array<User>",
+        "User[]",
+    ] {
+        assert_eq!(
+            PhpType::parse(spelling).iterable_key_type().unwrap(),
+            PhpType::int(),
+            "{spelling}"
+        );
+    }
+    // A bare `array` names no key domain at all.
+    assert_eq!(PhpType::parse("array").iterable_key_type(), None);
+}
+
+#[test]
 fn iterable_key_type_keeps_object_shape_keys_as_strings() {
     for shape in [r#"object{'0': User}"#, r#"object{"\x38": User}"#] {
         assert_eq!(

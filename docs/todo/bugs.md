@@ -387,30 +387,3 @@ condition directly rather than relying on the walker.
 same way `apply_null_narrowing_truthy` records it for an `if`/`while`
 body, so the then branch's offset resolves against the narrowed scope
 instead of the declared one.
-
-### B128. A `foreach` key variable is left untyped
-
-**Impact: Medium · Effort: Medium**
-
-```php
-/** @param list<int> $xs */
-function f(array $xs): void {
-    foreach ($xs as $i => $x) {
-        $i;  // declared: int
-             // inferred: nothing (falls through to mixed)
-    }
-}
-```
-
-The value variable of a `foreach` is resolved from the subject's element
-type, but the key variable is not resolved at all, for a `list<T>`, an
-`array<K, V>`, or an array shape alike. Every consumer that asks what
-`$i` is gets nothing and falls back to `mixed`, so an argument check on
-the key says nothing and a keyed write through it (`$rows[$i] = …`)
-widens the array's key type to `int|string` even where the subject is a
-list and the key can only be `int`.
-
-**Fix:** bind the key variable alongside the value variable in the
-`foreach` handler (`type_engine/variable/forward_walk/control_flow.rs`),
-taking its type from `iterable_key_type()` on the resolved subject the
-same way the value variable takes `iterable_element_type()`.
