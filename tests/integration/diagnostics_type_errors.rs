@@ -8663,3 +8663,115 @@ function run(array $items): void {
     let messages = type_error_messages(&collect_slow(php));
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
+
+// ─── Benevolent builtins ────────────────────────────────────────────────────
+
+/// `tempnam()` declares `string|false`, but the failure branch fires only
+/// when the temp directory itself is broken, so idiomatic PHP passes the
+/// result straight on. PHPStan tags these builtins `__benevolent<>` and
+/// stops enforcing the branch; PHPantom borrows the same list.
+#[test]
+fn a_builtin_whose_failure_branch_nobody_checks_is_not_enforced() {
+    let php = r#"<?php
+function takesString(string $path): void {}
+
+function test(): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    takesString($tmp);
+    takesString(tempnam(sys_get_temp_dir(), 'y'));
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The leniency is tied to the specific builtins on the list, not to
+/// `|false` in general: an ordinary function that can fail is still a
+/// function whose failure the caller has to deal with.
+#[test]
+fn an_ordinary_failure_branch_is_still_enforced() {
+    let php = r#"<?php
+function takesString(string $path): void {}
+
+/** @return string|false */
+function mightFail() { return false; }
+
+function test(): void {
+    $value = mightFail();
+    takesString($value);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(
+        messages.iter().any(|m| m.contains("false")),
+        "expected the `false` branch to still be reported, got {messages:?}"
+    );
+}
+
+/// `strpos()` is deliberately *not* on the list: its `false` means "not
+/// found", which is an answer the caller is expected to read.
+#[test]
+fn a_failure_branch_that_carries_meaning_is_still_enforced() {
+    let php = r#"<?php
+function takesInt(int $offset): void {}
+
+function test(): void {
+    $pos = strpos('haystack', 'needle');
+    takesInt($pos);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(
+        messages.iter().any(|m| m.contains("false")),
+        "expected strpos's `false` to still be reported, got {messages:?}"
+    );
+}
+
+/// Leniency is a diagnostic policy, not a claim about the value: the union
+/// stays intact, so a caller that *does* check the failure branch still
+/// narrows through it.
+#[test]
+fn a_benevolent_result_still_narrows_on_an_identity_check() {
+    let php = r#"<?php
+function takesString(string $path): void {}
+
+function test(): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    if ($tmp === false) {
+        return;
+    }
+    takesString($tmp);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+/// `DOMNode::appendChild()` is benevolent *and* templated
+/// (`@return TNode|false`), so the marker has to survive both the template
+/// substitution and the union simplification that follow it.
+#[test]
+fn a_benevolent_return_survives_template_substitution() {
+    let php = r#"<?php
+function takesNode(DOMNode $n): void {}
+
+class Holder {
+    private DOMNode $node;
+    public function fill(DOMDocument $dom): void {
+        $this->node = $dom->appendChild($dom->createElement('x'));
+    }
+}
+
+function test(DOMDocument $dom): void {
+    takesNode($dom->createElement('y'));
+    takesNode($dom->appendChild($dom->createElement('z')));
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
+    backend.collect_property_type_diagnostics(uri, php, &mut out);
+    let messages: Vec<String> = out.iter().map(|d| d.message.clone()).collect();
+    assert!(messages.is_empty(), "got {messages:?}");
+}

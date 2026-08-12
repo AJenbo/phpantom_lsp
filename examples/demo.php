@@ -4831,6 +4831,46 @@ class CoverageFunctionTargetDemo
 {
 }
 
+// ── Builtins whose failure branch is conventionally never checked ───────────
+//
+// `tempnam()` is declared `string|false`, and so are a couple of hundred other
+// builtins whose `false` only appears when something has gone wrong that the
+// caller could not do anything about locally.  Real code passes the result
+// straight on, and PHPantom follows PHPStan in not reporting that.
+//
+// The union itself is untouched: hover on `$tmp` below still reads
+// `string|false`, and a caller that does check the branch still narrows
+// through it.  Only the argument/property/return checks stop insisting on it.
+
+class BenevolentBuiltinDemo
+{
+    /** No diagnostic: tempnam()'s `false` is not worth reporting. */
+    public function writeReport(string $body): string
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'report');   // string|false
+        file_put_contents($tmp, $body);                 // $filename expects string
+
+        return $tmp;
+    }
+
+    /** Checking the branch still narrows it away. */
+    public function writeCheckedReport(string $body): ?string
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'report');
+        if ($tmp === false) {
+            return null;                                // $tmp is false here
+        }
+        file_put_contents($tmp, $body);                 // $tmp is string here
+
+        return $tmp;
+    }
+}
+
+// The leniency is tied to the listed builtins, not to `|false` at large.
+// `strpos()` is deliberately not on the list: its `false` means "not found",
+// which is an answer the caller is meant to read, so
+// `takesInt(strpos($h, $n))` is still reported.
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
@@ -8380,6 +8420,14 @@ function runDemoAssertions(): void
     // ── Lazy initialisation inside a guarded `if` ───────────────────────
     $lazy = new LazyInitNarrowingDemo();
     assert($lazy->marker() instanceof Marker, 'a property assigned inside a guard keeps that type after the block');
+
+    // ── Builtins whose failure branch is never checked ──────────────────
+    $benevolent = new BenevolentBuiltinDemo();
+    $reportPath = $benevolent->writeReport('body');
+    assert(is_string($reportPath), 'tempnam() yields a usable path, so the |false branch never arrives');
+    assert(file_get_contents($reportPath) === 'body', 'the report was written to the temp file');
+    assert($benevolent->writeCheckedReport('checked') !== null, 'checking === false narrows to the string branch');
+    unlink($reportPath);
 
     // ── interface-string names an interface, not a class ────────────────
     assert(interface_exists(Printable::class), 'Printable::class is an interface-string');

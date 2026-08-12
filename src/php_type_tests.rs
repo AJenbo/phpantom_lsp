@@ -286,9 +286,12 @@ fn round_trip_key_of_value_of() {
 
 #[test]
 fn round_trip_int_range() {
-    assert_round_trip("int<0, 100>");
-    assert_round_trip("int<min, max>");
-    assert_round_trip("int<0, max>");
+    // Mago's `Display` renders a range with `..` (`int<0..100>`); the
+    // comma spelling is the one PHPStan and Psalm document and the one
+    // developers write, so ours is compared against itself here.
+    assert_round_trip_expected("int<0, 100>", "int<0, 100>");
+    assert_round_trip_expected("int<min, max>", "int<min, max>");
+    assert_round_trip_expected("int<0, max>", "int<0, max>");
 }
 
 #[test]
@@ -4574,4 +4577,36 @@ fn unevaluated_operators_widen_to_their_bounds() {
     );
     let concrete = PhpType::parse("list<string>");
     assert_eq!(concrete.unevaluated_operators_as_bounds(), concrete);
+}
+
+#[test]
+fn benevolence_is_invisible_to_readers_and_matchers() {
+    let ty = PhpType::parse("__benevolent<string|false>");
+    assert!(ty.is_benevolent());
+    // Nothing downstream should be able to tell the difference: the marker
+    // is a note about provenance, not a shape.
+    assert_eq!(ty.to_string(), "string|false");
+    assert!(matches!(ty.kind(), TypeKind::Union(members) if members.len() == 2));
+    assert_eq!(ty.strip_benevolence(), PhpType::parse("string|false"));
+}
+
+#[test]
+fn benevolence_needs_a_branch_to_be_lenient_about() {
+    // A lone type has no failure branch to waive, so it is left untagged
+    // rather than carrying a marker that can never mean anything.
+    assert!(!PhpType::parse("__benevolent<Foo>").is_benevolent());
+    assert!(!PhpType::benevolent(PhpType::string()).is_benevolent());
+    assert!(PhpType::benevolent(PhpType::parse("string|false")).is_benevolent());
+}
+
+#[test]
+fn benevolence_survives_a_rewrite() {
+    let ty = PhpType::parse("__benevolent<Foo|false>");
+    let resolved = ty.resolve_names(&|name| format!("App\\{name}"));
+    assert!(
+        resolved.is_benevolent(),
+        "resolving names must not drop the marker, got {resolved:?}"
+    );
+    assert_eq!(resolved.to_string(), "App\\Foo|false");
+    assert!(ty.shorten().is_benevolent());
 }

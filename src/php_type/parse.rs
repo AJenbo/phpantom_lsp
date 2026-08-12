@@ -304,10 +304,11 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                     let mut args: Vec<PhpType> =
                         params.entries.iter().map(|e| convert(&e.inner)).collect();
                     // PHPStan's `__benevolent<T>` wrapper marks a lenient
-                    // union; it is never a class. Treat the type as its
-                    // inner `T`.
+                    // union; it is never a class. It reads and resolves as
+                    // its inner `T`, with the leniency kept as a marker the
+                    // compatibility check consults.
                     if args.len() == 1 && name == "__benevolent" {
-                        return args.pop().unwrap();
+                        return PhpType::benevolent(args.pop().unwrap());
                     }
                     PhpType::generic(name, args)
                 }

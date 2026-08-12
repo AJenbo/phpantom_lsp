@@ -8,7 +8,10 @@ use super::*;
 
 impl fmt::Display for PhpType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind() {
+        match self.raw_kind() {
+            // The leniency marker is a note about where the type came from,
+            // not something a developer reading `string|false` should see.
+            TypeKind::Benevolent(inner) => write!(f, "{inner}"),
             TypeKind::Named(s) => write!(f, "{s}"),
             TypeKind::StaticType(bound) => write!(f, "static({bound})"),
             TypeKind::ThisType(bound) => write!(f, "$this({bound})"),
@@ -129,7 +132,7 @@ impl fmt::Display for PhpType {
 
             TypeKind::ValueOf(inner) => write!(f, "value-of<{inner}>"),
 
-            TypeKind::IntRange(min, max) => write!(f, "int<{min}..{max}>"),
+            TypeKind::IntRange(min, max) => write!(f, "int<{min}, {max}>"),
 
             TypeKind::IndexAccess(target, index) => write!(f, "{target}[{index}]"),
 

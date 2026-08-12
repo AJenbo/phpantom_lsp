@@ -70,10 +70,61 @@ pub(crate) use subtype::*;
 pub struct PhpType(Arc<TypeKind>);
 
 impl PhpType {
-    /// The interned node this handle points at.
+    /// The interned node this handle points at, with any
+    /// [`Benevolent`](TypeKind::Benevolent) marker seen through.
+    ///
+    /// Leniency is a note about where a type came from, not a shape, so it
+    /// must not change how the type is matched on. Use
+    /// [`raw_kind`](PhpType::raw_kind) to see the marker.
     #[inline]
     pub fn kind(&self) -> &TypeKind {
+        match &*self.0 {
+            TypeKind::Benevolent(inner) => &inner.0,
+            kind => kind,
+        }
+    }
+
+    /// The interned node this handle points at, marker and all.
+    ///
+    /// Only the type module itself should need this: the interner, the
+    /// `Display` impl, and the transforms that have to carry the marker
+    /// across a rewrite.
+    #[inline]
+    pub(crate) fn raw_kind(&self) -> &TypeKind {
         &self.0
+    }
+
+    /// Whether this type carries PHPStan's `__benevolent<>` leniency
+    /// marker.
+    #[inline]
+    pub fn is_benevolent(&self) -> bool {
+        matches!(&*self.0, TypeKind::Benevolent(_))
+    }
+
+    /// Tag `inner` as benevolent.
+    ///
+    /// A marker only means something on a union — it says "one of these
+    /// branches is the failure branch nobody checks" — so anything else is
+    /// returned untagged, and an already-tagged type is not tagged twice.
+    /// That keeps the marker at the very top of the type, which is what
+    /// lets [`kind`](PhpType::kind) see through it in one hop.
+    pub fn benevolent(inner: PhpType) -> PhpType {
+        if inner.is_benevolent() {
+            return inner;
+        }
+        if !matches!(inner.kind(), TypeKind::Union(_) | TypeKind::Nullable(_)) {
+            return inner;
+        }
+        TypeKind::Benevolent(inner).into()
+    }
+
+    /// This type without its leniency marker.
+    #[inline]
+    pub fn strip_benevolence(&self) -> PhpType {
+        match &*self.0 {
+            TypeKind::Benevolent(inner) => inner.clone(),
+            _ => self.clone(),
+        }
     }
 
     /// Address of the interned node, distinct for every distinct type as
@@ -94,7 +145,7 @@ impl Deref for PhpType {
 
     #[inline]
     fn deref(&self) -> &TypeKind {
-        &self.0
+        self.kind()
     }
 }
 
@@ -238,6 +289,27 @@ pub enum TypeKind {
 
     /// Fallback for anything we cannot parse or do not yet map.
     Raw(Box<str>),
+
+    /// PHPStan's `__benevolent<T>` marker: the inner union, tagged as one
+    /// whose failure branch is not worth enforcing.
+    ///
+    /// Deliberately invisible: [`PhpType::kind`] and the [`Deref`] impl
+    /// both see straight through it to the inner node, so every existing
+    /// `match ty.kind()` treats a benevolent `string|false` exactly as it
+    /// treats a plain one.  Narrowing, subtyping, hover and completion are
+    /// therefore unaffected, which is the point — the union is honest, and
+    /// only the code that explicitly asks (via [`PhpType::is_benevolent`])
+    /// gets to relax it.  [`PhpType::raw_kind`] is the way to see the
+    /// marker itself.
+    ///
+    /// The cost of that invisibility is that a transform which rebuilds a
+    /// type by matching on `kind()` drops the marker unless it matches on
+    /// `raw_kind()` and carries it across.  The ones on the path from a
+    /// stub return type to a diagnostic do (`resolve_names`, `substitute`,
+    /// `simplified`, `shorten`, the `self`/`static` replacements, …); a
+    /// transform that does not simply loses the leniency, which shows up
+    /// as the `|false` diagnostic coming back, never as a wrong type.
+    Benevolent(PhpType),
 }
 
 /// Payload of [`TypeKind::Generic`].
@@ -1395,7 +1467,8 @@ impl PhpType {
     /// - Unions/intersections of native types are preserved
     /// - `?T` → `?NativeT`
     pub fn to_native_hint(&self) -> Option<String> {
-        match self.kind() {
+        match self.raw_kind() {
+            TypeKind::Benevolent(inner) => inner.to_native_hint(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| n.to_string())
             }
@@ -1453,7 +1526,8 @@ impl PhpType {
     /// Like [`to_native_hint`] but returns a structured [`PhpType`] instead of a string,
     /// avoiding a parse round-trip.
     pub fn to_native_hint_typed(&self) -> Option<PhpType> {
-        match self.kind() {
+        match self.raw_kind() {
+            TypeKind::Benevolent(inner) => inner.to_native_hint_typed(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
@@ -2256,7 +2330,8 @@ impl PhpType {
     /// Operates on the structured type directly, avoiding a
     /// parse→check round-trip when the caller already has a `PhpType`.
     pub fn is_informative(&self) -> bool {
-        match self.kind() {
+        match self.raw_kind() {
+            TypeKind::Benevolent(inner) => inner.is_informative(),
             TypeKind::Generic(..) => true,
             TypeKind::ArrayShape(..) | TypeKind::ObjectShape(..) => true,
             TypeKind::Array(..) => true,
@@ -2315,7 +2390,8 @@ impl PhpType {
         if template_params.is_empty() {
             return false;
         }
-        match self.kind() {
+        match self.raw_kind() {
+            TypeKind::Benevolent(inner) => inner.references_any_template_param(template_params),
             TypeKind::Named(name) => template_params.iter().any(|p| p == name),
             TypeKind::Nullable(inner) => inner.references_any_template_param(template_params),
             TypeKind::Union(members) | TypeKind::Intersection(members) => members

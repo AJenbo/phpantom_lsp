@@ -30,6 +30,9 @@ impl PhpType {
     /// - Nested unions are flattened (`(A|B)|C` → `A|B|C`).
     /// - Nested intersections are flattened (`(A&B)&C` → `A&B&C`).
     pub fn simplified(&self) -> PhpType {
+        if let TypeKind::Benevolent(inner) = self.raw_kind() {
+            return PhpType::benevolent(inner.simplified());
+        }
         match self.kind() {
             TypeKind::Union(members) => {
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
@@ -126,6 +129,9 @@ impl PhpType {
     /// must not rewrite the type carried by `Box`.
     #[must_use]
     pub(crate) fn widen_scalar_literals(&self) -> PhpType {
+        if let TypeKind::Benevolent(inner) = self.raw_kind() {
+            return PhpType::benevolent(inner.widen_scalar_literals());
+        }
         match self.kind() {
             TypeKind::Literal(value) => match &**value {
                 LiteralValue::Int(_) => PhpType::int(),

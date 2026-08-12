@@ -45,6 +45,14 @@
 //!    return type (and thus the function's own return) stays in the
 //!    value-inspecting logic in `raw_type_inference.rs`.
 //!
+//! 4. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//!    `mktime` and the rest of [`crate::benevolent_builtins`] declare a
+//!    failure branch that idiomatic PHP never checks. Their return type is
+//!    tagged so the diagnostics stop enforcing that branch. Unlike the
+//!    patches above this one is applied by name lookup rather than a
+//!    hand-written function, because the list runs to a couple of hundred
+//!    entries.
+//!
 //! ### Class patches
 //!
 //! 1. **`WeakMap`** -- phpstorm-stubs have `@template TKey of object`,
@@ -76,6 +84,10 @@
 //!    `@param` is untyped `object|array`.  We bind `TKey`/`TValue` from
 //!    the `$array` argument, matching PHPStan's stubs.
 //!
+//! 7. **Benevolent methods** -- the class-level half of function patch 4,
+//!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
+//!    `DateTime::modify` and `Closure::bind`.
+//!
 //! ## Removing patches
 //!
 //! When phpstorm-stubs gains proper annotations for a patched symbol,
@@ -104,6 +116,20 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
         _ => {}
+    }
+    if crate::benevolent_builtins::function_is_benevolent(&func.name) {
+        mark_benevolent(&mut func.return_type);
+    }
+}
+
+/// Tag a return type as one whose failure branch is not worth enforcing.
+///
+/// The type is unchanged in every other respect — see
+/// [`crate::benevolent_builtins`] — and a return type that is not a union
+/// on this PHP version comes back untagged.
+fn mark_benevolent(return_type: &mut Option<PhpType>) {
+    if let Some(ty) = return_type.take() {
+        *return_type = Some(PhpType::benevolent(ty));
     }
 }
 
@@ -259,6 +285,33 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "CallbackFilterIterator" => patch_callback_filter_iterator(class),
         "ArrayIterator" => patch_array_iterator(class),
         _ => {}
+    }
+    mark_benevolent_methods(class);
+}
+
+/// Tag the class's benevolent methods (`Redis::get`, `SplFileInfo::getSize`,
+/// `DateTime::modify`, …) so their `|false` branch stops being enforced at
+/// call sites.
+fn mark_benevolent_methods(class: &mut ClassInfo) {
+    if !crate::benevolent_builtins::class_has_benevolent_methods(&class.name) {
+        return;
+    }
+    for idx in 0..class.methods.len() {
+        if !crate::benevolent_builtins::method_is_benevolent(&class.name, &class.methods[idx].name)
+        {
+            continue;
+        }
+        let Some(tagged) = class.methods[idx]
+            .return_type
+            .as_ref()
+            .map(|ty| PhpType::benevolent(ty.clone()))
+            .filter(|tagged| tagged.is_benevolent())
+        else {
+            continue;
+        };
+        let mut method = (*class.methods[idx]).clone();
+        method.return_type = Some(tagged);
+        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
     }
 }
 

@@ -158,6 +158,34 @@ pub(crate) fn is_type_compatible(
     // see the class-hierarchy section below for how the supertype-where-
     // subtype hatch was retired.
 
+    // A benevolent value came out of a builtin whose failure branch nobody
+    // checks (`tempnam()`, `curl_init()`, `Redis::get()`, …), so the union
+    // is satisfied as soon as one branch fits — the failure branch alone is
+    // not worth a diagnostic.  See `crate::benevolent_builtins` for why, and
+    // note that this relaxes nothing outside the diagnostics: the value
+    // keeps its full union everywhere else, so `=== false` still narrows and
+    // still reads as a live comparison.
+    if arg_type.is_benevolent() {
+        let stripped = arg_type.strip_benevolence();
+        let members: &[PhpType] = match stripped.kind() {
+            TypeKind::Union(members) => members,
+            _ => return is_type_compatible(&stripped, param_type, class_loader, strict_types),
+        };
+        return members
+            .iter()
+            .any(|member| is_type_compatible(member, param_type, class_loader, strict_types));
+    }
+    // A benevolent *parameter* is the same bargain read from the other side:
+    // it accepts whatever any of its branches accepts.
+    if param_type.is_benevolent() {
+        return is_type_compatible(
+            arg_type,
+            &param_type.strip_benevolence(),
+            class_loader,
+            strict_types,
+        );
+    }
+
     // A conditional that survived resolution (the call-site arguments that
     // would decide it were not available) is a type expression, not a set
     // of values — comparing a concrete type against it can only fail.

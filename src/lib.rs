@@ -219,6 +219,7 @@ pub fn configure_allocator() {
 pub mod analyse;
 pub mod atom;
 mod backend;
+pub mod benevolent_builtins;
 pub mod blade;
 pub(crate) mod call_args;
 pub mod ci_map;
