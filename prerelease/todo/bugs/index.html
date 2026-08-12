@@ -828,10 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b131-a-for-loops-condition-narrows-nothing" class="md-nav__link">
+  <a href="#b133-a-for-loops-increment-clause-never-updates-a-variables-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B131. A <code>for</code> loop's condition narrows nothing
+        B133. A <code>for</code> loop's increment clause never updates a variable's type
       </span>
     </span>
   </a>
@@ -1394,10 +1394,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b131-a-for-loops-condition-narrows-nothing" class="md-nav__link">
+  <a href="#b133-a-for-loops-increment-clause-never-updates-a-variables-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B131. A <code>for</code> loop's condition narrows nothing
+        B133. A <code>for</code> loop's increment clause never updates a variable's type
       </span>
     </span>
   </a>
@@ -1525,36 +1525,31 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b131-a-for-loops-condition-narrows-nothing">B131. A <code>for</code> loop's condition narrows nothing<a class="headerlink" href="#b131-a-for-loops-condition-narrows-nothing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @return string|false */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function readLine() { return false; }</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$line = readLine();</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">for (; $line !== false; $line = readLine()) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    useString($line);   // reported: got string|false</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">for (; ($row = fgetcsv($handle)) !== false; ) {</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    useCsvRow($row);    // reported: got array|false</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
+<h3 id="b133-a-for-loops-increment-clause-never-updates-a-variables-type">B133. A <code>for</code> loop's increment clause never updates a variable's type<a class="headerlink" href="#b133-a-for-loops-increment-clause-never-updates-a-variables-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Node {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public function __construct(public ?Node $next) {}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function useNode(Node $n): void {}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">for ($node = $head; $node !== null; $node = $node-&gt;next) {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    useNode($node);   // $node&#39;s type never reflects the reassignment</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>process_while</code> applies <code>apply_condition_narrowing</code> to its condition (and
-the inverse to the scope after the loop), and <code>process_for</code>
-(<code>type_engine/variable/forward_walk/control_flow.rs</code>) never applies
-either. It seeds assignments and pass-by-reference arguments out of its
-condition clauses, so the variable is in scope with the right type, but
-nothing rules out the sentinel the condition tests for. Every narrowing
-form is affected, not just the sentinel checks: an <code>instanceof</code>, an
-<code>isset</code>, and a <code>@phpstan-assert-if-true</code> predicate in a <code>for</code> condition
-are all ignored the same way.</p>
-<p><strong>Fix:</strong> narrow each condition clause the way <code>process_while</code> does, after
-seeding the condition's assignments and before walking the body, and
-apply the inverse to the post-loop scope. The fixed-point re-entry
-closure needs the same treatment so later trips through the body keep the
-narrowing. Comma-separated conditions are evaluated left to right and
-only the last one decides whether the body runs, so narrowing them in
-order matches PHP.</p>
+<p><code>process_for</code> (<code>type_engine/variable/forward_walk/control_flow.rs</code>) never
+runs <code>for_stmt.increments</code> through <code>process_assignment_expr</code> (or any other
+assignment handling). The increment clause's own span is only ever used
+for <code>record_scope_snapshot</code> (diagnostic hover/go-to-definition lookups on
+the <code>for</code> line itself); its effect on the variable's type is never fed
+back into the loop's fixed-point re-walk the way <code>for_stmt.initializations</code>
+is. So a hand-walked-iterator pattern where the increment reassigns a
+variable to a differently-typed value (e.g. <code>$node = $node-&gt;next()</code>)
+never has that reassignment reflected in the body or in the post-loop
+scope.</p>
+<p><strong>Fix:</strong> process <code>for_stmt.increments</code> with <code>process_assignment_expr</code>
+after each body walk (mirroring how <code>process_while</code>'s condition
+reassignment runs on each re-entry), and include the same processing in
+the fixed-point re-entry closure passed to <code>walk_loop_body_to_fixed_point</code>.</p>
 <h3 id="b129-arithmetic-on-a-refined-int-widens-to-intfloat">B129. Arithmetic on a refined int widens to <code>int|float</code><a class="headerlink" href="#b129-arithmetic-on-a-refined-int-widens-to-intfloat" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Low</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function total(string $text): int {</span>
