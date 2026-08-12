@@ -3594,6 +3594,22 @@ class TypeErrorDemo
 
         // No diagnostic — int widens to float:
         $this->requiresFloat(42);
+
+        // Type error — a `callable(...)` parameter states what the callee
+        // will do with the result, so a closure that returns something
+        // else breaks the contract on the first call:
+        $this->requiresUserMatcher(static fn (User $u): string => $u->getName());
+
+        // No diagnostic — the closure returns what the parameter promised:
+        $this->requiresUserMatcher(static fn (User $u): bool => $u->getName() !== '');
+
+        // Type error — the closure declares no return type, but its body
+        // resolves to one, and that is just as much a contradiction:
+        $this->requiresUserMatcher(static fn (User $u) => $u->getName());
+
+        // No diagnostic — a bare `Closure` carries no signature at all,
+        // so there is nothing to hold it to:
+        $this->requiresUserMatcher($this->makeMatcher());
     }
 
     private function requiresInt(int $value): void {}
@@ -3605,6 +3621,12 @@ class TypeErrorDemo
     private function requiresInterfaceName(string $name): void {}
     private function acceptsNullable(?string $text): void {}
     private function requiresFloat(float $value): void {}
+    /** @param callable(User): bool $matcher */
+    private function requiresUserMatcher(callable $matcher): void {}
+    private function makeMatcher(): \Closure
+    {
+        return static fn (User $u): bool => $u->getName() !== '';
+    }
 }
 
 

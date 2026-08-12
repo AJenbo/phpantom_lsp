@@ -898,7 +898,6 @@ than a case where nobody has solved it yet:
 | `arrays_shape_required_keys.php` | a required shape key missing from a literal array |
 | `assertions_assert_non_empty_list.php` | `assert()`-narrowed non-empty-list stays enforced downstream |
 | `callables_docblock_signature.php` | a `callable(int): string`-shaped docblock param against a mismatched closure |
-| `callables_return_type_mismatch.php` | a callable's declared return type against what it actually returns |
 | `generics_extends_implements.php` | a `@template` bound carried through `extends`/`implements` |
 | `generics_template_bound_array.php` | a `@template T of array` bound rejecting a non-array constructor argument |
 
@@ -915,9 +914,15 @@ the up-to-date pass/fail per tool).
 Each row needs its own root-cause pass — they were only confirmed
 silent (not misclassified), not yet traced to a specific resolver.
 Fix one at a time rather than as a single PR; several likely share a
-cause. The two remaining generics rows do not share one with the pair
-already closed: a mismatch between the *same* generic class' type
-arguments is now reported, but `generics_extends_implements.php` needs
+cause. `callables_docblock_signature.php` did not share one with the
+callable row already closed: a closure's *return* type reaches the
+compatibility check, but its parameter list is never recorded on the
+resolved `Callable` type, so the row needs the resolver to carry a
+closure's declared parameters before there is anything to compare
+against. The two remaining generics rows do not share a cause with the
+pair already closed either: a mismatch between the *same* generic
+class' type arguments is now reported, but
+`generics_extends_implements.php` needs
 a subclass' `@extends Box<int>` read as its ancestor's type arguments
 before the two sides have a common base to compare, and
 `generics_template_bound_array.php` needs a constructor argument

@@ -132,10 +132,16 @@ fn patch_array_map(func: &mut FunctionInfo) {
 }
 
 /// Link `array_filter`'s callback parameter to the input array's element
-/// type (the callback receives each element and returns a boolean).
+/// type (the callback receives each element and its result is tested for
+/// truthiness).
 ///
 /// Unlike `array_map`, `array_filter` takes the array first and the
 /// callback second: `array_filter(array $array, ?callable $callback, …)`.
+///
+/// The callback's return stays `mixed` because that is what PHP accepts:
+/// `array_filter($items, fn ($i) => preg_match($re, $i))` keeps every
+/// element the callback returns a truthy value for, and typing the
+/// return as `bool` would call that idiom a type error.
 fn patch_array_filter(func: &mut FunctionInfo) {
     let array_name = match func.parameters.first() {
         Some(p) if p.name.as_str() == "$array" => p.name,
@@ -145,7 +151,7 @@ fn patch_array_filter(func: &mut FunctionInfo) {
         Some(p) if p.name.as_str() == "$callback" => p.name,
         _ => return,
     };
-    link_callback_to_array_element(func, callback_name, array_name, "bool");
+    link_callback_to_array_element(func, callback_name, array_name, "mixed");
 }
 
 /// Shared helper: give `func` a single `TValue` template bound from the
@@ -718,7 +724,7 @@ mod tests {
         );
         assert_eq!(
             func.parameters[1].type_hint,
-            Some(PhpType::parse("callable(TValue): bool"))
+            Some(PhpType::parse("callable(TValue): mixed"))
         );
     }
 

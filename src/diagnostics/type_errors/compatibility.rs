@@ -245,6 +245,29 @@ pub(crate) fn is_type_compatible(
     {
         return true;
     }
+    // ── Callable specification ↔ callable specification ─────────
+    // Both sides carry a signature, so the return type — covariant,
+    // like any other value the caller receives back — is a real
+    // constraint to check.  It is also the half we can trust: a closure
+    // arrives here with a return type only when one was declared or
+    // resolved from its body, and with none at all when neither was
+    // possible.  Its parameter list is not recorded on the resolved type
+    // at all, so an empty `params` means "unknown", not "takes nothing",
+    // and parameters therefore stay a MAYBE.
+    //
+    // This has to come before the bare-`callable` rule below, which
+    // treats any two callable-ish types as compatible and would
+    // otherwise answer for the pair first.
+    if let (TypeKind::Callable(arg_sig), TypeKind::Callable(param_sig)) =
+        (arg_type.kind(), param_type.kind())
+    {
+        return match (&arg_sig.return_type, &param_sig.return_type) {
+            (Some(arg_return), Some(param_return)) => {
+                is_type_compatible(arg_return, param_return, class_loader, strict_types)
+            }
+            _ => true,
+        };
+    }
     // Skip when param type is `callable` and arg type is Closure, callable, string, array,
     // or any object-like type (which might implement `__invoke`).
     if param_type.is_callable()
@@ -341,7 +364,7 @@ pub(crate) fn is_type_compatible(
         return true;
     }
 
-    // ── Bare Closure/callable ↔ callable specification: MAYBE ───
+    // ── Bare Closure/callable → callable specification: MAYBE ───
     // When the param is a callable specification like
     // `Closure(Builder<X>): mixed` and the arg is a bare `Closure`
     // or `callable`, we can't verify the signature — stay silent.

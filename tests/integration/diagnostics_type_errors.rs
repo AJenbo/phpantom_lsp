@@ -8029,3 +8029,78 @@ acceptsClassString(returnsInterfaceString());
     let messages = type_error_messages(&collect(php));
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// A closure whose declared return type contradicts the one the parameter's
+/// `callable(...)` spelling promises is a mismatch the callee will hit on the
+/// first call, not a signature we merely failed to verify.
+#[test]
+fn callable_spec_rejects_a_closure_returning_the_wrong_type() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param callable(int): string $callback */
+function takesStringCallback(callable $callback): void {}
+
+takesStringCallback(static fn (int $value): string => (string) $value);
+takesStringCallback(static fn (int $value): int => $value);
+takesStringCallback(static function (int $value): int { return $value; });
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("return type int does not satisfy string")),
+        "{messages:?}"
+    );
+}
+
+/// A closure that declares no return type carries none on its resolved type,
+/// and neither does a first-class callable — both have to stay silent rather
+/// than be read as returning nothing.
+#[test]
+fn callable_spec_stays_silent_when_the_closure_declares_no_return_type() {
+    let php = r#"<?php
+namespace App;
+
+/** @param callable(int): string $callback */
+function takesStringCallback(callable $callback): void {}
+
+takesStringCallback(static fn (int $value) => $value);
+takesStringCallback(static function (int $value) { return $value; });
+takesStringCallback(strlen(...));
+takesStringCallback('strlen');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A `static` return type needs the class context the compatibility layer
+/// deliberately does not guess at, and a covariant one is not a mismatch.
+#[test]
+fn callable_spec_accepts_a_covariant_or_relative_closure_return_type() {
+    let php = r#"<?php
+namespace App;
+
+class Animal {}
+class Cat extends Animal {}
+
+class Shelter
+{
+    /** @param callable(int): Animal $factory */
+    public function register(callable $factory): void {}
+
+    /** @param callable(int): static $factory */
+    public function registerSelf(callable $factory): void {}
+
+    public function go(): void {
+        $this->register(static fn (int $i): Cat => new Cat());
+        $this->registerSelf(fn (int $i): static => $this);
+    }
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
