@@ -1515,17 +1515,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#t39-no-leniency-modelling-for-builtin-functions-whose-failure-branch-is-conventionally-never-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T39. No leniency modelling for builtin functions whose failure branch is conventionally never checked
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1973,17 +1962,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T38. Several core builtins have a return type that depends on an argument's value or shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#t39-no-leniency-modelling-for-builtin-functions-whose-failure-branch-is-conventionally-never-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T39. No leniency modelling for builtin functions whose failure branch is conventionally never checked
       </span>
     </span>
   </a>
@@ -2820,46 +2798,6 @@ of returning the raw stub union. Start with <code>json_encode</code>/<code>json_
 (<code>JSON_THROW_ON_ERROR</code> bit test) and the <code>preg_replace</code>/<code>str_replace</code>
 family (array-vs-string <code>$subject</code>), since those account for most of
 the volume found.</p>
-<hr />
-<h2 id="t39-no-leniency-modelling-for-builtin-functions-whose-failure-branch-is-conventionally-never-checked">T39. No leniency modelling for builtin functions whose failure branch is conventionally never checked<a class="headerlink" href="#t39-no-leniency-modelling-for-builtin-functions-whose-failure-branch-is-conventionally-never-checked" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$tmp = tempnam(sys_get_temp_dir(), &#39;x&#39;);</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">file_put_contents($tmp, $data); // reported: $filename expects string, got string|false</span>
-</code></pre></div>
-<p><code>tempnam()</code>, <code>fopen()</code> in several modes, <code>mkdir()</code>, <code>curl_init()</code>,
-<code>password_hash()</code>, <code>mktime()</code>, and roughly 200 other builtins declare a
-failure return (<code>false</code>, <code>-1</code>, …) that real-world code almost never
-checks, because the failure mode is either exceptionally rare or the
-caller would have nothing sensible to do about it locally anyway.
-PHPStan special-cases exactly this: its own function-reflection map
-wraps these functions' return types in <code>__benevolent&lt;T&gt;</code>, and its type
-checker only enforces the wrapped branch when the value is directly,
-strictly compared against it (<code>=== false</code>) — passing the value on to
-another function or storing it is not flagged. PHPantom enforces the
-full union everywhere with no equivalent leniency, so ordinary
-filesystem/network/date code that never checks these return values
-(idiomatic, and accepted by PHPStan at <code>level: max</code>) produces a steady
-stream of <code>type_mismatch_argument</code> false positives — nearly 300
-instances of a <code>|false</code> mismatch traceable to this pattern in the
-2026-08-12 sample-project sweep, spread across every project that
-touches the filesystem.</p>
-<p>Note PHPantom already parses the <code>__benevolent&lt;T&gt;</code> syntax (it can appear
-in a project's own docblocks) but discards the leniency entirely,
-unwrapping straight to the inner union (<code>php_type/parse.rs:309</code>,
-"treat the type as its inner <code>T</code>") — that unwrap is correct for a type
-<em>display</em> (there's nothing else <code>__benevolent&lt;T&gt;</code> could mean to a
-reader), but nothing downstream re-applies the leniency it named during
-argument/property/return compatibility checking.</p>
-<p><strong>Fix:</strong> hand-maintain a small allowlist of "benevolent" builtin function
-names, borrowed from PHPStan's own <code>resources/functionMap.php</code>
-(<code>__benevolent&lt;…&gt;</code>-tagged entries; license-compatible, see
-<code>references/phpstan-src</code>) as the leniency wrapper. Have the leniency
-apply where <code>is_type_compatible</code>
-(<code>diagnostics/type_errors/compatibility.rs</code>, see T32) already carries
-other diagnostic-only leniency rules: strip the benevolent branch from
-the resolved type before argument/property/return comparison, unless
-the immediate use is a strict <code>===</code>/<code>!==</code> comparison against that exact
-branch.</p>
 
 
 
