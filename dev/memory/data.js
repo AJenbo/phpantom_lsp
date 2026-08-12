@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786498163929,
+  "lastUpdate": 1786500218838,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -18835,6 +18835,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9b13a77a912c2e66c6a88593a9cab8502303a225",
+          "message": "A class name written with an escaped backslash is recognized",
+          "timestamp": "2026-08-12T03:47:05+02:00",
+          "tree_id": "747b681049e783bd94c3761014c1e3dfca2baa6d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9b13a77a912c2e66c6a88593a9cab8502303a225"
+        },
+        "date": 1786500213987,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.6,
             "unit": "MiB"
           }
         ]
