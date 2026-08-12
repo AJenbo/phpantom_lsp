@@ -1262,6 +1262,25 @@ class LoopCarriedAssignmentDemo
             $lastOrder = new Response(200, 'ok');
         }
     }
+
+    /**
+     * A read loop advances its own cursor, so the checked variable is
+     * written to below the read. The read still sees what the loop
+     * condition established.
+     *
+     * @param list<string> $lines
+     */
+    public function readLoop(array $lines): string
+    {
+        $joined = '';
+        $line = demoNextLine($lines);
+        while ($line !== false) {
+            $joined .= strtoupper($line);         // string (`!== false` holds here)
+            $line = demoNextLine($lines);         // string|false again, below the read
+        }
+
+        return $joined;
+    }
 }
 
 
@@ -6835,6 +6854,19 @@ function loadPensOrFail(): array|false
     return [new Pen()];
 }
 
+/**
+ * The next line of a stream, `false` once it is exhausted, the shape
+ * `fgets()` and `fgetcsv()` have.
+ *
+ * @param list<string> $lines
+ *
+ * @return string|false
+ */
+function demoNextLine(array &$lines): string|false
+{
+    return array_shift($lines) ?? false;
+}
+
 /** @phpstan-assert Rock $value */
 function assertRock(mixed $value): void
 {
@@ -8363,6 +8395,12 @@ function runDemoAssertions(): void
     foreach ($shapeGrouped as $shapeEntry) {
         assert($shapeEntry['tool'] instanceof Pen, 'Shape key from conditional loop must resolve to Pen');
     }
+
+    // ── Read loop that reassigns the checked variable ────────────────────
+    assert(
+        (new LoopCarriedAssignmentDemo())->readLoop(['alpha', 'beta', 'gamma']) === 'ALPHABETAGAMMA',
+        'a read loop reads every line the stream hands out before the false'
+    );
 
     // ── Untyped property inference from constructor ─────────────────────
     $untypedDemo = new UntypedPropertyInferenceDemo();

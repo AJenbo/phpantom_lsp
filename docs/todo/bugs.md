@@ -11,37 +11,119 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B125. A `while` body that reassigns the checked variable loses the condition's narrowing
+### B128. A variable assigned in a loop condition is not narrowed by that condition
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Effort: Low-Medium**
 
 ```php
 /** @return string|false */
 function readLine() { return false; }
 
-$line = readLine();
-while ($line !== false) {
+while (($line = readLine()) !== false) {
     useString($line);   // reported: got string|false
-    $line = readLine(); // …because of this line, below the read
+}
+
+while ($line = readLine()) {
+    useString($line);   // reported: got string|false
 }
 ```
 
-`while ($line !== false)` narrows its body correctly as long as the body
-does not write to `$line`. Advancing the cursor inside the loop — which is
-what every `fgets()`/`fgetcsv()`/`readLine()` read loop does — puts the
-un-narrowed assignment type back at the *top* of the body, so a read
-written *above* the reassignment is judged against the widened type. The
-same happens with `null` (`while ($line !== null) { …; $line = next(); }`),
-so this is the loop re-walk merging the assignment into the entry scope
-rather than anything specific to `false`: the narrowing the condition
-established is dropped for the whole body instead of holding until the
-statement that invalidates it.
+The `while (($line = fgets($handle)) !== false)` idiom assigns and checks
+in one expression, and the check narrows nothing: the body sees the full
+`string|false` the assignment produced. Both the explicit comparison and
+the bare truthy form are affected, and so is the `null` sentinel
+(`while (($line = readLine()) !== null)`).
 
-An `if` body behaves correctly here, so only the loop path is affected.
+Two things stand in the way, both in `process_while`
+(`type_engine/variable/forward_walk/control_flow.rs`):
 
-**Fix:** re-apply the loop condition's narrowing at the top of each
-re-walk of the body, so the entry scope of every iteration is the merged
-type *narrowed by the condition* rather than the merged type alone.
+- `apply_condition_narrowing` runs *before*
+  `process_condition_assignment`, so when the narrowing looks the
+  variable up it is not in scope yet and
+  `strip_false_from_scope`/`strip_null_from_scope` return early on an
+  empty type list.
+- `extract_non_false_check_var` (and its `null` counterpart) reads the
+  comparison's operands with `expr_to_var_name`, which only matches a
+  bare `Expression::Variable`. The operand here is a parenthesized
+  assignment, so no subject is extracted at all.
+
+**Fix:** seed the condition's assignment before narrowing the condition,
+and peel a parenthesized assignment down to its target when extracting
+the narrowing subject, so the assigned variable is the subject the check
+narrows. `if (($line = readLine()) !== false)` has the same shape and
+should be covered by the same change.
+
+### B130. Echoing a translation in a template is reported as printing an array
+
+**Impact: High · Effort: Low-Medium**
+
+```blade
+{{ __('messages.welcome') }}   {{-- reported: e() got array|string --}}
+{{ trans('messages.welcome') }}
+```
+
+`{{ __('messages.welcome') }}` is the single most common line in a
+localised Blade template, and every one of them is reported: Blade
+compiles an echo to `e($value)`, `e()` takes a
+`Htmlable|BackedEnum|string|int|float|null`, and `__()` is declared
+`array|string` because a translation key may name a whole group of
+strings. So the array branch, which a scalar key can never return, is
+reported against the argument.
+
+This is the Laravel case of T38 (a return type that depends on an
+argument's *value* rather than its type): the key is a literal, and
+PHPantom already resolves translation keys to their entries, so which
+branch applies is known at the call site. The volume makes it worth
+handling separately from the core builtins T38 lists: 15 of the 20
+diagnostics `analyze` reports on `examples/laravel` are this one shape,
+which puts the project's documented CI gate (3 deliberate diagnostics,
+see `docs/CONTRIBUTING.md`) 17 over.
+
+**Fix:** resolve the translation key at the call site and return `string`
+when it names a scalar entry, keeping `array|string` only for a key that
+names a group or that cannot be resolved. `Lang::get()`, `trans()`, and
+`trans_choice()` share the signature and should share the treatment.
+
+The remaining two diagnostics of that 20 are a separate question:
+`examples/laravel/resources/views/welcome.blade.php` passes
+`$posts->first()` (a genuinely nullable `BlogPost|null`) to a component
+whose constructor takes a non-nullable `BlogPost`. Either the check is
+too strict for a component attribute or the example should pass
+something non-nullable; the maintainer's call which.
+
+### B129. Arithmetic on a refined int widens to `int|float`
+
+**Impact: Medium · Effort: Low**
+
+```php
+function total(string $text): int {
+    $length = 0;
+    $length += strlen($text);   // strlen() is declared `@return int<0,max>`
+
+    return $length;             // reported: int|float is incompatible with int
+}
+```
+
+`int + int` is `int`, and PHPantom gets that right for a plain `int`. It
+does not for any of the *refinements* of `int`: `int<0,max>`,
+`positive-int`, `non-negative-int`, and the rest classify as "not a
+number I recognise", which falls through to the conservative `int|float`
+result. `strlen()`, `count()`, `strpos()`, and most of the standard
+library's counting functions are declared with a range, so this fires on
+ordinary accumulator code and is reported at the `return`, several lines
+away from the addition that caused it.
+
+`classify_php_type`
+(`type_engine/variable/forward_walk/assignment.rs`) enumerates the
+int-like spellings by name (`int`, `integer`, `bool`, …) and has no arm
+for `TypeKind::IntRange` or for the refined `int` names, so it returns
+`None` and `infer_arithmetic_result_type` takes its unknown-operand
+branch.
+
+**Fix:** classify every int subtype as int-like. `PhpType::is_int_subtype`
+already knows the full set (including `IntRange`), so the name matching
+in `classify_php_type` can defer to it, with the same treatment for
+`is_float_subtype` on the float side.
 
 ### B126. A scalar check on a property narrows nothing
 

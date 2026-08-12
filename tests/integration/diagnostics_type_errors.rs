@@ -8775,3 +8775,69 @@ function test(DOMDocument $dom): void {
     let messages: Vec<String> = out.iter().map(|d| d.message.clone()).collect();
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// A read loop advances its own cursor inside the body, so the checked
+/// variable is written to below the read.  The read still sees what the
+/// loop condition established, not the reassigned type.
+#[test]
+fn a_while_body_that_reassigns_the_subject_keeps_the_narrowing() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+while ($line !== false) {
+    useString($line);
+    $line = readLine();
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The same shape with `null` as the sentinel, which is what an iterator
+/// walked by hand (`$node = $node->next()`) looks like.
+#[test]
+fn a_while_body_that_reassigns_the_subject_keeps_the_null_narrowing() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|null */
+function readLine() { return null; }
+
+$line = readLine();
+while ($line !== null) {
+    useString($line);
+    $line = readLine();
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The reassignment is still in force for the statements written *below*
+/// it: the widened type comes back once the loop body has advanced past
+/// the write.
+#[test]
+fn a_while_body_reassignment_widens_below_itself() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+while ($line !== false) {
+    $line = readLine();
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("string|false"),
+        "the read below the reassignment sees the widened type, got {messages:?}"
+    );
+}
