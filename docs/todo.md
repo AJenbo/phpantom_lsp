@@ -105,7 +105,7 @@ unlikely to move the needle for most users.
 | B130 | [Echoing a translation in a template is reported as printing an array](todo/bugs.md#b130-echoing-a-translation-in-a-template-is-reported-as-printing-an-array) | High        | Low-Medium  |
 | B89 | [`assert($x !== null)` / `assert($x !== false)` does not narrow](todo/bugs.md#b89-assertx--null--assertx--false-does-not-narrow)                                           | Medium-High | Medium      |
 | B124 | [A ternary's truthy condition does not narrow its own then branch](todo/bugs.md#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch)                     | Medium      | Low-Medium  |
-| B128 | [A variable assigned in a loop condition is not narrowed by that condition](todo/bugs.md#b128-a-variable-assigned-in-a-loop-condition-is-not-narrowed-by-that-condition) | Medium      | Low-Medium  |
+| B131 | [A `for` loop's condition narrows nothing](todo/bugs.md#b131-a-for-loops-condition-narrows-nothing)                                                                       | Medium      | Low         |
 | B129 | [Arithmetic on a refined int widens to `int\|float`](todo/bugs.md#b129-arithmetic-on-a-refined-int-widens-to-intfloat)                                                     | Medium      | Low         |
 | B126 | [A scalar check on a property narrows nothing](todo/bugs.md#b126-a-scalar-check-on-a-property-narrows-nothing)                                                            | Medium      | Medium      |
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |

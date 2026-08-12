@@ -1281,6 +1281,28 @@ class LoopCarriedAssignmentDemo
 
         return $joined;
     }
+
+    /**
+     * The compact form of the same loop reads and checks in one
+     * expression, so the assignment is the subject the check narrows.
+     *
+     * @param list<string> $lines
+     */
+    public function compactReadLoop(array $lines): string
+    {
+        $joined = '';
+        while (($line = demoNextLine($lines)) !== false) {
+            $joined .= strtoupper($line);         // string (`false` narrowed away)
+        }
+
+        // The bare truthy form rules out `false` the same way.
+        $trailing = ['omega'];
+        while ($next = demoNextLine($trailing)) {
+            $joined .= strtolower($next);         // string
+        }
+
+        return $joined;
+    }
 }
 
 
@@ -1305,6 +1327,16 @@ class ConditionAssignmentDemo
         while (is_object($next = $this->maybePen())) {
             $next->write();                       // Pen (assignment seen inside is_object())
         }
+    }
+
+    /** The sentinel check narrows what the assignment beside it produced. */
+    public function firstPen(): ?Pen
+    {
+        if (($pens = loadPensOrFail()) !== false) {
+            return $pens[0];                      // Pen (`false` narrowed away)
+        }
+
+        return null;
     }
 }
 
@@ -8458,6 +8490,14 @@ function runDemoAssertions(): void
     assert(
         (new LoopCarriedAssignmentDemo())->readLoop(['alpha', 'beta', 'gamma']) === 'ALPHABETAGAMMA',
         'a read loop reads every line the stream hands out before the false'
+    );
+    assert(
+        (new LoopCarriedAssignmentDemo())->compactReadLoop(['alpha', 'beta']) === 'ALPHABETAomega',
+        'the compact read loop reads the same lines through its condition assignment'
+    );
+    assert(
+        (new ConditionAssignmentDemo())->firstPen() instanceof Pen,
+        'a sentinel check beside an assignment leaves the success type behind'
     );
 
     // ── Untyped property inference from constructor ─────────────────────

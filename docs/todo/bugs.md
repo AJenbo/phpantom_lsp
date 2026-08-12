@@ -11,48 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B128. A variable assigned in a loop condition is not narrowed by that condition
-
-**Impact: Medium · Effort: Low-Medium**
-
-```php
-/** @return string|false */
-function readLine() { return false; }
-
-while (($line = readLine()) !== false) {
-    useString($line);   // reported: got string|false
-}
-
-while ($line = readLine()) {
-    useString($line);   // reported: got string|false
-}
-```
-
-The `while (($line = fgets($handle)) !== false)` idiom assigns and checks
-in one expression, and the check narrows nothing: the body sees the full
-`string|false` the assignment produced. Both the explicit comparison and
-the bare truthy form are affected, and so is the `null` sentinel
-(`while (($line = readLine()) !== null)`).
-
-Two things stand in the way, both in `process_while`
-(`type_engine/variable/forward_walk/control_flow.rs`):
-
-- `apply_condition_narrowing` runs *before*
-  `process_condition_assignment`, so when the narrowing looks the
-  variable up it is not in scope yet and
-  `strip_false_from_scope`/`strip_null_from_scope` return early on an
-  empty type list.
-- `extract_non_false_check_var` (and its `null` counterpart) reads the
-  comparison's operands with `expr_to_var_name`, which only matches a
-  bare `Expression::Variable`. The operand here is a parenthesized
-  assignment, so no subject is extracted at all.
-
-**Fix:** seed the condition's assignment before narrowing the condition,
-and peel a parenthesized assignment down to its target when extracting
-the narrowing subject, so the assigned variable is the subject the check
-narrows. `if (($line = readLine()) !== false)` has the same shape and
-should be covered by the same change.
-
 ### B130. Echoing a translation in a template is reported as printing an array
 
 **Impact: High · Effort: Low-Medium**
@@ -90,6 +48,42 @@ The remaining two diagnostics of that 20 are a separate question:
 whose constructor takes a non-nullable `BlogPost`. Either the check is
 too strict for a component attribute or the example should pass
 something non-nullable; the maintainer's call which.
+
+### B131. A `for` loop's condition narrows nothing
+
+**Impact: Medium · Effort: Low**
+
+```php
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+for (; $line !== false; $line = readLine()) {
+    useString($line);   // reported: got string|false
+}
+
+for (; ($row = fgetcsv($handle)) !== false; ) {
+    useCsvRow($row);    // reported: got array|false
+}
+```
+
+`process_while` applies `apply_condition_narrowing` to its condition (and
+the inverse to the scope after the loop), and `process_for`
+(`type_engine/variable/forward_walk/control_flow.rs`) never applies
+either. It seeds assignments and pass-by-reference arguments out of its
+condition clauses, so the variable is in scope with the right type, but
+nothing rules out the sentinel the condition tests for. Every narrowing
+form is affected, not just the sentinel checks: an `instanceof`, an
+`isset`, and a `@phpstan-assert-if-true` predicate in a `for` condition
+are all ignored the same way.
+
+**Fix:** narrow each condition clause the way `process_while` does, after
+seeding the condition's assignments and before walking the body, and
+apply the inverse to the post-loop scope. The fixed-point re-entry
+closure needs the same treatment so later trips through the body keep the
+narrowing. Comma-separated conditions are evaluated left to right and
+only the last one decides whether the body runs, so narrowing them in
+order matches PHP.
 
 ### B129. Arithmetic on a refined int widens to `int|float`
 

@@ -8841,3 +8841,98 @@ while ($line !== false) {
         "the read below the reassignment sees the widened type, got {messages:?}"
     );
 }
+
+// ─── Assign-and-check in one condition ──────────────────────────────────────
+
+/// `while (($line = fgets($h)) !== false)` assigns and checks in one
+/// expression, so the assignment is the subject the check narrows.
+#[test]
+fn a_condition_assignment_is_narrowed_by_its_own_false_check() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+while (($line = readLine()) !== false) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The bare truthy form of the same loop rules out every falsy value,
+/// `false` among them.
+#[test]
+fn a_bare_truthy_condition_assignment_is_narrowed() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+while ($line = readLine()) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The `null` sentinel is the shape a hand-walked iterator
+/// (`while (($node = $node->next()) !== null)`) is written in.
+#[test]
+fn a_condition_assignment_is_narrowed_by_its_own_null_check() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|null */
+function readLine() { return null; }
+
+while (($line = readLine()) !== null) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// An `if` with the same shape narrows its body the same way.
+#[test]
+fn an_if_condition_assignment_is_narrowed_by_its_own_false_check() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+if (($line = readLine()) !== false) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only the sentinel the check names is ruled out: `null` survives a
+/// `!== false` check on an assignment that could produce it.
+#[test]
+fn a_condition_assignment_keeps_the_members_its_check_leaves() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false|null */
+function readLine() { return null; }
+
+if (($line = readLine()) !== false) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("null"),
+        "only false should be narrowed away, got {messages:?}"
+    );
+}

@@ -1862,11 +1862,19 @@ pub(crate) fn is_null_expr(expr: &Expression<'_>) -> bool {
 }
 
 /// Extract a direct variable name from an expression.
+///
+/// An assignment stands for the variable it wrote, so the
+/// assign-and-check idiom (`while (($line = fgets($h)) !== false)`,
+/// `if ($row = next())`) resolves to `$line`/`$row` — the subject the
+/// surrounding check narrows.  Parentheses are peeled on the way.
 pub(crate) fn expr_to_var_name(expr: &Expression<'_>) -> Option<String> {
-    if let Expression::Variable(Variable::Direct(dv)) = expr {
-        Some(bytes_to_str(dv.name).to_string())
-    } else {
-        None
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
+        Expression::Parenthesized(paren) => expr_to_var_name(paren.expression),
+        Expression::Assignment(assignment) if assignment.operator.is_assign() => {
+            expr_to_var_name(assignment.lhs)
+        }
+        _ => None,
     }
 }
 

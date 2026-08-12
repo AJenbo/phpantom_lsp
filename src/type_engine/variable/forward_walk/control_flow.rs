@@ -1710,6 +1710,15 @@ pub(crate) fn process_while<'b>(
 
     let pre_loop_scope = scope.clone();
 
+    // Assignment in condition: `while ($x = expr())`.  Seeded before the
+    // narrowing below so a condition that assigns and checks in one
+    // expression (`while (($line = fgets($h)) !== false)`) finds the
+    // variable in scope and can strip the sentinel from it.
+    process_condition_assignment(while_stmt.condition, scope, ctx);
+
+    // Pass-by-reference in condition: `while (preg_match(..., $matches))`
+    seed_pass_by_ref_in_condition(while_stmt.condition, scope, ctx);
+
     // The while body executes when the condition is truthy, so apply
     // condition narrowing (instanceof, phpstan-assert-if-true, etc.).
     // This must happen AFTER saving pre_loop_scope so the narrowing
@@ -1730,12 +1739,6 @@ pub(crate) fn process_while<'b>(
     } else {
         ctx.with_cursor_offset(ctx.cursor_offset)
     };
-
-    // Assignment in condition: `while ($x = expr())`
-    process_condition_assignment(while_stmt.condition, scope, ctx);
-
-    // Pass-by-reference in condition: `while (preg_match(..., $matches))`
-    seed_pass_by_ref_in_condition(while_stmt.condition, scope, ctx);
 
     // Record a snapshot after condition processing (same reasoning as
     // the corresponding snapshot in `process_if`).
@@ -1763,9 +1766,9 @@ pub(crate) fn process_while<'b>(
         ctx,
         &discovery_ctx,
         |next_scope| {
-            apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
             process_condition_assignment(while_stmt.condition, next_scope, ctx);
             seed_pass_by_ref_in_condition(while_stmt.condition, next_scope, ctx);
+            apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
         },
     );
 
