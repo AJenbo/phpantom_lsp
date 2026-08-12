@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b133-a-for-loops-increment-clause-never-updates-a-variables-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B133. A <code>for</code> loop's increment clause never updates a variable's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b126-a-scalar-check-on-a-property-narrows-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1361,17 +1350,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b133-a-for-loops-increment-clause-never-updates-a-variables-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B133. A <code>for</code> loop's increment clause never updates a variable's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b126-a-scalar-check-on-a-property-narrows-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1459,45 +1437,20 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b133-a-for-loops-increment-clause-never-updates-a-variables-type">B133. A <code>for</code> loop's increment clause never updates a variable's type<a class="headerlink" href="#b133-a-for-loops-increment-clause-never-updates-a-variables-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Node {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public function __construct(public ?Node $next) {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function useNode(Node $n): void {}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">for ($node = $head; $node !== null; $node = $node-&gt;next) {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    useNode($node);   // $node&#39;s type never reflects the reassignment</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>process_for</code> (<code>type_engine/variable/forward_walk/control_flow.rs</code>) never
-runs <code>for_stmt.increments</code> through <code>process_assignment_expr</code> (or any other
-assignment handling). The increment clause's own span is only ever used
-for <code>record_scope_snapshot</code> (diagnostic hover/go-to-definition lookups on
-the <code>for</code> line itself); its effect on the variable's type is never fed
-back into the loop's fixed-point re-walk the way <code>for_stmt.initializations</code>
-is. So a hand-walked-iterator pattern where the increment reassigns a
-variable to a differently-typed value (e.g. <code>$node = $node-&gt;next()</code>)
-never has that reassignment reflected in the body or in the post-loop
-scope.</p>
-<p><strong>Fix:</strong> process <code>for_stmt.increments</code> with <code>process_assignment_expr</code>
-after each body walk (mirroring how <code>process_while</code>'s condition
-reassignment runs on each re-entry), and include the same processing in
-the fixed-point re-entry closure passed to <code>walk_loop_body_to_fixed_point</code>.</p>
 <h3 id="b126-a-scalar-check-on-a-property-narrows-nothing">B126. A scalar check on a property narrows nothing<a class="headerlink" href="#b126-a-scalar-check-on-a-property-narrows-nothing" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Holder {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    public string|false $value = false;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function run(): void {</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        if ($this-&gt;value !== false) {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">        }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">        if ($this-&gt;value) {</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">        }</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">    }</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Holder {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public string|false $value = false;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    public function run(): void {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        if ($this-&gt;value !== false) {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        if ($this-&gt;value) {</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">        }</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    }</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
 </code></pre></div>
 <p>A property subject only ever gets <em>class-level</em> narrowing. <code>instanceof</code>
 on <code>$this-&gt;prop</code> works, because <code>Expression::Access</code> falls through to
@@ -1523,9 +1476,9 @@ snapshot recording for a synthetic member key, or the branch-scope merge
 property key the way it already does for an array-access key.</p>
 <h3 id="b89-assertx-null-assertx-false-does-not-narrow">B89. <code>assert($x !== null)</code> / <code>assert($x !== false)</code> does not narrow<a class="headerlink" href="#b89-assertx-null-assertx-false-does-not-narrow" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$handle = fopen(&#39;php://memory&#39;, &#39;r&#39;);</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">assert($handle !== false);</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">fclose($handle); // reported: fclose() expects resource, got resource|false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$handle = fopen(&#39;php://memory&#39;, &#39;r&#39;);</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">assert($handle !== false);</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">fclose($handle); // reported: fclose() expects resource, got resource|false</span>
 </code></pre></div>
 <p><code>process_assert_narrowing</code> (<code>type_engine/variable/forward_walk/assignment.rs:2649</code>)
 only recognizes <code>assert($x instanceof Foo)</code>, <code>@phpstan-assert</code>/<code>@psalm-assert</code>
@@ -1547,15 +1500,15 @@ use) rather than re-implementing a narrower parallel set of cases. That also
 picks up B88's fix for <code>assert($x !== false)</code> for free once B88 lands.</p>
 <h3 id="b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check">B90. An object union is not narrowed by a discriminating property check<a class="headerlink" href="#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">final class StrBox { public string $v = &#39;&#39;; }</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">final class IntBox { public int $v = 0; }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">function pick(StrBox|IntBox $b): StrBox {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    if (is_string($b-&gt;v)) {</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">        return $b; // reported: StrBox|IntBox is incompatible with StrBox</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    }</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    throw new \LogicException(&#39;not a StrBox&#39;);</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">final class StrBox { public string $v = &#39;&#39;; }</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">final class IntBox { public int $v = 0; }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">function pick(StrBox|IntBox $b): StrBox {</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    if (is_string($b-&gt;v)) {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        return $b; // reported: StrBox|IntBox is incompatible with StrBox</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    }</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    throw new \LogicException(&#39;not a StrBox&#39;);</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>PHPantom already narrows an <strong>array-shape</strong> union by a literal-equality check
 on one shape key (confirmed: <code>if ($a['tag'] === true) { return $a['name']; }</code>
@@ -1574,10 +1527,10 @@ or equality check on <code>$subject-&gt;prop</code> is true only for one member 
 object union, narrow the union to that member.</p>
 <h3 id="b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read">B92. An array literal's element types widen to base scalar types on a dynamic-key read<a class="headerlink" href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function takesInt(int $x): void {}</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$values = [1, 1.5, &#39;123&#39;];</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">$key = array_rand($values);</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">takesInt($values[$key]); // reported: got int|float|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function takesInt(int $x): void {}</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$values = [1, 1.5, &#39;123&#39;];</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">$key = array_rand($values);</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">takesInt($values[$key]); // reported: got int|float|string</span>
 </code></pre></div>
 <p>Indexing a literal array with a non-literal key resolves the value to the
 union of the literal array's <em>base</em> member types (<code>int|float|string</code>)
@@ -1594,16 +1547,16 @@ same way a literal-key access already does, rather than widening to base
 scalar types as soon as the key stops being a compile-time constant.</p>
 <h3 id="b134-a-constant-operand-is-only-read-where-a-template-is-bound">B134. A constant operand is only read where a <code>@template</code> is bound<a class="headerlink" href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">/** @param key-of&lt;ID_TABLE&gt; $key */</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function acceptsKey(string $key): void {}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">/** @return value-of&lt;ID_TABLE&gt; */</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">function anyValue() { return 1; }</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">acceptsKey(&#39;nope&#39;);            // not reported: should be &#39;immutable&#39;|&#39;mutable&#39;</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">takesInt(anyValue());          // not reported: should be int|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">/** @param key-of&lt;ID_TABLE&gt; $key */</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">function acceptsKey(string $key): void {}</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">/** @return value-of&lt;ID_TABLE&gt; */</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">function anyValue() { return 1; }</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">acceptsKey(&#39;nope&#39;);            // not reported: should be &#39;immutable&#39;|&#39;mutable&#39;</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">takesInt(anyValue());          // not reported: should be int|string</span>
 </code></pre></div>
 <p>A constant holding an array literal is now read as its own array shape, so
 <code>key-of&lt;ID_TABLE&gt;</code> and <code>ID_TABLE[K]</code> evaluate — but only along the path that
