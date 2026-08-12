@@ -1045,7 +1045,15 @@ pub(super) fn extract_from_hint_ctx(
         Hint::Identifier(ident) => {
             let raw = bytes_to_str(ident.value()).to_string();
             let name_clean = strip_fqn_prefix(&raw).to_string();
-            if is_navigable_type(&name_clean) {
+            // The parser gives every type PHP supports natively its own
+            // `Hint` variant, so an identifier here is a class name as far
+            // as PHP is concerned — including `resource`, `integer`, and
+            // `number`, which mean something in a docblock and nothing in a
+            // declaration ("`resource` is not a supported builtin type and
+            // will be interpreted as a class name"). Reading them as the
+            // class references they are is what gets them reported instead
+            // of waved through by the docblock type vocabulary.
+            if !crate::php_type::is_native_type_name(&name_clean) {
                 spans.push(class_ref_span_ctx(
                     ident.span().start.offset,
                     ident.span().end.offset,

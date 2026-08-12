@@ -1108,4 +1108,56 @@ function takesPseudoTypes($callback, $value) { return 1; }
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    /// PHP has no `resource`, `integer`, or `number` type declaration: it
+    /// reads each as a class name, and so does PHPantom, rather than
+    /// accepting a docblock-only pseudo-type where a native type is
+    /// written.
+    #[test]
+    fn a_phpdoc_only_pseudo_type_written_as_a_native_hint_is_reported() {
+        let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+function takesResource(resource $value): void {}
+function takesInteger(integer $value): void {}
+function givesNumber(): number { return 1; }
+"#;
+
+        let diags = collect(&backend, uri, content);
+        let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+        assert_eq!(diags.len(), 3, "got {messages:?}");
+        for name in ["resource", "integer", "number"] {
+            assert!(
+                messages.iter().any(|m| m.contains(name)),
+                "`{name}` should be reported, got {messages:?}"
+            );
+        }
+    }
+
+    /// Every type PHP does support natively stays unreported, in whatever
+    /// casing it was written, since those are reserved keywords.
+    #[test]
+    fn native_type_hints_are_not_reported() {
+        let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+function f(int $a, float $b, string $c, bool $d, array $e, object $g, callable $h): void {}
+function g(iterable $a, mixed $b, null|int $c, false|int $d, true|int $e): void {}
+function h(): never { exit(1); }
+function i(INT $a, Iterable $b, ARRAY $c): void {}
+class Holder {
+    public function j(): static { return $this; }
+    public function k(): self { return $this; }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "got {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }

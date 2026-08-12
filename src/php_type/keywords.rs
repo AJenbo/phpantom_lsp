@@ -31,6 +31,40 @@ pub(crate) fn keyword_lowercase(name: &str) -> String {
     lower
 }
 
+/// Whether `name` is a type PHP itself accepts in a native declaration.
+///
+/// This is PHP's own list, not the type vocabulary a docblock may draw on:
+/// `resource`, `integer`, `number`, `list`, and every hyphenated PHPStan
+/// spelling are missing from it deliberately. PHP reads an identifier it
+/// does not recognise here as a class name ("`resource` is not a supported
+/// builtin type and will be interpreted as a class name"), so anything
+/// this returns `false` for is a class reference wherever a *native* type
+/// is written, however well a docblock would understand it.
+///
+/// Native type names are reserved keywords, so they match in any casing.
+pub(crate) fn is_native_type_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "int"
+            | "float"
+            | "string"
+            | "bool"
+            | "array"
+            | "object"
+            | "callable"
+            | "iterable"
+            | "mixed"
+            | "void"
+            | "never"
+            | "null"
+            | "false"
+            | "true"
+            | "self"
+            | "static"
+            | "parent"
+    )
+}
+
 /// Whether a type name is a keyword that should never be resolved as a
 /// class name.
 ///

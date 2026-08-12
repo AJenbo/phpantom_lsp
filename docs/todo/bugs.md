@@ -152,32 +152,28 @@ rival, not just a feature gap.
 or equality check on `$subject->prop` is true only for one member of an
 object union, narrow the union to that member.
 
-### B91. A native type hint silently accepts a PHPDoc-only pseudo-type
+### B127. An inline `@method` template parameter is read as a class name
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Low · Effort: Low-Medium**
 
 ```php
-function takesResource(resource $value): void {} // not flagged; PHP has no native `resource` type
-function takesReal(NotAClass $value): void {}     // correctly flagged: unknown_class
+/**
+ * @method TVal get<TVal of mixed>(TVal $default)
+ */
+class Box {}
+// reported twice: Class 'Demo\TVal' not found
 ```
 
-`is_scalar_name` (`php_type/keywords.rs:229`) folds `resource` (and
-`class-string`, `interface-string`, `trait-string`, `number`, …) into "not a
-class reference" unconditionally. That classifier's own doc comment says
-outright that "PHP has no `resource` type-hint at all" — the pseudo-type is
-valid only in a docblock, never in a native declaration — but nothing at the
-native-hint call site checks *where* the identifier was written before
-consulting it. So `resource` used as a real parameter/return type hint is
-silently accepted instead of being flagged the same way an unrecognized class
-name is.
+A `@method` tag may declare its own template parameters inline, between
+the method name and its parameter list, and PHPantom does not read that
+declaration: `TVal` is not registered as a template parameter for the
+tag, so both occurrences of it (the return type and the parameter type)
+resolve as class references and are reported as unknown classes. This is
+visible in `examples/demo.php`, which carries the two diagnostics.
 
-Both Qodana and Intelephense flag this case in `php-typing-conformance`'s
-corpus.
-
-**Fix:** at the point where a native (not docblock) type hint is validated,
-reject identifiers that `is_scalar_name`/`is_keyword_type` only recognize as
-PHPDoc-only pseudo-types, the same way an unresolvable class name is rejected,
-rather than treating "known to the type vocabulary" as "valid here."
+**Fix:** parse the `<TVal of mixed>` list in a `@method` tag as the
+tag's own `@template` parameters, and register them so the symbol map's
+template-definition lookup finds them for the tag's own span.
 
 ### B92. An array literal's element types widen to base scalar types on a dynamic-key read
 
