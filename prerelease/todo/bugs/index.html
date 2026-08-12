@@ -948,17 +948,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b128-a-foreach-key-variable-is-left-untyped" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B128. A <code>foreach</code> key variable is left untyped
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1547,17 +1536,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b128-a-foreach-key-variable-is-left-untyped" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B128. A <code>foreach</code> key variable is left untyped
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1893,27 +1871,6 @@ condition directly rather than relying on the walker.</p>
 same way <code>apply_null_narrowing_truthy</code> records it for an <code>if</code>/<code>while</code>
 body, so the then branch's offset resolves against the narrowed scope
 instead of the declared one.</p>
-<h3 id="b128-a-foreach-key-variable-is-left-untyped">B128. A <code>foreach</code> key variable is left untyped<a class="headerlink" href="#b128-a-foreach-key-variable-is-left-untyped" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">/** @param list&lt;int&gt; $xs */</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">function f(array $xs): void {</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    foreach ($xs as $i =&gt; $x) {</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">        $i;  // declared: int</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">             // inferred: nothing (falls through to mixed)</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">    }</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>The value variable of a <code>foreach</code> is resolved from the subject's element
-type, but the key variable is not resolved at all, for a <code>list&lt;T&gt;</code>, an
-<code>array&lt;K, V&gt;</code>, or an array shape alike. Every consumer that asks what
-<code>$i</code> is gets nothing and falls back to <code>mixed</code>, so an argument check on
-the key says nothing and a keyed write through it (<code>$rows[$i] = …</code>)
-widens the array's key type to <code>int|string</code> even where the subject is a
-list and the key can only be <code>int</code>.</p>
-<p><strong>Fix:</strong> bind the key variable alongside the value variable in the
-<code>foreach</code> handler (<code>type_engine/variable/forward_walk/control_flow.rs</code>),
-taking its type from <code>iterable_key_type()</code> on the resolved subject the
-same way the value variable takes <code>iterable_element_type()</code>.</p>
 
 
 
