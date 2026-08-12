@@ -11949,6 +11949,74 @@ $name = lookUp('mutable');
     );
 }
 
+/// A `for` loop's update clause runs before the condition check that exits the
+/// loop, so the type it reassigns is the one that survives the loop.
+#[test]
+fn hover_for_loop_exit_narrows_update_clause_to_null() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Node {
+    /** @var ?Node */
+    public $parent;
+}
+function makeNode(): Node { return new Node(); }
+
+for ($a = makeNode(); $a; $a = $a->parent) {
+    echo 1;
+}
+$result = $a;
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$result = $a"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover =
+        hover_at(&backend, uri, content, target_line, 1).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("null") && !text.contains("Node"),
+        "After for(; $a; $a = $a->parent) loop, $a should be null, got: {}",
+        text
+    );
+}
+
+/// A hand-walked iterator reassigns its cursor in the update clause, so from
+/// the second iteration onward the body sees the reassigned type as well as
+/// the one the initialiser bound.
+#[test]
+fn hover_for_loop_update_clause_type_reaches_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Inner {
+    public function innerOnly(): void {}
+}
+class Outer {
+    public function next(): Inner { return new Inner(); }
+}
+
+for ($i = 0, $x = new Outer(); $i < 10; $i++, $x = $x->next()) {
+    $probe = $x;
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$probe = $x"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover = hover_at(&backend, uri, content, target_line, 5).expect("expected hover on $probe");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Outer") && text.contains("Inner"),
+        "In the body, $x should be Outer|Inner, got: {}",
+        text
+    );
+}
+
 // ─── __get magic method template resolution ─────────────────────────────────
 
 #[test]

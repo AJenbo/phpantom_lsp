@@ -11,37 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B133. A `for` loop's increment clause never updates a variable's type
-
-**Impact: Medium · Effort: Medium**
-
-```php
-class Node {
-    public function __construct(public ?Node $next) {}
-}
-function useNode(Node $n): void {}
-
-for ($node = $head; $node !== null; $node = $node->next) {
-    useNode($node);   // $node's type never reflects the reassignment
-}
-```
-
-`process_for` (`type_engine/variable/forward_walk/control_flow.rs`) never
-runs `for_stmt.increments` through `process_assignment_expr` (or any other
-assignment handling). The increment clause's own span is only ever used
-for `record_scope_snapshot` (diagnostic hover/go-to-definition lookups on
-the `for` line itself); its effect on the variable's type is never fed
-back into the loop's fixed-point re-walk the way `for_stmt.initializations`
-is. So a hand-walked-iterator pattern where the increment reassigns a
-variable to a differently-typed value (e.g. `$node = $node->next()`)
-never has that reassignment reflected in the body or in the post-loop
-scope.
-
-**Fix:** process `for_stmt.increments` with `process_assignment_expr`
-after each body walk (mirroring how `process_while`'s condition
-reassignment runs on each re-entry), and include the same processing in
-the fixed-point re-entry closure passed to `walk_loop_body_to_fixed_point`.
-
 ### B126. A scalar check on a property narrows nothing
 
 **Impact: Medium · Effort: Medium**

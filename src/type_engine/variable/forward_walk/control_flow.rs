@@ -599,11 +599,24 @@ fn branch_exits_stmts<'s>(
 /// This determines how many loop iterations are needed for types to
 /// propagate through the entire chain.  Typically 1-3 for real PHP.
 pub(crate) fn assignment_map_depth(statements: &[&Statement<'_>]) -> u32 {
+    assignment_map_depth_with_updates(statements, std::iter::empty())
+}
+
+/// `assignment_map_depth` for a loop whose header also assigns: the `for`
+/// update clause reassigns variables between two body executions, so those
+/// assignments belong in the same dependency graph as the body's.
+pub(crate) fn assignment_map_depth_with_updates<'a>(
+    statements: &[&Statement<'_>],
+    updates: impl Iterator<Item = &'a Expression<'a>>,
+) -> u32 {
     // Build dependency map: assigned_var → set of RHS variables
     let mut deps: HashMap<String, HashSet<String>> = HashMap::new();
 
     for stmt in statements {
         collect_assignment_deps(stmt, &mut deps);
+    }
+    for update in updates {
+        collect_expr_assignment_deps(update, &mut deps);
     }
 
     if deps.is_empty() {
@@ -902,13 +915,27 @@ pub(crate) fn scope_has_changes(before: &ScopeState, after: &ScopeState) -> bool
     false
 }
 
+/// Where in a loop iteration `walk_loop_body_to_fixed_point` is invoking
+/// its seeding callback.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoopSeedPoint {
+    /// Straight after a walk of the body, on the types that walk left
+    /// behind.  This is where a `for` loop's increment clause runs.
+    AfterBody,
+    /// On the entry scope of the next walk, once the previous walk's types
+    /// have been merged back in: re-applies the narrowing the caller did
+    /// for the first iteration.
+    Entry,
+}
+
 /// Walk a loop body until its loop-carried types stop changing.
 ///
 /// The caller has already seeded `scope` for the first iteration (bound
 /// the `foreach` target, narrowed by the `while` condition, run the `for`
-/// initialisers); `reseed` re-applies that same seeding to the entry
-/// scope of every later walk, after the types discovered by the previous
-/// walk are merged back in.
+/// initialisers).  `seed` advances the loop for every later walk: at
+/// `AfterBody` it applies whatever runs between two body executions, and
+/// at `Entry` it re-applies the caller's first-iteration narrowing to the
+/// merged entry scope.
 ///
 /// A walk that uses `discovery_ctx` ignores the cursor so that
 /// assignments written *below* it are still discovered.  That leaves the
@@ -925,7 +952,7 @@ fn walk_loop_body_to_fixed_point<'b>(
     assignment_depth: u32,
     ctx: &ForwardWalkCtx<'_>,
     discovery_ctx: &ForwardWalkCtx<'_>,
-    mut reseed: impl FnMut(&mut ScopeState),
+    mut seed: impl FnMut(&mut ScopeState, LoopSeedPoint),
 ) {
     let re_walks = assignment_depth.saturating_sub(1);
 
@@ -944,7 +971,7 @@ fn walk_loop_body_to_fixed_point<'b>(
             break;
         }
 
-        *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut reseed);
+        *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
 
         // Use the real context on the final iteration so diagnostic
         // snapshots and cursor handling are correct.
@@ -958,22 +985,25 @@ fn walk_loop_body_to_fixed_point<'b>(
     }
 
     if !walked_at_cursor && discovery_ctx.cursor_offset != ctx.cursor_offset {
-        *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut reseed);
+        *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
         walk_body_forward(body_stmts.iter().copied(), scope, ctx);
     }
 }
 
-/// The entry scope of the next walk of a loop body: what was known
-/// before the loop, merged with what the previous walk discovered, then
-/// re-seeded the way the loop seeds its first iteration.
+/// The entry scope of the next walk of a loop body: the previous walk
+/// advanced past the end of the body, merged with what was known before
+/// the loop (the body may not have run yet), then narrowed the way the
+/// loop narrows its first iteration.
 fn merged_loop_entry_scope(
     pre_loop_scope: &ScopeState,
-    walked: &ScopeState,
-    reseed: &mut impl FnMut(&mut ScopeState),
+    walked: &mut ScopeState,
+    seed: &mut impl FnMut(&mut ScopeState, LoopSeedPoint),
 ) -> ScopeState {
+    seed(walked, LoopSeedPoint::AfterBody);
+
     let mut next_scope = pre_loop_scope.clone();
     next_scope.merge_branch(walked);
-    reseed(&mut next_scope);
+    seed(&mut next_scope, LoopSeedPoint::Entry);
     next_scope
 }
 
@@ -1180,7 +1210,10 @@ pub(crate) fn process_foreach<'b>(
         assignment_depth,
         ctx,
         &discovery_ctx,
-        |next_scope| {
+        |next_scope, point| {
+            if point != LoopSeedPoint::Entry {
+                return;
+            }
             // Re-bind the foreach variables for the next iteration.
             match &foreach.target {
                 ForeachTarget::Value(val) => {
@@ -1765,7 +1798,10 @@ pub(crate) fn process_while<'b>(
         assignment_depth,
         ctx,
         &discovery_ctx,
-        |next_scope| {
+        |next_scope, point| {
+            if point != LoopSeedPoint::Entry {
+                return;
+            }
             process_condition_assignment(while_stmt.condition, next_scope, ctx);
             seed_pass_by_ref_in_condition(while_stmt.condition, next_scope, ctx);
             apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
@@ -1877,8 +1913,14 @@ pub(crate) fn process_for<'b>(
         ForBody::Statement(inner) => vec![*inner],
         ForBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let assignment_depth =
-        clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    // The update clause is part of the loop's assignment graph: a
+    // hand-walked iterator (`for (…; …; $node = $node->next)`) carries its
+    // type from one iteration to the next through the increment alone, so a
+    // body with no assignments of its own still needs a re-walk.
+    let assignment_depth = clamp_iterations_for_depth(
+        assignment_map_depth_with_updates(&body_stmts, for_stmt.increments.iter().copied()),
+        loop_depth,
+    );
 
     walk_loop_body_to_fixed_point(
         &body_stmts,
@@ -1887,14 +1929,24 @@ pub(crate) fn process_for<'b>(
         assignment_depth,
         ctx,
         &discovery_ctx,
-        |next_scope| {
-            for init_expr in for_stmt.initializations.iter() {
-                process_assignment_expr(init_expr, next_scope, ctx);
+        |next_scope, point| match point {
+            // The update clause runs after the body, so its reassignments
+            // are what the next iteration starts from.  The initialisers
+            // are deliberately *not* re-run: they execute once, and
+            // `pre_loop_scope` (which the entry scope is merged from)
+            // already holds the types they bound.  Re-running them would
+            // overwrite a loop-carried type with the first iteration's.
+            LoopSeedPoint::AfterBody => {
+                for increment in for_stmt.increments.iter() {
+                    process_assignment_expr(increment, next_scope, ctx);
+                }
             }
-            for cond_expr in for_stmt.conditions.iter() {
-                process_condition_assignment(cond_expr, next_scope, ctx);
-                seed_pass_by_ref_in_condition(cond_expr, next_scope, ctx);
-                apply_condition_narrowing(cond_expr, next_scope, ctx);
+            LoopSeedPoint::Entry => {
+                for cond_expr in for_stmt.conditions.iter() {
+                    process_condition_assignment(cond_expr, next_scope, ctx);
+                    seed_pass_by_ref_in_condition(cond_expr, next_scope, ctx);
+                    apply_condition_narrowing(cond_expr, next_scope, ctx);
+                }
             }
         },
     );
@@ -1918,6 +1970,13 @@ pub(crate) fn process_for<'b>(
     if cursor_in_body && !is_diagnostic_scope_active() {
         leave_loop(loop_depth);
         return;
+    }
+
+    // A loop that ran its body at least once exited from the condition
+    // check that follows the update clause, so the reassignments the update
+    // clause makes are part of the post-loop state.
+    for increment in for_stmt.increments.iter() {
+        process_assignment_expr(increment, scope, ctx);
     }
 
     // The loop body might not execute at all (condition false on
@@ -1978,7 +2037,10 @@ pub(crate) fn process_do_while<'b>(
         assignment_depth,
         ctx,
         ctx,
-        |next_scope| {
+        |next_scope, point| {
+            if point != LoopSeedPoint::Entry {
+                return;
+            }
             process_condition_assignment(dw.condition, next_scope, ctx);
             seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
         },
