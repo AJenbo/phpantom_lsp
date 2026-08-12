@@ -1777,6 +1777,7 @@ pub(crate) fn process_while<'b>(
     // merge would erase the narrowing (since the loop might not execute),
     // but the cursor IS inside the body, so the condition is true.
     if cursor_in_body && !is_diagnostic_scope_active() {
+        leave_loop(loop_depth);
         return;
     }
 
@@ -1845,6 +1846,17 @@ pub(crate) fn process_for<'b>(
 
     let pre_loop_scope = scope.clone();
 
+    // The body executes when the conditions are truthy, so apply condition
+    // narrowing (instanceof, isset, phpstan-assert-if-true, etc.) the same
+    // way `process_while` does for its single condition. Comma-separated
+    // conditions are evaluated left to right, so narrow them in that order;
+    // only the last one's truthiness decides whether the body runs, but an
+    // earlier clause can still narrow a variable that a later clause or the
+    // body depends on.
+    for cond_expr in for_stmt.conditions.iter() {
+        apply_condition_narrowing(cond_expr, scope, ctx);
+    }
+
     // When the cursor is inside the loop body (completion path), discovery
     // passes must walk the ENTIRE body; the final pass uses the real
     // cursor_offset so it stops at the cursor as usual.
@@ -1879,6 +1891,11 @@ pub(crate) fn process_for<'b>(
             for init_expr in for_stmt.initializations.iter() {
                 process_assignment_expr(init_expr, next_scope, ctx);
             }
+            for cond_expr in for_stmt.conditions.iter() {
+                process_condition_assignment(cond_expr, next_scope, ctx);
+                seed_pass_by_ref_in_condition(cond_expr, next_scope, ctx);
+                apply_condition_narrowing(cond_expr, next_scope, ctx);
+            }
         },
     );
 
@@ -1894,11 +1911,34 @@ pub(crate) fn process_for<'b>(
         }
     }
 
+    // When the cursor is inside the loop body (completion path), keep the
+    // scope with condition narrowing applied.  The post-loop merge would
+    // erase the narrowing (since the loop might not execute), but the
+    // cursor IS inside the body, so the conditions are true there.
+    if cursor_in_body && !is_diagnostic_scope_active() {
+        leave_loop(loop_depth);
+        return;
+    }
+
     // The loop body might not execute at all (condition false on
     // first check), so merge with the pre-loop scope.
     let post_loop = scope.clone();
     *scope = pre_loop_scope;
     scope.merge_branch(&post_loop);
+
+    // After the loop, only the last condition clause decided the exit (the
+    // earlier clauses were evaluated for their side effects but don't gate
+    // continuation), so apply the inverse of just that clause.
+    // For example: `for (; ($row = fgetcsv($h)) !== false; )` => after the
+    // loop, $row is false.
+    if let Some(last_cond) = for_stmt.conditions.iter().last() {
+        apply_condition_narrowing_inverse(last_cond, scope, ctx);
+    }
+
+    // Remove synthetic property access keys that were seeded by condition
+    // narrowing; they only hold inside the loop body where the conditions
+    // were true.
+    strip_synthetic_property_keys(scope);
 
     leave_loop(loop_depth);
 }

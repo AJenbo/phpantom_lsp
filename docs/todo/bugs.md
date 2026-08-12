@@ -11,41 +11,36 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B131. A `for` loop's condition narrows nothing
+### B133. A `for` loop's increment clause never updates a variable's type
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Effort: Medium**
 
 ```php
-/** @return string|false */
-function readLine() { return false; }
-
-$line = readLine();
-for (; $line !== false; $line = readLine()) {
-    useString($line);   // reported: got string|false
+class Node {
+    public function __construct(public ?Node $next) {}
 }
+function useNode(Node $n): void {}
 
-for (; ($row = fgetcsv($handle)) !== false; ) {
-    useCsvRow($row);    // reported: got array|false
+for ($node = $head; $node !== null; $node = $node->next) {
+    useNode($node);   // $node's type never reflects the reassignment
 }
 ```
 
-`process_while` applies `apply_condition_narrowing` to its condition (and
-the inverse to the scope after the loop), and `process_for`
-(`type_engine/variable/forward_walk/control_flow.rs`) never applies
-either. It seeds assignments and pass-by-reference arguments out of its
-condition clauses, so the variable is in scope with the right type, but
-nothing rules out the sentinel the condition tests for. Every narrowing
-form is affected, not just the sentinel checks: an `instanceof`, an
-`isset`, and a `@phpstan-assert-if-true` predicate in a `for` condition
-are all ignored the same way.
+`process_for` (`type_engine/variable/forward_walk/control_flow.rs`) never
+runs `for_stmt.increments` through `process_assignment_expr` (or any other
+assignment handling). The increment clause's own span is only ever used
+for `record_scope_snapshot` (diagnostic hover/go-to-definition lookups on
+the `for` line itself); its effect on the variable's type is never fed
+back into the loop's fixed-point re-walk the way `for_stmt.initializations`
+is. So a hand-walked-iterator pattern where the increment reassigns a
+variable to a differently-typed value (e.g. `$node = $node->next()`)
+never has that reassignment reflected in the body or in the post-loop
+scope.
 
-**Fix:** narrow each condition clause the way `process_while` does, after
-seeding the condition's assignments and before walking the body, and
-apply the inverse to the post-loop scope. The fixed-point re-entry
-closure needs the same treatment so later trips through the body keep the
-narrowing. Comma-separated conditions are evaluated left to right and
-only the last one decides whether the body runs, so narrowing them in
-order matches PHP.
+**Fix:** process `for_stmt.increments` with `process_assignment_expr`
+after each body walk (mirroring how `process_while`'s condition
+reassignment runs on each re-entry), and include the same processing in
+the fixed-point re-entry closure passed to `walk_loop_body_to_fixed_point`.
 
 ### B129. Arithmetic on a refined int widens to `int|float`
 

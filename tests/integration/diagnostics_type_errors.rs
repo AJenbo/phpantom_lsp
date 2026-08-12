@@ -8955,3 +8955,65 @@ if (($line = readLine()) !== false) {
         "only false should be narrowed away, got {messages:?}"
     );
 }
+
+// ─── A `for` condition narrows like `while`'s does ──────────────────────────
+
+/// A `for` loop's condition narrows its body the same way `while`'s does:
+/// the sentinel a sentinel check rules out doesn't survive into the body.
+#[test]
+fn a_for_condition_narrows_inside_the_body() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+for (; $line !== false; $line = readLine()) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The assign-and-check shape (`for (; ($row = fgetcsv($h)) !== false; )`)
+/// narrows the same way a `while` with the same condition does.
+#[test]
+fn a_for_condition_assignment_is_narrowed_by_its_own_false_check() {
+    let php = r#"<?php
+function useCsvRow(array $row): void {}
+
+/** @return array|false */
+function readRow() { return false; }
+
+for (; ($row = readRow()) !== false; ) {
+    useCsvRow($row);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only the sentinel the check names is ruled out: `null` survives a
+/// `!== false` check in a `for` condition the same way it does in a `while`.
+#[test]
+fn a_for_condition_leaves_null_in_place() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false|null */
+function readLine() { return null; }
+
+$line = readLine();
+for (; $line !== false; $line = readLine()) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("null"),
+        "only false should be narrowed away, got {messages:?}"
+    );
+}

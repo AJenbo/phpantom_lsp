@@ -103,7 +103,7 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B89 | [`assert($x !== null)` / `assert($x !== false)` does not narrow](todo/bugs.md#b89-assertx--null--assertx--false-does-not-narrow)                                           | Medium-High | Medium      |
-| B131 | [A `for` loop's condition narrows nothing](todo/bugs.md#b131-a-for-loops-condition-narrows-nothing)                                                                       | Medium      | Low         |
+| B133 | [A `for` loop's increment clause never updates a variable's type](todo/bugs.md#b133-a-for-loops-increment-clause-never-updates-a-variables-type)                        | Medium      | Medium      |
 | B129 | [Arithmetic on a refined int widens to `int\|float`](todo/bugs.md#b129-arithmetic-on-a-refined-int-widens-to-intfloat)                                                     | Medium      | Low         |
 | B126 | [A scalar check on a property narrows nothing](todo/bugs.md#b126-a-scalar-check-on-a-property-narrows-nothing)                                                            | Medium      | Medium      |
 | B132 | [A mismatched generic type argument is never reported](todo/bugs.md#b132-a-mismatched-generic-type-argument-is-never-reported)                                            | Medium      | Medium      |
