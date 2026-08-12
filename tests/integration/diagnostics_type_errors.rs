@@ -4428,6 +4428,66 @@ function forward(Box $box): void {
 }
 
 #[test]
+fn diagnostic_for_mismatched_generic_type_argument_without_strict_types() {
+    // A type argument is not a coercion site: PHP converts a `string`
+    // passed to an `int` parameter, but never the `T` inside a `Box<T>`
+    // handed over whole.  So the mismatch is reported whether or not the
+    // file declared `strict_types`.
+    let php = r#"<?php
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(public mixed $value) {}
+}
+
+/** @param Box<int> $box */
+function takesIntBox(Box $box): void {}
+
+function f(): void {
+    /** @var Box<string> $box */
+    $box = new Box('x');
+    takesIntBox($box);
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Expected exactly one type error for Box<string> where Box<int> is required, got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("Box<int>") && msgs[0].contains("Box<string>"),
+        "Message should name both generic types, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn diagnostic_for_mismatched_generic_type_argument_in_both_directions() {
+    // The coercion leniency ran both ways without `strict_types`, so an
+    // `int` type argument reaching a `string` one has to be reported too.
+    let php = r#"<?php
+/** @template T */
+final class Box {
+    /** @param T $value */
+    public function __construct(public mixed $value) {}
+}
+
+/** @param Box<string> $box */
+function takesStringBox(Box $box): void {}
+
+takesStringBox(new Box(1));
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Expected exactly one type error for Box<int> where Box<string> is required, got: {msgs:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_template_bound_from_two_generic_parameters() {
     // `T` is bound at two sites, so it is what both arguments have in
     // common — neither may be measured against the other's type.

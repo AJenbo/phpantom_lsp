@@ -228,3 +228,45 @@ fn subtype_of_global_interface_not_broken_by_shadowing_use_import() {
     // A genuinely unrelated global class is still rejected.
     assert!(!is_subtype_of(&rec_dir_iterator, "Countable", &loader));
 }
+
+// ── is_subtype_of_typed: generic type arguments ─────────────
+
+#[test]
+fn subtype_of_typed_rejects_disjoint_generic_arguments() {
+    use crate::php_type::PhpType;
+
+    let animal = make_class("Animal", None, None, &[]);
+    let cat = make_class("Cat", None, Some("Animal"), &[]);
+    let plant = make_class("Plant", None, None, &[]);
+    let boxed = make_class("Box", None, None, &[]);
+    let classes = [animal, cat, plant, boxed];
+    let loader = loader_from(&classes);
+    let parse = |src: &str| PhpType::parse(src);
+
+    // Neither argument is the other, so the two boxes are unrelated.
+    // The nominal fallback would compare the bases alone and call them
+    // the same class.
+    assert!(!is_subtype_of_typed(
+        &parse("Box<string>"),
+        &parse("Box<int>"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("Box<Cat>"),
+        &parse("Box<Plant>"),
+        &loader
+    ));
+
+    // A narrower or wider argument leaves the question to the nominal
+    // check as before: variance is not recorded on the resolved type.
+    assert!(is_subtype_of_typed(
+        &parse("Box<Cat>"),
+        &parse("Box<Animal>"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("Box<Animal>"),
+        &parse("Box<Cat>"),
+        &loader
+    ));
+}

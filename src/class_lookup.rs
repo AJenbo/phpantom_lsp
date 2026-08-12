@@ -476,6 +476,24 @@ pub(crate) fn is_subtype_of_typed(
             if all_params_ok {
                 return true;
             }
+            // Type arguments that provably do not line up in *either*
+            // direction settle the question here.  The nominal fallback at
+            // the end of this function compares base names only, so it
+            // would read `Box<string>` <: `Box<int>` as `Box` <: `Box` and
+            // discard the arguments entirely.
+            //
+            // A pair where one direction does hold is still left to it:
+            // variance is not recorded on the resolved type, so a wider
+            // argument may be a `@template-contravariant` one, or simply
+            // all we managed to infer.
+            if !is_array_like
+                && args_sub.iter().zip(args_sup.iter()).any(|(s, t)| {
+                    !is_subtype_of_typed(s, t, class_loader)
+                        && !is_subtype_of_typed(t, s, class_loader)
+                })
+            {
+                return false;
+            }
         }
     }
 

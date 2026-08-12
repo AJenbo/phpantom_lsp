@@ -106,7 +106,6 @@ unlikely to move the needle for most users.
 | B133 | [A `for` loop's increment clause never updates a variable's type](todo/bugs.md#b133-a-for-loops-increment-clause-never-updates-a-variables-type)                        | Medium      | Medium      |
 | B129 | [Arithmetic on a refined int widens to `int\|float`](todo/bugs.md#b129-arithmetic-on-a-refined-int-widens-to-intfloat)                                                     | Medium      | Low         |
 | B126 | [A scalar check on a property narrows nothing](todo/bugs.md#b126-a-scalar-check-on-a-property-narrows-nothing)                                                            | Medium      | Medium      |
-| B132 | [A mismatched generic type argument is never reported](todo/bugs.md#b132-a-mismatched-generic-type-argument-is-never-reported)                                            | Medium      | Medium      |
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |
 | B92 | [An array literal's element types widen to base scalar types on a dynamic-key read](todo/bugs.md#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read) | Low-Medium  | High        |
 | B93 | [`CONSTANT[T]` does not resolve per templated key](todo/bugs.md#b93-constantt-does-not-resolve-per-templated-key)                                                           | Low-Medium  | High        |

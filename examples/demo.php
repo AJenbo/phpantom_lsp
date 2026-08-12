@@ -3721,6 +3721,14 @@ class TypeErrorDemo
         // No diagnostic — a box of a User subclass satisfies it:
         $this->requiresUserBox(new ScaffoldingTypedBox($admin));
 
+        // Type error — this file does not declare `strict_types`, so a
+        // string handed to an `int` parameter would be coerced, but the
+        // `string` inside a box never is: the box is passed on whole:
+        $this->requiresIntBox(new ScaffoldingTypedBox('7'));
+
+        // No diagnostic — the box holds what was asked for:
+        $this->requiresIntBox(new ScaffoldingTypedBox(7));
+
         // Type error — `interface-string` constrains the name the string
         // holds, so a class that implements the interface is still the
         // wrong kind of name:
@@ -3776,6 +3784,8 @@ class TypeErrorDemo
     private function requiresUser(User $user): void {}
     /** @param ScaffoldingTypedBox<User> $box */
     private function requiresUserBox(ScaffoldingTypedBox $box): void {}
+    /** @param ScaffoldingTypedBox<int> $box */
+    private function requiresIntBox(ScaffoldingTypedBox $box): void {}
     /** @param interface-string $name */
     private function requiresInterfaceName(string $name): void {}
     private function acceptsNullable(?string $text): void {}

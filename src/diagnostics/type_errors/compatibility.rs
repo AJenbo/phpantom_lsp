@@ -670,39 +670,47 @@ pub(crate) fn is_type_compatible(
         let bases_match = base_arg == base_param
             || (is_array_like_name(name_arg) && is_array_like_name(name_param));
         if bases_match && args_arg.len() == args_param.len() && !args_arg.is_empty() {
+            // Only a class-like base is decided here — array-likes have
+            // their own cross-form rules further down (`list<X>` ↔
+            // `array<int, X>`, `X[]`) that a verdict at this point would
+            // pre-empt.
+            let class_like = !is_array_like_name(name_arg) && !is_array_like_name(name_param);
+            // A type argument is not a coercion site.  PHP converts the
+            // value handed to an `int` parameter, but never the `T` inside
+            // a `Box<T>` it receives whole, so the juggling rules that a
+            // missing `strict_types` turns on have nothing to act on
+            // between two type arguments: `Box<string>` is no more a
+            // `Box<int>` in a lenient file than in a strict one.
+            let args_strict = strict_types || class_like;
             let all_args_compatible = args_arg
                 .iter()
                 .zip(args_param.iter())
-                .all(|(a, p)| is_type_compatible(a, p, class_loader, strict_types));
+                .all(|(a, p)| is_type_compatible(a, p, class_loader, args_strict));
             if all_args_compatible {
                 return true;
             }
-            // The same class with disjoint type arguments is a mismatch,
-            // and the nominal fallback below cannot see it: it compares
-            // base names, so `Box<string>` reaches `Box<int>` as `Box`
-            // <: `Box`.
-            //
-            // Disjoint, not merely "not a subtype": a class type
-            // argument we inferred is widened to the template's declared
-            // bound whenever nothing bound it, so an argument that is a
-            // *supertype* of the declared one says we learned too little,
-            // not that the value contradicts the annotation.  It also
-            // leaves `@template-contravariant` alone, where the wider
-            // argument is the correct one.
-            //
-            // Only decide it here for a class-like base — array-likes
-            // have their own cross-form rules further down (`list<X>` ↔
-            // `array<int, X>`, `X[]`) that a verdict at this point would
-            // pre-empt.
-            if !is_array_like_name(name_arg)
-                && !is_array_like_name(name_param)
-                && args_arg.iter().zip(args_param.iter()).any(|(a, p)| {
-                    !is_type_compatible(a, p, class_loader, strict_types)
-                        && !is_type_compatible(p, a, class_loader, strict_types)
+            if class_like {
+                // The same class with disjoint type arguments is a
+                // mismatch, and the nominal fallback below cannot see it:
+                // it compares base names, so `Box<string>` reaches
+                // `Box<int>` as `Box` <: `Box`.
+                //
+                // Disjoint, not merely "not a subtype": a class type
+                // argument we inferred is widened to the template's
+                // declared bound whenever nothing bound it, so an
+                // argument that is a *supertype* of the declared one says
+                // we learned too little, not that the value contradicts
+                // the annotation.  It also leaves
+                // `@template-contravariant` alone, where the wider
+                // argument is the correct one.  Both of those are the
+                // `true` here rather than a fall-through, so that the
+                // pair is answered on its arguments either way and the
+                // nominal name match never gets to speak for it.
+                return !args_arg.iter().zip(args_param.iter()).any(|(a, p)| {
+                    !is_type_compatible(a, p, class_loader, args_strict)
+                        && !is_type_compatible(p, a, class_loader, args_strict)
                         && !may_name_same_class(a, p)
-                })
-            {
-                return false;
+                });
             }
         }
     }
