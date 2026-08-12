@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b86-a-check-on-a-method-call-does-not-reach-the-argument-that-repeats-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B86. A check on a method call does not reach the argument that repeats it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b86-a-check-on-a-method-call-does-not-reach-the-argument-that-repeats-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B86. A check on a method call does not reach the argument that repeats it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1349,25 +1277,7 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b86-a-check-on-a-method-call-does-not-reach-the-argument-that-repeats-it">B86. A check on a method call does not reach the argument that repeats it<a class="headerlink" href="#b86-a-check-on-a-method-call-does-not-reach-the-argument-that-repeats-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if ($this-&gt;service() instanceof MockInterface) {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $this-&gt;mockMethod($this-&gt;service(), &#39;annul&#39;);  // reported: got EpaymentService</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>resolve_target_classes</code> narrows an argument-less instance call keyed
-under its own text (<code>narrowable_call_key</code> in
-<code>type_engine/resolver/mod.rs</code>), so completion and hover after the check
-see the narrowed type.  The argument-type diagnostic never gets there:
-<code>resolve_expression_type</code> walks the argument as an AST expression, and
-<code>rhs_resolution::resolve_rhs_call</code> resolves the call purely from the
-method's declared return type without consulting the narrowing for the
-call's key, the way <code>Expression::Access</code> does for a property path.  So
-the check is ignored and the declared return type is what the parameter
-is measured against.</p>
-<p><strong>Fix:</strong> give <code>resolve_rhs_call</code> the same narrowing lookup
-<code>Expression::Access</code> has, keyed with the same text
-<code>narrowable_call_key</code> builds so both sides agree on the key.</p>
+<p>No outstanding items.</p>
 
 
 
