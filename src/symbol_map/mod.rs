@@ -120,6 +120,16 @@ pub(crate) enum ClassRefContext {
     /// is tagged so the "which tests cover this class" code lens can pick
     /// coverage references out of the reference index without re-parsing.
     CoversTarget,
+    /// As the operand of a docblock type operator: `key-of<X>`,
+    /// `value-of<X>`, or the base of `X[K]`.
+    ///
+    /// A bare name there is an *array-typed* thing rather than a class most
+    /// of the time — a constant holding an array literal, a `@template`
+    /// parameter, or a type alias — so the unknown-class diagnostic checks
+    /// for those readings before reporting the name as a missing class. A
+    /// backed enum (`value-of<Suit>`) is the one genuine class operand, so
+    /// the reference is still recorded and still navigable.
+    TypeOperatorOperand,
 }
 
 /// The subject (LHS) text of a [`SymbolKind::MemberAccess`] span.

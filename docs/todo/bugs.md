@@ -178,35 +178,34 @@ Intelephense do not), so the signal is weaker than the other entries here.
 same way a literal-key access already does, rather than widening to base
 scalar types as soon as the key stops being a compile-time constant.
 
-### B93. `CONSTANT[T]` does not resolve per templated key
+### B134. A constant operand is only read where a `@template` is bound
 
-**Impact: Low-Medium · Effort: High**
+**Impact: Low · Effort: Medium**
 
 ```php
 const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
 
-/**
- * @template T of key-of<ID_TABLE>
- * @param T $type
- * @return ID_TABLE[T]
- */
-function lookUp(string $type = 'immutable'): int|string {
-    return ID_TABLE[$type];
-}
+/** @param key-of<ID_TABLE> $key */
+function acceptsKey(string $key): void {}
 
-takesInt(lookUp('immutable')); // reported: got int|string, wanted int
+/** @return value-of<ID_TABLE> */
+function anyValue() { return 1; }
+
+acceptsKey('nope');            // not reported: should be 'immutable'|'mutable'
+takesInt(anyValue());          // not reported: should be int|string
 ```
 
-`ID_TABLE[T]` in a `@return` tag should resolve, per call site, to the type
-of the *specific* key the template argument is bound to — `lookUp('immutable')`
-should read as `int`, `lookUp('mutable')` as `string` — not to the union of
-every value the constant array holds. PHPantom currently returns the whole
-table's value union regardless of which key `T` is bound to at the call
-site, so calls that should pass a narrower parameter type are rejected.
+A constant holding an array literal is now read as its own array shape, so
+`key-of<ID_TABLE>` and `ID_TABLE[K]` evaluate — but only along the path that
+builds a template substitution map for a call, which runs solely when the
+function or method declares `@template` params. A `key-of<CONSTANT>`
+parameter or a `value-of<CONSTANT>` return on a plain function is still left
+unevaluated and widens to its bound, so neither constrains anything.
 
-Both `phpy` and Qodana pass this case in `php-typing-conformance`'s corpus
-(Intelephense does not).
-
-**Fix:** when substituting a template parameter bound to `key-of<CONSTANT>`
-at a call site, resolve `CONSTANT[T]` by indexing the constant's array type
-at that specific literal key rather than falling back to the value union.
+**Fix:** run the constant-operand expansion (`constant_operand_shape` in
+`type_engine/call_resolution/`) wherever a declared parameter or return type
+containing an unevaluated operator is read, not only from
+`finish_template_subs`. The awkward part is that the expansion needs a
+`ResolutionCtx` while the sites that read those types (the argument
+compatibility check, the untemplated return path) have varying access to
+one, so the shared entry point has to come first.

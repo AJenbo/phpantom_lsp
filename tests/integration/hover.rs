@@ -11905,6 +11905,50 @@ $result = $a;
     );
 }
 
+/// The type engine reads a constant's array shape for `CONST[K]`, so hover
+/// names the one value the key is bound to rather than the whole table's
+/// value union.
+#[test]
+fn hover_index_access_over_a_constant_names_the_bound_key_value() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+/**
+ * @template T of key-of<ID_TABLE>
+ * @param T $type
+ * @return ID_TABLE[T]
+ */
+function lookUp(string $type): int|string { return ID_TABLE[$type]; }
+
+$id = lookUp('immutable');
+$name = lookUp('mutable');
+"#;
+    let line_of = |needle: &str| {
+        content
+            .lines()
+            .position(|l| l.contains(needle))
+            .expect("line not found") as u32
+    };
+
+    let hover =
+        hover_at(&backend, uri, content, line_of("$id = "), 1).expect("expected hover on $id");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains('1') && !text.contains("string"),
+        "Expected $id to read as the table's int entry, got: {text}"
+    );
+
+    let hover =
+        hover_at(&backend, uri, content, line_of("$name = "), 1).expect("expected hover on $name");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("two") && !text.contains("int"),
+        "Expected $name to read as the table's string entry, got: {text}"
+    );
+}
+
 // ─── __get magic method template resolution ─────────────────────────────────
 
 #[test]

@@ -966,6 +966,11 @@ impl PhpType {
     /// All other nodes are recursively rebuilt with their children
     /// substituted.
     ///
+    /// A `Raw` node — text no type syntax covers, such as the `Foo::BAR`
+    /// spelling of a class constant — is looked up the same way. It is only
+    /// opaque because nothing has told us what it means; when `subs` does,
+    /// that reading wins.
+    ///
     /// # Examples
     ///
     /// ```ignore
@@ -991,7 +996,12 @@ impl PhpType {
                 }
             }
 
-            TypeKind::Literal(_) | TypeKind::Raw(_) | TypeKind::IntRange(_, _) => self.clone(),
+            TypeKind::Raw(s) => match subs.get(s.as_ref()) {
+                Some(replacement) => replacement.clone(),
+                None => self.clone(),
+            },
+
+            TypeKind::Literal(_) | TypeKind::IntRange(_, _) => self.clone(),
 
             TypeKind::StaticType(_) | TypeKind::ThisType(_) => self.clone(),
 

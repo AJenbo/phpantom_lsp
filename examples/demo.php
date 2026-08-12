@@ -832,6 +832,35 @@ class BareGenericSubjectDemo
 }
 
 
+// ── Constant Tables Read Through a Type Operator ────────────────────────────
+
+class ConstantTableLookupDemo
+{
+    /**
+     * A constant holding an array literal is as readable an operand as an
+     * inline `array{…}` shape, so `key-of<TABLE>` names its keys and
+     * `TABLE[K]` names the value under the one key the call site bound.
+     */
+    public function demo(): void
+    {
+        // Each call reads as the one entry its key names, not as the
+        // `int|string` union the declaration has to spell.
+        $width = scaffoldingToolDefault('width');  // TOOL_DEFAULTS['width'] → 2
+        var_dump($width + 1);
+
+        $ink = scaffoldingToolDefault('ink');      // TOOL_DEFAULTS['ink'] → 'black'
+        var_dump(strtoupper($ink));
+
+        // The class-constant spelling reads the same way.
+        $retries = ScaffoldingLimits::lookUp('retries');
+        var_dump($retries + 1);                    // LIMITS['retries'] → 3
+
+        $label = ScaffoldingLimits::lookUp('label');
+        var_dump(strtoupper($label));              // LIMITS['label'] → 'off'
+    }
+}
+
+
 // ── @implements Generic Resolution ─────────────────────────────────────────
 
 class ImplementsGenericDemo
@@ -6447,6 +6476,35 @@ class CachingPenRepository extends PenRepository
     public function clearCache(): void {}
 }
 
+// ─── Constant Tables Read Through a Type Operator ───────────────────────────
+
+const TOOL_DEFAULTS = ['width' => 2, 'ink' => 'black'];
+
+/**
+ * @template T of key-of<TOOL_DEFAULTS>
+ * @param T $setting
+ * @return TOOL_DEFAULTS[T]
+ */
+function scaffoldingToolDefault(string $setting): int|string
+{
+    return TOOL_DEFAULTS[$setting];
+}
+
+class ScaffoldingLimits
+{
+    const LIMITS = ['retries' => 3, 'label' => 'off'];
+
+    /**
+     * @template T of key-of<self::LIMITS>
+     * @param T $key
+     * @return self::LIMITS[T]
+     */
+    public static function lookUp(string $key): int|string
+    {
+        return self::LIMITS[$key];
+    }
+}
+
 // ─── @implements Generic Resolution ─────────────────────────────────────────
 
 /**
@@ -7292,6 +7350,12 @@ function runDemoAssertions(): void
     $boundedPens = new ScaffoldingBoundedPenCollection([new Pen()]);
     assert($boundedPens->first() instanceof Pen, 'a bare generic collection yields its @template bound');
     assert((new ScaffoldingBoundedPenCollection())->first() === null, 'an empty bare generic collection yields null');
+
+    // ── Constant table read through a type operator ─────────────────────
+    assert(scaffoldingToolDefault('width') === 2, "TOOL_DEFAULTS['width'] really is the int 2");
+    assert(scaffoldingToolDefault('ink') === 'black', "TOOL_DEFAULTS['ink'] really is the string 'black'");
+    assert(ScaffoldingLimits::lookUp('retries') === 3, "LIMITS['retries'] really is the int 3");
+    assert(ScaffoldingLimits::lookUp('label') === 'off', "LIMITS['label'] really is the string 'off'");
 
     // ── Receiver retyped by a call (@psalm-this-out) ─────────────────────
     /** @var ScaffoldingMutableBox<Pen> $selfOutBox */

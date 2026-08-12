@@ -101,6 +101,16 @@ pub(crate) fn build_function_template_subs(
             },
         };
 
+        if let Some(literal) = crate::type_engine::call_resolution::type_operator_bound_literal(
+            func_info
+                .template_param_bounds
+                .get(&crate::atom::atom(tpl_name)),
+            arg_text,
+        ) {
+            insert_or_union(&mut subs, tpl_name.to_string(), literal);
+            continue;
+        }
+
         match binding_mode {
             TemplateBindingMode::Direct => {
                 if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
@@ -290,23 +300,13 @@ pub(crate) fn build_function_template_subs(
         }
     }
 
-    // ── Fill in unbound function-level template params ──────
-    // Any template parameter that was not bound from call-site
-    // arguments is replaced with its declared upper bound
-    // (`@template T of Foo` → `Foo`) or `mixed`.  This follows
-    // PHPStan's `resolveToBounds()` semantics and prevents raw
-    // template names like `TReduceReturnType` from leaking into
-    // parameter and return types.
-    for tpl_name in &func_info.template_params {
-        let tpl_key = tpl_name.to_string();
-        subs.entry(tpl_key).or_insert_with(|| {
-            func_info
-                .template_param_bounds
-                .get(tpl_name)
-                .cloned()
-                .unwrap_or_else(PhpType::mixed)
-        });
-    }
+    crate::type_engine::call_resolution::finish_template_subs(
+        &mut subs,
+        &func_info.template_params,
+        &func_info.template_param_bounds,
+        func_info.return_type.as_ref(),
+        rctx,
+    );
 
     subs
 }

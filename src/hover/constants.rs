@@ -105,6 +105,42 @@ impl Backend {
 
         None
     }
+
+    /// The initializer text of a global constant, looked up only where it
+    /// costs a map probe or one targeted file parse to find.
+    ///
+    /// [`Self::lookup_global_constant`] ends by parsing *every* known
+    /// autoload file, to catch a `define()` the byte-level scanner skipped
+    /// inside an `if (!defined(…))` guard. That is worth paying when the user
+    /// hovered one specific name, but not for a speculative lookup: the type
+    /// engine asks about names taken out of a docblock type operator
+    /// (`key-of<X>`, `X[K]`), where `X` is usually a template parameter and
+    /// every miss would charge the whole autoload set.
+    pub(crate) fn lookup_indexed_global_constant(&self, name: &str) -> Option<String> {
+        if let Some(value) = self
+            .symbols
+            .global_defines
+            .read()
+            .get(name)
+            .and_then(|info| info.value.clone())
+        {
+            return Some(value);
+        }
+
+        let path = self
+            .symbols
+            .autoload_constant_index
+            .read()
+            .get(name)
+            .cloned()?;
+        let content = std::fs::read_to_string(&path).ok()?;
+        self.update_ast(&crate::util::path_to_uri(&path), &content);
+        self.symbols
+            .global_defines
+            .read()
+            .get(name)
+            .and_then(|info| info.value.clone())
+    }
 }
 
 /// Extract the value of a constant from PHP source text.

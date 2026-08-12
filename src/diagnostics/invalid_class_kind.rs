@@ -351,11 +351,14 @@ fn check_kind_in_context(
         }
         // A coverage target names a code unit rather than using it, and
         // `#[CoversTrait]` / `@covers SomeInterface` are legitimate, so no
-        // kind is wrong in that position.
+        // kind is wrong in that position. Neither is any kind wrong as a type
+        // operator's operand: `value-of<Suit>` reads an enum, and the other
+        // readings of that position are not classes at all.
         ClassRefContext::Other
         | ClassRefContext::UseImport
         | ClassRefContext::Attribute
-        | ClassRefContext::CoversTarget => None,
+        | ClassRefContext::CoversTarget
+        | ClassRefContext::TypeOperatorOperand => None,
     }
 }
 

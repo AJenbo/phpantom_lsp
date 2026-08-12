@@ -8159,6 +8159,59 @@ acceptsInt(firstValue());
     );
 }
 
+/// A constant naming an array literal is a readable operand: `CONST[T]`
+/// with `T` bound to one of its keys is that key's own value type, not the
+/// union of every value the table holds.
+#[test]
+fn index_access_over_a_constant_resolves_per_templated_key() {
+    let php = r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+/**
+ * @template T of key-of<ID_TABLE>
+ * @param T $type
+ * @return ID_TABLE[T]
+ */
+function lookUp(string $type = 'immutable'): int|string { return ID_TABLE[$type]; }
+
+function takesInt(int $id): void {}
+function takesString(string $id): void {}
+
+takesInt(lookUp('immutable'));
+takesString(lookUp('mutable'));
+takesInt(lookUp('mutable'));
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'two'"), "{messages:?}");
+}
+
+/// The same, for a class constant operand.
+#[test]
+fn index_access_over_a_class_constant_resolves_per_templated_key() {
+    let php = r#"<?php
+namespace App;
+
+class Ids { const TABLE = ['immutable' => 1, 'mutable' => 'two']; }
+
+/**
+ * @template T of key-of<Ids::TABLE>
+ * @param T $type
+ * @return Ids::TABLE[T]
+ */
+function lookUp(string $type) { return Ids::TABLE[$type]; }
+
+function takesInt(int $id): void {}
+
+takesInt(lookUp('immutable'));
+takesInt(lookUp('mutable'));
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
 /// A `@template T of array<array-key, mixed>` bound from an array-literal
 /// argument takes the argument's own shape, not the erased bound, so
 /// `key-of<T>` projects the literal's actual keys.

@@ -109,27 +109,16 @@ impl Backend {
                 }
             };
 
-            // When the template param has a key-of bound (e.g.
-            // `@template K as key-of<TData>`) and the argument is a
-            // string literal, resolve K to the literal value so that
-            // indexed access types like `TData[K]` can look up the
-            // specific key in the array shape.
-            if let Some(bound) = method.template_param_bounds.get(&atom(tpl_name))
-                && matches!(bound.kind(), TypeKind::KeyOf(_))
-            {
-                let trimmed = arg_text.trim();
-                let is_string_lit = (trimmed.starts_with('\'') && trimmed.ends_with('\''))
-                    || (trimmed.starts_with('"') && trimmed.ends_with('"'));
-                if is_string_lit {
-                    // Store as Literal with quotes so evaluate_index_access
-                    // can strip them when matching against shape keys.
-                    crate::type_engine::variable::rhs_resolution::insert_or_union(
-                        &mut subs,
-                        tpl_name.to_string(),
-                        PhpType::literal_string_raw(trimmed.to_string()),
-                    );
-                    continue;
-                }
+            if let Some(literal) = type_operator_bound_literal(
+                method.template_param_bounds.get(&atom(tpl_name)),
+                arg_text,
+            ) {
+                crate::type_engine::variable::rhs_resolution::insert_or_union(
+                    &mut subs,
+                    tpl_name.to_string(),
+                    literal,
+                );
+                continue;
             }
 
             match binding_mode {
@@ -560,23 +549,13 @@ impl Backend {
             }
         }
 
-        // ── Fill in unbound method-level template params ────────
-        // Any template parameter that was not bound from call-site
-        // arguments is replaced with its declared upper bound
-        // (`@template T of Foo` → `Foo`) or `mixed`.  This follows
-        // PHPStan's `resolveToBounds()` semantics and prevents raw
-        // template names like `TReduceReturnType` from leaking into
-        // parameter and return types.
-        for tpl_name in &method.template_params {
-            let tpl_key = tpl_name.to_string();
-            subs.entry(tpl_key).or_insert_with(|| {
-                method
-                    .template_param_bounds
-                    .get(tpl_name)
-                    .cloned()
-                    .unwrap_or_else(PhpType::mixed)
-            });
-        }
+        finish_template_subs(
+            &mut subs,
+            &method.template_params,
+            &method.template_param_bounds,
+            method.return_type.as_ref(),
+            ctx,
+        );
 
         subs
     }
@@ -1148,6 +1127,139 @@ pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) 
     }
 
     (!entries.is_empty()).then(|| PhpType::array_shape(entries))
+}
+
+/// The literal an argument binds a template to when the template's own bound
+/// is a type operator — `@template K of key-of<TABLE>`, `@template V of
+/// value-of<TABLE>`, `@template E of TABLE[K]`.
+///
+/// `resolve_arg_text_to_type` widens a scalar literal to its base type, which
+/// is what nearly every binding wants and exactly wrong here: the operator can
+/// only be evaluated against the *specific* key or value the caller wrote, so
+/// `'immutable'` has to stay `'immutable'` rather than becoming `string`. The
+/// quotes are kept because that is the spelling `evaluate_index_access`
+/// matches shape keys against.
+///
+/// Returns `None` when the bound is not a type operator or the argument is not
+/// a scalar literal, leaving the ordinary binding modes to resolve it.
+pub(crate) fn type_operator_bound_literal(
+    bound: Option<&PhpType>,
+    arg_text: &str,
+) -> Option<PhpType> {
+    let bound = bound?;
+    if !matches!(
+        bound.kind(),
+        TypeKind::KeyOf(_) | TypeKind::ValueOf(_) | TypeKind::IndexAccess(..)
+    ) {
+        return None;
+    }
+    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(arg_text.trim())
+        .filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+}
+
+/// The array shape a constant read through a type operator describes.
+///
+/// `key-of<ID_TABLE>` and `ID_TABLE[K]` name an operand as concrete as an
+/// inline `array{…}`, but the docblock parser only ever sees the name — it
+/// cannot read the constant behind it. This does, from the constant's own
+/// initializer text, for a global constant (`ID_TABLE`) and for the
+/// `Class::CONST` spelling alike.
+///
+/// Returns `None` when the name is not a constant we can reach, when its
+/// value is not an array literal, or when none of its keys are literal — in
+/// each case the operator stays unevaluated and widens to its bound, which
+/// is the honest reading of an operand nobody can read.
+pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let value = match name.rsplit_once("::") {
+        Some((class_part, const_name)) => {
+            let class_name =
+                crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
+                    .unwrap_or_else(|| class_part.to_string());
+            let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
+                .cloned()
+                .or_else(|| (ctx.class_loader)(&class_name))?;
+            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                &class,
+                ctx.class_loader,
+                ctx.resolved_class_cache,
+            );
+            merged.get_constant(const_name)?.value.clone()?
+        }
+        // `resolve_names` qualifies a bare docblock name against the file's
+        // namespace, since almost every bare name in a type position is a
+        // class. A namespace-level `const` is indexed under its short name,
+        // so both spellings have to be tried.
+        None => {
+            let backend = ctx.backend?;
+            let short = crate::util::short_name(name);
+            backend.lookup_indexed_global_constant(name).or_else(|| {
+                (short != name)
+                    .then(|| backend.lookup_indexed_global_constant(short))
+                    .flatten()
+            })?
+        }
+    };
+    array_literal_shape_type(&value, ctx)
+}
+
+/// Finish a template substitution map: bind the constants its types read
+/// through a type operator, then fill in the template params no argument
+/// bound.
+///
+/// Both halves exist so a raw name never leaks downstream. An unbound
+/// template resolves to its declared upper bound (`@template T of Foo` →
+/// `Foo`) or `mixed`, following PHPStan's `resolveToBounds()`. A constant
+/// operand resolves to the array shape it names, which is what lets the
+/// substitution every call site already runs finish the operator:
+/// `key-of<TABLE>` becomes the table's own keys, and `TABLE[K]` picks out
+/// the single value the argument bound `K` to.
+///
+/// The constant bindings are applied to the bounds as well, so a call that
+/// leaves `K` unbound still reads `TABLE[key-of<TABLE>]` as the table's
+/// value union rather than giving up on the operator.
+pub(crate) fn finish_template_subs(
+    subs: &mut HashMap<String, PhpType>,
+    template_params: &[Atom],
+    template_param_bounds: &crate::atom::AtomMap<PhpType>,
+    return_type: Option<&PhpType>,
+    ctx: &ResolutionCtx<'_>,
+) {
+    let mut operands = Vec::new();
+    if let Some(ret) = return_type.filter(|r| r.contains_unevaluated_operator()) {
+        ret.unevaluated_operator_operands(&mut operands);
+    }
+    for bound in template_param_bounds.values() {
+        if bound.contains_unevaluated_operator() {
+            bound.unevaluated_operator_operands(&mut operands);
+        }
+    }
+
+    let mut constant_subs: HashMap<String, PhpType> = HashMap::new();
+    for operand in operands {
+        // A template parameter is the other thing a surviving operator's
+        // operand can be, and looking one up as a constant only wastes work.
+        if constant_subs.contains_key(&operand)
+            || template_params.iter().any(|p| p.as_str() == operand)
+        {
+            continue;
+        }
+        if let Some(shape) = constant_operand_shape(&operand, ctx) {
+            constant_subs.insert(operand, shape);
+        }
+    }
+
+    for tpl_name in template_params {
+        subs.entry(tpl_name.to_string()).or_insert_with(|| {
+            template_param_bounds
+                .get(tpl_name)
+                .map(|bound| bound.substitute(&constant_subs))
+                .unwrap_or_else(PhpType::mixed)
+        });
+    }
+
+    for (name, shape) in constant_subs {
+        subs.entry(name).or_insert(shape);
+    }
 }
 
 /// Extract the literal key text of an array literal's key expression

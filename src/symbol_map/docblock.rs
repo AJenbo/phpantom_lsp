@@ -757,15 +757,15 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
 
         // ── key-of / value-of ───────────────────────────────────────
         type_ast::Type::KeyOf(k) => {
-            emit_type_symbols(&k.parameter.entry.inner, sink);
+            emit_type_operand_symbols(&k.parameter.entry.inner, sink);
         }
         type_ast::Type::ValueOf(v) => {
-            emit_type_symbols(&v.parameter.entry.inner, sink);
+            emit_type_operand_symbols(&v.parameter.entry.inner, sink);
         }
 
         // ── Index access: T[K] ─────────────────────────────────────
         type_ast::Type::IndexAccess(i) => {
-            emit_type_symbols(i.target, sink);
+            emit_type_operand_symbols(i.target, sink);
             emit_type_symbols(i.index, sink);
         }
 
@@ -886,7 +886,42 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
 ///
 /// Checks [`is_navigable_type`] and emits either a `ClassReference` or
 /// `SelfStaticParent` span as appropriate.
+/// Emit the operand of a type operator (`key-of<X>`, `value-of<X>`, `X[K]`).
+///
+/// A bare name in that position is usually array-typed rather than a class:
+/// a constant holding an array literal, a `@template` parameter, or a type
+/// alias. It is tagged [`ClassRefContext::TypeOperatorOperand`] so the
+/// unknown-class diagnostic reads it that way. A structural operand
+/// (`key-of<array<string, Foo>>`) is an ordinary type and its own references
+/// are emitted as usual.
+fn emit_type_operand_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
+    match ty {
+        type_ast::Type::Reference(r) if r.parameters.is_none() => {
+            let name = crate::php_type::reference_kind_name(&r.kind);
+            let span = r.kind.span();
+            emit_identifier_span_in(
+                name,
+                span.start.offset,
+                span.end.offset,
+                ClassRefContext::TypeOperatorOperand,
+                sink.spans,
+            );
+        }
+        _ => emit_type_symbols(ty, sink),
+    }
+}
+
 fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<SymbolSpan>) {
+    emit_identifier_span_in(name, start, end, ClassRefContext::Other, spans);
+}
+
+fn emit_identifier_span_in(
+    name: &str,
+    start: u32,
+    end: u32,
+    context: ClassRefContext,
+    spans: &mut Vec<SymbolSpan>,
+) {
     // Handle `self`, `static`, `parent` — they're class-like but get
     // a special span kind.
     if let Some(ssp_kind) = self_static_parent_kind(name) {
@@ -909,7 +944,7 @@ fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<Symbol
             kind: SymbolKind::ClassReference {
                 name: display_name,
                 is_fqn,
-                context: ClassRefContext::Other,
+                context,
             },
         });
     }

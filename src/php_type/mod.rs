@@ -968,6 +968,66 @@ impl PhpType {
         }
     }
 
+    /// Collect the names an unevaluated type operator reads: the operand of
+    /// `key-of<X>` / `value-of<X>` and the base of `X[K]`.
+    ///
+    /// An operator survives evaluation when its operand is a bare name, which
+    /// is either a template nobody has substituted yet or a constant nobody
+    /// has read yet — the docblock parser cannot tell the two apart. Callers
+    /// that *can* read constants use this to learn which names a type needs
+    /// resolved before they bind them (see
+    /// `type_engine::call_resolution::constant_operand_shape`).
+    ///
+    /// Names are appended in traversal order, without deduplication; a class
+    /// constant arrives in its written `Foo::BAR` spelling.
+    pub fn unevaluated_operator_operands(&self, out: &mut Vec<String>) {
+        let push_operand = |operand: &PhpType, out: &mut Vec<String>| match operand.kind() {
+            TypeKind::Named(name) => out.push(name.to_string()),
+            TypeKind::Raw(text) => out.push(text.to_string()),
+            _ => operand.unevaluated_operator_operands(out),
+        };
+        match self.kind() {
+            TypeKind::KeyOf(operand) | TypeKind::ValueOf(operand) => push_operand(operand, out),
+            TypeKind::IndexAccess(base, index) => {
+                push_operand(base, out);
+                index.unevaluated_operator_operands(out);
+            }
+            TypeKind::Nullable(inner)
+            | TypeKind::Array(inner)
+            | TypeKind::ClassString(Some(inner))
+            | TypeKind::InterfaceString(Some(inner)) => inner.unevaluated_operator_operands(out),
+            TypeKind::Union(members) | TypeKind::Intersection(members) => {
+                for member in members {
+                    member.unevaluated_operator_operands(out);
+                }
+            }
+            TypeKind::Generic(g) => {
+                for arg in &g.args {
+                    arg.unevaluated_operator_operands(out);
+                }
+            }
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
+                for entry in entries {
+                    entry.value_type.unevaluated_operator_operands(out);
+                }
+            }
+            TypeKind::Callable(c) => {
+                for param in &c.params {
+                    param.type_hint.unevaluated_operator_operands(out);
+                }
+                if let Some(ret) = &c.return_type {
+                    ret.unevaluated_operator_operands(out);
+                }
+            }
+            TypeKind::Conditional(c) => {
+                c.condition.unevaluated_operator_operands(out);
+                c.then_type.unevaluated_operator_operands(out);
+                c.else_type.unevaluated_operator_operands(out);
+            }
+            _ => {}
+        }
+    }
+
     /// Whether this type is `bool` or `boolean` (case-insensitive).
     ///
     /// Also returns `true` when the type is `?bool` (nullable wrapper).

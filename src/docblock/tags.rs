@@ -1280,6 +1280,16 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
         return false;
     }
 
+    // A type operator the parser could not evaluate — `key-of<TABLE>`,
+    // `value-of<TABLE>`, `TABLE[K]` — reads one value out of a table or a
+    // template, which no native hint can express: the declaration can only
+    // spell the widest type the operator might produce (`int|string` for a
+    // table holding both). It refines that hint however it evaluates, so the
+    // docblock wins.
+    if doc_inner.contains_unevaluated_operator() {
+        return true;
+    }
+
     // Produce a lowercased base name for the native type's inner part
     // `array`, `iterable`, `callable`, and `Closure` are broad types
     // that docblocks commonly refine (e.g. `array` → `list<User>`,

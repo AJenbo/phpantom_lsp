@@ -20,7 +20,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{ClassRefContext, SymbolKind};
 
 use super::helpers::{
     ByteRange, FileDiagnosticContext, compute_existence_guards, compute_use_line_ranges,
@@ -102,8 +102,12 @@ impl Backend {
                 continue;
             }
 
-            let (ref_name, is_fqn) = match &span.kind {
-                SymbolKind::ClassReference { name, is_fqn, .. } => (name.as_str(), *is_fqn),
+            let (ref_name, is_fqn, ref_context) = match &span.kind {
+                SymbolKind::ClassReference {
+                    name,
+                    is_fqn,
+                    context,
+                } => (name.as_str(), *is_fqn, *context),
                 _ => continue,
             };
 
@@ -142,6 +146,22 @@ impl Backend {
             if !is_fqn
                 && !ref_name.contains('\\')
                 && symbol_map.find_template_def(ref_name, span.start).is_some()
+            {
+                continue;
+            }
+
+            // ── Skip a constant read through a type operator ─────────────
+            // `key-of<ID_TABLE>` / `ID_TABLE[K]` name the array the constant
+            // holds, not a class. The type engine reads the constant's own
+            // initializer there (see
+            // `type_engine::call_resolution::constant_operand_shape`), so
+            // insisting the name is a class would report every use of the
+            // syntax PHPantom supports.
+            if ref_context == ClassRefContext::TypeOperatorOperand
+                && (self.lookup_indexed_global_constant(&fqn).is_some()
+                    || self
+                        .lookup_indexed_global_constant(crate::util::short_name(&fqn))
+                        .is_some())
             {
                 continue;
             }
