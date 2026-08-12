@@ -1562,6 +1562,13 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
             strip_null_from_scope(&var_name, scope);
         }
     }
+    // Check for `$x !== false` or `false !== $x` — the truthy branch
+    // rules out `false` alone, which is what the `T|false` handle idiom
+    // (`fopen()`, `finfo_open()`, `strpos()`, …) is written to do.
+    if let Some(var_name) = extract_non_false_check_var(condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        strip_false_from_scope(&var_name, scope);
+    }
     // `isset($x)` — truthy branch means $x is not null: strip null.
     // Handles multiple args: `isset($a, $b)` strips null from both.
     for var_name in extract_isset_vars(condition) {
@@ -1788,6 +1795,39 @@ pub(crate) fn extract_false_equality_check_var(expr: &Expression<'_>) -> Option<
             let is_equal = matches!(bin.operator, BinaryOperator::Equal(_));
 
             if (is_identical || is_equal) && !negated {
+                if is_false_expr(bin.rhs) {
+                    return expr_to_var_name(bin.lhs)
+                        .or_else(|| narrowing::expr_to_subject_key(bin.lhs));
+                }
+                if is_false_expr(bin.lhs) {
+                    return expr_to_var_name(bin.rhs)
+                        .or_else(|| narrowing::expr_to_subject_key(bin.rhs));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Extract variable name from `$x !== false` or `false !== $x` patterns.
+///
+/// Mirrors [`extract_non_null_check_var`] but for `false`, which is what
+/// the truthy branch of an `if`/`while` guarding a `T|false` return has
+/// ruled out. The loose form (`$x != false`) rules out every falsy value,
+/// so treating it as `false` alone is a subset of what it proves.
+pub(crate) fn extract_non_false_check_var(expr: &Expression<'_>) -> Option<String> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    match inner {
+        Expression::Binary(bin) => {
+            let is_not_identical = matches!(bin.operator, BinaryOperator::NotIdentical(_));
+            let is_not_equal = matches!(bin.operator, BinaryOperator::NotEqual(_));
+            let is_identical = matches!(bin.operator, BinaryOperator::Identical(_));
+            let is_equal = matches!(bin.operator, BinaryOperator::Equal(_));
+
+            if (is_not_identical || is_not_equal) && !negated
+                || (is_identical || is_equal) && negated
+            {
                 if is_false_expr(bin.rhs) {
                     return expr_to_var_name(bin.lhs)
                         .or_else(|| narrowing::expr_to_subject_key(bin.lhs));

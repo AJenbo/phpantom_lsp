@@ -11,32 +11,81 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B88. `!== false` does not narrow inside a plain `if`/`while` truthy branch
+### B125. A `while` body that reassigns the checked variable loses the condition's narrowing
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Effort: Medium**
 
 ```php
-/** @param non-empty-string|false $value */
-function inspect($value): void {
-    if ($value !== false) {
-        takesNonEmptyString($value); // reported: got non-empty-string|false
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+while ($line !== false) {
+    useString($line);   // reported: got string|false
+    $line = readLine(); // …because of this line, below the read
+}
+```
+
+`while ($line !== false)` narrows its body correctly as long as the body
+does not write to `$line`. Advancing the cursor inside the loop — which is
+what every `fgets()`/`fgetcsv()`/`readLine()` read loop does — puts the
+un-narrowed assignment type back at the *top* of the body, so a read
+written *above* the reassignment is judged against the widened type. The
+same happens with `null` (`while ($line !== null) { …; $line = next(); }`),
+so this is the loop re-walk merging the assignment into the entry scope
+rather than anything specific to `false`: the narrowing the condition
+established is dropped for the whole body instead of holding until the
+statement that invalidates it.
+
+An `if` body behaves correctly here, so only the loop path is affected.
+
+**Fix:** re-apply the loop condition's narrowing at the top of each
+re-walk of the body, so the entry scope of every iteration is the merged
+type *narrowed by the condition* rather than the merged type alone.
+
+### B126. A scalar check on a property narrows nothing
+
+**Impact: Medium · Effort: Medium**
+
+```php
+class Holder {
+    public string|false $value = false;
+
+    public function run(): void {
+        if ($this->value !== false) {
+            useString($this->value); // reported: got string|false
+        }
+        if ($this->value) {
+            useString($this->value); // reported: got string|false
+        }
     }
 }
 ```
 
-`apply_null_narrowing_truthy` (`type_engine/variable/forward_walk/cond_narrowing.rs:1540`)
-handles `!== null`/`isset`/`!empty` for the truthy branch of an `if`/`while`
-condition, but has no equivalent case for `!== false`. `strip_false_from_scope`
-and `extract_false_equality_check_var` already exist (lines 1936 and 1783) but
-are wired only into the guard-clause *inverse* path
-(`apply_guard_clause_null_narrowing`, line 2057) for `=== false { throw; }`,
-never into the truthy in-block branch. So the common `T|false` idiom guarded
-with `!== false` (rather than `!$x`/`empty($x)`) never narrows inside the
-`if` body.
+A property subject only ever gets *class-level* narrowing. `instanceof`
+on `$this->prop` works, because `Expression::Access` falls through to
+`narrowed_by_rewalk` → `apply_property_narrowing`, which narrows a
+`Vec<ClassInfo>`. A check that removes a scalar member instead
+(`!== false`, `!== null`, a bare truthy `if`) has no class to swap, and
+the forward walker's scope entry for the key never reaches the
+diagnostic: `narrowed_subject_from_scope` is consulted for the key first,
+so the narrowing either is not recorded in the snapshot cache under the
+synthetic key or is discarded when the branch scope merges. The same
+check on a local variable narrows correctly, so it is the property key,
+not the check, that is unsupported.
 
-**Fix:** add an `extract_non_false_check_var` mirroring
-`extract_non_null_check_var`, and call it with `strip_false_from_scope` from
-`apply_null_narrowing_truthy` the same way the null case is handled.
+This is easy to mistake for working, because the nullable form is hidden
+by a deliberately permissive rule: a `?T` argument passed to a `T`
+parameter is accepted without narrowing at all
+(`diagnostics/type_errors/compatibility.rs`, the "Nullable arg →
+non-nullable param: MAYBE" case), on the grounds that the caller may have
+guarded. A `T|false` union has no such escape hatch, so that is where the
+missing narrowing surfaces.
+
+**Fix:** find out which of the two halves drops the narrowing — the
+snapshot recording for a synthetic member key, or the branch-scope merge
+— and record it so that `narrowed_subject_from_scope` answers for a
+property key the way it already does for an array-access key.
 
 ### B89. `assert($x !== null)` / `assert($x !== false)` does not narrow
 

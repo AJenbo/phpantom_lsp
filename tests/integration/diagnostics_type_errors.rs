@@ -8522,3 +8522,86 @@ useString(widen());
         "the native union should stand, got {messages:?}"
     );
 }
+
+// ─── `!== false` in a truthy branch ─────────────────────────────────────────
+
+/// `if ($x !== false)` rules out `false` for the body, the same way
+/// `if ($x !== null)` already rules out `null`.
+#[test]
+fn a_not_false_check_narrows_inside_the_if_body() {
+    let php = r#"<?php
+function takesNonEmptyString(string $value): void {}
+
+/** @param non-empty-string|false $value */
+function inspect($value): void {
+    if ($value !== false) {
+        takesNonEmptyString($value);
+    }
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The whole idiom, end to end: a docblock refines the native union to
+/// `false|string` and `!== false` narrows that `false` away.
+#[test]
+fn a_refined_union_narrows_through_a_not_false_check() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/**
+ * @return false|string
+ */
+function parseImage(array $fragments): bool|string { return false; }
+
+$image = parseImage([]);
+if ($image !== false) {
+    useString($image);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `while ($row !== false)` narrows its body the same way, which is the
+/// shape every `fgets()`/`fgetcsv()` read loop is written in.
+#[test]
+fn a_not_false_check_narrows_inside_a_while_body() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+while ($line !== false) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only `false` is ruled out: a `null` member of the same union survives
+/// the check, since `null !== false`.
+#[test]
+fn a_not_false_check_leaves_null_in_place() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false|null */
+function readLine() { return null; }
+
+$line = readLine();
+if ($line !== false) {
+    useString($line);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("null"),
+        "only false should be narrowed away, got {messages:?}"
+    );
+}

@@ -105,7 +105,8 @@ unlikely to move the needle for most users.
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B89 | [`assert($x !== null)` / `assert($x !== false)` does not narrow](todo/bugs.md#b89-assertx--null--assertx--false-does-not-narrow)                                           | Medium-High | Medium      |
 | B124 | [A ternary's truthy condition does not narrow its own then branch](todo/bugs.md#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch)                     | Medium      | Low-Medium  |
-| B88 | [`!== false` does not narrow inside a plain `if`/`while` truthy branch](todo/bugs.md#b88-false-does-not-narrow-inside-a-plain-ifwhile-truthy-branch)                       | Medium      | Low         |
+| B125 | [A `while` body that reassigns the checked variable loses the condition's narrowing](todo/bugs.md#b125-a-while-body-that-reassigns-the-checked-variable-loses-the-conditions-narrowing) | Medium      | Medium      |
+| B126 | [A scalar check on a property narrows nothing](todo/bugs.md#b126-a-scalar-check-on-a-property-narrows-nothing)                                                            | Medium      | Medium      |
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |
 | B91 | [A native type hint silently accepts a PHPDoc-only pseudo-type](todo/bugs.md#b91-a-native-type-hint-silently-accepts-a-phpdoc-only-pseudo-type)                            | Medium      | Low-Medium  |
 | B121 | [`assert($array[$key] instanceof Foo)` does not narrow the array-access subject](todo/bugs.md#b121-assertarraykey-instanceof-foo-does-not-narrow-the-array-access-subject) | Medium      | Low         |
