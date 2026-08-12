@@ -246,6 +246,43 @@ impl Backend {
     }
 }
 
+/// Finish the type operators a declared return type reads through a
+/// constant.
+///
+/// `@return value-of<ID_TABLE>` names the values a table holds, but the
+/// docblock parser only ever saw the constant's name.  Reading it here means
+/// the body is checked against those values, where an unevaluated operator
+/// widens to whatever a value could be in general and proves nothing.
+fn evaluate_declared_return(
+    declared: PhpType,
+    current_class: &ClassInfo,
+    content: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+    backend: &Backend,
+) -> PhpType {
+    if !declared.contains_unevaluated_operator() {
+        return declared;
+    }
+    let ctx = crate::type_engine::resolver::ResolutionCtx {
+        current_class: Some(current_class),
+        all_classes,
+        content,
+        cursor_offset: 0,
+        class_loader,
+        backend: Some(backend),
+        laravel_macro_this_resolver: None,
+        function_loader: Some(function_loader),
+        resolved_class_cache: Some(&backend.resolved_class_cache),
+        scope_var_resolver: None,
+        is_in_static_method: false,
+        preserve_static: false,
+    };
+    crate::type_engine::call_resolution::evaluate_constant_operands(&declared, &ctx)
+        .unwrap_or(declared)
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Resolve the type of a return expression and push a `ResolvedReturn`.
 ///
@@ -478,6 +515,16 @@ fn process_top_level_statement(
                 }
             };
 
+            let declared_return = evaluate_declared_return(
+                declared_return,
+                current_class,
+                content,
+                &file_ctx.classes,
+                class_loader,
+                function_loader,
+                backend,
+            );
+
             let config_resolver = |key: &str| backend.resolve_config_type(key);
             let trans_resolver = |key: &str| backend.resolve_trans_type(key);
             let loaders = Loaders {
@@ -614,6 +661,16 @@ fn process_class_member(
                 name.to_string()
             }
         });
+
+    let declared_return = evaluate_declared_return(
+        declared_return,
+        current_class,
+        content,
+        &file_ctx.classes,
+        class_loader,
+        function_loader,
+        backend,
+    );
 
     let config_resolver = |key: &str| backend.resolve_config_type(key);
     let trans_resolver = |key: &str| backend.resolve_trans_type(key);

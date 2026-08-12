@@ -614,7 +614,7 @@ pub(crate) fn seed_closure_params(
             &pname,
         )
         .filter(|_| is_docblock_adjacent(ctx.content, fn_span_start as usize))
-        .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+        .map(|t| super::scope_state::resolve_docblock_param_type(&t, ctx));
 
         let effective_type = crate::docblock::resolve_effective_type_typed(
             native_type.as_ref(),

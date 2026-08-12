@@ -3523,3 +3523,87 @@ function total(): int {
     let messages = return_error_messages(&collect(php));
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+// ── key-of / value-of over a constant ───────────────────────────────────────
+
+/// `@return key-of<CONSTANT>` holds the body to the keys the table has,
+/// with no `@template` anywhere in the signature.
+#[test]
+fn key_of_over_a_constant_holds_the_body_to_the_tables_keys() {
+    let php = r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+/** @return key-of<ID_TABLE> */
+function goodKey() { return 'mutable'; }
+
+/** @return key-of<ID_TABLE> */
+function badKey() { return 'nope'; }
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'nope'"), "{messages:?}");
+    assert!(
+        messages[0].contains("'immutable'|'mutable'"),
+        "{messages:?}"
+    );
+}
+
+/// And `@return value-of<CONSTANT>` to its values, whichever of them the
+/// body picks.
+#[test]
+fn value_of_over_a_constant_holds_the_body_to_the_tables_values() {
+    let php = r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+/** @return value-of<ID_TABLE> */
+function goodInt() { return 1; }
+
+/** @return value-of<ID_TABLE> */
+function goodString() { return 'two'; }
+
+/** @return value-of<ID_TABLE> */
+function badValue() { return 3.5; }
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("3.5"), "{messages:?}");
+}
+
+/// The same on a method, whose declared return names its own class constant.
+#[test]
+fn key_of_over_a_class_constant_holds_a_methods_body() {
+    let php = r#"<?php
+namespace App;
+
+class Ids {
+    const TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+    /** @return key-of<Ids::TABLE> */
+    public function bad() { return 'nope'; }
+
+    /** @return key-of<self::TABLE> */
+    public function good() { return 'immutable'; }
+}
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'nope'"), "{messages:?}");
+}
+
+/// A constant nobody can read leaves the operator standing, and an
+/// operator that names no set of values cannot reject anything.
+#[test]
+fn key_of_over_an_unreadable_constant_rejects_nothing() {
+    let php = r#"<?php
+namespace App;
+
+/** @return key-of<\Vendor\Config::MAP> */
+function unknownKey() { return 'anything'; }
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}

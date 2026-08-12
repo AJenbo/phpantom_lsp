@@ -977,6 +977,12 @@ class ConstantTableLookupDemo
         // return is the union of its values.
         var_dump(scaffoldingToolSettingName('ink'));  // key-of<TOOL_DEFAULTS> → 'width'|'ink'
         var_dump(scaffoldingAnyToolDefault());        // value-of<TOOL_DEFAULTS> → 2|'black'
+
+        // The declaration reads the same way from inside the body, so a
+        // `@return` naming the table is held to what the table holds.
+        // Try: hover `$setting` inside `scaffoldingToolDefaultFor()`.
+        var_dump(scaffoldingToolDefaultFor('ink'));   // value-of<TOOL_DEFAULTS> → 2|'black'
+        var_dump(ScaffoldingLimits::anyLimitName());  // key-of<LIMITS> → 'retries'|'label'
     }
 }
 
@@ -6657,6 +6663,16 @@ function scaffoldingAnyToolDefault(): int|string
     return TOOL_DEFAULTS['width'];
 }
 
+/**
+ * @param key-of<TOOL_DEFAULTS> $setting
+ * @return value-of<TOOL_DEFAULTS>
+ */
+function scaffoldingToolDefaultFor(string $setting): int|string
+{
+    // Try: hover `$setting` — 'width'|'ink', the keys the table has.
+    return TOOL_DEFAULTS[$setting];
+}
+
 class ScaffoldingLimits
 {
     const LIMITS = ['retries' => 3, 'label' => 'off'];
@@ -6669,6 +6685,12 @@ class ScaffoldingLimits
     public static function lookUp(string $key): int|string
     {
         return self::LIMITS[$key];
+    }
+
+    /** @return key-of<self::LIMITS> */
+    public static function anyLimitName(): string
+    {
+        return 'retries';
     }
 }
 
@@ -7573,6 +7595,8 @@ function runDemoAssertions(): void
     assert(ScaffoldingLimits::lookUp('label') === 'off', "LIMITS['label'] really is the string 'off'");
     assert(scaffoldingToolSettingName('ink') === 'ink', "'ink' really is one of TOOL_DEFAULTS' keys");
     assert(in_array(scaffoldingAnyToolDefault(), TOOL_DEFAULTS, true), "the untemplated return really is one of TOOL_DEFAULTS' values");
+    assert(scaffoldingToolDefaultFor('ink') === 'black', "a key read inside the body really picks the table's own value");
+    assert(array_key_exists(ScaffoldingLimits::anyLimitName(), ScaffoldingLimits::LIMITS), "the declared return really is one of LIMITS' keys");
 
     // ── Receiver retyped by a call (@psalm-this-out) ─────────────────────
     /** @var ScaffoldingMutableBox<Pen> $selfOutBox */

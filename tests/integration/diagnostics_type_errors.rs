@@ -8467,6 +8467,65 @@ takesInt(anyValue());
     assert!(messages[0].contains("'two'"), "{messages:?}");
 }
 
+/// Inside the body, the parameter holds one of the table's keys: the
+/// declaration is read where the walker seeds the scope, not only where
+/// the call site checks the argument.
+#[test]
+fn key_of_over_a_constant_types_the_parameter_in_the_body() {
+    let php = r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+function takesInt(int $x): void {}
+function takesKey(string $x): void {}
+
+/** @param key-of<ID_TABLE> $key */
+function acceptsKey(string $key): void {
+    takesKey($key);
+    takesInt($key);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("'immutable'|'mutable'"),
+        "{messages:?}"
+    );
+}
+
+/// The same on a method, where the parameter type the walker reads comes
+/// from the merged class rather than the source docblock.  Both spellings
+/// of the owning class resolve.
+#[test]
+fn key_of_over_a_class_constant_types_a_method_parameter() {
+    let php = r#"<?php
+namespace App;
+
+function takesInt(int $x): void {}
+
+class Ids {
+    const TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+    /** @param key-of<Ids::TABLE> $key */
+    public function pick(string $key): void {
+        takesInt($key);
+    }
+
+    /** @param key-of<self::TABLE> $key */
+    public function pickSelf(string $key): void {
+        takesInt($key);
+    }
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("'immutable'|'mutable'")),
+        "{messages:?}"
+    );
+}
+
 // ── interface-string ────────────────────────────────────────────────
 
 #[test]

@@ -519,6 +519,30 @@ impl<'a> ForwardWalkCtx<'a> {
         }
     }
 
+    /// Build a [`ResolutionCtx`](crate::type_engine::resolver::ResolutionCtx)
+    /// from this walk context.
+    ///
+    /// Carries no variable resolver: it is for the resolutions that read
+    /// the *declarations* around the walk (a constant behind a type
+    /// operator, a class behind a name) rather than the values flowing
+    /// through it.
+    pub(crate) fn as_resolution_ctx(&self) -> crate::type_engine::resolver::ResolutionCtx<'_> {
+        crate::type_engine::resolver::ResolutionCtx {
+            current_class: Some(self.current_class),
+            all_classes: self.all_classes,
+            content: self.content,
+            cursor_offset: self.cursor_offset,
+            class_loader: self.class_loader,
+            backend: self.backend,
+            laravel_macro_this_resolver: None,
+            function_loader: self.loaders.function_loader,
+            resolved_class_cache: self.resolved_class_cache,
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: false,
+        }
+    }
+
     /// Build a [`VarResolutionCtx`] with a scope-based variable
     /// resolver.  Used by [`resolve_rhs_with_scope`] so that
     /// `resolve_rhs_expression` and its sub-functions read variable
@@ -634,6 +658,33 @@ pub(crate) fn seed_params<'b>(
     }
 }
 
+/// Finish the type operators a declared type reads through a constant, or
+/// `None` when it has none to finish.
+///
+/// `key-of<ID_TABLE>` names a set of values as concrete as any written-out
+/// union, but the docblock parser only ever saw the constant's name.  Every
+/// place a declared parameter type is read has to read the constant behind
+/// it too, or the operator widens to whatever a key could be in general and
+/// the parameter constrains nothing.
+fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<PhpType> {
+    if !ty.contains_unevaluated_operator() {
+        return None;
+    }
+    crate::type_engine::call_resolution::evaluate_constant_operands(ty, &ctx.as_resolution_ctx())
+}
+
+/// Finish a `@param` type the docblock parser could only read as text:
+/// qualify the class names in it, then evaluate the type operators it
+/// reads through a constant.
+///
+/// Reading the constant here means the body sees the keys the table
+/// actually has, and the declaration is judged a refinement of the native
+/// `string` hint rather than an operator nothing can compare.
+pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
+    let resolved = crate::util::resolve_php_type_names(raw, ctx.class_loader);
+    finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
+}
+
 /// Resolve a single parameter's type through the full resolution
 /// pipeline: native hint → Eloquent Builder enrichment → docblock
 /// `@param` → template substitution → merged class fallback →
@@ -675,7 +726,7 @@ pub(crate) fn resolve_param_type(
         method_span_start as usize,
         pname,
     )
-    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+    .map(|t| resolve_docblock_param_type(&t, ctx));
 
     // With no `@param` of its own, an override inherits the ancestor's,
     // which `@extends`/`@implements` template substitution may have
@@ -911,7 +962,11 @@ pub(crate) fn try_resolve_from_merged_class(
     // Find the matching parameter by name.
     // ParameterInfo.name includes the `$` prefix.
     let merged_param = merged_method.parameters.iter().find(|p| p.name == pname)?;
-    let hint = merged_param.type_hint.as_ref()?;
+    let declared = merged_param.type_hint.as_ref()?;
+    // The merged declaration is as much a place a `key-of<CONSTANT>` is read
+    // as the source docblock is, and for a method it is the one that wins.
+    let finished = finish_constant_operands(declared, ctx);
+    let hint = finished.as_ref().unwrap_or(declared);
 
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         hint,

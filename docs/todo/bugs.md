@@ -11,38 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B134. A constant operand is only read where a `@template` is bound
-
-**Impact: Low · Effort: Medium**
-
-```php
-const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
-
-/** @param key-of<ID_TABLE> $key */
-function acceptsKey(string $key): void {}
-
-/** @return value-of<ID_TABLE> */
-function anyValue() { return 1; }
-
-acceptsKey('nope');            // not reported: should be 'immutable'|'mutable'
-takesInt(anyValue());          // not reported: should be int|string
-```
-
-A constant holding an array literal is now read as its own array shape, so
-`key-of<ID_TABLE>` and `ID_TABLE[K]` evaluate — but only along the path that
-builds a template substitution map for a call, which runs solely when the
-function or method declares `@template` params. A `key-of<CONSTANT>`
-parameter or a `value-of<CONSTANT>` return on a plain function is still left
-unevaluated and widens to its bound, so neither constrains anything.
-
-**Fix:** run the constant-operand expansion (`constant_operand_shape` in
-`type_engine/call_resolution/`) wherever a declared parameter or return type
-containing an unevaluated operator is read, not only from
-`finish_template_subs`. The awkward part is that the expansion needs a
-`ResolutionCtx` while the sites that read those types (the argument
-compatibility check, the untemplated return path) have varying access to
-one, so the shared entry point has to come first.
-
 ### B135. A conditional return type is not resolved from an argument's default
 
 **Impact: Low · Effort: Medium**
@@ -67,3 +35,31 @@ trips over, which is why the Laravel example reports four errors where
 **Fix:** resolve a conditional return type against the call's arguments,
 falling back to a parameter's declared default when the argument is
 omitted, rather than joining every branch.
+
+### B138. A `@param` on a docblock's opening line is ignored
+
+**Impact: Medium · Effort: Low**
+
+```php
+/** @param 'a'|'b' $key
+ *  @return string */
+function pick(string $key): string {
+    takesInt($key);   // reported as `string`, not as 'a'|'b'
+    return $key;
+}
+```
+
+A tag written on the same line as the opening `/**` of a *multi-line*
+docblock is not read for parameters. The fully single-line spelling
+(`/** @param 'a'|'b' $key */`) works, and so does the same tag moved to a
+continuation line, so only the "first tag shares the opening line" shape is
+affected. The parameter falls back to its native hint, which is wider than
+what the docblock declared: narrowing, argument checks, and hover all read
+the wide type, and a `@return` on the same docblock (which *is* read) can
+then be reported as incompatible with the body's widened value.
+
+**Fix:** find where the parameter scan decides a docblock's tag lines
+(`find_iterable_raw_type_in_source` in `docblock/tags.rs`) and let the text
+following `/**` count as a tag line, the way the single-line spelling
+already does. The `@return` path reads it, so the two disagree on where a
+docblock's first line starts.

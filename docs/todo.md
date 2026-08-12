@@ -102,7 +102,7 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B134 | [A constant operand is only read where a `@template` is bound](todo/bugs.md#b134-a-constant-operand-is-only-read-where-a-template-is-bound)                               | Low         | Medium      |
+| B138 | [A `@param` on a docblock's opening line is ignored](todo/bugs.md#b138-a-param-on-a-docblocks-opening-line-is-ignored)                                                   | Medium      | Low         |
 | B135 | [A conditional return type is not resolved from an argument's default](todo/bugs.md#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default) | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
