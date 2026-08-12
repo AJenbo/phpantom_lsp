@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786510140988,
+  "lastUpdate": 1786510381152,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19039,6 +19039,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "83827fc47a514fe9c4efcf4a13c46e5fbb36317f",
+          "message": "An `instanceof` on a nested property keeps the property's declared class",
+          "timestamp": "2026-08-12T06:36:03+02:00",
+          "tree_id": "c8c8bc40c5ad30aba861985b482888b6a3c01d5b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/83827fc47a514fe9c4efcf4a13c46e5fbb36317f"
+        },
+        "date": 1786510376927,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76,
             "unit": "MiB"
           }
         ]
