@@ -141,7 +141,7 @@
     {{-- <x-post-summary> is backed by a class, App\View\Components\PostSummary.
          Its view reads the class's public members, not what this tag
          passes: resources/views/components/post-summary.blade.php --}}
-    <x-post-summary :post="$posts->first()" heading="Latest post" />
+    <x-post-summary :post="$posts->firstOrFail()" heading="Latest post" />
 
     {{-- A component tag is the call Laravel makes with it, so its
          attributes are the constructor's arguments and are checked as
@@ -154,7 +154,7 @@
          variable Blade's own compiled output uses, so the body reaches
          the class rather than only the data it exposes.
          Try: completion on `$component->` on the next line. --}}
-    <x-post-summary :post="$posts->first()" heading="Second post" class="mt-2">
+    <x-post-summary :post="$posts->firstOrFail()" heading="Second post" class="mt-2">
         {{ $component->excerpt(20) }}
     </x-post-summary>
 

@@ -11,24 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B132. A nullable value passed to a component attribute is reported, and it is unclear which side is wrong
-
-**Impact: Low · Effort: Low**
-
-```blade
-{{-- $posts->first() : BlogPost|null; PostSummary's constructor takes a non-nullable BlogPost --}}
-<x-post-summary :post="$posts->first()" />
-```
-
-`examples/laravel/resources/views/welcome.blade.php` passes
-`$posts->first()` (genuinely `BlogPost|null`) to a component whose
-constructor takes a non-nullable `BlogPost`, and PHPantom reports it.
-The resolution is either the check is too strict for a component
-attribute (Blade tolerates `null` reaching a typed property in ways a
-plain function call does not) or the example should pass something
-non-nullable; the maintainer's call which. Found while fixing the
-translation-narrowing issue previously tracked as B130.
-
 ### B131. A `for` loop's condition narrows nothing
 
 **Impact: Medium · Effort: Low**
