@@ -11,50 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B126. A scalar check on a property narrows nothing
-
-**Impact: Medium · Effort: Medium**
-
-```php
-class Holder {
-    public string|false $value = false;
-
-    public function run(): void {
-        if ($this->value !== false) {
-            useString($this->value); // reported: got string|false
-        }
-        if ($this->value) {
-            useString($this->value); // reported: got string|false
-        }
-    }
-}
-```
-
-A property subject only ever gets *class-level* narrowing. `instanceof`
-on `$this->prop` works, because `Expression::Access` falls through to
-`narrowed_by_rewalk` → `apply_property_narrowing`, which narrows a
-`Vec<ClassInfo>`. A check that removes a scalar member instead
-(`!== false`, `!== null`, a bare truthy `if`) has no class to swap, and
-the forward walker's scope entry for the key never reaches the
-diagnostic: `narrowed_subject_from_scope` is consulted for the key first,
-so the narrowing either is not recorded in the snapshot cache under the
-synthetic key or is discarded when the branch scope merges. The same
-check on a local variable narrows correctly, so it is the property key,
-not the check, that is unsupported.
-
-This is easy to mistake for working, because the nullable form is hidden
-by a deliberately permissive rule: a `?T` argument passed to a `T`
-parameter is accepted without narrowing at all
-(`diagnostics/type_errors/compatibility.rs`, the "Nullable arg →
-non-nullable param: MAYBE" case), on the grounds that the caller may have
-guarded. A `T|false` union has no such escape hatch, so that is where the
-missing narrowing surfaces.
-
-**Fix:** find out which of the two halves drops the narrowing — the
-snapshot recording for a synthetic member key, or the branch-scope merge
-— and record it so that `narrowed_subject_from_scope` answers for a
-property key the way it already does for an array-access key.
-
 ### B89. `assert($x !== null)` / `assert($x !== false)` does not narrow
 
 **Impact: Medium-High · Effort: Medium**
@@ -169,3 +125,78 @@ trips over, which is why the Laravel example reports four errors where
 **Fix:** resolve a conditional return type against the call's arguments,
 falling back to a parameter's declared default when the argument is
 omitted, rather than joining every branch.
+
+### B136. A `false` check narrows nothing in its else branch
+
+**Impact: Medium · Effort: Low-Medium**
+
+```php
+/** @return string|false */
+function readIt() { return false; }
+
+$value = readIt();
+if ($value === false) {
+    // ...
+} else {
+    useString($value);              // reported: got string|false
+}
+
+if (!empty($value)) {
+    useString($value);              // reported: got string|false
+}
+
+if ($value === false || rand(0, 1)) {
+    return;
+}
+useString($value);                  // reported: got string|false
+```
+
+The guard-clause form (`if ($value === false) { return; }`) narrows
+correctly, so the extraction and the stripping both work; what is missing
+is the inverse direction. `apply_null_narrowing_inverse` handles `null` in
+every shape (`=== null`, `!== null`, `isset`, `!isset`) but has no `false`
+counterpart, so an explicit `else`, and the implicit else that an
+`||` guard's De Morgan expansion produces, both leave `false` in place.
+`!empty($x)` misses for a different reason: `extract_not_empty_var` feeds
+`strip_null_from_scope`, which removes `null` only, even though `empty()`
+is false exactly when the value is truthy.
+
+This affects locals and property paths alike, so it is not the synthetic
+member key that is at fault.
+
+**Fix:** give `apply_null_narrowing_inverse` the `false` cases that
+`apply_guard_clause_null_narrowing` already has (`extract_false_equality_check_var`
+→ strip `false`, `extract_non_false_check_var` → narrow to `false`), and
+route `!empty($x)` through `strip_falsy_from_scope` rather than
+`strip_null_from_scope`.
+
+### B137. A scalar check on an argument-less method call narrows nothing
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+```php
+class Holder {
+    public function value(): string|false { return false; }
+
+    public function run(): void {
+        if ($this->value() !== false) {
+            useString($this->value()); // reported: got string|false
+        }
+    }
+}
+```
+
+An argument-less call is a narrowing subject (`expr_to_subject_key` keys it
+under `$this->value()`, and `narrowed_call` reads that key back), and an
+`instanceof` check on one narrows correctly. A scalar check does not,
+because the key is never seeded: `resolve_member_key_type`
+(`type_engine/variable/forward_walk/cond_narrowing.rs`) skips a call whose
+return type resolves to no class, on the grounds that a template parameter
+or generic alias is answered better by the call resolver at the use site.
+A concrete scalar union like `string|false` is caught by that rule too, so
+there is nothing in scope for the check to strip `false` from.
+
+**Fix:** seed a call key whose declared return type is built entirely from
+keyword types. Those cannot be template parameters, so the call resolver
+has nothing better to say about them, and seeding lets the same scalar
+narrowing that already works for a property key apply.

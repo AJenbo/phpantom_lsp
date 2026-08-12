@@ -531,3 +531,210 @@ class C {{
          got: {diags:?}"
     );
 }
+
+// ─── Scalar checks on a property subject ────────────────────────────────────
+//
+// A check that rules out a scalar member of a union (`!== false`,
+// `!== null`, `!$x`, `empty($x)`) has no class to swap, so it narrows the
+// property's key in the forward walker's scope rather than a `ClassInfo`
+// list.  Every guard-clause shape that narrows a local this way must
+// narrow a property path the same way.
+
+/// Run slow diagnostics and keep only argument type mismatches.
+fn type_error_messages(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -> Vec<String> {
+    backend.update_ast(uri, text);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut out);
+    out.iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+/// A `Holder` whose property is a `T|false` union — the shape a `T|false`
+/// return gets cached into, and the one with no permissive
+/// "the caller may have guarded" escape hatch at the call site.
+const HANDLE_SCAFFOLD: &str = r#"<?php
+namespace Handle;
+
+function useString(string $value): void {}
+
+class Holder {
+    public string|false $value = false;
+    public string|null $maybe = null;
+}
+"#;
+
+/// `if ($h->value === false) { return; }` proves the property is not
+/// `false` for the rest of the function, the same way it does for a local.
+#[test]
+fn a_false_equality_guard_clause_narrows_a_property() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_guard_return.php";
+    let text = format!(
+        "{HANDLE_SCAFFOLD}
+function run(Holder $h): void {{
+    if ($h->value === false) {{
+        return;
+    }}
+    useString($h->value);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The guard does not have to return: throwing ends the path just as well.
+#[test]
+fn a_false_equality_guard_that_throws_narrows_a_property() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_guard_throw.php";
+    let text = format!(
+        "{HANDLE_SCAFFOLD}
+class C {{
+    public function m(Holder $h): void {{
+        if ($h->value === false) {{
+            throw new \\RuntimeException();
+        }}
+        useString($h->value);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `continue` ends the iteration, so the rest of the loop body runs only
+/// on the paths the guard let through.
+#[test]
+fn a_false_equality_guard_that_continues_narrows_a_property() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_guard_continue.php";
+    let text = format!(
+        "{HANDLE_SCAFFOLD}
+function run(Holder $h): void {{
+    for ($i = 0; $i < 3; $i++) {{
+        if ($h->value === false) {{
+            continue;
+        }}
+        useString($h->value);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `!$h->value` and `empty($h->value)` name a property subject the same
+/// way they name a local, and both rule out every falsy member.
+#[test]
+fn a_falsy_guard_clause_narrows_a_property() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_guard_falsy.php";
+    let text = format!(
+        "{HANDLE_SCAFFOLD}
+function bang(Holder $h): void {{
+    if (!$h->value) {{
+        return;
+    }}
+    useString($h->value);
+}}
+
+function blank(Holder $h): void {{
+    if (empty($h->value)) {{
+        return;
+    }}
+    useString($h->value);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The property path can be deeper than one hop, and `$this` is a subject
+/// like any other object expression.
+#[test]
+fn a_guard_clause_narrows_a_chained_property_on_this() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_guard_chain.php";
+    let text = format!(
+        "{HANDLE_SCAFFOLD}
+class C {{
+    public Holder $holder;
+
+    public function __construct(Holder $holder) {{
+        $this->holder = $holder;
+    }}
+
+    public function m(): void {{
+        if ($this->holder->value === false) {{
+            return;
+        }}
+        useString($this->holder->value);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only the member the guard names is ruled out: a `null` guard leaves a
+/// `string|null` property narrowed to `string`, and a `false` guard on a
+/// `string|false` property says nothing about a different property.
+#[test]
+fn a_guard_clause_narrows_only_the_property_it_names() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_guard_scoped.php";
+    let text = format!(
+        "{HANDLE_SCAFFOLD}
+function run(Holder $h): void {{
+    if ($h->maybe === null) {{
+        return;
+    }}
+    useString($h->maybe);
+    useString($h->value);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("string|false"),
+        "the unguarded property keeps its declared type, got {messages:?}"
+    );
+}
+
+/// A write after the guard replaces what the guard proved: the property
+/// holds whatever was assigned, not the narrowed type.
+#[test]
+fn a_write_after_the_guard_replaces_the_property_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_guard_rewritten.php";
+    let text = format!(
+        "{HANDLE_SCAFFOLD}
+/** @return string|false */
+function readIt() {{
+    return false;
+}}
+
+function run(Holder $h): void {{
+    if ($h->value === false) {{
+        return;
+    }}
+    $h->value = readIt();
+    useString($h->value);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}

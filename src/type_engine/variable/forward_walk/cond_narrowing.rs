@@ -1945,6 +1945,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // When the condition is `!$x` or `empty($x)`, the inverse means
     // $x is truthy — remove null.
     if let Some(var_name) = extract_falsy_check_var(condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_null_from_scope(&var_name, scope);
     }
     // When the condition is a bare `$x` (truthy check), the inverse means
@@ -2080,14 +2081,22 @@ pub(crate) fn extract_not_empty_var(expr: &Expression<'_>) -> Option<String> {
     None
 }
 
-/// Extract variable name from falsy checks: `!$x`, `empty($x)`.
+/// Extract the subject of a falsy check: `!$x`, `empty($x)`.
+///
+/// A member path is as much a subject here as a bare variable is, so
+/// `!$this->handle` names `$this->handle` — the guard-clause idiom
+/// (`if (!$this->handle) { throw; }`) proves the same thing about a
+/// property that it does about a local.
 pub(crate) fn extract_falsy_check_var(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
             expr_to_var_name(prefix.operand)
+                .or_else(|| narrowing::expr_to_subject_key(prefix.operand))
         }
         // `empty($x)` — language construct, parsed as Expression::Construct(Construct::Empty).
-        Expression::Construct(Construct::Empty(empty)) => expr_to_var_name(empty.value),
+        Expression::Construct(Construct::Empty(empty)) => {
+            expr_to_var_name(empty.value).or_else(|| narrowing::expr_to_subject_key(empty.value))
+        }
         _ => None,
     }
 }
@@ -2405,12 +2414,14 @@ pub(crate) fn apply_guard_clause_null_narrowing<'b>(
         }
     }
     if let Some(var_name) = extract_falsy_check_var(if_stmt.condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_falsy_from_scope(&var_name, scope);
     }
     // When `if ($x === false) { throw; }`, strip only `false` from $x
     // after — the common "resource-like handle" idiom (`finfo_open()`,
     // `pg_connect()`, …) that returns `T|false`.
     if let Some(var_name) = extract_false_equality_check_var(if_stmt.condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_false_from_scope(&var_name, scope);
     }
     // `if (!isset($x)) { return; }` — after the guard, $x is not null.

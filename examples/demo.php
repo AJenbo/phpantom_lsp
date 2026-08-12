@@ -608,6 +608,74 @@ class TypeGuardNarrowingDemo
 }
 
 
+// ── Scalar Guard Clauses on a Property ─────────────────────────────────────
+//
+// A check that rules out a scalar member of a union has no class to swap, so
+// it narrows the property path itself. Every guard shape that narrows a local
+// narrows a property the same way, however the guarded branch ends.
+
+class PropertyGuardDemo
+{
+    public string|false $label = false;
+
+    public ?ScaffoldingHandle $handle = null;
+
+    public function earlyReturn(): string
+    {
+        if ($this->label === false) {
+            return 'unlabelled';
+        }
+        return strtoupper($this->label);          // string after the guard
+    }
+
+    public function earlyThrow(): string
+    {
+        if (!$this->label) {                      // `!` names the property too
+            throw new \RuntimeException('no label');
+        }
+        return strtoupper($this->label);          // string after the guard
+    }
+
+    public function skipIteration(): int
+    {
+        $width = 0;
+        foreach ([1, 2, 3] as $_) {
+            if (empty($this->label)) {            // empty() names it as well
+                continue;
+            }
+            $width += strlen($this->label);       // string on the surviving path
+        }
+        return $width;
+    }
+
+    public function chainedPath(): string
+    {
+        // The path can be as deep as it needs to be.
+        if ($this->handle === null) {
+            return 'anonymous';
+        }
+        if ($this->handle->name === false) {
+            return 'anonymous';
+        }
+        return strtoupper($this->handle->name);   // string after the guard
+    }
+
+    public function rewritten(string|false $next): string
+    {
+        if ($this->label === false) {
+            return 'unlabelled';
+        }
+        // A write replaces what the guard proved rather than outliving it,
+        // so `$this->label` is `string|false` again and needs guarding anew.
+        $this->label = $next;
+        if ($this->label === false) {
+            return 'unlabelled';
+        }
+        return strtoupper($this->label);          // string after the second guard
+    }
+}
+
+
 // ── instanceof self/static/parent Narrowing ────────────────────────────────
 
 class InstanceofSelfDemo extends ScaffoldingSedan
@@ -5392,6 +5460,17 @@ class ScaffoldingUntypedLogger
 // ── Demo-Specific Scaffolding ───────────────────────────────────────────────
 
 // ── Body Return Type Inference scaffolding ──────────────────────────────────
+/** A holder one hop further down a property path, for PropertyGuardDemo. */
+class ScaffoldingHandle
+{
+    public string|false $name;
+
+    public function __construct(string|false $name = false)
+    {
+        $this->name = $name;
+    }
+}
+
 class ScaffoldingUntypedFactory
 {
     public function createPen() { return new Pen(); }
@@ -8853,6 +8932,20 @@ function runDemoAssertions(): void
     assert(file_get_contents($reportPath) === 'body', 'the report was written to the temp file');
     assert($benevolent->writeCheckedReport('checked') !== null, 'checking === false narrows to the string branch');
     unlink($reportPath);
+
+    // ── Scalar guard clauses on a property ──────────────────────────────
+    $guarded = new PropertyGuardDemo();
+    assert($guarded->earlyReturn() === 'unlabelled', 'the guard fires while the property is false');
+    assert($guarded->skipIteration() === 0, 'an empty label skips every iteration');
+    assert($guarded->chainedPath() === 'anonymous', 'a null handle takes the guarded branch');
+    $guarded->label = 'ink';
+    $guarded->handle = new ScaffoldingHandle('nib');
+    assert($guarded->earlyReturn() === 'INK', 'past the guard the label really is a string');
+    assert($guarded->earlyThrow() === 'INK', 'a `!` guard proves the same thing');
+    assert($guarded->skipIteration() === 9, 'three iterations of a 3-character label');
+    assert($guarded->chainedPath() === 'NIB', 'a two-hop path narrows the same way');
+    assert($guarded->rewritten('new') === 'NEW', 'the second guard proves the written value');
+    assert($guarded->rewritten(false) === 'unlabelled', 'a write after the guard restores the union');
 
     // ── interface-string names an interface, not a class ────────────────
     assert(interface_exists(Printable::class), 'Printable::class is an interface-string');
