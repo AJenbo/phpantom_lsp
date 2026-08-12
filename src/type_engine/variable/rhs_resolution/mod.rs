@@ -329,6 +329,83 @@ fn resolved_type_with_lookup(
     ResolvedType::from_type_string(ty)
 }
 
+/// The narrowed type recorded for `key` at this expression's position,
+/// if any.
+///
+/// The completion/hover paths carry a `scope_var_resolver`; the
+/// diagnostic path instead reads the forward walker's snapshot cache, so
+/// both are consulted — otherwise diagnostics get a different answer
+/// than hover for the identical expression.
+fn narrowed_subject_from_scope(
+    key: &str,
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let from_scope = match ctx.scope_var_resolver {
+        Some(resolver) => resolver(key),
+        None if super::forward_walk::is_diagnostic_scope_active()
+            && !super::forward_walk::is_building_scopes() =>
+        {
+            super::forward_walk::lookup_diagnostic_scope(key, expr.span().start.offset)?
+        }
+        None => return None,
+    };
+    (!from_scope.is_empty()).then_some(from_scope)
+}
+
+/// Re-walk the enclosing body for an `instanceof` check on `key` and
+/// apply it to `resolved`, returning the narrowed type when the check
+/// changed it.
+///
+/// This is what reaches the checks the forward walker's scope does not
+/// hold: `$this->prop` and `$this->prop()` are not locals, so the scope
+/// resolver returns nothing for them and completion and hover would
+/// otherwise see the declared type.
+fn narrowed_by_rewalk(
+    key: &str,
+    resolved: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let mut classes: Vec<Arc<ClassInfo>> = resolved
+        .iter()
+        .filter_map(|r| r.class_info.clone())
+        .collect();
+    if classes.is_empty() {
+        return None;
+    }
+    let before: Vec<Atom> = classes.iter().map(|c| c.fqn()).collect();
+    let rctx = ctx.as_resolution_ctx();
+    let is_intersection = crate::type_engine::resolver::apply_property_narrowing(
+        key,
+        ctx.current_class,
+        &rctx,
+        &mut classes,
+    );
+    if classes.iter().map(|c| c.fqn()).eq(before) {
+        return None;
+    }
+    let mut narrowed = ResolvedType::from_classes(classes);
+    if is_intersection {
+        ResolvedType::tag_as_intersection(&mut narrowed);
+    }
+    Some(narrowed)
+}
+
+/// The type a check on `call` narrowed it to, given what the method it
+/// invokes declares it returns.
+///
+/// The narrowing is keyed under the call's own text, the same key the
+/// subject-expression resolver builds, so the check and every later
+/// occurrence of the call agree on what they are talking about.
+fn narrowed_call(
+    call: &Expression<'_>,
+    resolved: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let key = crate::type_engine::types::narrowing::expr_to_subject_key(call)?;
+    narrowed_subject_from_scope(&key, call, ctx).or_else(|| narrowed_by_rewalk(&key, resolved, ctx))
+}
+
 /// Resolve a right-hand-side expression to zero or more
 /// [`ResolvedType`] values.
 ///
@@ -539,6 +616,9 @@ fn resolve_conditional_chain<'b>(
 
 /// One link of a fluent chain: `->method(args)` applied to `object`.
 struct ChainLink<'b> {
+    /// The call expression the link was peeled from, which is what a
+    /// check written on the call is keyed under.
+    call: &'b Expression<'b>,
     object: &'b Expression<'b>,
     method: &'b ClassLikeMemberSelector<'b>,
     argument_list: &'b ArgumentList<'b>,
@@ -568,13 +648,16 @@ fn resolve_method_chain<'b>(
     let mut links: Vec<ChainLink<'b>> = Vec::new();
     let mut current = expr;
     loop {
-        let link = match peel_type_transparent(current) {
+        let peeled = peel_type_transparent(current);
+        let link = match peeled {
             Expression::Call(Call::Method(call)) => ChainLink {
+                call: peeled,
                 object: call.object,
                 method: &call.method,
                 argument_list: &call.argument_list,
             },
             Expression::Call(Call::NullSafeMethod(call)) => ChainLink {
+                call: peeled,
                 object: call.object,
                 method: &call.method,
                 argument_list: &call.argument_list,
@@ -589,13 +672,25 @@ fn resolve_method_chain<'b>(
 
     let mut receiver: Option<MethodReceiver> = None;
     for link in links.iter().rev() {
-        let resolved = resolve_method_call_on_receiver(
+        let mut resolved = resolve_method_call_on_receiver(
             link.object,
             link.method,
             link.argument_list,
             receiver,
             ctx,
         );
+        // A check written on the call itself (`if ($h->get() instanceof
+        // Foo)`) is keyed under the call's own text, so a later
+        // occurrence of that text reads the narrowed type instead of the
+        // method's declared return type.  Only an argument-less call
+        // carries such a key: an argument is a hint that the call does
+        // something rather than just handing back state, and matching
+        // two of them means comparing whole argument expressions.
+        if link.argument_list.arguments.is_empty()
+            && let Some(narrowed) = narrowed_call(link.call, &resolved, ctx)
+        {
+            resolved = narrowed;
+        }
         receiver = Some((ResolvedType::into_arced_classes(resolved.clone()), resolved));
     }
     // `links` always holds at least the call this was entered on.
@@ -673,20 +768,9 @@ fn resolve_rhs_expression_inner<'b>(
             // the forward walker's snapshot cache, so both are consulted.
             if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
                 && key.contains("[\"")
+                && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {
-                if let Some(resolver) = ctx.scope_var_resolver {
-                    let from_scope = resolver(&key);
-                    if !from_scope.is_empty() {
-                        return from_scope;
-                    }
-                } else if super::forward_walk::is_diagnostic_scope_active()
-                    && !super::forward_walk::is_building_scopes()
-                    && let Some(from_scope) =
-                        super::forward_walk::lookup_diagnostic_scope(&key, expr.span().start.offset)
-                    && !from_scope.is_empty()
-                {
-                    return from_scope;
-                }
+                return from_scope;
             }
             resolve_rhs_array_access(array_access, expr, ctx)
         }
@@ -694,28 +778,12 @@ fn resolve_rhs_expression_inner<'b>(
         Expression::Access(access) => {
             // Check if the scope has a narrowed type for this property
             // access (e.g. `$a->foo` narrowed through if/elseif
-            // conditions, or assigned inside a guarded `if`).  The
-            // completion/hover paths carry a `scope_var_resolver`; the
-            // diagnostic path instead reads the forward walker's
-            // snapshot cache, so both are consulted — otherwise
-            // diagnostics get a different answer than hover for the
-            // identical expression.
+            // conditions, or assigned inside a guarded `if`).
             if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
                 && key.contains("->")
+                && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {
-                if let Some(resolver) = ctx.scope_var_resolver {
-                    let from_scope = resolver(&key);
-                    if !from_scope.is_empty() {
-                        return from_scope;
-                    }
-                } else if super::forward_walk::is_diagnostic_scope_active()
-                    && !super::forward_walk::is_building_scopes()
-                    && let Some(from_scope) =
-                        super::forward_walk::lookup_diagnostic_scope(&key, expr.span().start.offset)
-                    && !from_scope.is_empty()
-                {
-                    return from_scope;
-                }
+                return from_scope;
             }
             let result = resolve_rhs_property_access(access, ctx);
             // Apply property narrowing from enclosing if / ternary
@@ -726,35 +794,11 @@ fn resolve_rhs_expression_inner<'b>(
             // (when present) is tried first above; property paths are not
             // locals, so it returns nothing for them and we fall through to
             // this walk.
-            if !result.is_empty()
-                && let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+            if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
                 && key.contains("->")
+                && let Some(narrowed) = narrowed_by_rewalk(&key, &result, ctx)
             {
-                let rctx = ctx.as_resolution_ctx();
-                let mut classes: Vec<Arc<ClassInfo>> =
-                    result.iter().filter_map(|r| r.class_info.clone()).collect();
-                if !classes.is_empty() {
-                    let is_intersection = crate::type_engine::resolver::apply_property_narrowing(
-                        &key,
-                        ctx.current_class,
-                        &rctx,
-                        &mut classes,
-                    );
-                    // If narrowing changed the classes, return the narrowed result.
-                    let original_names: Vec<&str> = result
-                        .iter()
-                        .filter_map(|r| r.class_info.as_ref().map(|c| c.name.as_str()))
-                        .collect();
-                    let narrowed_names: Vec<&str> =
-                        classes.iter().map(|c| c.name.as_str()).collect();
-                    if original_names != narrowed_names {
-                        let mut narrowed = ResolvedType::from_classes(classes);
-                        if is_intersection {
-                            ResolvedType::tag_as_intersection(&mut narrowed);
-                        }
-                        return narrowed;
-                    }
-                }
+                return narrowed;
             }
             result
         }

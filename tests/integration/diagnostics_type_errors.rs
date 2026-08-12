@@ -5271,6 +5271,44 @@ class TestCase {
 }
 
 #[test]
+fn no_false_positive_for_call_narrowed_via_instanceof() {
+    // The check is written on the call itself, and the argument repeats
+    // that call verbatim.  Both spellings share a narrowing key, so the
+    // argument is measured against the narrowed type rather than the
+    // method's declared return type.
+    let php = r#"<?php
+interface MockInterface {
+    public function shouldReceive(string $name): self;
+}
+
+class EpaymentService {
+    public function annul(): bool { return true; }
+}
+
+class TestCase {
+    protected function service(): EpaymentService {}
+
+    protected function mockMethod(MockInterface $mock, string $method): void {}
+
+    protected function realMethod(EpaymentService $service): void {}
+
+    public function test(): void {
+        if ($this->service() instanceof MockInterface) {
+            $this->mockMethod($this->service(), 'annul');
+            $this->realMethod($this->service());
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Call narrowed via instanceof should be accepted as MockInterface, got: {msgs:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_compound_and_instanceof_narrowing() {
     // `$x instanceof Aye && $x instanceof Bee` proves both at once, so
     // `$x` is `Aye&Bee`.  Joining the two as `Aye|Bee` instead judged
