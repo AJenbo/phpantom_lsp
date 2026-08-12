@@ -175,6 +175,8 @@ pub(crate) fn process_expression_statement<'b>(
 
     process_assert_narrowing(expr, scope, ctx);
 
+    process_self_out_narrowing(expr, scope, ctx);
+
     // Process increment/decrement: $a++, ++$a, $a--, --$a.
     process_increment_decrement(expr, scope, ctx);
 }
@@ -2853,6 +2855,136 @@ pub(crate) fn process_assert_narrowing<'b>(
                 scope.set(&var_name, results);
             }
         }
+    }
+}
+
+/// `@psalm-this-out` / `@phpstan-self-out`: a call to a method carrying
+/// this annotation changes the type the walker tracks for its receiver,
+/// the way an assignment changes a variable's type.  Method-level
+/// template parameters bound from the call's arguments are substituted
+/// into the annotation's type before it replaces the receiver's tracked
+/// type: `$box->replace('x')` on a `MutableBox<int> $box`, where
+/// `replace(U $value)` declares `@psalm-this-out self<U>`, re-binds
+/// `$box` to `MutableBox<string>` for the rest of the block.
+///
+/// Only fires for a receiver that is a plain variable already in scope
+/// with a resolved class — `$this` is excluded because there is no
+/// receiver variable to re-bind.
+pub(crate) fn process_self_out_narrowing<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let unwrapped = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let (object, method, argument_list) = match unwrapped {
+        Expression::Call(Call::Method(mc)) => (mc.object, &mc.method, &mc.argument_list),
+        Expression::Call(Call::NullSafeMethod(mc)) => (mc.object, &mc.method, &mc.argument_list),
+        _ => return,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = method else {
+        return;
+    };
+    let Expression::Variable(Variable::Direct(dv)) = object else {
+        return;
+    };
+    let var_name = bytes_to_str(dv.name);
+    if var_name == "$this" {
+        return;
+    }
+    let method_name = bytes_to_str(ident.value).to_string();
+
+    let before = scope.get(var_name).to_vec();
+    if before.is_empty() {
+        return;
+    }
+    // Cheap check before the template substitution machinery below runs:
+    // bail out unless at least one branch's class actually declares a
+    // self-out type for this method.
+    if !before.iter().any(|rt| {
+        rt.class_info
+            .as_ref()
+            .and_then(|c| c.get_method_ci(&method_name))
+            .is_some_and(|m| m.self_out.is_some())
+    }) {
+        return;
+    }
+
+    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        ctx.content,
+    );
+    let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
+
+    let scope_snapshot = scope.locals.clone();
+    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
+        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
+    };
+    let var_ctx = VarResolutionCtx {
+        var_name,
+        current_class: ctx.current_class,
+        all_classes: ctx.all_classes,
+        content: ctx.content,
+        cursor_offset: ctx.cursor_offset,
+        class_loader: ctx.class_loader,
+        backend: ctx.backend,
+        loaders: ctx.loaders,
+        resolved_class_cache: ctx.resolved_class_cache,
+        enclosing_return_type: ctx.enclosing_return_type.clone(),
+        top_level_scope: ctx.top_level_scope.clone(),
+        branch_aware: false,
+        match_arm_narrowing: HashMap::new(),
+        scope_var_resolver: Some(&scope_resolver),
+    };
+    let rctx = var_ctx.as_resolution_ctx();
+
+    let mut changed = false;
+    let mut results: Vec<ResolvedType> = Vec::with_capacity(before.len());
+    for rt in &before {
+        let mutated = rt.class_info.as_ref().and_then(|owner| {
+            let self_out = owner.get_method_ci(&method_name)?.self_out.clone()?;
+            let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
+                owner,
+                &method_name,
+                &arg_refs,
+                Some(&rt.type_string),
+                &rctx,
+            );
+            let substituted = self_out.substitute(&template_subs).simplified();
+            let final_ty = if substituted.contains_self_ref() {
+                substituted.replace_self_with_type(&rt.type_string)
+            } else {
+                substituted
+            };
+            // Re-resolve the class for the new type rather than keeping the
+            // receiver's existing `class_info`: that one still carries the
+            // *old* template substitution, so members typed by a template
+            // parameter would keep resolving to the pre-call binding.
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                &final_ty,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+            Some(if classes.is_empty() {
+                vec![ResolvedType::from_type_string(final_ty)]
+            } else {
+                ResolvedType::from_classes_with_hint(classes, final_ty)
+            })
+        });
+        match mutated {
+            Some(new_rts) => {
+                changed = true;
+                results.extend(new_rts);
+            }
+            None => results.push(rt.clone()),
+        }
+    }
+
+    if changed {
+        scope.set(var_name, results);
     }
 }
 

@@ -1282,6 +1282,14 @@ impl Backend {
                         .map(docblock::extract_throws_tags_from_info)
                         .unwrap_or_default();
 
+                    // Extract `@psalm-this-out` / `@phpstan-self-out` so the
+                    // forward walker can re-bind the receiver's template
+                    // arguments after a call, the way an assignment
+                    // re-binds a variable's type.
+                    let self_out = method_docblock_info
+                        .as_ref()
+                        .and_then(docblock::extract_self_out_type_from_info);
+
                     methods.push(MethodInfo {
                         name,
                         name_offset,
@@ -1310,6 +1318,7 @@ impl Backend {
                         throws,
                         if_this_is: method_docblock_text
                             .and_then(crate::docblock::extract_if_this_is_type),
+                        self_out,
                     });
                     method_bodies.push((methods.len() - 1, &method.body));
                 }

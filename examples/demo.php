@@ -1188,6 +1188,26 @@ class MultiBoundTemplateDemo
 }
 
 
+// ── Receiver Retyped By A Call (@psalm-this-out / @phpstan-self-out) ────────
+
+class SelfOutDemo
+{
+    public function demo(): void
+    {
+        /** @var ScaffoldingMutableBox<Pen> $box */
+        $box = new ScaffoldingMutableBox(new Pen('red'));
+        $box->value->write();       // Try: `$box->value->` — T = Pen
+
+        // `replace()` carries `@psalm-this-out self<U>`, so the call rebinds
+        // $box's own template argument for the rest of the block the way an
+        // assignment would.  U is bound from the argument, so T becomes
+        // Pencil and the Pen members are gone.
+        $box->replace(new Pencil());
+        $box->value->sketch();      // Try: `$box->value->` — T = Pencil now
+    }
+}
+
+
 // ── Trait Generic Substitution ──────────────────────────────────────────────
 
 class TraitGenericDemo
@@ -5998,6 +6018,42 @@ class ObjectMapper
 }
 
 
+// ── ScaffoldingMutableBox (@psalm-this-out / @phpstan-self-out demo) ─────────
+
+/**
+ * A box whose contents can be swapped for a value of another type.
+ *
+ * `replace()` carries `@psalm-this-out self<U>` / `@phpstan-self-out
+ * self<U>`: the call re-binds the receiver's own template argument, so
+ * after `$box->replace(new Pencil())` the box reads as
+ * `ScaffoldingMutableBox<Pencil>` however it was annotated before.
+ *
+ * @template T
+ */
+class ScaffoldingMutableBox
+{
+    /** @var T */
+    public mixed $value;
+
+    /** @param T $value */
+    public function __construct(mixed $value)
+    {
+        $this->value = $value;
+    }
+
+    /**
+     * @template U
+     * @param U $value
+     * @psalm-this-out self<U>
+     * @phpstan-self-out self<U>
+     */
+    public function replace(mixed $value): void
+    {
+        $this->value = $value;
+    }
+}
+
+
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
 /**
@@ -7226,6 +7282,14 @@ function runDemoAssertions(): void
     $boundedPens = new ScaffoldingBoundedPenCollection([new Pen()]);
     assert($boundedPens->first() instanceof Pen, 'a bare generic collection yields its @template bound');
     assert((new ScaffoldingBoundedPenCollection())->first() === null, 'an empty bare generic collection yields null');
+
+    // ── Receiver retyped by a call (@psalm-this-out) ─────────────────────
+    /** @var ScaffoldingMutableBox<Pen> $selfOutBox */
+    $selfOutBox = new ScaffoldingMutableBox(new Pen('red'));
+    assert($selfOutBox->value instanceof Pen, 'the box holds a Pen before replace()');
+    $selfOutBox->replace(new Pencil());
+    assert($selfOutBox->value instanceof Pencil, 'replace() swaps the contents, so the box holds a Pencil after the call');
+    assert(!$selfOutBox->value instanceof Pen, 'a Pencil is not a Pen — the template argument really changed');
 
     // ── Trait `return $this` fluent chain ───────────────────────────────
     $page = new TestablePage();

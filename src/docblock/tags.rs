@@ -105,6 +105,22 @@ pub fn extract_if_this_is_type_from_info(info: &DocblockInfo) -> Option<PhpType>
     Some(PhpType::parse(&tag.type_text()?))
 }
 
+/// Extract the type from a `@psalm-this-out` or `@phpstan-self-out` tag.
+///
+/// `@psalm-this-out self<U>` returns `Some(PhpType::parse("self<U>"))`. When
+/// both vendor variants are present, the higher-precedence one wins (see
+/// [`DocblockInfo::first_tag_by_kind_vendor_first`]).
+pub fn extract_self_out_type(docblock: &str) -> Option<PhpType> {
+    extract_self_out_type_from_info(&parse_docblock_for_tags(docblock)?)
+}
+
+/// Like [`extract_self_out_type`], but operates on a pre-parsed
+/// [`DocblockInfo`].
+pub fn extract_self_out_type_from_info(info: &DocblockInfo) -> Option<PhpType> {
+    let tag = info.first_tag_by_kind_vendor_first(TagKind::SelfOut)?;
+    Some(PhpType::parse(&tag.type_text()?))
+}
+
 /// Extract the PHP version from a `@removed` PHPDoc tag.
 ///
 /// Handles the format `@removed X.Y` where `X.Y` is a PHP version

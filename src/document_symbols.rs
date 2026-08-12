@@ -583,6 +583,7 @@ mod tests {
             type_assertions: vec![],
             throws: vec![],
             if_this_is: None,
+            self_out: None,
         };
         let detail = build_method_detail(&method);
         assert_eq!(detail, Some("(): void".to_string()));
@@ -641,6 +642,7 @@ mod tests {
             type_assertions: vec![],
             throws: vec![],
             if_this_is: None,
+            self_out: None,
         };
         let detail = build_method_detail(&method);
         assert_eq!(

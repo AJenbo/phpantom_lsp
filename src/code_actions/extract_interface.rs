@@ -528,6 +528,7 @@ mod tests {
             type_assertions: vec![],
             throws: vec![],
             if_this_is: None,
+            self_out: None,
         })
     }
 

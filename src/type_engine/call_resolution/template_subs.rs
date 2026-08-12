@@ -976,6 +976,68 @@ impl Backend {
     }
 }
 
+/// Build the full template substitution map for a method call: class-level
+/// substitutions from the receiver's own generic arguments, method-level
+/// substitutions bound from the call's arguments, and `@psalm-if-this-is`
+/// substitutions inferred from the receiver's concrete type.
+///
+/// Shared by call-site return-type resolution
+/// ([`crate::type_engine::variable::rhs_resolution::calls`]) and
+/// `@psalm-this-out` receiver mutation (the forward walker) — both need
+/// the same three-layer substitution map, just applied to different
+/// target types (the method's return type vs. its self-out type).
+pub(crate) fn build_call_template_subs(
+    owner: &ClassInfo,
+    method_name: &str,
+    arg_texts: &[&str],
+    receiver_type: Option<&PhpType>,
+    ctx: &ResolutionCtx<'_>,
+) -> HashMap<String, PhpType> {
+    let class_level_subs: HashMap<String, PhpType> = receiver_type
+        .and_then(|ty| match ty.kind() {
+            TypeKind::Generic(g)
+                if !g.args.is_empty()
+                    && !owner.template_params.is_empty()
+                    && !g.args.iter().any(|a| a.is_self_like()) =>
+            {
+                Some(
+                    owner
+                        .template_params
+                        .iter()
+                        .zip(g.args.iter())
+                        .map(|(name, ty)| (name.to_string(), ty.clone()))
+                        .collect(),
+                )
+            }
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    let method_template_subs =
+        Backend::build_method_template_subs(owner, method_name, arg_texts, ctx);
+
+    let if_this_is_subs: HashMap<String, PhpType> = owner
+        .get_method_ci(method_name)
+        .and_then(|m| m.if_this_is.as_ref())
+        .and_then(|pattern| {
+            let method = owner.get_method_ci(method_name)?;
+            Some(
+                crate::type_engine::variable::rhs_resolution::infer_if_this_is_subs(
+                    pattern,
+                    receiver_type?,
+                    &method.template_params,
+                    &method.template_param_bounds,
+                ),
+            )
+        })
+        .unwrap_or_default();
+
+    let mut template_subs = class_level_subs;
+    template_subs.extend(method_template_subs);
+    template_subs.extend(if_this_is_subs);
+    template_subs
+}
+
 /// Parameter names (`$`-prefixed) that are the *exclusive* binding site
 /// for a `@template` parameter.
 ///

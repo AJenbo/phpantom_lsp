@@ -535,6 +535,15 @@ pub struct MethodInfo {
     /// the pattern are resolved against the caller's concrete type to
     /// compute additional template substitutions for the return type.
     pub if_this_is: Option<PhpType>,
+    /// Receiver type mutation from `@psalm-this-out` or `@phpstan-self-out`.
+    ///
+    /// When present, a call to this method changes the type the forward
+    /// walker believes the receiver variable holds, the way an assignment
+    /// changes a variable's type. Method-level template parameters bound
+    /// from the call's arguments (and the receiver's own generic
+    /// arguments) are substituted into this type before it replaces the
+    /// receiver's tracked type.
+    pub self_out: Option<PhpType>,
 }
 
 impl MethodInfo {
@@ -570,6 +579,8 @@ impl MethodInfo {
             && self.is_macro == other.is_macro
             && self.is_inferred_return == other.is_inferred_return
             && self.throws == other.throws
+            && self.if_this_is == other.if_this_is
+            && self.self_out == other.self_out
             && self.parameters.len() == other.parameters.len()
             && self
                 .parameters
@@ -629,6 +640,7 @@ impl MethodInfo {
             type_assertions: Vec::new(),
             throws: Vec::new(),
             if_this_is: None,
+            self_out: None,
         }
     }
 
@@ -663,6 +675,7 @@ impl MethodInfo {
             type_assertions: Vec::new(),
             throws: Vec::new(),
             if_this_is: None,
+            self_out: None,
         }
     }
 }

@@ -1351,7 +1351,7 @@ fn extract_closure_or_arrow_return_type(expr: &Expression<'_>) -> Option<PhpType
 /// This matches `TOption → Option<int>`, `TEither → Either<Exception, int>`,
 /// then extracts `A = int` from `Option<A>` vs `Option<int>`, and
 /// `B = int` from `Either<mixed, B>` vs `Either<Exception, int>`.
-fn infer_if_this_is_subs(
+pub(crate) fn infer_if_this_is_subs(
     pattern: &PhpType,
     receiver: &PhpType,
     template_params: &[Atom],

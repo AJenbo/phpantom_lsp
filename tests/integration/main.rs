@@ -176,6 +176,7 @@ mod references;
 mod references_laravel_trans;
 mod reparse_symbol_eviction;
 mod return_type_resolution;
+mod self_out;
 mod semantic_tokens;
 mod server_lifecycle;
 mod signature_help;

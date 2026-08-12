@@ -632,8 +632,8 @@ impl Audit {
         st.add(ARC + size_of::<MethodInfo>());
         self.m_struct += st;
         let m: &MethodInfo = a;
-        // return_type, native_return_type, conditional_return, if_this_is
-        self.pt_inline_slots += 4;
+        // return_type, native_return_type, conditional_return, if_this_is, self_out
+        self.pt_inline_slots += 5;
         if m.description.is_none()
             && m.return_description.is_none()
             && m.links.is_empty()
@@ -647,6 +647,7 @@ impl Audit {
         self.m_types += opt_ty(&m.native_return_type);
         self.m_types += opt_ty(&m.conditional_return);
         self.m_types += opt_ty(&m.if_this_is);
+        self.m_types += opt_ty(&m.self_out);
         self.m_types += ty_vec(&m.throws);
         self.m_types += assertions(&m.type_assertions);
         let mut tp = Sz::default();

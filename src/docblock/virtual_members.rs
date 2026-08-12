@@ -204,6 +204,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             type_assertions: Vec::new(),
             throws: Vec::new(),
             if_this_is: None,
+            self_out: None,
         });
 
         if is_vendor_tag {

@@ -273,44 +273,47 @@ Both `phpy` and Qodana pass this case in `php-typing-conformance`'s corpus
 at a call site, resolve `CONSTANT[T]` by indexing the constant's array type
 at that specific literal key rather than falling back to the value union.
 
-### B94. `@psalm-this-out` / `@phpstan-self-out` method-level template mutation is not modelled
+### B132. A mismatched generic type argument is never reported
 
-**Impact: Low · Effort: High**
+**Impact: Medium · Effort: Medium**
 
 ```php
 /** @template T */
-final class MutableBox {
+final class Box {
+    /** @param T $value */
     public function __construct(public mixed $value) {}
-
-    /**
-     * @template U
-     * @param U $value
-     * @psalm-this-out self<U>
-     * @phpstan-self-out self<U>
-     */
-    public function replace(mixed $value): void {}
 }
 
-/** @param MutableBox<int> $box */
-function f(MutableBox $box): void {
-    $box->replace('x');
-    takesIntBox($box);    // still reported clean — should now fail
-    takesStringBox($box); // reported: MutableBox<int> is not MutableBox<string> — should now pass
+/** @param Box<int> $box */
+function takesIntBox(Box $box): void {}
+
+function f(): void {
+    /** @var Box<string> $box */
+    $box = new Box('x');
+    takesIntBox($box);   // reported clean — should fail
 }
 ```
 
-`@psalm-this-out self<U>` / `@phpstan-self-out self<U>` on a method says the
-call mutates `$this`'s template parameter to `U`, so after
-`$box->replace('x')`, `$box` should read as `MutableBox<string>` rather than
-`MutableBox<int>` for the rest of the block. PHPantom does not track this
-annotation at all, so `$box`'s type never changes after the call.
+Passing a `Box<string>` where a `Box<int>` is declared is accepted. Both
+compatibility checks that know about generic arguments only ever return
+`true` on success and otherwise fall through: the same-base covariance block
+in `is_type_compatible` (`src/diagnostics/type_errors/compatibility.rs`) and
+the one in `is_subtype_of_typed` (`src/class_lookup.rs`). Control reaches the
+final nominal hierarchy check, which compares `base_name()` against
+`base_name()` — `Box` against `Box` — and answers `true`, discarding the type
+arguments entirely.
 
-None of `phpy`, Qodana, or Intelephense pass this case in
-`php-typing-conformance`'s corpus either — Mago intentionally dropped
-`@this-out` support as unsound, and NoVerify/Phan don't model it — so this is
-filed for completeness rather than because any tool we compare against
-demonstrates users expect it.
+Two things combine to get there. The disjointness test the covariance block
+uses recurses through the full `is_type_compatible`, so `int` vs `string`
+comes back compatible via PHP's scalar-coercion leniency and the arguments
+are never judged disjoint. Nothing downstream then re-examines them.
 
-**Fix:** not investigated beyond confirming the annotation has no effect;
-would need a mechanism to re-bind a receiver's template arguments after a
-method call the way an assignment re-binds a variable's type.
+This is the check that would let the `@psalm-this-out` / `@phpstan-self-out`
+receiver mutation be observed through a diagnostic rather than only through
+hover.
+
+**Fix:** decide argument compatibility with an invariance-aware comparison
+rather than the coercion-lenient one, and have the base-name fallback refuse
+to answer for a generic type whose arguments were not already checked, so a
+mismatch is reported instead of falling through to a name match. T32's audit
+of the `MAYBE` escape hatches covers the leniency side of this.

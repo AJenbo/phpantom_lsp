@@ -25,8 +25,8 @@ use super::instantiation::{
     extract_generic_arg_from_ancestor,
 };
 use super::{
-    extract_closure_or_arrow_return_type, infer_if_this_is_subs, resolve_rhs_expression,
-    resolve_var_types, resolved_type_with_lookup,
+    extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
+    resolved_type_with_lookup,
 };
 
 /// Build a template substitution map for a function-level `@template` call.
@@ -1297,64 +1297,21 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     for (idx, owner) in owner_classes.iter().enumerate() {
         // Build class-level template substitutions from the receiver's
         // generic type string (e.g. `Collection<int, User>` maps
-        // `TKey => int, TValue => User`).  This ensures method return
-        // types like `TValue` are concretised when the receiver was
-        // annotated with generic arguments via `@var`.
-        let class_level_subs: HashMap<String, PhpType> = receiver_resolved
+        // `TKey => int, TValue => User`), merge in method-level
+        // substitutions bound from the call's arguments, then override
+        // with any `@psalm-if-this-is` inference from the receiver's
+        // concrete type.
+        let receiver_type = receiver_resolved
             .get(idx)
             .or_else(|| receiver_resolved.first())
-            .and_then(|rt| match &rt.type_string.kind() {
-                TypeKind::Generic(g)
-                    if !g.args.is_empty()
-                        && !owner.template_params.is_empty()
-                        && !g.args.iter().any(|a| a.is_self_like()) =>
-                {
-                    Some(
-                        owner
-                            .template_params
-                            .iter()
-                            .zip(g.args.iter())
-                            .map(|(name, ty)| (name.to_string(), ty.clone()))
-                            .collect(),
-                    )
-                }
-                _ => None,
-            })
-            .unwrap_or_default();
-
-        let method_template_subs =
-            Backend::build_method_template_subs(owner, &method_name, &arg_refs, &rctx);
-
-        // ── @psalm-if-this-is template inference ────────────────
-        // When a method has a `@psalm-if-this-is` annotation and
-        // method-level template parameters remain unresolved (no
-        // arguments to infer from), match the receiver's concrete
-        // type against the pattern to compute substitutions.
-        let if_this_is_subs: HashMap<String, PhpType> = owner
-            .get_method_ci(&method_name)
-            .and_then(|m| m.if_this_is.as_ref())
-            .and_then(|pattern| {
-                let receiver_type = receiver_resolved
-                    .get(idx)
-                    .or_else(|| receiver_resolved.first())
-                    .map(|rt| &rt.type_string)?;
-                let method = owner.get_method_ci(&method_name)?;
-                Some(infer_if_this_is_subs(
-                    pattern,
-                    receiver_type,
-                    &method.template_params,
-                    &method.template_param_bounds,
-                ))
-            })
-            .unwrap_or_default();
-
-        // Merge class-level, method-level, and if-this-is subs.
-        // if-this-is overrides method-level defaults (which may be
-        // `mixed` for unresolvable templates). Method-level takes
-        // precedence over class-level.
-        let mut template_subs = class_level_subs;
-        template_subs.extend(method_template_subs);
-        template_subs.extend(if_this_is_subs);
+            .map(|rt| &rt.type_string);
+        let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
+            owner,
+            &method_name,
+            &arg_refs,
+            receiver_type,
+            &rctx,
+        );
 
         // When the return type contains `static`/`self`/`$this` and the
         // receiver was resolved with generic parameters, use the
