@@ -8225,3 +8225,117 @@ class Shelter
     let messages = type_error_messages(&collect(php));
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+// ─── Required array-shape keys ──────────────────────────────────────────────
+
+/// An array written out at the call site lists every key it has, so a
+/// required shape key that is not among them is genuinely absent.
+#[test]
+fn array_literal_missing_a_required_shape_key_is_reported() {
+    let php = r#"<?php
+/** @param array{host: string, port: int} $config */
+function takesConfig(array $config): void {}
+
+takesConfig(['host' => 'localhost']);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required key 'port'"),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn array_literal_missing_several_required_shape_keys_names_all_of_them() {
+    let php = r#"<?php
+/** @param array{host: string, port: int, user: string} $config */
+function takesConfig(array $config): void {}
+
+takesConfig(['port' => 3306]);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required keys 'host', 'user'"),
+        "got {messages:?}"
+    );
+}
+
+/// Key order is irrelevant, extra keys are harmless, and an optional key
+/// is by definition not required.
+#[test]
+fn array_literal_satisfying_a_shape_is_not_reported() {
+    let php = r#"<?php
+/** @param array{host: string, port: int} $config */
+function takesConfig(array $config): void {}
+
+/** @param array{host: string, port?: int} $config */
+function takesOptional(array $config): void {}
+
+takesConfig(['host' => 'localhost', 'port' => 3306]);
+takesConfig(['port' => 3306, 'host' => 'localhost']);
+takesConfig(['host' => 'localhost', 'port' => 3306, 'debug' => true]);
+takesOptional(['host' => 'localhost']);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A shape written positionally holds the same keys as one written with
+/// the indices spelled out.
+#[test]
+fn positional_shape_entries_count_as_their_index() {
+    let php = r#"<?php
+/** @param array{0: string, 1: string} $pair */
+function takesPair(array $pair): void {}
+
+takesPair(['a', 'b']);
+takesPair([0 => 'a', 1 => 'b']);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A shape inferred from a variable records the keys we saw assigned,
+/// which is a lower bound on the keys the value has — a branch we could
+/// not follow may add more. Only a literal at the call site is proof.
+#[test]
+fn a_shape_that_did_not_come_from_a_literal_argument_stays_silent() {
+    let php = r#"<?php
+/** @param array{host: string, port: int} $config */
+function takesConfig(array $config): void {}
+
+function build(bool $withPort): array {
+    $config = ['host' => 'localhost'];
+    if ($withPort) {
+        $config['port'] = 3306;
+    }
+    return $config;
+}
+
+$partial = ['host' => 'localhost'];
+takesConfig($partial);
+takesConfig(build(true));
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A key spelled as anything but a literal, or spread in from another
+/// array, leaves keys we cannot read — so the literal is no longer a
+/// complete account of what it holds.
+#[test]
+fn a_literal_with_keys_we_cannot_read_stays_silent() {
+    let php = r#"<?php
+const PORT_KEY = 'port';
+
+/** @param array{host: string, port: int} $config */
+function takesConfig(array $config): void {}
+
+takesConfig(['host' => 'localhost', PORT_KEY => 3306]);
+takesConfig(['host' => 'localhost', ...['port' => 3306]]);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}

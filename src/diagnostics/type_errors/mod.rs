@@ -12,6 +12,7 @@
 pub(super) mod compatibility;
 
 pub(super) use compatibility::is_type_compatible;
+use compatibility::missing_required_shape_keys;
 
 use std::collections::{HashMap, HashSet};
 
@@ -57,6 +58,11 @@ struct ResolvedArg {
     /// validation when the param type is an array with `model-property`
     /// in a generic position.
     array_string_literals: Vec<(String, usize, usize)>,
+    /// Whether the argument is an array written out at the call site
+    /// with every key spelled as a literal, so its resolved shape lists
+    /// all the keys the value has rather than the ones we happened to
+    /// see.  See [`enumerates_all_keys`].
+    enumerates_all_keys: bool,
 }
 
 /// All resolved argument types for a single call site.
@@ -84,6 +90,39 @@ pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
         }
     }
     false
+}
+
+/// Whether the expression is an array literal whose keys are all known
+/// statically, so the shape inferred from it is the whole array rather
+/// than a lower bound on it.
+///
+/// This is what separates a missing key from an unproven one. A shape
+/// that came from a variable was built by watching assignments, and a
+/// key we never saw assigned may still be there at runtime — through a
+/// branch we could not follow, a constant key we could not read, or a
+/// merge somewhere upstream. An array written out at the call site has
+/// no such history: every key is right there.
+///
+/// A single entry written without a key, or spread in with `...`, is
+/// enough to disqualify the literal, because the shape inference drops
+/// positional entries as soon as the array has string keys.
+fn enumerates_all_keys(expr: &Expression<'_>) -> bool {
+    use mago_syntax::cst::array::ArrayElement;
+
+    let elements = match expr {
+        Expression::Array(arr) => &arr.elements,
+        Expression::LegacyArray(arr) => &arr.elements,
+        _ => return false,
+    };
+
+    !elements.is_empty()
+        && elements.iter().all(|elem| match elem {
+            ArrayElement::KeyValue(kv) => matches!(
+                kv.key,
+                Expression::Literal(Literal::String(_) | Literal::Integer(_))
+            ),
+            _ => false,
+        })
 }
 
 /// Extract string literal values from array expression elements.
@@ -397,6 +436,7 @@ impl Backend {
                             start,
                             end,
                             array_string_literals,
+                            enumerates_all_keys: enumerates_all_keys(arg_expr),
                         });
                     }
                     result.insert(
@@ -602,7 +642,28 @@ impl Backend {
                     param_type
                 };
 
-                if is_type_compatible(arg_type, effective_param_type, &class_loader, strict_types) {
+                // The compatibility layer treats an array shape as an open
+                // description — a key it does not mention may still be
+                // there at runtime — which is right for a shape inferred
+                // from a variable but not for one written out at the call
+                // site. There the keys are all of them, so a required key
+                // that is not among them is genuinely absent. A key that
+                // *is* there with the wrong value type stays the
+                // compatibility layer's call.
+                let missing_keys = if resolved_arg.enumerates_all_keys {
+                    missing_required_shape_keys(arg_type, effective_param_type)
+                } else {
+                    Vec::new()
+                };
+
+                if missing_keys.is_empty()
+                    && is_type_compatible(
+                        arg_type,
+                        effective_param_type,
+                        &class_loader,
+                        strict_types,
+                    )
+                {
                     // Even when the array types are compatible, validate
                     // string literals against model-property<Model> when
                     // the param type is an array with model-property in
@@ -725,6 +786,20 @@ impl Backend {
                 {
                     message.push_str(&format!(
                         " (return type {arg_return} does not satisfy {param_return})"
+                    ));
+                }
+                // Two shapes that differ by a key the developer forgot
+                // read as two long type expressions to diff by eye. Name
+                // the keys that are missing instead.
+                if !missing_keys.is_empty() {
+                    message.push_str(&format!(
+                        " (missing required key{} {})",
+                        if missing_keys.len() == 1 { "" } else { "s" },
+                        missing_keys
+                            .iter()
+                            .map(|key| format!("'{key}'"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
                     ));
                 }
                 // Name the specific member(s) that broke a partially

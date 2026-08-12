@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::class_lookup::is_subtype_of_typed;
 use crate::php_type::{
-    LiteralValue, PhpType, TypeKind, int_literal_is_within_range, is_array_like_name,
+    LiteralValue, PhpType, ShapeEntry, TypeKind, int_literal_is_within_range, is_array_like_name,
 };
 use crate::types::{ClassInfo, Visibility};
 
@@ -52,6 +52,54 @@ fn is_bare_array(ty: &PhpType) -> bool {
         }
         _ => false,
     }
+}
+
+/// The required keys a parameter's array shape declares that the
+/// argument's array shape does not hold, in the order the parameter
+/// declares them.
+///
+/// Empty unless both sides are shapes: only a shape enumerates its keys,
+/// so only a shape can be found short of one.  Whether the argument's
+/// shape can be trusted to be the *whole* array is the caller's call —
+/// this only reports the difference between the two.
+pub(crate) fn missing_required_shape_keys(arg_type: &PhpType, param_type: &PhpType) -> Vec<String> {
+    let (TypeKind::ArrayShape(arg_entries), TypeKind::ArrayShape(param_entries)) =
+        (arg_type.kind(), param_type.kind())
+    else {
+        return Vec::new();
+    };
+
+    let arg_keys = shape_keys(arg_entries);
+    shape_keys(param_entries)
+        .into_iter()
+        .zip(param_entries.iter())
+        .filter(|(key, entry)| !entry.optional && !arg_keys.contains(key))
+        .map(|(key, _)| key)
+        .collect()
+}
+
+/// The key each shape entry stands for, filling in the sequential index
+/// PHP assigns an entry written without one: `array{a: int, string}`
+/// holds a `0` exactly as `array{a: int, 0: string}` does, so the two
+/// spellings have to compare equal.
+fn shape_keys(entries: &[ShapeEntry]) -> Vec<String> {
+    let mut next_index: i64 = 0;
+    entries
+        .iter()
+        .map(|entry| match &entry.key {
+            Some(key) => {
+                if let Ok(index) = key.parse::<i64>() {
+                    next_index = next_index.max(index + 1);
+                }
+                key.clone()
+            }
+            None => {
+                let key = next_index.to_string();
+                next_index += 1;
+                key
+            }
+        })
+        .collect()
 }
 
 /// Returns `true` when two class-like types may name the same class

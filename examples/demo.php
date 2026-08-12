@@ -3643,6 +3643,24 @@ class TypeErrorDemo
         // No diagnostic — a bare `Closure` carries no signature at all,
         // so there is nothing to hold it to:
         $this->requiresUserMatcher($this->makeMatcher());
+
+        // Type error — an array written out here lists every key it has,
+        // so a required shape key that is not among them is missing:
+        $this->requiresConfig(['host' => 'localhost']);
+
+        // No diagnostic — every required key is there. Order does not
+        // matter, an extra key is harmless, and `timeout` is optional:
+        $this->requiresConfig(['port' => 3306, 'host' => 'localhost']);
+        $this->requiresConfig(['host' => 'localhost', 'port' => 3306, 'debug' => true]);
+
+        // No diagnostic — a shape built up over several statements records
+        // the keys we watched being assigned, which is a lower bound on
+        // what the array holds rather than the whole of it:
+        $config = ['host' => 'localhost'];
+        if ($this->useDefaultPort()) {
+            $config['port'] = 3306;
+        }
+        $this->requiresConfig($config);
     }
 
     private function requiresInt(int $value): void {}
@@ -3656,6 +3674,12 @@ class TypeErrorDemo
     private function requiresFloat(float $value): void {}
     /** @param callable(User): bool $matcher */
     private function requiresUserMatcher(callable $matcher): void {}
+    /** @param array{host: string, port: int, timeout?: int} $config */
+    private function requiresConfig(array $config): void {}
+    private function useDefaultPort(): bool
+    {
+        return true;
+    }
     private function makeMatcher(): \Closure
     {
         return static fn (User $u): bool => $u->getName() !== '';
