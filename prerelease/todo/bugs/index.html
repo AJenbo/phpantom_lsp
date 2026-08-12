@@ -849,17 +849,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b136-a-false-check-narrows-nothing-in-its-else-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B136. A <code>false</code> check narrows nothing in its else branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1349,17 +1338,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b136-a-false-check-narrows-nothing-in-its-else-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B136. A <code>false</code> check narrows nothing in its else branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1437,43 +1415,6 @@ trips over, which is why the Laravel example reports four errors where
 <p><strong>Fix:</strong> resolve a conditional return type against the call's arguments,
 falling back to a parameter's declared default when the argument is
 omitted, rather than joining every branch.</p>
-<h3 id="b136-a-false-check-narrows-nothing-in-its-else-branch">B136. A <code>false</code> check narrows nothing in its else branch<a class="headerlink" href="#b136-a-false-check-narrows-nothing-in-its-else-branch" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @return string|false */</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function readIt() { return false; }</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$value = readIt();</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">if ($value === false) {</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    // ...</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">} else {</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    useString($value);              // reported: got string|false</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">if (!empty($value)) {</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">    useString($value);              // reported: got string|false</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">}</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">if ($value === false || rand(0, 1)) {</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">    return;</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">}</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="x">useString($value);                  // reported: got string|false</span>
-</code></pre></div>
-<p>The guard-clause form (<code>if ($value === false) { return; }</code>) narrows
-correctly, so the extraction and the stripping both work; what is missing
-is the inverse direction. <code>apply_null_narrowing_inverse</code> handles <code>null</code> in
-every shape (<code>=== null</code>, <code>!== null</code>, <code>isset</code>, <code>!isset</code>) but has no <code>false</code>
-counterpart, so an explicit <code>else</code>, and the implicit else that an
-<code>||</code> guard's De Morgan expansion produces, both leave <code>false</code> in place.
-<code>!empty($x)</code> misses for a different reason: <code>extract_not_empty_var</code> feeds
-<code>strip_null_from_scope</code>, which removes <code>null</code> only, even though <code>empty()</code>
-is false exactly when the value is truthy.</p>
-<p>This affects locals and property paths alike, so it is not the synthetic
-member key that is at fault.</p>
-<p><strong>Fix:</strong> give <code>apply_null_narrowing_inverse</code> the <code>false</code> cases that
-<code>apply_guard_clause_null_narrowing</code> already has (<code>extract_false_equality_check_var</code>
-→ strip <code>false</code>, <code>extract_non_false_check_var</code> → narrow to <code>false</code>), and
-route <code>!empty($x)</code> through <code>strip_falsy_from_scope</code> rather than
-<code>strip_null_from_scope</code>.</p>
 
 
 
