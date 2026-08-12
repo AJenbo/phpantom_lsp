@@ -391,6 +391,39 @@ class CompoundNarrowingDemo
         // conjunct is visible to the member access in a later conjunct.
         return fn($specimen) => $specimen instanceof Rock && $specimen->crush() === 'smash!';
     }
+
+    /**
+     * Two checks that both hold prove the subject is both types at once,
+     * so it satisfies a parameter naming either one on its own.
+     */
+    public function bothAtOnce(object $specimen): string
+    {
+        if ($specimen instanceof Rock && $specimen instanceof Labelled) {
+            $this->takesRock($specimen);          // Rock&Labelled satisfies Rock
+            $this->takesLabelled($specimen);      // ... and Labelled
+            return $specimen->crush() . ':' . $specimen->label();
+        }
+
+        return '';
+    }
+
+    /**
+     * `assert()` reaches the same conclusion about a value already typed as
+     * a class it does not nominally implement, which is how a test doubles
+     * a concrete dependency with a mock.
+     */
+    public function assertedBoth(Rock $rock): string
+    {
+        assert($rock instanceof Labelled);
+        $this->takesRock($rock);                  // still a Rock
+        $this->takesLabelled($rock);              // and now a Labelled too
+
+        return $rock->crush() . ':' . $rock->label();
+    }
+
+    private function takesRock(Rock $rock): void {}
+
+    private function takesLabelled(Labelled $labelled): void {}
 }
 
 
@@ -6423,6 +6456,16 @@ class Banana
     public function weigh(): float { return 0.2; }
 }
 
+interface Labelled
+{
+    public function label(): string;
+}
+
+class LabelledRock extends Rock implements Labelled
+{
+    public function label(): string { return 'granite'; }
+}
+
 class SpecimenHolder
 {
     public Rock|Banana $item;
@@ -7013,6 +7056,18 @@ function runDemoAssertions(): void
     assert(
         (new CompoundNarrowingDemo())->repeatedCall(new SpecimenHolder()) === '',
         'maybe() returns null, so the instanceof branch is not taken',
+    );
+
+    // ── Two checks that both hold make one value of both types ──────────
+    $compound = new CompoundNarrowingDemo();
+    assert(
+        $compound->bothAtOnce(new LabelledRock()) === 'smash!:granite',
+        'a value that is both a Rock and a Labelled satisfies either one alone',
+    );
+    assert($compound->bothAtOnce(new Rock()) === '', 'a plain Rock is not Labelled');
+    assert(
+        $compound->assertedBoth(new LabelledRock()) === 'smash!:granite',
+        'assert() proves the extra interface without losing the declared class',
     );
 
     // ── class-string guard keeps its type argument ─────────────────────

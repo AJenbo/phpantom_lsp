@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| T36 | [Array-shape and generic enforcement gaps mir already covers](todo/type-inference.md#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers)                       | Medium      | Medium      |
 |     | **Release 0.10.0**                                                                                                                              |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -103,7 +102,8 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B85 | [Some `instanceof`-to-unrelated-interface narrowings still merge as a union](todo/bugs.md#b85-some-instanceof-to-unrelated-interface-narrowings-still-merge-as-a-union)     | Low         | Medium      |
+| B86 | [A check on a method call does not reach the argument that repeats it](todo/bugs.md#b86-a-check-on-a-method-call-does-not-reach-the-argument-that-repeats-it)                | Medium      | Medium      |
+| B87 | [An `instanceof` on a two-level property path drops the declared class](todo/bugs.md#b87-an-instanceof-on-a-two-level-property-path-drops-the-declared-class)               | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

@@ -974,6 +974,49 @@ fn types_joined_mixed_entries_return_union() {
     );
 }
 
+// ── tag_as_intersection ─────────────────────────────────────────
+
+#[test]
+fn tag_as_intersection_gives_every_entry_the_same_intersection() {
+    let mut entries = vec![
+        ResolvedType::from_class(class("Countable")),
+        ResolvedType::from_class(class("Serializable")),
+    ];
+    ResolvedType::tag_as_intersection(&mut entries);
+    let intersection = PhpType::intersection(vec![
+        PhpType::named(atom("Countable")),
+        PhpType::named(atom("Serializable")),
+    ]);
+    assert!(entries.iter().all(|rt| rt.type_string == intersection));
+    // Each entry keeps its own class so member lookup still sees both.
+    assert_eq!(
+        entries
+            .iter()
+            .filter_map(|rt| rt.class_info.as_ref().map(|c| c.name.to_string()))
+            .collect::<Vec<_>>(),
+        vec!["Countable", "Serializable"],
+    );
+    assert_eq!(ResolvedType::types_joined(&entries), intersection);
+}
+
+#[test]
+fn tag_as_intersection_leaves_a_single_entry_alone() {
+    let mut entries = vec![ResolvedType::from_class(class("Countable"))];
+    ResolvedType::tag_as_intersection(&mut entries);
+    assert_eq!(entries[0].type_string, PhpType::named(atom("Countable")));
+}
+
+#[test]
+fn tag_as_intersection_leaves_non_class_entries_alone() {
+    let mut entries = vec![
+        ResolvedType::from_class(class("Countable")),
+        ResolvedType::from_type_string(PhpType::string()),
+    ];
+    ResolvedType::tag_as_intersection(&mut entries);
+    assert_eq!(entries[0].type_string, PhpType::named(atom("Countable")));
+    assert_eq!(entries[1].type_string, PhpType::string());
+}
+
 #[test]
 fn types_joined_empty_returns_mixed() {
     let entries: Vec<ResolvedType> = vec![];

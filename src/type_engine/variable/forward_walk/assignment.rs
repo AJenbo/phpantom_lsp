@@ -2775,9 +2775,21 @@ pub(crate) fn process_assert_narrowing<'b>(
         let mut results = before.clone();
 
         // assert($x instanceof Foo)
+        let mut assert_shape = narrowing::NarrowedShape::NotApplied;
         ResolvedType::apply_narrowing(&mut results, |classes| {
-            narrowing::try_apply_assert_instanceof_narrowing(expr, &var_ctx, classes)
+            narrowing::try_apply_assert_instanceof_narrowing(
+                expr,
+                &var_ctx,
+                classes,
+                &mut assert_shape,
+            )
         });
+        // An `assert()` proving a mock is both its declared class and the
+        // asserted interface leaves both classes side by side; they
+        // describe one value, not a choice between two.
+        if assert_shape == narrowing::NarrowedShape::Intersection {
+            ResolvedType::tag_as_intersection(&mut results);
+        }
 
         // @phpstan-assert / @psalm-assert
         let mut type_guard: Option<(narrowing::TypeGuardKind, bool)> = None;

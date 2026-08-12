@@ -5207,6 +5207,8 @@ class EpaymentService {
     public function annul(): bool { return true; }
 }
 
+interface Unrelated {}
+
 class TestCase {
     private EpaymentService $service;
 
@@ -5224,6 +5226,125 @@ class TestCase {
     assert!(
         msgs.is_empty(),
         "Property narrowed via instanceof should be accepted as MockInterface, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_compound_and_instanceof_narrowing() {
+    // `$x instanceof Aye && $x instanceof Bee` proves both at once, so
+    // `$x` is `Aye&Bee`.  Joining the two as `Aye|Bee` instead judged
+    // the value against `Bee` as well and rejected it.
+    let php = r#"<?php
+interface Aye { public function a(): void; }
+interface Bee { public function b(): void; }
+
+function wantsAye(Aye $x): void {}
+
+function test(object $thing): void {
+    if ($thing instanceof Aye && $thing instanceof Bee) {
+        wantsAye($thing);
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "A subject proven to be both classes should satisfy either one, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn compound_or_instanceof_narrowing_stays_a_union() {
+    // The `||` counterpart proves only that the value is one of the two,
+    // so passing it where just one is accepted must still be reported.
+    let php = r#"<?php
+interface Aye { public function a(): void; }
+interface Bee { public function b(): void; }
+
+function wantsAye(Aye $x): void {}
+
+function test(object $thing): void {
+    if ($thing instanceof Aye || $thing instanceof Bee) {
+        wantsAye($thing);
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "An `||`-narrowed subject is still a union, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_property_narrowed_by_compound_and_instanceof() {
+    // The property-path re-walk reaches the same "both hold" conclusion
+    // for `$this->prop` as the forward walker does for a local.
+    let php = r#"<?php
+interface Aye { public function a(): void; }
+interface Bee { public function b(): void; }
+
+class Base {
+    public function base(): void {}
+}
+
+class Holder {
+    private Base $thing;
+
+    private function wantsAye(Aye $x): void {}
+
+    public function test(): void {
+        if ($this->thing instanceof Aye && $this->thing instanceof Bee) {
+            $this->wantsAye($this->thing);
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "A property proven to be both classes should satisfy either one, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_asserted_mock_intersection() {
+    // `assert($x instanceof MockInterface)` on a value already typed as
+    // an unrelated concrete class proves it is both at once, exactly as
+    // the `if`-based form does.
+    let php = r#"<?php
+interface MockInterface {
+    public function shouldReceive(string $name): self;
+}
+
+class EpaymentService {
+    public function annul(): bool { return true; }
+}
+
+class TestCase {
+    protected function service(): EpaymentService {}
+
+    protected function mockMethod(MockInterface $mock, string $method): void {}
+
+    protected function realMethod(EpaymentService $service): void {}
+
+    public function test(): void {
+        $service = $this->service();
+        assert($service instanceof MockInterface);
+        $this->mockMethod($service, 'annul');
+        $this->realMethod($service);
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "An asserted mock satisfies both its class and the asserted interface, got: {msgs:?}"
     );
 }
 

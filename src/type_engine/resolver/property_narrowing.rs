@@ -234,11 +234,14 @@ fn walk_property_narrowing_stmts<'b>(
             Statement::Expression(expr_stmt) => {
                 // assert($this->prop instanceof Foo) — unconditional
                 if !check_is_stale(expr_stmt.expression, floor) {
+                    let mut shape = narrowing::NarrowedShape::NotApplied;
                     narrowing::try_apply_assert_instanceof_narrowing(
                         expr_stmt.expression,
                         ctx,
                         results,
+                        &mut shape,
                     );
+                    shape.record(is_intersection);
                 }
                 // `$x = $this->prop instanceof Foo ? … : …` and other
                 // ternaries nested in the expression narrow the property
@@ -366,24 +369,26 @@ fn walk_property_narrowing_if<'b>(
         IfBody::Statement(body) => {
             // ── then-body narrowing ──
             if !condition_is_stale {
-                *is_intersection |= narrowing::try_apply_instanceof_narrowing(
+                narrowing::try_apply_instanceof_narrowing(
                     if_stmt.condition,
                     body.statement.span(),
                     ctx,
                     results,
-                );
+                )
+                .record(is_intersection);
             }
             walk_property_narrowing_stmt(body.statement, ctx, results, floor, is_intersection);
 
             // ── elseif narrowing ──
             for else_if in body.else_if_clauses.iter() {
                 if !check_is_stale(else_if.condition, floor) {
-                    *is_intersection |= narrowing::try_apply_instanceof_narrowing(
+                    narrowing::try_apply_instanceof_narrowing(
                         else_if.condition,
                         else_if.statement.span(),
                         ctx,
                         results,
-                    );
+                    )
+                    .record(is_intersection);
                 }
                 walk_property_narrowing_stmt(
                     else_if.statement,
@@ -398,21 +403,23 @@ fn walk_property_narrowing_if<'b>(
             if let Some(else_clause) = &body.else_clause {
                 let else_span = else_clause.statement.span();
                 if !condition_is_stale {
-                    *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
+                    narrowing::try_apply_instanceof_narrowing_inverse(
                         if_stmt.condition,
                         else_span,
                         ctx,
                         results,
-                    );
+                    )
+                    .record(is_intersection);
                 }
                 for else_if in body.else_if_clauses.iter() {
                     if !check_is_stale(else_if.condition, floor) {
-                        *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
+                        narrowing::try_apply_instanceof_narrowing_inverse(
                             else_if.condition,
                             else_span,
                             ctx,
                             results,
-                        );
+                        )
+                        .record(is_intersection);
                     }
                 }
                 walk_property_narrowing_stmt(
@@ -444,12 +451,13 @@ fn walk_property_narrowing_if<'b>(
                 mago_span::Position::new(then_end),
             );
             if !condition_is_stale {
-                *is_intersection |= narrowing::try_apply_instanceof_narrowing(
+                narrowing::try_apply_instanceof_narrowing(
                     if_stmt.condition,
                     then_span,
                     ctx,
                     results,
-                );
+                )
+                .record(is_intersection);
             }
             walk_property_narrowing_stmts(
                 body.statements.iter(),
@@ -472,12 +480,13 @@ fn walk_property_narrowing_if<'b>(
                     ),
                 );
                 if !check_is_stale(else_if.condition, floor) {
-                    *is_intersection |= narrowing::try_apply_instanceof_narrowing(
+                    narrowing::try_apply_instanceof_narrowing(
                         else_if.condition,
                         ei_span,
                         ctx,
                         results,
-                    );
+                    )
+                    .record(is_intersection);
                 }
                 walk_property_narrowing_stmts(
                     else_if.statements.iter(),
@@ -501,21 +510,23 @@ fn walk_property_narrowing_if<'b>(
                     ),
                 );
                 if !condition_is_stale {
-                    *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
+                    narrowing::try_apply_instanceof_narrowing_inverse(
                         if_stmt.condition,
                         else_span,
                         ctx,
                         results,
-                    );
+                    )
+                    .record(is_intersection);
                 }
                 for else_if in body.else_if_clauses.iter() {
                     if !check_is_stale(else_if.condition, floor) {
-                        *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
+                        narrowing::try_apply_instanceof_narrowing_inverse(
                             else_if.condition,
                             else_span,
                             ctx,
                             results,
-                        );
+                        )
+                        .record(is_intersection);
                     }
                 }
                 walk_property_narrowing_stmts(
@@ -588,12 +599,13 @@ fn walk_property_narrowing_expr<'b>(
                     && ctx.cursor_offset <= then_span.end.offset
                 {
                     if !condition_is_stale {
-                        *is_intersection |= narrowing::try_apply_instanceof_narrowing(
+                        narrowing::try_apply_instanceof_narrowing(
                             cond.condition,
                             then_span,
                             ctx,
                             results,
-                        );
+                        )
+                        .record(is_intersection);
                     }
                     walk_property_narrowing_expr(then_expr, ctx, results, floor, is_intersection);
                     return;
@@ -604,12 +616,13 @@ fn walk_property_narrowing_expr<'b>(
                 && ctx.cursor_offset <= else_span.end.offset
             {
                 if !condition_is_stale {
-                    *is_intersection |= narrowing::try_apply_instanceof_narrowing_inverse(
+                    narrowing::try_apply_instanceof_narrowing_inverse(
                         cond.condition,
                         else_span,
                         ctx,
                         results,
-                    );
+                    )
+                    .record(is_intersection);
                 }
                 walk_property_narrowing_expr(cond.r#else, ctx, results, floor, is_intersection);
             }

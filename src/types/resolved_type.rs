@@ -145,6 +145,40 @@ impl ResolvedType {
         classes.into_iter().map(ResolvedType::from_arc).collect()
     }
 
+    /// Give every entry the same intersection `type_string` naming all of
+    /// the classes in `results`.
+    ///
+    /// Narrowing an `instanceof` against a class the subject does not
+    /// nominally implement (a mock or dynamic proxy that is the declared
+    /// class *and* implements the checked interface) keeps both classes,
+    /// because the value satisfies them simultaneously.  Each entry keeps
+    /// its own `class_info` so member lookup still finds members from
+    /// every class, while the shared intersection `type_string` tells
+    /// [`Self::types_joined`] to report `A&B` instead of wrapping the
+    /// entries in an `A|B` union — a compatibility check against a
+    /// parameter naming just one member has to pass, not be judged
+    /// against the other member too.
+    ///
+    /// A single entry is already unambiguous, and a set with a non-class
+    /// entry (a scalar, an array shape) is not an intersection of
+    /// classes, so both are left alone.
+    pub(crate) fn tag_as_intersection(results: &mut [ResolvedType]) {
+        if results.len() < 2 {
+            return;
+        }
+        let Some(members) = results
+            .iter()
+            .map(|rt| rt.class_info.as_ref().map(|c| PhpType::named(c.fqn())))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
+        let intersection = PhpType::intersection(members);
+        for rt in results.iter_mut() {
+            rt.type_string = intersection.clone();
+        }
+    }
+
     /// Convert a `Vec<ClassInfo>` into `Vec<ResolvedType>`, preserving
     /// the original type hint string.
     ///

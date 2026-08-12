@@ -748,34 +748,11 @@ fn resolve_rhs_expression_inner<'b>(
                     let narrowed_names: Vec<&str> =
                         classes.iter().map(|c| c.name.as_str()).collect();
                     if original_names != narrowed_names {
-                        // `instanceof` narrowed the property to an
-                        // unrelated interface it doesn't nominally
-                        // implement (e.g. a mock/proxy) — the value
-                        // satisfies every class simultaneously.  Keep
-                        // one `ResolvedType` per class (so completion
-                        // and hover still see each class's own
-                        // `class_info` for member lookup) but give
-                        // every entry the *same* intersection
-                        // `type_string`: `ResolvedType::types_joined`
-                        // special-cases "every entry shares one
-                        // Intersection type_string" and returns it
-                        // as-is instead of wrapping it in a `A|B`
-                        // union, which is what compatibility checks
-                        // need — every member must be satisfied, not
-                        // just one.
-                        if is_intersection && classes.len() > 1 {
-                            let members: Vec<PhpType> =
-                                classes.iter().map(|c| PhpType::named(c.fqn())).collect();
-                            let intersection = PhpType::intersection(members);
-                            return classes
-                                .into_iter()
-                                .map(|c| ResolvedType {
-                                    type_string: intersection.clone(),
-                                    class_info: Some(c),
-                                })
-                                .collect();
+                        let mut narrowed = ResolvedType::from_classes(classes);
+                        if is_intersection {
+                            ResolvedType::tag_as_intersection(&mut narrowed);
                         }
-                        return ResolvedType::from_classes(classes);
+                        return narrowed;
                     }
                 }
             }

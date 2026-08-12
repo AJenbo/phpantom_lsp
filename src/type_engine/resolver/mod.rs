@@ -523,12 +523,17 @@ fn resolve_target_classes_expr_inner(
                         &dummy_class
                     }
                 };
-                apply_property_narrowing(&key, effective_class, ctx, &mut classes);
+                let is_intersection =
+                    apply_property_narrowing(&key, effective_class, ctx, &mut classes);
                 // A narrowed result stands on its own: the raw return
                 // type hint below describes what the method declares,
                 // which is what the check just refined away.
                 if classes.iter().map(|c| c.fqn()).ne(before) {
-                    return classes.into_iter().map(ResolvedType::from_arc).collect();
+                    let mut narrowed = ResolvedType::from_classes(classes);
+                    if is_intersection {
+                        ResolvedType::tag_as_intersection(&mut narrowed);
+                    }
+                    return narrowed;
                 }
             }
             // Use the raw return type hint only when it actually carries
@@ -641,13 +646,14 @@ fn resolve_target_classes_expr_inner(
                         &dummy_class
                     }
                 };
-                apply_property_narrowing(&full_path, effective_class, ctx, &mut arc_results);
+                let is_intersection =
+                    apply_property_narrowing(&full_path, effective_class, ctx, &mut arc_results);
+                let mut narrowed = ResolvedType::from_classes(arc_results);
+                if is_intersection {
+                    ResolvedType::tag_as_intersection(&mut narrowed);
+                }
+                narrowed
             }
-
-            arc_results
-                .into_iter()
-                .map(ResolvedType::from_arc)
-                .collect()
         }
 
         // ── Array access on variable or call expression ─────────

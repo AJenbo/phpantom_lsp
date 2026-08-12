@@ -15,6 +15,45 @@ use crate::type_engine::resolver::VarResolutionCtx;
 
 use super::*;
 
+/// How the entries a narrowing call left in `results` relate to each
+/// other, so that callers turning them into a `PhpType` pick the right
+/// composite.
+///
+/// A caller that joins the entries as alternatives when they are really
+/// an intersection judges the value's compatibility with a parameter
+/// naming one member against the *other* member too, and rejects it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::type_engine) enum NarrowedShape {
+    /// The check said nothing about this subject here (it names another
+    /// variable, the cursor is outside the body it guards, or it only
+    /// ruled a class out), so whatever shape `results` already had still
+    /// stands.
+    NotApplied,
+    /// `results` holds alternatives: the value is exactly one of them.
+    Union,
+    /// `results` holds classes the value satisfies *simultaneously* —
+    /// `apply_instanceof_inclusion` merged in a class the subject does
+    /// not nominally implement (a mock or dynamic proxy that is both at
+    /// once), so the entries describe one value rather than a choice.
+    Intersection,
+}
+
+impl NarrowedShape {
+    /// Fold this outcome into a walk-wide "the result is an
+    /// intersection" flag.
+    ///
+    /// A walk applies many checks in source order and each one that
+    /// applies replaces the previous conclusion, so only
+    /// [`Self::NotApplied`] leaves the flag as it was.
+    pub(in crate::type_engine) fn record(self, is_intersection: &mut bool) {
+        match self {
+            Self::NotApplied => {}
+            Self::Union => *is_intersection = false,
+            Self::Intersection => *is_intersection = true,
+        }
+    }
+}
+
 /// Check if `condition` is `$var instanceof ClassName` (possibly
 /// parenthesised or negated) where the variable matches `ctx.var_name`.
 ///
@@ -22,25 +61,14 @@ use super::*;
 ///   - positive match → narrow `results` to only the instanceof class
 ///   - negated match (`!($var instanceof ClassName)`) → *exclude* the
 ///     class from the current candidates
-///
-/// Returns `true` when the resulting `results` represents an
-/// *intersection* rather than the usual set of union alternatives —
-/// i.e. `apply_instanceof_inclusion` merged in an unrelated interface
-/// (a declared class narrowed by `instanceof` to an interface it
-/// doesn't implement, such as a mock/proxy that is both simultaneously).
-/// Callers that turn `results` into a `PhpType` must build a
-/// `TypeKind::Intersection` in that case instead of joining the entries
-/// as alternatives, or the value's compatibility with a parameter
-/// naming just one of the two members will be judged against the
-/// *other* member too and rejected.
 pub(in crate::type_engine) fn try_apply_instanceof_narrowing(
     condition: &Expression<'_>,
     body_span: mago_span::Span,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) -> bool {
+) -> NarrowedShape {
     if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
-        return false;
+        return NarrowedShape::NotApplied;
     }
 
     // ── Compound OR: `$x instanceof A || $x instanceof B` ──────────
@@ -56,44 +84,66 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing(
         && !classes.is_empty()
     {
         let union = resolve_class_names_to_union(&classes, ctx);
-        if !union.is_empty() {
-            results.clear();
-            *results = union;
+        if union.is_empty() {
+            return NarrowedShape::NotApplied;
         }
-        return false;
+        results.clear();
+        *results = union;
+        return NarrowedShape::Union;
     }
 
     // ── Compound AND: `$x instanceof A && $x instanceof B` ─────────
-    // Both branches must hold, so each narrows further.  In practice
-    // this means the variable is the intersection.  Since PHPantom
-    // uses union-completion semantics, we add all matched classes.
+    // Both branches must hold, so the value is every matched class at
+    // once — an intersection, not a choice between them.
     if let Some(classes) = try_extract_compound_and_instanceof(condition, ctx.var_name)
         && !classes.is_empty()
     {
         let union = resolve_class_names_to_union(&classes, ctx);
-        if !union.is_empty() {
-            results.clear();
-            *results = union;
+        if union.is_empty() {
+            return NarrowedShape::NotApplied;
         }
-        return false;
+        let multiple = union.len() > 1;
+        results.clear();
+        *results = union;
+        return if multiple {
+            NarrowedShape::Intersection
+        } else {
+            NarrowedShape::Union
+        };
     }
 
     if let Some(mut extraction) = try_extract_instanceof_with_negation(condition, ctx.var_name) {
         resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
         if extraction.negated {
             apply_instanceof_exclusion(&extraction.class_type, ctx, results);
-            false
+            // Ruling one class out leaves the remaining entries relating
+            // to each other exactly as they did before.
+            NarrowedShape::NotApplied
         } else {
-            let before = results.len();
-            apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results);
-            // `apply_instanceof_inclusion` only grows a single starting
-            // class into two entries via its "keep both" branch — every
-            // other path clears and replaces, so growth here is an
-            // unambiguous signal (see its doc comment).
-            before <= 1 && results.len() > before
+            instanceof_inclusion_shape(&extraction, ctx, results)
         }
     } else {
-        false
+        NarrowedShape::NotApplied
+    }
+}
+
+/// Apply a positive instanceof check and report the shape it left.
+///
+/// `apply_instanceof_inclusion` only grows a single starting class into
+/// two entries via its "keep both" branch — every other path clears and
+/// replaces — so growth is an unambiguous signal that the merge was an
+/// intersection (see that function's doc comment).
+fn instanceof_inclusion_shape(
+    extraction: &InstanceofExtraction,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ClassInfo>,
+) -> NarrowedShape {
+    let before = results.len();
+    apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results);
+    if before <= 1 && results.len() > before {
+        NarrowedShape::Intersection
+    } else {
+        NarrowedShape::Union
     }
 }
 
@@ -103,17 +153,14 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing(
 /// A positive instanceof in the condition means the variable is NOT
 /// that class inside the else body (→ exclude), and vice-versa for a
 /// negated condition (→ include only that class).
-///
-/// Returns `true` under the same "intersection, not union" condition
-/// as [`try_apply_instanceof_narrowing`].
 pub(in crate::type_engine) fn try_apply_instanceof_narrowing_inverse(
     condition: &Expression<'_>,
     body_span: mago_span::Span,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
-) -> bool {
+) -> NarrowedShape {
     if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
-        return false;
+        return NarrowedShape::NotApplied;
     }
 
     // ── Compound OR inverse: after `if ($x instanceof A || $x instanceof B) { exit; }` ──
@@ -124,7 +171,7 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing_inverse(
         for cls_type in &classes {
             apply_instanceof_exclusion(cls_type, ctx, results);
         }
-        return false;
+        return NarrowedShape::NotApplied;
     }
 
     // ── Compound AND inverse: after `if ($x instanceof A && $x instanceof B) { exit; }` ──
@@ -136,15 +183,13 @@ pub(in crate::type_engine) fn try_apply_instanceof_narrowing_inverse(
         // Flip the polarity: positive condition → exclude in else,
         // negated condition → include in else.
         if extraction.negated {
-            let before = results.len();
-            apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results);
-            before <= 1 && results.len() > before
+            instanceof_inclusion_shape(&extraction, ctx, results)
         } else {
             apply_instanceof_exclusion(&extraction.class_type, ctx, results);
-            false
+            NarrowedShape::NotApplied
         }
     } else {
-        false
+        NarrowedShape::NotApplied
     }
 }
 
@@ -628,11 +673,17 @@ pub(in crate::type_engine) fn class_match_condition_class(
 /// guaranteed by the caller.
 ///
 /// Returns `true` when a definite (inclusion-style) narrowing was
-/// applied — see [`ResolvedType::apply_narrowing`].
+/// applied — see [`ResolvedType::apply_narrowing`].  `shape` reports how
+/// the surviving entries relate to each other, which is a separate
+/// question from whether the narrowing was definite: an `assert()` can
+/// prove a mock is both its declared class and the asserted interface at
+/// once, and a caller that joins those as alternatives gets the same
+/// false positives as the `if`-based path does.
 pub(in crate::type_engine) fn try_apply_assert_instanceof_narrowing(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
+    shape: &mut NarrowedShape,
 ) -> bool {
     // ── Compound OR inside assert: `assert($x instanceof A || $x instanceof B)` ──
     if let Some(classes) = try_extract_assert_compound_or_instanceof(expr, ctx.var_name)
@@ -642,6 +693,7 @@ pub(in crate::type_engine) fn try_apply_assert_instanceof_narrowing(
         if !union.is_empty() {
             results.clear();
             *results = union;
+            *shape = NarrowedShape::Union;
             return true;
         }
         return false;
@@ -652,7 +704,8 @@ pub(in crate::type_engine) fn try_apply_assert_instanceof_narrowing(
         return if extraction.negated {
             apply_instanceof_exclusion(&extraction.class_type, ctx, results)
         } else {
-            apply_instanceof_inclusion(&extraction.class_type, extraction.exact, ctx, results)
+            *shape = instanceof_inclusion_shape(&extraction, ctx, results);
+            true
         };
     }
     false

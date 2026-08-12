@@ -370,6 +370,32 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
     );
 }
 
+/// Where one subject's accumulated classes came from while walking a
+/// condition's `&&` operands, which decides whether they are
+/// alternatives or members of an intersection.
+#[derive(Default)]
+struct Conjuncts {
+    /// How many operands contributed a positive `instanceof` naming a
+    /// single class.
+    operands: usize,
+    /// A `||` chain contributed, so at least one contribution is a set of
+    /// alternatives rather than a class the value definitely is.
+    saw_alternatives: bool,
+}
+
+impl Conjuncts {
+    /// Whether the accumulated classes describe one value that is all of
+    /// them at once.
+    ///
+    /// `$x instanceof A && $x instanceof B` proves both, so the value is
+    /// `A&B`.  One operand on its own proves a single class, and a `||`
+    /// chain proves only that the value is one of its members, so
+    /// neither concludes an intersection.
+    fn is_intersection(&self) -> bool {
+        self.operands > 1 && !self.saw_alternatives
+    }
+}
+
 /// Apply condition-based narrowing (instanceof, null check, type guard)
 /// to the scope.  This narrows types for the "truthy" branch.
 pub(crate) fn apply_condition_narrowing<'b>(
@@ -424,8 +450,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
     }
 
     // Track which variables have been narrowed by instanceof across
-    // `&&` operands so we can merge them into a union.
+    // `&&` operands so we can merge them, plus where each subject's
+    // classes came from so the merge knows whether they are alternatives
+    // or an intersection.
     let mut instanceof_results: HashMap<String, Vec<ResolvedType>> = HashMap::new();
+    let mut conjuncts: HashMap<String, Conjuncts> = HashMap::new();
 
     for (op_idx, operand) in operands.iter().enumerate() {
         for var_name in &var_names {
@@ -441,6 +470,10 @@ pub(crate) fn apply_condition_narrowing<'b>(
                         entry,
                         union.into_iter().map(ResolvedType::from_class).collect(),
                     );
+                    conjuncts
+                        .entry(var_name.clone())
+                        .or_default()
+                        .saw_alternatives = true;
                 }
                 continue;
             }
@@ -490,6 +523,7 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     if !single.is_empty() {
                         let entry = instanceof_results.entry(var_name.clone()).or_default();
                         ResolvedType::extend_unique(entry, single);
+                        conjuncts.entry(var_name.clone()).or_default().operands += 1;
                     } else {
                         // Target class is unresolvable — mark variable
                         // as empty so diagnostics suppress false positives.
@@ -501,7 +535,16 @@ pub(crate) fn apply_condition_narrowing<'b>(
     }
 
     // Apply the accumulated instanceof narrowing results to the scope.
-    for (var_name, narrowed) in instanceof_results {
+    for (var_name, mut narrowed) in instanceof_results {
+        // `$x instanceof A && $x instanceof B` proves both at once, so the
+        // classes gathered across the operands are members of `A&B`
+        // rather than alternatives a consumer may pick one of.
+        let intersected = conjuncts
+            .get(&var_name)
+            .is_some_and(Conjuncts::is_intersection);
+        if intersected {
+            ResolvedType::tag_as_intersection(&mut narrowed);
+        }
         if !narrowed.is_empty() {
             let existing = scope.get(&var_name);
             if existing.is_empty() {
@@ -568,10 +611,13 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     // instanceof check guarantees non-null, so `null`
                     // entries added by `from_classes_with_hint` must
                     // be removed.
-                    let filtered: Vec<ResolvedType> = filtered
+                    let mut filtered: Vec<ResolvedType> = filtered
                         .into_iter()
                         .filter(|rt| !rt.type_string.is_null())
                         .collect();
+                    if intersected {
+                        ResolvedType::tag_as_intersection(&mut filtered);
+                    }
                     if filtered.is_empty() {
                         scope.set(&var_name, narrowed);
                     } else {
@@ -607,31 +653,9 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     // `apply_instanceof_inclusion` merging in an
                     // unrelated interface (the branch this call site
                     // exists for) leaves both classes in `results` as
-                    // separate entries, each keeping its own
-                    // `class_info` so member lookup (completion, hover)
-                    // still finds members from both — but the value
-                    // satisfies both simultaneously (e.g. a mock that
-                    // IS the declared class AND implements the
-                    // interface it was narrowed to), so every entry's
-                    // `type_string` is overwritten with the *same*
-                    // intersection type.  `ResolvedType::types_joined`
-                    // already special-cases "every entry shares one
-                    // Intersection type_string" and returns it as-is
-                    // instead of wrapping it in a `Foo|Bar` union, which
-                    // is what the argument/return compatibility check
-                    // needs: every member must be satisfied, not just
-                    // one.
-                    if results.len() > 1
-                        && let Some(members) = results
-                            .iter()
-                            .map(|rt| rt.class_info.as_ref().map(|c| PhpType::named(c.fqn())))
-                            .collect::<Option<Vec<_>>>()
-                    {
-                        let intersection = PhpType::intersection(members);
-                        for rt in results.iter_mut() {
-                            rt.type_string = intersection.clone();
-                        }
-                    }
+                    // separate entries, which describe one value that is
+                    // both at once.
+                    ResolvedType::tag_as_intersection(&mut results);
                     if !results.is_empty() {
                         scope.set(&var_name, results);
                     } else {

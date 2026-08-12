@@ -882,55 +882,6 @@ upstream's `nsrt/class-constant-types.php` were dropped when
 
 ---
 
-## T36. Array-shape and generic enforcement gaps mir already covers
-
-**Impact: Medium · Effort: Medium**
-
-Cross-referencing the php-typing-conformance results: for the cases
-below, mir recognizes and enforces the spelling and we are silent
-(zero diagnostics, not a false positive) — a real recognized-but-
-unenforced gap versus the LSP we're closest to competing with rather
-than a case where nobody has solved it yet:
-
-| Test | What mir enforces that we don't |
-| --- | --- |
-| `arrays_non_empty_list.php` | `non-empty-list<int>` rejects `[]` |
-| `arrays_shape_required_keys.php` | a required shape key missing from a literal array |
-| `assertions_assert_non_empty_list.php` | `assert()`-narrowed non-empty-list stays enforced downstream |
-| `callables_docblock_signature.php` | a `callable(int): string`-shaped docblock param against a mismatched closure |
-| `generics_extends_implements.php` | a `@template` bound carried through `extends`/`implements` |
-| `generics_template_bound_array.php` | a `@template T of array` bound rejecting a non-array constructor argument |
-
-None of these are things we should chase for their own sake — PHPStan
-and Mago already own deep static analysis and we proxy them rather
-than re-implementing their rule sets (see the CLAUDE.md anti-pattern
-on parallel type-resolution systems). These are worth closing because
-mir is the analyzer behind php-lsp, the LSP we're most directly
-compared against, and Intelephense fails most of them too (see the
-per-test TOML `conformance_automated` field under
-`php-typing-conformance/conformance/results/{mir,intelephense}/` for
-the up-to-date pass/fail per tool).
-
-Each row needs its own root-cause pass — they were only confirmed
-silent (not misclassified), not yet traced to a specific resolver.
-Fix one at a time rather than as a single PR; several likely share a
-cause. `callables_docblock_signature.php` did not share one with the
-callable row already closed: a closure's *return* type reaches the
-compatibility check, but its parameter list is never recorded on the
-resolved `Callable` type, so the row needs the resolver to carry a
-closure's declared parameters before there is anything to compare
-against. The two remaining generics rows do not share a cause with the
-pair already closed either: a mismatch between the *same* generic
-class' type arguments is now reported, but
-`generics_extends_implements.php` needs
-a subclass' `@extends Box<int>` read as its ancestor's type arguments
-before the two sides have a common base to compare, and
-`generics_template_bound_array.php` needs a constructor argument
-checked against the template's declared bound rather than against the
-substitution that argument itself produced.
-
----
-
 ## T37. Readonly write forms the `invalid_readonly_write` diagnostic still misses
 
 **Impact: Low-Medium · Effort: Medium**
