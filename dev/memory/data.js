@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786569624467,
+  "lastUpdate": 1786569753839,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19719,6 +19719,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "799d523df0a4ce9ea3c32230e3da8998bd179bba",
+          "message": "A guard clause on a property proves the same thing it proves about a\nlocal",
+          "timestamp": "2026-08-12T23:05:54+02:00",
+          "tree_id": "2f6d38c95d672b8115290f29ad7cb1c394349202",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/799d523df0a4ce9ea3c32230e3da8998bd179bba"
+        },
+        "date": 1786569747956,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.9,
             "unit": "MiB"
           }
         ]
