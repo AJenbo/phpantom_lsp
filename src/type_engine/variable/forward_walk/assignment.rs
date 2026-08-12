@@ -1551,18 +1551,21 @@ pub(crate) fn classify_php_type(
     saw_float: &mut bool,
     saw_int: &mut bool,
 ) -> Option<()> {
+    // Defer to `is_int_subtype`/`is_float_subtype` so every PHPDoc int
+    // refinement (`int<0,max>`, `positive-int`, …) and float spelling is
+    // recognised, not just the bare `int`/`float` names.
+    if ty.is_float_subtype() {
+        *saw_float = true;
+        return Some(());
+    }
+    if ty.is_int_subtype() {
+        *saw_int = true;
+        return Some(());
+    }
     match ty.kind() {
         TypeKind::Named(n) => {
             let lower = keyword_lowercase(n);
-            if lower == "float" || lower == "double" || lower == "real" {
-                *saw_float = true;
-            } else if lower == "int"
-                || lower == "integer"
-                || lower == "bool"
-                || lower == "boolean"
-                || lower == "true"
-                || lower == "false"
-            {
+            if lower == "bool" || lower == "boolean" || lower == "true" || lower == "false" {
                 *saw_int = true;
             } else if lower == "numeric" || n == "number" {
                 *saw_int = true;
@@ -1572,14 +1575,6 @@ pub(crate) fn classify_php_type(
                 // so that `int|null` classifies as int-like.
             } else {
                 return None; // mixed, string, object, etc.
-            }
-            Some(())
-        }
-        TypeKind::Literal(value) => {
-            match value.as_ref() {
-                LiteralValue::Int(_) => *saw_int = true,
-                LiteralValue::Float(_) => *saw_float = true,
-                LiteralValue::String(_) => return None,
             }
             Some(())
         }

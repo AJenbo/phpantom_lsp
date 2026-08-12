@@ -42,40 +42,6 @@ after each body walk (mirroring how `process_while`'s condition
 reassignment runs on each re-entry), and include the same processing in
 the fixed-point re-entry closure passed to `walk_loop_body_to_fixed_point`.
 
-### B129. Arithmetic on a refined int widens to `int|float`
-
-**Impact: Medium · Effort: Low**
-
-```php
-function total(string $text): int {
-    $length = 0;
-    $length += strlen($text);   // strlen() is declared `@return int<0,max>`
-
-    return $length;             // reported: int|float is incompatible with int
-}
-```
-
-`int + int` is `int`, and PHPantom gets that right for a plain `int`. It
-does not for any of the *refinements* of `int`: `int<0,max>`,
-`positive-int`, `non-negative-int`, and the rest classify as "not a
-number I recognise", which falls through to the conservative `int|float`
-result. `strlen()`, `count()`, `strpos()`, and most of the standard
-library's counting functions are declared with a range, so this fires on
-ordinary accumulator code and is reported at the `return`, several lines
-away from the addition that caused it.
-
-`classify_php_type`
-(`type_engine/variable/forward_walk/assignment.rs`) enumerates the
-int-like spellings by name (`int`, `integer`, `bool`, …) and has no arm
-for `TypeKind::IntRange` or for the refined `int` names, so it returns
-`None` and `infer_arithmetic_result_type` takes its unknown-operand
-branch.
-
-**Fix:** classify every int subtype as int-like. `PhpType::is_int_subtype`
-already knows the full set (including `IntRange`), so the name matching
-in `classify_php_type` can defer to it, with the same treatment for
-`is_float_subtype` on the float side.
-
 ### B126. A scalar check on a property narrows nothing
 
 **Impact: Medium · Effort: Medium**

@@ -3489,3 +3489,37 @@ function returnsClass() { return SomeClass::class; }
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("interface-string"), "{messages:?}");
 }
+
+#[test]
+fn accumulating_a_refined_int_return_type_stays_int() {
+    let php = r#"<?php
+/** @return int<0,max> */
+function count_things(): int { return 0; }
+
+function total(): int {
+    $length = 0;
+    $length += count_things();
+
+    return $length;
+}
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+#[test]
+fn accumulating_a_positive_int_return_type_stays_int() {
+    let php = r#"<?php
+/** @return positive-int */
+function count_things(): int { return 1; }
+
+function total(): int {
+    $length = 0;
+    $length += count_things();
+
+    return $length;
+}
+"#;
+    let messages = return_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
