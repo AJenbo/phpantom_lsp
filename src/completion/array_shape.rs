@@ -535,6 +535,7 @@ impl Backend {
         };
         let function_loader = self.function_loader(file_ctx);
         let config_resolver = |key: &str| self.resolve_config_type(key);
+        let trans_resolver = |key: &str| self.resolve_trans_type(key);
         let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
             var_name,
             effective_class,
@@ -546,6 +547,7 @@ impl Backend {
             Loaders {
                 function_loader: Some(&function_loader),
                 config_resolver: Some(&config_resolver),
+                trans_resolver: Some(&trans_resolver),
                 ..Loaders::default()
             },
         );

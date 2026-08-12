@@ -248,6 +248,101 @@ function test(): void {
     );
 }
 
+/// A literal translation key that names a scalar entry narrows
+/// `trans()`/`__()`'s declared `array|string` return to `string`, but a
+/// key that names a translation group keeps the full union.
+#[test]
+fn hover_trans_return_type_narrowed_for_scalar_key() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "lang/en/messages.php",
+                "<?php\nreturn [\n    'welcome' => 'Welcome!',\n    'group' => [\n        'a' => 'A',\n    ],\n];\n",
+            ),
+            (
+                "app/helpers.php",
+                "<?php\nfunction trans($key = null, $replace = [], $locale = null): \\Illuminate\\Contracts\\Translation\\Translator|array|string {}\nfunction __($key = null, $replace = [], $locale = null): string|array|null {}\n",
+            ),
+        ],
+    );
+
+    let uri = "file:///test_trans.php";
+    let content = "<?php
+function test(): void {
+    $scalar = trans('messages.welcome');
+    $scalar;
+    $group = trans('messages.group');
+    $group;
+    $underscore = __('messages.welcome');
+    $underscore;
+}
+";
+    backend.update_ast(uri, content);
+
+    let h = hover_at(&backend, uri, content, 3, 6).expect("hover on $scalar");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("string") && !text.contains("array"),
+        "trans('messages.welcome') names a scalar entry, so it should narrow to string: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 5, 6).expect("hover on $group");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("array"),
+        "trans('messages.group') names a group, so the array branch must stay: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 7, 6).expect("hover on $underscore");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("string") && !text.contains("array"),
+        "__('messages.welcome') names a scalar entry, so it should narrow to string: {text}"
+    );
+}
+
+/// `Lang::get()` (the `Lang` facade method) narrows the same way as the
+/// `trans()`/`__()` helpers for a literal scalar key.
+#[test]
+fn hover_lang_facade_get_return_type_narrowed_for_scalar_key() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "lang/en/messages.php",
+            "<?php\nreturn [\n    'welcome' => 'Welcome!',\n    'group' => [\n        'a' => 'A',\n    ],\n];\n",
+        )],
+    );
+
+    let uri = "file:///test_lang_facade.php";
+    let content = "<?php
+class Lang {
+    public static function get($key = null, $replace = [], $locale = null): array|string {}
+}
+function test(): void {
+    $scalar = Lang::get('messages.welcome');
+    $scalar;
+    $group = Lang::get('messages.group');
+    $group;
+}
+";
+    backend.update_ast(uri, content);
+
+    let h = hover_at(&backend, uri, content, 5, 6).expect("hover on $scalar");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("string") && !text.contains("array"),
+        "Lang::get('messages.welcome') names a scalar entry, so it should narrow to string: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 7, 6).expect("hover on $group");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("array"),
+        "Lang::get('messages.group') names a group, so the array branch must stay: {text}"
+    );
+}
+
 #[test]
 fn hover_config_vendor_framework_fallback() {
     let (backend, _dir) = create_psr4_workspace(

@@ -102,7 +102,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B130 | [Echoing a translation in a template is reported as printing an array](todo/bugs.md#b130-echoing-a-translation-in-a-template-is-reported-as-printing-an-array) | High        | Low-Medium  |
 | B89 | [`assert($x !== null)` / `assert($x !== false)` does not narrow](todo/bugs.md#b89-assertx--null--assertx--false-does-not-narrow)                                           | Medium-High | Medium      |
 | B131 | [A `for` loop's condition narrows nothing](todo/bugs.md#b131-a-for-loops-condition-narrows-nothing)                                                                       | Medium      | Low         |
 | B129 | [Arithmetic on a refined int widens to `int\|float`](todo/bugs.md#b129-arithmetic-on-a-refined-int-widens-to-intfloat)                                                     | Medium      | Low         |
@@ -112,6 +111,7 @@ unlikely to move the needle for most users.
 | B93 | [`CONSTANT[T]` does not resolve per templated key](todo/bugs.md#b93-constantt-does-not-resolve-per-templated-key)                                                           | Low-Medium  | High        |
 | B127 | [An inline `@method` template parameter is read as a class name](todo/bugs.md#b127-an-inline-method-template-parameter-is-read-as-a-class-name)                            | Low         | Low-Medium  |
 | B94 | [`@psalm-this-out` / `@phpstan-self-out` method-level template mutation is not modelled](todo/bugs.md#b94-psalm-this-out--phpstan-self-out-method-level-template-mutation-is-not-modelled) | Low         | High        |
+| B132 | [A nullable value passed to a component attribute is reported, and it is unclear which side is wrong](todo/bugs.md#b132-a-nullable-value-passed-to-a-component-attribute-is-reported-and-it-is-unclear-which-side-is-wrong) | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

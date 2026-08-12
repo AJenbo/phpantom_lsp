@@ -787,6 +787,31 @@ pub(super) fn resolve_rhs_function_call<'b>(
         }
     }
 
+    // ── Laravel translation helper return type narrowing ─────
+    // `trans()`/`__()` declare a return type of `array|string` (plus a
+    // `null` branch for `__()`'s no-key form) because a translation key
+    // may name a whole group. A literal key that resolves to a scalar
+    // entry can never take the array branch, so narrow to `string`.
+    if let Some(ref name) = func_name {
+        let normalized_func = name.trim_start_matches('\\');
+        if matches!(normalized_func, "trans" | "__") {
+            let arg_texts =
+                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                    &func_call.argument_list,
+                    content,
+                );
+            if let Some(first_arg) = arg_texts.first()
+                && let Some(key) = crate::util::unescape_php_string_literal(first_arg.trim())
+                && !key.is_empty()
+                && !key.contains('$')
+                && let Some(resolver) = ctx.loaders.trans_resolver
+                && let Some(ty) = resolver(&key)
+            {
+                return vec![ResolvedType::from_type_string(ty)];
+            }
+        }
+    }
+
     // ── Known array functions ────────────────────────
     // For element-extracting functions (array_pop, etc.)
     // resolve to the element ClassInfo directly.
@@ -1226,6 +1251,11 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     for owner in &owner_classes {
         if let Some(result) =
             try_resolve_config_method_type(&owner.fqn(), &method_name, argument_list, ctx)
+        {
+            return result;
+        }
+        if let Some(result) =
+            try_resolve_trans_method_type(&owner.fqn(), &method_name, argument_list, ctx)
         {
             return result;
         }
@@ -2097,6 +2127,15 @@ pub(super) fn resolve_rhs_static_call(
                 return result;
             }
 
+            if let Some(result) = try_resolve_trans_method_type(
+                &owner.fqn(),
+                &method_name,
+                &static_call.argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+
             let arg_texts =
                 crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                     &static_call.argument_list,
@@ -2223,5 +2262,43 @@ fn try_resolve_config_method_type(
         }
         return None;
     }
+    Some(vec![ResolvedType::from_type_string(ty)])
+}
+
+/// Narrow `Illuminate\Translation\Translator::get()` (the `Lang::get()`
+/// facade method) to `string` when its literal key argument names a
+/// scalar translation entry.  Mirrors [`try_resolve_config_method_type`].
+fn try_resolve_trans_method_type(
+    owner_fqn: &str,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    const TRANS_FQNS: &[&str] = &[
+        "Illuminate\\Translation\\Translator",
+        "Illuminate\\Support\\Facades\\Lang",
+        "Lang",
+    ];
+    if method_name != "get" {
+        return None;
+    }
+    let normalized = owner_fqn.strip_prefix('\\').unwrap_or(owner_fqn);
+    if !TRANS_FQNS
+        .iter()
+        .any(|fqn| normalized.eq_ignore_ascii_case(fqn))
+    {
+        return None;
+    }
+    let resolver = ctx.loaders.trans_resolver?;
+    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        ctx.content,
+    );
+    let first_arg = arg_texts.first()?;
+    let key = crate::util::unescape_php_string_literal(first_arg.trim())?;
+    if key.is_empty() || key.contains('$') {
+        return None;
+    }
+    let ty = resolver(&key)?;
     Some(vec![ResolvedType::from_type_string(ty)])
 }

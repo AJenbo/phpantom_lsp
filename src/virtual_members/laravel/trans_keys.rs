@@ -5,6 +5,24 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::php_type::PhpType;
+
+impl Backend {
+    /// Narrow a translation key argument's type to `string` when the key
+    /// names a scalar entry, so that `__('messages.welcome')`/`trans(...)`/
+    /// `Lang::get(...)` calls don't carry the full `array|string` union of
+    /// the framework's declared return type into an argument that a
+    /// literal key can never actually make an array.
+    ///
+    /// Returns `None` (leaving the declared union in place) when the key
+    /// names a translation group, or cannot be resolved at all.
+    pub(crate) fn resolve_trans_type(&self, key: &str) -> Option<PhpType> {
+        match self.cached_trans_key_shapes().get(key) {
+            Some(false) => Some(PhpType::string()),
+            Some(true) | None => None,
+        }
+    }
+}
 
 /// Resolve `__('file.key')` / `trans('file.key')` / `Lang::get('file.key')` to the
 /// matching keys inside all matching `lang/{locale}/file.php` translation files,
@@ -114,6 +132,9 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
 pub(crate) struct TransKeyMatch {
     pub key: String,
     pub start: usize,
+    /// Whether the key's value is itself a nested array (a translation
+    /// group) rather than a scalar string entry.
+    pub is_group: bool,
 }
 
 pub(crate) fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMatch> {
@@ -215,8 +236,24 @@ fn collect_array<'a>(
         out.push(TransKeyMatch {
             key: dot_key,
             start: key_start,
+            is_group: value_is_group(kv.value),
         });
 
         collect_expr(kv.value, content, prefix, &full_path, out);
+    }
+}
+
+/// Whether a translation entry's value expression is a nested array
+/// (a translation group) rather than a scalar string entry.  Mirrors the
+/// shapes [`collect_expr`] recurses into, so a group is recognized exactly
+/// when there is more beneath it to flatten.
+fn value_is_group(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Array(_) | Expression::LegacyArray(_) => true,
+        Expression::Parenthesized(p) => value_is_group(p.expression),
+        Expression::Call(Call::Function(fc)) => {
+            matches!(fc.function, Expression::Identifier(ident) if ident.value().eq_ignore_ascii_case(b"array_merge"))
+        }
+        _ => false,
     }
 }

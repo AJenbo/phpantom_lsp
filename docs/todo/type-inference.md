@@ -921,3 +921,11 @@ of returning the raw stub union. Start with `json_encode`/`json_decode`
 (`JSON_THROW_ON_ERROR` bit test) and the `preg_replace`/`str_replace`
 family (array-vs-string `$subject`), since those account for most of
 the volume found.
+
+Another instance of the same shape: `str_word_count()`'s declared
+`array<string>|int` return actually depends on whether the `$format`
+argument is passed at all (absent or `0` → `int`; `1`/`2` → an array).
+`examples/laravel/app/View/Components/PostSummary.php` calls
+`str_word_count($title)` with no `$format` argument and gets the full
+union reported against its `int` return type — a live false positive
+in the demo project, found while fixing B130.

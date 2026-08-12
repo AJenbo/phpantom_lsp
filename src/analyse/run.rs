@@ -340,10 +340,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             let function_loader_cl = backend.function_loader(&file_ctx);
                             let constant_loader_cl = backend.constant_loader();
                             let config_resolver = |key: &str| backend.resolve_config_type(key);
+                            let trans_resolver = |key: &str| backend.resolve_trans_type(key);
                             let loaders = crate::type_engine::resolver::Loaders {
                                 function_loader: Some(&function_loader_cl),
                                 constant_loader: Some(&constant_loader_cl),
                                 config_resolver: Some(&config_resolver),
+                                trans_resolver: Some(&trans_resolver),
                             };
                             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                                 content,

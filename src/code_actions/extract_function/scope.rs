@@ -29,12 +29,14 @@ pub(crate) fn resolve_var_type(
     let function_loader = backend.function_loader(&ctx);
     let constant_loader = backend.constant_loader();
     let config_resolver = |key: &str| backend.resolve_config_type(key);
+    let trans_resolver = |key: &str| backend.resolve_trans_type(key);
     let loaders = Loaders {
         function_loader: Some(
             &function_loader as &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
         ),
         constant_loader: Some(&constant_loader),
         config_resolver: Some(&config_resolver),
+        trans_resolver: Some(&trans_resolver),
     };
 
     let current_class = find_class_at_offset(&ctx.classes, cursor_offset);

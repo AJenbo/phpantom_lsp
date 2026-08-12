@@ -360,10 +360,12 @@ impl Backend {
             let function_loader_cl = self.function_loader(&ctx.file);
             let constant_loader_cl = self.constant_loader();
             let config_resolver = |key: &str| self.resolve_config_type(key);
+            let trans_resolver = |key: &str| self.resolve_trans_type(key);
             let loaders = crate::type_engine::resolver::Loaders {
                 function_loader: Some(&function_loader_cl),
                 constant_loader: Some(&constant_loader_cl),
                 config_resolver: Some(&config_resolver),
+                trans_resolver: Some(&trans_resolver),
             };
             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                 content,

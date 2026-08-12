@@ -70,10 +70,12 @@ impl Backend {
         let function_loader = self.function_loader(ctx);
         let constant_loader = self.constant_loader();
         let config_resolver = |key: &str| self.resolve_config_type(key);
+        let trans_resolver = |key: &str| self.resolve_trans_type(key);
         let loaders = crate::type_engine::resolver::Loaders {
             function_loader: Some(&function_loader as &dyn Fn(&str, u32) -> Option<FunctionInfo>),
             constant_loader: Some(&constant_loader),
             config_resolver: Some(&config_resolver),
+            trans_resolver: Some(&trans_resolver),
         };
 
         // Try the type-string path first.  This preserves generic

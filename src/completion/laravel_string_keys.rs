@@ -8,6 +8,8 @@
 //! - `view('|')` / `View::make('|')` → view names
 //! - `__('|')` / `trans('|')` / `Lang::get('|')` → translation keys
 
+use std::collections::HashMap;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -427,6 +429,48 @@ impl Backend {
         keys
     }
 
+    /// Enumerate every translation key alongside whether it names a
+    /// translation group (a nested array) rather than a scalar string
+    /// entry, merging the flag across every locale and file that
+    /// declares the key.
+    ///
+    /// A key that is a group in *any* locale is recorded as a group even
+    /// if another locale happens to declare it as a scalar — the return
+    /// type narrowing this feeds is only safe when every locale agrees
+    /// the entry is scalar.
+    fn enumerate_all_trans_key_shapes(&self) -> HashMap<String, bool> {
+        let snapshot = self.user_file_symbol_maps();
+        let mut shapes = HashMap::new();
+
+        for (file_uri, _) in &snapshot {
+            if !(file_uri.contains("/lang/") || file_uri.contains("/resources/lang/")) {
+                continue;
+            }
+            if !file_uri.ends_with(".php") {
+                continue;
+            }
+            let Some(stem) = extract_lang_file_stem(file_uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content(file_uri) else {
+                continue;
+            };
+            let decls =
+                crate::virtual_members::laravel::collect_trans_declarations(&content, &stem);
+            for d in decls {
+                mark_trans_shape(&mut shapes, d.key, d.is_group);
+            }
+        }
+
+        collect_json_trans_key_shapes(self, &mut shapes);
+
+        for res in &self.laravel_provider_resources.read().trans_dirs {
+            collect_namespaced_trans_key_shapes(&res.path, &res.namespace, &mut shapes);
+        }
+
+        shapes
+    }
+
     /// Read one slot of [`LaravelStringKeyCache`], building it under
     /// `build_lock` when empty.
     ///
@@ -509,6 +553,19 @@ impl Backend {
             |cache| cache.trans_keys.clone(),
             |cache, keys| cache.trans_keys = Some(keys),
             || self.enumerate_all_trans_keys(),
+        )
+    }
+
+    /// Every translation key mapped to whether it names a group (nested
+    /// array) rather than a scalar entry.  Used to narrow the return type
+    /// of `__()`/`trans()`/`Lang::get()` at call sites whose key argument
+    /// is a literal.
+    pub(crate) fn cached_trans_key_shapes(&self) -> std::sync::Arc<HashMap<String, bool>> {
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.trans_key_shapes,
+            |cache| cache.trans_key_shapes.clone(),
+            |cache, shapes| cache.trans_key_shapes = Some(shapes),
+            || std::sync::Arc::new(self.enumerate_all_trans_key_shapes()),
         )
     }
 }
@@ -609,6 +666,97 @@ fn collect_namespaced_trans_from_locale_dir(
         let decls = crate::virtual_members::laravel::collect_trans_declarations(&content, &prefix);
         for d in decls {
             out.push(d.key);
+        }
+    }
+}
+
+/// Record a key's group/scalar shape, OR-ing into any flag already
+/// recorded for the same key from another locale or file.
+fn mark_trans_shape(shapes: &mut HashMap<String, bool>, key: String, is_group: bool) {
+    let existing = shapes.entry(key).or_insert(false);
+    *existing = *existing || is_group;
+}
+
+/// The shape counterpart of [`collect_json_trans_keys`]: every JSON
+/// translation key is a scalar phrase, never a group.
+fn collect_json_trans_key_shapes(backend: &crate::Backend, out: &mut HashMap<String, bool>) {
+    let root = match backend.workspace.workspace_root.read().clone() {
+        Some(r) => r,
+        None => return,
+    };
+    for sub in &["lang", "resources/lang"] {
+        let dir = root.join(sub);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json")
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(map) =
+                    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+            {
+                for k in map.keys() {
+                    mark_trans_shape(out, k.clone(), false);
+                }
+            }
+        }
+    }
+}
+
+/// The shape counterpart of [`collect_namespaced_trans_keys`].
+fn collect_namespaced_trans_key_shapes(
+    dir: &std::path::Path,
+    namespace: &str,
+    out: &mut HashMap<String, bool>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_namespaced_trans_shapes_from_locale_dir(&path, namespace, out);
+        } else if path.extension().is_some_and(|e| e == "json")
+            && namespace.is_empty()
+            && let Ok(content) = std::fs::read_to_string(&path)
+            && let Ok(map) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+        {
+            for k in map.keys() {
+                mark_trans_shape(out, k.clone(), false);
+            }
+        }
+    }
+}
+
+fn collect_namespaced_trans_shapes_from_locale_dir(
+    dir: &std::path::Path,
+    namespace: &str,
+    out: &mut HashMap<String, bool>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().is_some_and(|e| e == "php") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let prefix = if namespace.is_empty() {
+            stem.to_string()
+        } else {
+            format!("{namespace}::{stem}")
+        };
+        let decls = crate::virtual_members::laravel::collect_trans_declarations(&content, &prefix);
+        for d in decls {
+            mark_trans_shape(out, d.key, d.is_group);
         }
     }
 }

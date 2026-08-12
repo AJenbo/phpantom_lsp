@@ -479,10 +479,12 @@ fn process_top_level_statement(
             };
 
             let config_resolver = |key: &str| backend.resolve_config_type(key);
+            let trans_resolver = |key: &str| backend.resolve_trans_type(key);
             let loaders = Loaders {
                 function_loader: Some(function_loader),
                 constant_loader: Some(constant_loader),
                 config_resolver: Some(&config_resolver),
+                trans_resolver: Some(&trans_resolver),
             };
 
             for (maybe_expr, start, end) in returns {
@@ -614,10 +616,12 @@ fn process_class_member(
         });
 
     let config_resolver = |key: &str| backend.resolve_config_type(key);
+    let trans_resolver = |key: &str| backend.resolve_trans_type(key);
     let loaders = Loaders {
         function_loader: Some(function_loader),
         constant_loader: Some(constant_loader),
         config_resolver: Some(&config_resolver),
+        trans_resolver: Some(&trans_resolver),
     };
 
     for (maybe_expr, start, end) in returns {

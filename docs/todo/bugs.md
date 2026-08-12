@@ -11,43 +11,23 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B130. Echoing a translation in a template is reported as printing an array
+### B132. A nullable value passed to a component attribute is reported, and it is unclear which side is wrong
 
-**Impact: High · Effort: Low-Medium**
+**Impact: Low · Effort: Low**
 
 ```blade
-{{ __('messages.welcome') }}   {{-- reported: e() got array|string --}}
-{{ trans('messages.welcome') }}
+{{-- $posts->first() : BlogPost|null; PostSummary's constructor takes a non-nullable BlogPost --}}
+<x-post-summary :post="$posts->first()" />
 ```
 
-`{{ __('messages.welcome') }}` is the single most common line in a
-localised Blade template, and every one of them is reported: Blade
-compiles an echo to `e($value)`, `e()` takes a
-`Htmlable|BackedEnum|string|int|float|null`, and `__()` is declared
-`array|string` because a translation key may name a whole group of
-strings. So the array branch, which a scalar key can never return, is
-reported against the argument.
-
-This is the Laravel case of T38 (a return type that depends on an
-argument's *value* rather than its type): the key is a literal, and
-PHPantom already resolves translation keys to their entries, so which
-branch applies is known at the call site. The volume makes it worth
-handling separately from the core builtins T38 lists: 15 of the 20
-diagnostics `analyze` reports on `examples/laravel` are this one shape,
-which puts the project's documented CI gate (3 deliberate diagnostics,
-see `docs/CONTRIBUTING.md`) 17 over.
-
-**Fix:** resolve the translation key at the call site and return `string`
-when it names a scalar entry, keeping `array|string` only for a key that
-names a group or that cannot be resolved. `Lang::get()`, `trans()`, and
-`trans_choice()` share the signature and should share the treatment.
-
-The remaining two diagnostics of that 20 are a separate question:
 `examples/laravel/resources/views/welcome.blade.php` passes
-`$posts->first()` (a genuinely nullable `BlogPost|null`) to a component
-whose constructor takes a non-nullable `BlogPost`. Either the check is
-too strict for a component attribute or the example should pass
-something non-nullable; the maintainer's call which.
+`$posts->first()` (genuinely `BlogPost|null`) to a component whose
+constructor takes a non-nullable `BlogPost`, and PHPantom reports it.
+The resolution is either the check is too strict for a component
+attribute (Blade tolerates `null` reaching a typed property in ways a
+plain function call does not) or the example should pass something
+non-nullable; the maintainer's call which. Found while fixing the
+translation-narrowing issue previously tracked as B130.
 
 ### B131. A `for` loop's condition narrows nothing
 

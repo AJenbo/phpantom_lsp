@@ -80,10 +80,12 @@ impl Backend {
                     let current_class = enclosing.unwrap_or(&default_class);
 
                     let config_resolver = |key: &str| self.resolve_config_type(key);
+                    let trans_resolver = |key: &str| self.resolve_trans_type(key);
                     let loaders = Loaders {
                         function_loader: Some(&function_loader_cl),
                         constant_loader: Some(&constant_loader_cl),
                         config_resolver: Some(&config_resolver),
+                        trans_resolver: Some(&trans_resolver),
                     };
 
                     let var_ctx = VarResolutionCtx {

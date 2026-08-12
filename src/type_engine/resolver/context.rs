@@ -86,6 +86,12 @@ pub(crate) type ConstantLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<Option<
 /// inferred [`PhpType`] of the config value.
 pub(crate) type ConfigResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<crate::php_type::PhpType>>;
 
+/// Type alias for the optional translation-key resolver closure.  Given a
+/// translation key (e.g. `"messages.welcome"`), returns `Some(string)`
+/// when the key names a scalar translation entry, or `None` when it names
+/// a group or cannot be resolved.
+pub(crate) type TransResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<crate::php_type::PhpType>>;
+
 /// Type alias for the optional scope-based variable resolver from the
 /// forward walker.  When set on a [`VarResolutionCtx`], variable
 /// lookups read from the forward walker's in-progress `ScopeState`
@@ -113,6 +119,10 @@ pub(crate) struct Loaders<'a> {
     /// to the inferred type of its static value.  Used by the
     /// `config()` return-type interception in function call resolution.
     pub config_resolver: ConfigResolverFn<'a>,
+    /// Resolve a translation key to `string` when it names a scalar
+    /// entry.  Used by the `__()`/`trans()`/`Lang::get()` return-type
+    /// interception in function/static-call resolution.
+    pub trans_resolver: TransResolverFn<'a>,
 }
 
 impl<'a> Loaders<'a> {
@@ -122,6 +132,7 @@ impl<'a> Loaders<'a> {
             function_loader: fl,
             constant_loader: None,
             config_resolver: None,
+            trans_resolver: None,
         }
     }
 }
