@@ -2817,10 +2817,6 @@ than a case where nobody has solved it yet:</p>
 <td>a <code>callable(int): string</code>-shaped docblock param against a mismatched closure</td>
 </tr>
 <tr>
-<td><code>callables_return_type_mismatch.php</code></td>
-<td>a callable's declared return type against what it actually returns</td>
-</tr>
-<tr>
 <td><code>generics_extends_implements.php</code></td>
 <td>a <code>@template</code> bound carried through <code>extends</code>/<code>implements</code></td>
 </tr>
@@ -2842,9 +2838,15 @@ the up-to-date pass/fail per tool).</p>
 <p>Each row needs its own root-cause pass — they were only confirmed
 silent (not misclassified), not yet traced to a specific resolver.
 Fix one at a time rather than as a single PR; several likely share a
-cause. The two remaining generics rows do not share one with the pair
-already closed: a mismatch between the <em>same</em> generic class' type
-arguments is now reported, but <code>generics_extends_implements.php</code> needs
+cause. <code>callables_docblock_signature.php</code> did not share one with the
+callable row already closed: a closure's <em>return</em> type reaches the
+compatibility check, but its parameter list is never recorded on the
+resolved <code>Callable</code> type, so the row needs the resolver to carry a
+closure's declared parameters before there is anything to compare
+against. The two remaining generics rows do not share a cause with the
+pair already closed either: a mismatch between the <em>same</em> generic
+class' type arguments is now reported, but
+<code>generics_extends_implements.php</code> needs
 a subclass' <code>@extends Box&lt;int&gt;</code> read as its ancestor's type arguments
 before the two sides have a common base to compare, and
 <code>generics_template_bound_array.php</code> needs a constructor argument
