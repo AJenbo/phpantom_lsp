@@ -1711,52 +1711,34 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
-<td>B119</td>
-<td><a href="../todo/bugs/#b119-eloquent-factory-count-narrowing-exists-but-only-reaches-one-of-two-call-resolution-paths">Eloquent factory count narrowing exists but only reaches one of two call-resolution paths</a></td>
-<td>High</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>B120</td>
-<td><a href="../todo/bugs/#b120-the-short-ternary--keeps-the-conditions-falsy-branch-in-its-own-result">The short ternary (<code>?:</code>) keeps the condition's falsy branch in its own result</a></td>
-<td>Medium-High</td>
-<td>Low</td>
-</tr>
-<tr>
 <td>B89</td>
 <td><a href="../todo/bugs/#b89-assertx--null--assertx--false-does-not-narrow"><code>assert($x !== null)</code> / <code>assert($x !== false)</code> does not narrow</a></td>
 <td>Medium-High</td>
 <td>Medium</td>
 </tr>
 <tr>
-<td>B88</td>
-<td><a href="../todo/bugs/#b88-false-does-not-narrow-inside-a-plain-ifwhile-truthy-branch"><code>!== false</code> does not narrow inside a plain <code>if</code>/<code>while</code> truthy branch</a></td>
+<td>B124</td>
+<td><a href="../todo/bugs/#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch">A ternary's truthy condition does not narrow its own then branch</a></td>
 <td>Medium</td>
-<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B125</td>
+<td><a href="../todo/bugs/#b125-a-while-body-that-reassigns-the-checked-variable-loses-the-conditions-narrowing">A <code>while</code> body that reassigns the checked variable loses the condition's narrowing</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B126</td>
+<td><a href="../todo/bugs/#b126-a-scalar-check-on-a-property-narrows-nothing">A scalar check on a property narrows nothing</a></td>
+<td>Medium</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>B90</td>
 <td><a href="../todo/bugs/#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check">An object union is not narrowed by a discriminating property check</a></td>
 <td>Medium</td>
 <td>Medium-High</td>
-</tr>
-<tr>
-<td>B91</td>
-<td><a href="../todo/bugs/#b91-a-native-type-hint-silently-accepts-a-phpdoc-only-pseudo-type">A native type hint silently accepts a PHPDoc-only pseudo-type</a></td>
-<td>Medium</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>B121</td>
-<td><a href="../todo/bugs/#b121-assertarraykey-instanceof-foo-does-not-narrow-the-array-access-subject"><code>assert($array[$key] instanceof Foo)</code> does not narrow the array-access subject</a></td>
-<td>Medium</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>B123</td>
-<td><a href="../todo/bugs/#b123-a-docblock-cannot-refine-one-member-of-an-all-scalar-native-return-union">A docblock cannot refine one member of an all-scalar native return union</a></td>
-<td>Medium</td>
-<td>Low</td>
 </tr>
 <tr>
 <td>B122</td>
@@ -1775,6 +1757,12 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/bugs/#b93-constantt-does-not-resolve-per-templated-key"><code>CONSTANT[T]</code> does not resolve per templated key</a></td>
 <td>Low-Medium</td>
 <td>High</td>
+</tr>
+<tr>
+<td>B127</td>
+<td><a href="../todo/bugs/#b127-an-inline-method-template-parameter-is-read-as-a-class-name">An inline <code>@method</code> template parameter is read as a class name</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
 </tr>
 <tr>
 <td>B94</td>
