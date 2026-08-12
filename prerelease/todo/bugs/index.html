@@ -883,17 +883,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b127-an-inline-method-template-parameter-is-read-as-a-class-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B127. An inline <code>@method</code> template parameter is read as a class name
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1438,17 +1427,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b127-an-inline-method-template-parameter-is-read-as-a-class-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B127. An inline <code>@method</code> template parameter is read as a class name
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1643,29 +1621,12 @@ rival, not just a feature gap.</p>
 <code>cond_narrowing.rs</code> and add the property-access equivalent: when a type guard
 or equality check on <code>$subject-&gt;prop</code> is true only for one member of an
 object union, narrow the union to that member.</p>
-<h3 id="b127-an-inline-method-template-parameter-is-read-as-a-class-name">B127. An inline <code>@method</code> template parameter is read as a class name<a class="headerlink" href="#b127-an-inline-method-template-parameter-is-read-as-a-class-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/**</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x"> * @method TVal get&lt;TVal of mixed&gt;(TVal $default)</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x"> */</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">class Box {}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">// reported twice: Class &#39;Demo\TVal&#39; not found</span>
-</code></pre></div>
-<p>A <code>@method</code> tag may declare its own template parameters inline, between
-the method name and its parameter list, and PHPantom does not read that
-declaration: <code>TVal</code> is not registered as a template parameter for the
-tag, so both occurrences of it (the return type and the parameter type)
-resolve as class references and are reported as unknown classes. This is
-visible in <code>examples/demo.php</code>, which carries the two diagnostics.</p>
-<p><strong>Fix:</strong> parse the <code>&lt;TVal of mixed&gt;</code> list in a <code>@method</code> tag as the
-tag's own <code>@template</code> parameters, and register them so the symbol map's
-template-definition lookup finds them for the tag's own span.</p>
 <h3 id="b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read">B92. An array literal's element types widen to base scalar types on a dynamic-key read<a class="headerlink" href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">function takesInt(int $x): void {}</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$values = [1, 1.5, &#39;123&#39;];</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">$key = array_rand($values);</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">takesInt($values[$key]); // reported: got int|float|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">function takesInt(int $x): void {}</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$values = [1, 1.5, &#39;123&#39;];</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$key = array_rand($values);</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">takesInt($values[$key]); // reported: got int|float|string</span>
 </code></pre></div>
 <p>Indexing a literal array with a non-literal key resolves the value to the
 union of the literal array's <em>base</em> member types (<code>int|float|string</code>)
@@ -1682,18 +1643,18 @@ same way a literal-key access already does, rather than widening to base
 scalar types as soon as the key stops being a compile-time constant.</p>
 <h3 id="b93-constantt-does-not-resolve-per-templated-key">B93. <code>CONSTANT[T]</code> does not resolve per templated key<a class="headerlink" href="#b93-constantt-does-not-resolve-per-templated-key" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">/**</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x"> * @template T of key-of&lt;ID_TABLE&gt;</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x"> * @param T $type</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x"> * @return ID_TABLE[T]</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x"> */</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">function lookUp(string $type = &#39;immutable&#39;): int|string {</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="x">    return ID_TABLE[$type];</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="x">}</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="x">takesInt(lookUp(&#39;immutable&#39;)); // reported: got int|string, wanted int</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">/**</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x"> * @template T of key-of&lt;ID_TABLE&gt;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x"> * @param T $type</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x"> * @return ID_TABLE[T]</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x"> */</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">function lookUp(string $type = &#39;immutable&#39;): int|string {</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">    return ID_TABLE[$type];</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="x">}</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="x">takesInt(lookUp(&#39;immutable&#39;)); // reported: got int|string, wanted int</span>
 </code></pre></div>
 <p><code>ID_TABLE[T]</code> in a <code>@return</code> tag should resolve, per call site, to the type
 of the <em>specific</em> key the template argument is bound to — <code>lookUp('immutable')</code>
