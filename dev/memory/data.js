@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786510381152,
+  "lastUpdate": 1786511250473,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19073,6 +19073,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f2e670b15923e550d27f77f75d3a313910995090",
+          "message": "A check written on a method call reaches the argument that repeats it",
+          "timestamp": "2026-08-12T06:50:27+02:00",
+          "tree_id": "1dfcd639febf28ddbb7d1cabd0bcaeeaa6fc3ff5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f2e670b15923e550d27f77f75d3a313910995090"
+        },
+        "date": 1786511245265,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.8,
             "unit": "MiB"
           }
         ]
