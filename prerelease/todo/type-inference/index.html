@@ -1505,17 +1505,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T36. Array-shape and generic enforcement gaps mir already covers
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1962,17 +1951,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T34. <code>static::CONST</code> over-narrows to the declaring class's value
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T36. Array-shape and generic enforcement gaps mir already covers
       </span>
     </span>
   </a>
@@ -2784,74 +2762,6 @@ to the current class name identically to <code>Expression::Self_</code>.</p>
 upstream's <code>nsrt/class-constant-types.php</code> were dropped when
 <code>tests/phpstan_nsrt/class-constant-types.php</code> was ported (only the
 <code>self::</code> cases survive); port them back.</p>
-<hr />
-<h2 id="t36-array-shape-and-generic-enforcement-gaps-mir-already-covers">T36. Array-shape and generic enforcement gaps mir already covers<a class="headerlink" href="#t36-array-shape-and-generic-enforcement-gaps-mir-already-covers" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Cross-referencing the php-typing-conformance results: for the cases
-below, mir recognizes and enforces the spelling and we are silent
-(zero diagnostics, not a false positive) — a real recognized-but-
-unenforced gap versus the LSP we're closest to competing with rather
-than a case where nobody has solved it yet:</p>
-<table>
-<thead>
-<tr>
-<th>Test</th>
-<th>What mir enforces that we don't</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>arrays_non_empty_list.php</code></td>
-<td><code>non-empty-list&lt;int&gt;</code> rejects <code>[]</code></td>
-</tr>
-<tr>
-<td><code>arrays_shape_required_keys.php</code></td>
-<td>a required shape key missing from a literal array</td>
-</tr>
-<tr>
-<td><code>assertions_assert_non_empty_list.php</code></td>
-<td><code>assert()</code>-narrowed non-empty-list stays enforced downstream</td>
-</tr>
-<tr>
-<td><code>callables_docblock_signature.php</code></td>
-<td>a <code>callable(int): string</code>-shaped docblock param against a mismatched closure</td>
-</tr>
-<tr>
-<td><code>generics_extends_implements.php</code></td>
-<td>a <code>@template</code> bound carried through <code>extends</code>/<code>implements</code></td>
-</tr>
-<tr>
-<td><code>generics_template_bound_array.php</code></td>
-<td>a <code>@template T of array</code> bound rejecting a non-array constructor argument</td>
-</tr>
-</tbody>
-</table>
-<p>None of these are things we should chase for their own sake — PHPStan
-and Mago already own deep static analysis and we proxy them rather
-than re-implementing their rule sets (see the CLAUDE.md anti-pattern
-on parallel type-resolution systems). These are worth closing because
-mir is the analyzer behind php-lsp, the LSP we're most directly
-compared against, and Intelephense fails most of them too (see the
-per-test TOML <code>conformance_automated</code> field under
-<code>php-typing-conformance/conformance/results/{mir,intelephense}/</code> for
-the up-to-date pass/fail per tool).</p>
-<p>Each row needs its own root-cause pass — they were only confirmed
-silent (not misclassified), not yet traced to a specific resolver.
-Fix one at a time rather than as a single PR; several likely share a
-cause. <code>callables_docblock_signature.php</code> did not share one with the
-callable row already closed: a closure's <em>return</em> type reaches the
-compatibility check, but its parameter list is never recorded on the
-resolved <code>Callable</code> type, so the row needs the resolver to carry a
-closure's declared parameters before there is anything to compare
-against. The two remaining generics rows do not share a cause with the
-pair already closed either: a mismatch between the <em>same</em> generic
-class' type arguments is now reported, but
-<code>generics_extends_implements.php</code> needs
-a subclass' <code>@extends Box&lt;int&gt;</code> read as its ancestor's type arguments
-before the two sides have a common base to compare, and
-<code>generics_template_bound_array.php</code> needs a constructor argument
-checked against the template's declared bound rather than against the
-substitution that argument itself produced.</p>
 <hr />
 <h2 id="t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses">T37. Readonly write forms the <code>invalid_readonly_write</code> diagnostic still misses<a class="headerlink" href="#t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
