@@ -848,6 +848,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         require_implements: Vec::new(),
         is_final: false,
         is_abstract: false,
+        is_readonly: false,
         deprecation_message: None,
         deprecated_replacement: None,
         links: Vec::new(),

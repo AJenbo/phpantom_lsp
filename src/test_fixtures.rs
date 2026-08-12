@@ -50,6 +50,7 @@ pub fn make_class(name: &str) -> ClassInfo {
         require_implements: Vec::new(),
         is_final: false,
         is_abstract: false,
+        is_readonly: false,
         deprecation_message: None,
         deprecated_replacement: None,
         links: Vec::new(),

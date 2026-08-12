@@ -879,36 +879,3 @@ to the current class name identically to `Expression::Self_`.
 upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
 `self::` cases survive); port them back.
-
----
-
-## T37. Readonly write forms the `invalid_readonly_write` diagnostic still misses
-
-**Impact: Low-Medium · Effort: Medium**
-
-`src/diagnostics/readonly_writes.rs` flags assignments, compound
-assignments, and increments whose target is a `readonly` property. Four
-write forms PHP rejects just as hard are still silent:
-
-```php
-readonly class Point {          // 1. every property is implicitly readonly
-    public function __construct(public int $x) {}
-}
-
-unset($box->value);             // 2. Cannot unset readonly property
-$box->items[] = 'x';            // 3. Cannot modify readonly property
-[$box->value, $other] = $pair;  // 4. destructuring is a write too
-$ref = &$box->value;            // 5. Cannot acquire reference
-```
-
-The `readonly class` case is the one that matters most, and it is the
-one that needs new metadata: `PropertyInfo::is_readonly` is deliberately
-`false` for the properties of a `readonly class` (a subclass of one may
-not repeat the keyword, and override completion depends on that), so
-`ClassInfo` needs an `is_readonly` flag of its own, set from the class
-modifiers in `src/parser/classes.rs` and inherited by subclasses the way
-PHP inherits it.
-
-Case 3 needs the property's type checked first: `$obj->offsetSet(…)` on
-a readonly property holding an `ArrayAccess` object is legal, so only an
-array-typed property may be flagged.

@@ -30,19 +30,31 @@
 //! flagged, and neither is a write whose target the constructor may
 //! leave uninitialized: initializing a readonly property lazily from
 //! another method of the declaring class is legal PHP.
+//!
+//! An *indirect* write — an array offset (`$box->items[] = 1`) or a
+//! reference (`&$box->value`) — is the exception: PHP rejects those in
+//! every scope, including a constructor that has not initialized the
+//! property yet, so they are reported wherever they appear.
+//!
+//! A property carries no `readonly` keyword of its own when its class is
+//! declared `readonly`; [`ClassInfo::is_readonly`] is what makes those
+//! properties count here.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::access::Access;
+use mago_syntax::cst::array::ArrayElement;
 use mago_syntax::cst::class_like::member::{ClassLikeMember, ClassLikeMemberSelector};
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::class_like::{AnonymousClass, Class};
 use mago_syntax::cst::expression::Expression;
-use mago_syntax::cst::sequence::Sequence;
+use mago_syntax::cst::r#loop::foreach::{ForeachKeyValueTarget, ForeachValueTarget};
+use mago_syntax::cst::sequence::{Sequence, TokenSeparatedSequence};
 use mago_syntax::cst::statement::Statement;
 use mago_syntax::cst::unary::UnaryPrefixOperator;
+use mago_syntax::cst::unset::Unset;
 use mago_syntax::cst::variable::Variable;
 
 use tower_lsp::lsp_types::*;
@@ -51,9 +63,10 @@ use crate::Backend;
 use crate::atom::{Atom, bytes_to_str};
 use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::parser::{with_parse_cache, with_parsed_program};
+use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
-use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
+use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::{FileDiagnosticContext, find_innermost_enclosing_class, make_diagnostic};
@@ -63,13 +76,53 @@ pub(crate) const INVALID_READONLY_WRITE_CODE: &str = "invalid_readonly_write";
 
 // ── Collected write sites ───────────────────────────────────────────────────
 
+/// How the source spells a write, which decides both the wording of the
+/// diagnostic and whether an uninitialized property saves it.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum WriteForm {
+    /// An assignment, a compound assignment, an increment, a
+    /// destructuring element, or a `foreach` target: legal in the
+    /// declaring class while the property may still be uninitialized.
+    Modify,
+    /// `unset($obj->prop)`, which PHP allows only before the property is
+    /// initialized.
+    Unset,
+    /// A write to an offset of the property's own value
+    /// (`$obj->prop[…] = …`, `unset($obj->prop[…])`).  Rejected in every
+    /// scope, but only when the property really holds an array: an
+    /// `ArrayAccess` object handles the offset itself and leaves the
+    /// property alone.
+    Offset,
+    /// `&$obj->prop`.  Acquiring a reference is rejected in every scope,
+    /// whatever the property holds.
+    Reference,
+}
+
+impl WriteForm {
+    /// Whether PHP rejects this form even where the property may still be
+    /// uninitialized, i.e. anywhere in the declaring class.
+    fn is_indirect(self) -> bool {
+        matches!(self, WriteForm::Offset | WriteForm::Reference)
+    }
+
+    /// The verb the diagnostic message uses for this form.  Only the two
+    /// direct forms reach it; the indirect ones get their own message.
+    fn verb(self) -> &'static str {
+        match self {
+            WriteForm::Unset => "unset",
+            _ => "modify",
+        }
+    }
+}
+
 /// Everything the file's AST contributes to the check.
 #[derive(Default)]
 struct FileWrites {
     /// Byte offsets of property identifiers that appear as the target of
-    /// a write.  This is the same offset the symbol map records as the
-    /// start of the matching `MemberAccess` span.
-    targets: HashSet<u32>,
+    /// a write, and how that write is spelled.  The offset is the same
+    /// one the symbol map records as the start of the matching
+    /// `MemberAccess` span.
+    targets: HashMap<u32, WriteForm>,
     /// Per class body, keyed by the left-brace offset so it matches
     /// [`ClassInfo::start_offset`].
     classes: HashMap<u32, ClassInitFacts>,
@@ -102,19 +155,45 @@ struct WriteWalker;
 impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for WriteWalker {
     fn walk_in_expression(&self, node: &'ast Expression<'arena>, ctx: &mut FileWrites) {
         match node {
-            Expression::Assignment(assign) => record_target(assign.lhs, ctx),
-            Expression::UnaryPrefix(unary)
-                if matches!(
-                    unary.operator,
-                    UnaryPrefixOperator::PreIncrement(_) | UnaryPrefixOperator::PreDecrement(_)
-                ) =>
-            {
-                record_target(unary.operand, ctx)
-            }
+            Expression::Assignment(assign) => record_target(assign.lhs, WriteForm::Modify, ctx),
+            Expression::UnaryPrefix(unary) => match unary.operator {
+                UnaryPrefixOperator::PreIncrement(_) | UnaryPrefixOperator::PreDecrement(_) => {
+                    record_target(unary.operand, WriteForm::Modify, ctx)
+                }
+                // `&$obj->prop` in any position — the right-hand side of
+                // an assignment, an array element, a `foreach` target.
+                UnaryPrefixOperator::Reference(_) => {
+                    record_target(unary.operand, WriteForm::Reference, ctx)
+                }
+                _ => {}
+            },
             // The only postfix operators are `++` and `--`.
-            Expression::UnaryPostfix(unary) => record_target(unary.operand, ctx),
+            Expression::UnaryPostfix(unary) => record_target(unary.operand, WriteForm::Modify, ctx),
             _ => {}
         }
+    }
+
+    fn walk_in_unset(&self, node: &'ast Unset<'arena>, ctx: &mut FileWrites) {
+        for value in node.values.iter() {
+            record_target(value, WriteForm::Unset, ctx);
+        }
+    }
+
+    fn walk_in_foreach_value_target(
+        &self,
+        node: &'ast ForeachValueTarget<'arena>,
+        ctx: &mut FileWrites,
+    ) {
+        record_target(node.value, WriteForm::Modify, ctx);
+    }
+
+    fn walk_in_foreach_key_value_target(
+        &self,
+        node: &'ast ForeachKeyValueTarget<'arena>,
+        ctx: &mut FileWrites,
+    ) {
+        record_target(node.key, WriteForm::Modify, ctx);
+        record_target(node.value, WriteForm::Modify, ctx);
     }
 
     fn walk_in_class(&self, node: &'ast Class<'arena>, ctx: &mut FileWrites) {
@@ -132,16 +211,59 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for Wri
     }
 }
 
-/// Record `expr` as a write target when it is a named property access.
+/// Record the property a write in `expr` targets, if any.
 ///
 /// Dynamic selectors (`$obj->$name`) and null-safe access (never a valid
 /// write target) are skipped, as are static properties: PHP rejects
 /// `static readonly` outright.
-fn record_target(expr: &Expression<'_>, ctx: &mut FileWrites) {
-    if let Expression::Access(Access::Property(access)) = expr
-        && let ClassLikeMemberSelector::Identifier(ident) = &access.property
-    {
-        ctx.targets.insert(ident.span.start.offset);
+///
+/// The walk descends through the shapes that put a property somewhere
+/// other than the top of the expression: array offsets
+/// (`$obj->items[0][1] = …`, which reach the property indirectly),
+/// destructuring patterns (`[$obj->a, [$obj->b]] = …`), and references.
+fn record_target(expr: &Expression<'_>, form: WriteForm, ctx: &mut FileWrites) {
+    match expr {
+        Expression::Access(Access::Property(access)) => {
+            if let ClassLikeMemberSelector::Identifier(ident) = &access.property {
+                let offset = ident.span.start.offset;
+                ctx.targets
+                    .entry(offset)
+                    .and_modify(|existing| *existing = (*existing).max(form))
+                    .or_insert(form);
+            }
+        }
+        Expression::ArrayAccess(access) => {
+            record_target(access.array, WriteForm::Offset, ctx);
+        }
+        Expression::ArrayAppend(append) => {
+            record_target(append.array, WriteForm::Offset, ctx);
+        }
+        Expression::Array(array) => record_destructured(&array.elements, ctx),
+        Expression::LegacyArray(array) => record_destructured(&array.elements, ctx),
+        Expression::List(list) => record_destructured(&list.elements, ctx),
+        Expression::Parenthesized(inner) => record_target(inner.expression, form, ctx),
+        Expression::UnaryPrefix(unary) if unary.operator.is_reference() => {
+            record_target(unary.operand, WriteForm::Reference, ctx)
+        }
+        _ => {}
+    }
+}
+
+/// Record the write targets of a destructuring pattern's elements.
+///
+/// Only the values are targets: a key (`['k' => $obj->prop]`) is read.
+fn record_destructured(
+    elements: &TokenSeparatedSequence<'_, ArrayElement<'_>>,
+    ctx: &mut FileWrites,
+) {
+    for element in elements.iter() {
+        let value = match element {
+            ArrayElement::KeyValue(entry) => entry.value,
+            ArrayElement::Value(entry) => entry.value,
+            ArrayElement::Variadic(entry) => entry.value,
+            ArrayElement::Missing(_) => continue,
+        };
+        record_target(value, WriteForm::Modify, ctx);
     }
 }
 
@@ -216,6 +338,9 @@ enum Verdict {
     /// The write is in the declaring scope, but the constructor has
     /// already initialized the property.
     AlreadyInitialized(String),
+    /// The write goes through the property's value (an array offset or a
+    /// reference), which no scope may do.
+    Indirect(String),
 }
 
 /// Whether `class` declares `property` itself, following its traits.
@@ -250,6 +375,46 @@ fn declares_property(
     }
 
     false
+}
+
+/// One write the file makes, as the verdict needs to see it.
+struct WriteSite<'a> {
+    /// Name of the property being written, without the `$`.
+    property: &'a str,
+    /// How the write is spelled in source.
+    form: WriteForm,
+    /// Byte offset of the property identifier, used to place the write
+    /// relative to the enclosing class's initializer bodies.
+    offset: u32,
+    /// The class body the write sits in, if any.
+    current_class: Option<&'a ClassInfo>,
+}
+
+/// Whether an offset write on this property necessarily modifies the
+/// property's own value.
+///
+/// True only when every branch of the declared type is an array: an
+/// object routes the offset through `ArrayAccess::offsetSet()` instead,
+/// and `iterable` covers objects like `ArrayObject` that do exactly that.
+/// An untyped property (a `readonly` one always has a type, so this means
+/// the type was lost somewhere) is left alone.
+fn holds_an_array(prop: &PropertyInfo) -> bool {
+    fn is_array(ty: &PhpType) -> bool {
+        match ty.kind() {
+            TypeKind::Named(name) => {
+                !name.eq_ignore_ascii_case("iterable") && is_array_like_name(name)
+            }
+            TypeKind::Generic(generic) => {
+                !generic.name.eq_ignore_ascii_case("iterable") && is_array_like_name(&generic.name)
+            }
+            TypeKind::Array(_) | TypeKind::ArrayShape(_) => true,
+            TypeKind::Nullable(inner) => is_array(inner),
+            TypeKind::Union(members) => members.iter().all(is_array),
+            _ => false,
+        }
+    }
+
+    prop.type_hint.as_ref().is_some_and(is_array)
 }
 
 /// How the property is spelled in the diagnostic message.
@@ -312,7 +477,10 @@ impl Backend {
             else {
                 continue;
             };
-            if *is_static || *is_method_call || !writes.targets.contains(&span.start) {
+            let Some(form) = writes.targets.get(&span.start).copied() else {
+                continue;
+            };
+            if *is_static || *is_method_call {
                 continue;
             }
 
@@ -333,8 +501,10 @@ impl Backend {
             // engine.  A property the enclosing class does not declare
             // itself still goes through the full check: initializing a
             // parent's readonly property is an error even in a
-            // constructor.
+            // constructor.  So does an indirect write, which the
+            // constructor is no more allowed to make than anyone else.
             if subject_text == "$this"
+                && !form.is_indirect()
                 && current_class.is_some_and(|class| {
                     writes
                         .classes
@@ -369,16 +539,15 @@ impl Backend {
             // Every branch of a union has to be invalid before the write
             // is: a value that could hold the branch where the property
             // is writable makes the assignment legal.
+            let site = WriteSite {
+                property: member_name,
+                form,
+                offset: span.start,
+                current_class,
+            };
             let mut verdict: Option<Verdict> = None;
             for receiver in &receivers {
-                let judged = self.judge_readonly_write(
-                    receiver,
-                    member_name,
-                    current_class,
-                    span.start,
-                    &writes,
-                    &class_loader,
-                );
+                let judged = self.judge_readonly_write(receiver, &site, &writes, &class_loader);
                 if matches!(judged, Verdict::Ok) {
                     verdict = None;
                     break;
@@ -388,13 +557,18 @@ impl Backend {
 
             let message = match verdict {
                 Some(Verdict::OutsideDeclaringClass(owner)) => format!(
-                    "Cannot modify readonly property {} from outside its declaring class",
+                    "Cannot {} readonly property {} from outside its declaring class",
+                    form.verb(),
                     owner
                 ),
                 Some(Verdict::AlreadyInitialized(owner)) => format!(
-                    "Cannot modify readonly property {} after the constructor has initialized it",
+                    "Cannot {} readonly property {} after the constructor has initialized it",
+                    form.verb(),
                     owner
                 ),
+                Some(Verdict::Indirect(owner)) => {
+                    format!("Cannot indirectly modify readonly property {}", owner)
+                }
                 _ => continue,
             };
 
@@ -420,12 +594,12 @@ impl Backend {
     fn judge_readonly_write(
         &self,
         receiver: &Arc<ClassInfo>,
-        property: &str,
-        current_class: Option<&ClassInfo>,
-        offset: u32,
+        site: &WriteSite<'_>,
         writes: &FileWrites,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Verdict {
+        let property = site.property;
+
         // Object shapes carry all their members already and must not go
         // through the cache: every shape shares the same class name.
         let merged = if receiver.name == "__object_shape" {
@@ -434,11 +608,21 @@ impl Backend {
             resolve_class_fully_cached(receiver, class_loader, &self.resolved_class_cache)
         };
 
-        let is_readonly = merged
+        let Some(prop) = merged
             .properties
             .iter()
-            .any(|p| p.name == property && p.is_readonly && !p.is_virtual);
-        if !is_readonly {
+            .find(|p| p.name == property && !p.is_virtual)
+        else {
+            return Verdict::Ok;
+        };
+        // A property of a `readonly` class carries no keyword of its own,
+        // so the class flag stands in for it.  The flag is inherited, so
+        // this also holds for a property reached through the parent chain
+        // — but the class that declared it is the one that has to be
+        // readonly, which the check below the declaring-class lookup
+        // settles.  This is the cheap half: unless something in the
+        // hierarchy is readonly, there is nothing to look up.
+        if !prop.is_readonly && !merged.is_readonly {
             return Verdict::Ok;
         }
 
@@ -447,9 +631,26 @@ impl Backend {
         let raw = class_loader(merged.fqn().as_str()).unwrap_or_else(|| Arc::clone(receiver));
         let declaring =
             find_declaring_class(&raw, property, &MemberKindForOrigin::Property, class_loader);
+
+        if !prop.is_readonly && !(declaring.is_readonly && !prop.is_static) {
+            return Verdict::Ok;
+        }
+
         let owner = owner_display(&declaring, property);
 
-        let Some(current) = current_class else {
+        if site.form.is_indirect() {
+            // Writing through the property's value never counts as
+            // initializing it, so PHP rejects it in every scope — but an
+            // offset write only reaches the property when the property is
+            // the array being written.  On an `ArrayAccess` object it is
+            // an `offsetSet()` call, which the property survives.
+            if site.form == WriteForm::Offset && !holds_an_array(prop) {
+                return Verdict::Ok;
+            }
+            return Verdict::Indirect(owner);
+        }
+
+        let Some(current) = site.current_class else {
             return Verdict::OutsideDeclaringClass(owner);
         };
 
@@ -463,7 +664,7 @@ impl Backend {
         let Some(facts) = writes.classes.get(&current.start_offset) else {
             return Verdict::Ok;
         };
-        if facts.covers_initializer(offset) || !facts.initialized.contains(property) {
+        if facts.covers_initializer(site.offset) || !facts.initialized.contains(property) {
             return Verdict::Ok;
         }
 

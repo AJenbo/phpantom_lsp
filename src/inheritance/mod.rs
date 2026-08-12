@@ -200,6 +200,12 @@ pub(crate) fn resolve_class_with_inheritance(
             break;
         };
 
+        // `readonly` covers the whole hierarchy: PHP rejects a
+        // non-readonly class extending a readonly one, so a subclass is
+        // readonly whether or not it repeats the keyword, and the
+        // properties it inherits are readonly as well.
+        merged.is_readonly |= parent.is_readonly;
+
         // Build the substitution map for this parent level.
         //
         // Look through current's `extends_generics` for an entry

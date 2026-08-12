@@ -1822,6 +1822,21 @@ pub struct ClassInfo {
     /// be excluded from contexts like `throw new` or `new` completion
     /// where only concrete classes are valid.
     pub is_abstract: bool,
+    /// Whether the class is declared `readonly` (PHP 8.2), or inherits
+    /// that from an ancestor.
+    ///
+    /// Every declared property of a readonly class is readonly without
+    /// carrying the keyword itself, so this is what tells a write
+    /// diagnostic that `$point->x = 1` is illegal.  PHP requires the whole
+    /// hierarchy to agree (a readonly class can neither be extended by a
+    /// non-readonly class nor extend one, and every property of a trait it
+    /// uses must be readonly), so the flag is propagated down the parent
+    /// chain by the inheritance merge and holds for inherited properties
+    /// too.
+    ///
+    /// The per-property [`PropertyInfo::is_readonly`] stays `false` for
+    /// these: the keyword is not repeatable in a subclass.
+    pub is_readonly: bool,
     /// Deprecation message from the `@deprecated` PHPDoc tag.
     ///
     /// `None` means not deprecated. `Some("")` means deprecated without a
@@ -2210,6 +2225,7 @@ impl ClassInfo {
             || self.require_implements != other.require_implements
             || self.is_final != other.is_final
             || self.is_abstract != other.is_abstract
+            || self.is_readonly != other.is_readonly
             || self.deprecation_message != other.deprecation_message
             || self.deprecated_replacement != other.deprecated_replacement
             || self.attribute_targets != other.attribute_targets

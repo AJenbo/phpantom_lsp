@@ -100,6 +100,7 @@ impl Backend {
             require_implements: Vec::new(),
             is_final: false,
             is_abstract: false,
+            is_readonly: anon.modifiers.contains_readonly(),
             deprecation_message: None,
             deprecated_replacement: None,
             template_params: vec![],

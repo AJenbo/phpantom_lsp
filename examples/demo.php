@@ -3714,6 +3714,25 @@ class ReadonlyWriteDemo
         // Error — compound operators and increments modify it too:
         $coordinate->y += 5;
 
+        // Error — `unset()` counts as a write:
+        unset($coordinate->x);
+
+        // Error — so does a destructuring target:
+        [$coordinate->x, $coordinate->y] = [1, 2];
+
+        // Error — and so does taking a reference:
+        $alias = &$coordinate->x;
+        echo $alias;
+
+        // Error — the array a readonly property holds cannot be modified
+        // either, however the write is spelled:
+        $coordinate->tags[] = 'origin';
+
+        // Error — every property of a `readonly` class is readonly, with or
+        // without the keyword on the property itself:
+        $point = new ScaffoldingReadonlyPoint(1, 2);
+        $point->x = 10;
+
         // No diagnostic — reading is always fine:
         echo $coordinate->x + $coordinate->y;
 
@@ -7034,6 +7053,15 @@ class ScaffoldingCoordinate
     public function __construct(
         public readonly int $x,
         public readonly int $y,
+        public readonly array $tags = [],
+    ) {}
+}
+
+readonly class ScaffoldingReadonlyPoint
+{
+    public function __construct(
+        public int $x,
+        public int $y,
     ) {}
 }
 
