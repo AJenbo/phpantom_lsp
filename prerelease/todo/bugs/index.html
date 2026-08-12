@@ -828,10 +828,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b125-a-while-body-that-reassigns-the-checked-variable-loses-the-conditions-narrowing" class="md-nav__link">
+  <a href="#b128-a-variable-assigned-in-a-loop-condition-is-not-narrowed-by-that-condition" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B125. A <code>while</code> body that reassigns the checked variable loses the condition's narrowing
+        B128. A variable assigned in a loop condition is not narrowed by that condition
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b130-echoing-a-translation-in-a-template-is-reported-as-printing-an-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B130. Echoing a translation in a template is reported as printing an array
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b129-arithmetic-on-a-refined-int-widens-to-intfloat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B129. Arithmetic on a refined int widens to <code>int|float</code>
       </span>
     </span>
   </a>
@@ -1405,10 +1427,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b125-a-while-body-that-reassigns-the-checked-variable-loses-the-conditions-narrowing" class="md-nav__link">
+  <a href="#b128-a-variable-assigned-in-a-loop-condition-is-not-narrowed-by-that-condition" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B125. A <code>while</code> body that reassigns the checked variable loses the condition's narrowing
+        B128. A variable assigned in a loop condition is not narrowed by that condition
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b130-echoing-a-translation-in-a-template-is-reported-as-printing-an-array" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B130. Echoing a translation in a template is reported as printing an array
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b129-arithmetic-on-a-refined-int-widens-to-intfloat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B129. Arithmetic on a refined int widens to <code>int|float</code>
       </span>
     </span>
   </a>
@@ -1547,45 +1591,113 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b125-a-while-body-that-reassigns-the-checked-variable-loses-the-conditions-narrowing">B125. A <code>while</code> body that reassigns the checked variable loses the condition's narrowing<a class="headerlink" href="#b125-a-while-body-that-reassigns-the-checked-variable-loses-the-conditions-narrowing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<h3 id="b128-a-variable-assigned-in-a-loop-condition-is-not-narrowed-by-that-condition">B128. A variable assigned in a loop condition is not narrowed by that condition<a class="headerlink" href="#b128-a-variable-assigned-in-a-loop-condition-is-not-narrowed-by-that-condition" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @return string|false */</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function readLine() { return false; }</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$line = readLine();</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">while ($line !== false) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    useString($line);   // reported: got string|false</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $line = readLine(); // …because of this line, below the read</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">while (($line = readLine()) !== false) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    useString($line);   // reported: got string|false</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">while ($line = readLine()) {</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    useString($line);   // reported: got string|false</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>while ($line !== false)</code> narrows its body correctly as long as the body
-does not write to <code>$line</code>. Advancing the cursor inside the loop — which is
-what every <code>fgets()</code>/<code>fgetcsv()</code>/<code>readLine()</code> read loop does — puts the
-un-narrowed assignment type back at the <em>top</em> of the body, so a read
-written <em>above</em> the reassignment is judged against the widened type. The
-same happens with <code>null</code> (<code>while ($line !== null) { …; $line = next(); }</code>),
-so this is the loop re-walk merging the assignment into the entry scope
-rather than anything specific to <code>false</code>: the narrowing the condition
-established is dropped for the whole body instead of holding until the
-statement that invalidates it.</p>
-<p>An <code>if</code> body behaves correctly here, so only the loop path is affected.</p>
-<p><strong>Fix:</strong> re-apply the loop condition's narrowing at the top of each
-re-walk of the body, so the entry scope of every iteration is the merged
-type <em>narrowed by the condition</em> rather than the merged type alone.</p>
+<p>The <code>while (($line = fgets($handle)) !== false)</code> idiom assigns and checks
+in one expression, and the check narrows nothing: the body sees the full
+<code>string|false</code> the assignment produced. Both the explicit comparison and
+the bare truthy form are affected, and so is the <code>null</code> sentinel
+(<code>while (($line = readLine()) !== null)</code>).</p>
+<p>Two things stand in the way, both in <code>process_while</code>
+(<code>type_engine/variable/forward_walk/control_flow.rs</code>):</p>
+<ul>
+<li><code>apply_condition_narrowing</code> runs <em>before</em>
+  <code>process_condition_assignment</code>, so when the narrowing looks the
+  variable up it is not in scope yet and
+  <code>strip_false_from_scope</code>/<code>strip_null_from_scope</code> return early on an
+  empty type list.</li>
+<li><code>extract_non_false_check_var</code> (and its <code>null</code> counterpart) reads the
+  comparison's operands with <code>expr_to_var_name</code>, which only matches a
+  bare <code>Expression::Variable</code>. The operand here is a parenthesized
+  assignment, so no subject is extracted at all.</li>
+</ul>
+<p><strong>Fix:</strong> seed the condition's assignment before narrowing the condition,
+and peel a parenthesized assignment down to its target when extracting
+the narrowing subject, so the assigned variable is the subject the check
+narrows. <code>if (($line = readLine()) !== false)</code> has the same shape and
+should be covered by the same change.</p>
+<h3 id="b130-echoing-a-translation-in-a-template-is-reported-as-printing-an-array">B130. Echoing a translation in a template is reported as printing an array<a class="headerlink" href="#b130-echoing-a-translation-in-a-template-is-reported-as-printing-an-array" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Effort: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>{{ __(&#39;messages.welcome&#39;) }}   {{-- reported: e() got array|string --}}
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>{{ trans(&#39;messages.welcome&#39;) }}
+</code></pre></div>
+<p><code>{{ __('messages.welcome') }}</code> is the single most common line in a
+localised Blade template, and every one of them is reported: Blade
+compiles an echo to <code>e($value)</code>, <code>e()</code> takes a
+<code>Htmlable|BackedEnum|string|int|float|null</code>, and <code>__()</code> is declared
+<code>array|string</code> because a translation key may name a whole group of
+strings. So the array branch, which a scalar key can never return, is
+reported against the argument.</p>
+<p>This is the Laravel case of T38 (a return type that depends on an
+argument's <em>value</em> rather than its type): the key is a literal, and
+PHPantom already resolves translation keys to their entries, so which
+branch applies is known at the call site. The volume makes it worth
+handling separately from the core builtins T38 lists: 15 of the 20
+diagnostics <code>analyze</code> reports on <code>examples/laravel</code> are this one shape,
+which puts the project's documented CI gate (3 deliberate diagnostics,
+see <code>docs/CONTRIBUTING.md</code>) 17 over.</p>
+<p><strong>Fix:</strong> resolve the translation key at the call site and return <code>string</code>
+when it names a scalar entry, keeping <code>array|string</code> only for a key that
+names a group or that cannot be resolved. <code>Lang::get()</code>, <code>trans()</code>, and
+<code>trans_choice()</code> share the signature and should share the treatment.</p>
+<p>The remaining two diagnostics of that 20 are a separate question:
+<code>examples/laravel/resources/views/welcome.blade.php</code> passes
+<code>$posts-&gt;first()</code> (a genuinely nullable <code>BlogPost|null</code>) to a component
+whose constructor takes a non-nullable <code>BlogPost</code>. Either the check is
+too strict for a component attribute or the example should pass
+something non-nullable; the maintainer's call which.</p>
+<h3 id="b129-arithmetic-on-a-refined-int-widens-to-intfloat">B129. Arithmetic on a refined int widens to <code>int|float</code><a class="headerlink" href="#b129-arithmetic-on-a-refined-int-widens-to-intfloat" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function total(string $text): int {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $length = 0;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $length += strlen($text);   // strlen() is declared `@return int&lt;0,max&gt;`</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    return $length;             // reported: int|float is incompatible with int</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>int + int</code> is <code>int</code>, and PHPantom gets that right for a plain <code>int</code>. It
+does not for any of the <em>refinements</em> of <code>int</code>: <code>int&lt;0,max&gt;</code>,
+<code>positive-int</code>, <code>non-negative-int</code>, and the rest classify as "not a
+number I recognise", which falls through to the conservative <code>int|float</code>
+result. <code>strlen()</code>, <code>count()</code>, <code>strpos()</code>, and most of the standard
+library's counting functions are declared with a range, so this fires on
+ordinary accumulator code and is reported at the <code>return</code>, several lines
+away from the addition that caused it.</p>
+<p><code>classify_php_type</code>
+(<code>type_engine/variable/forward_walk/assignment.rs</code>) enumerates the
+int-like spellings by name (<code>int</code>, <code>integer</code>, <code>bool</code>, …) and has no arm
+for <code>TypeKind::IntRange</code> or for the refined <code>int</code> names, so it returns
+<code>None</code> and <code>infer_arithmetic_result_type</code> takes its unknown-operand
+branch.</p>
+<p><strong>Fix:</strong> classify every int subtype as int-like. <code>PhpType::is_int_subtype</code>
+already knows the full set (including <code>IntRange</code>), so the name matching
+in <code>classify_php_type</code> can defer to it, with the same treatment for
+<code>is_float_subtype</code> on the float side.</p>
 <h3 id="b126-a-scalar-check-on-a-property-narrows-nothing">B126. A scalar check on a property narrows nothing<a class="headerlink" href="#b126-a-scalar-check-on-a-property-narrows-nothing" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Holder {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    public string|false $value = false;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function run(): void {</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        if ($this-&gt;value !== false) {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">        }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">        if ($this-&gt;value) {</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">        }</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">    }</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Holder {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    public string|false $value = false;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public function run(): void {</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        if ($this-&gt;value !== false) {</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">        }</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        if ($this-&gt;value) {</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">            useString($this-&gt;value); // reported: got string|false</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">        }</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">    }</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">}</span>
 </code></pre></div>
 <p>A property subject only ever gets <em>class-level</em> narrowing. <code>instanceof</code>
 on <code>$this-&gt;prop</code> works, because <code>Expression::Access</code> falls through to
@@ -1611,9 +1723,9 @@ snapshot recording for a synthetic member key, or the branch-scope merge
 property key the way it already does for an array-access key.</p>
 <h3 id="b89-assertx-null-assertx-false-does-not-narrow">B89. <code>assert($x !== null)</code> / <code>assert($x !== false)</code> does not narrow<a class="headerlink" href="#b89-assertx-null-assertx-false-does-not-narrow" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$handle = fopen(&#39;php://memory&#39;, &#39;r&#39;);</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">assert($handle !== false);</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">fclose($handle); // reported: fclose() expects resource, got resource|false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$handle = fopen(&#39;php://memory&#39;, &#39;r&#39;);</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">assert($handle !== false);</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">fclose($handle); // reported: fclose() expects resource, got resource|false</span>
 </code></pre></div>
 <p><code>process_assert_narrowing</code> (<code>type_engine/variable/forward_walk/assignment.rs:2649</code>)
 only recognizes <code>assert($x instanceof Foo)</code>, <code>@phpstan-assert</code>/<code>@psalm-assert</code>
@@ -1635,15 +1747,15 @@ use) rather than re-implementing a narrower parallel set of cases. That also
 picks up B88's fix for <code>assert($x !== false)</code> for free once B88 lands.</p>
 <h3 id="b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check">B90. An object union is not narrowed by a discriminating property check<a class="headerlink" href="#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">final class StrBox { public string $v = &#39;&#39;; }</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">final class IntBox { public int $v = 0; }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">function pick(StrBox|IntBox $b): StrBox {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    if (is_string($b-&gt;v)) {</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">        return $b; // reported: StrBox|IntBox is incompatible with StrBox</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    }</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    throw new \LogicException(&#39;not a StrBox&#39;);</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">final class StrBox { public string $v = &#39;&#39;; }</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">final class IntBox { public int $v = 0; }</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function pick(StrBox|IntBox $b): StrBox {</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    if (is_string($b-&gt;v)) {</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">        return $b; // reported: StrBox|IntBox is incompatible with StrBox</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">    }</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">    throw new \LogicException(&#39;not a StrBox&#39;);</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>PHPantom already narrows an <strong>array-shape</strong> union by a literal-equality check
 on one shape key (confirmed: <code>if ($a['tag'] === true) { return $a['name']; }</code>
@@ -1662,11 +1774,11 @@ or equality check on <code>$subject-&gt;prop</code> is true only for one member 
 object union, narrow the union to that member.</p>
 <h3 id="b127-an-inline-method-template-parameter-is-read-as-a-class-name">B127. An inline <code>@method</code> template parameter is read as a class name<a class="headerlink" href="#b127-an-inline-method-template-parameter-is-read-as-a-class-name" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * @method TVal get&lt;TVal of mixed&gt;(TVal $default)</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> */</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">class Box {}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">// reported twice: Class &#39;Demo\TVal&#39; not found</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/**</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x"> * @method TVal get&lt;TVal of mixed&gt;(TVal $default)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x"> */</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">class Box {}</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">// reported twice: Class &#39;Demo\TVal&#39; not found</span>
 </code></pre></div>
 <p>A <code>@method</code> tag may declare its own template parameters inline, between
 the method name and its parameter list, and PHPantom does not read that
@@ -1679,10 +1791,10 @@ tag's own <code>@template</code> parameters, and register them so the symbol map
 template-definition lookup finds them for the tag's own span.</p>
 <h3 id="b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read">B92. An array literal's element types widen to base scalar types on a dynamic-key read<a class="headerlink" href="#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">function takesInt(int $x): void {}</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$values = [1, 1.5, &#39;123&#39;];</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$key = array_rand($values);</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">takesInt($values[$key]); // reported: got int|float|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">function takesInt(int $x): void {}</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$values = [1, 1.5, &#39;123&#39;];</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">$key = array_rand($values);</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">takesInt($values[$key]); // reported: got int|float|string</span>
 </code></pre></div>
 <p>Indexing a literal array with a non-literal key resolves the value to the
 union of the literal array's <em>base</em> member types (<code>int|float|string</code>)
@@ -1699,18 +1811,18 @@ same way a literal-key access already does, rather than widening to base
 scalar types as soon as the key stops being a compile-time constant.</p>
 <h3 id="b93-constantt-does-not-resolve-per-templated-key">B93. <code>CONSTANT[T]</code> does not resolve per templated key<a class="headerlink" href="#b93-constantt-does-not-resolve-per-templated-key" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">/**</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x"> * @template T of key-of&lt;ID_TABLE&gt;</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x"> * @param T $type</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x"> * @return ID_TABLE[T]</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x"> */</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">function lookUp(string $type = &#39;immutable&#39;): int|string {</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="x">    return ID_TABLE[$type];</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="x">}</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="x">takesInt(lookUp(&#39;immutable&#39;)); // reported: got int|string, wanted int</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">/**</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x"> * @template T of key-of&lt;ID_TABLE&gt;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x"> * @param T $type</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x"> * @return ID_TABLE[T]</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x"> */</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">function lookUp(string $type = &#39;immutable&#39;): int|string {</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="x">    return ID_TABLE[$type];</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="x">}</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="x">takesInt(lookUp(&#39;immutable&#39;)); // reported: got int|string, wanted int</span>
 </code></pre></div>
 <p><code>ID_TABLE[T]</code> in a <code>@return</code> tag should resolve, per call site, to the type
 of the <em>specific</em> key the template argument is bound to — <code>lookUp('immutable')</code>
@@ -1725,25 +1837,25 @@ at a call site, resolve <code>CONSTANT[T]</code> by indexing the constant's arra
 at that specific literal key rather than falling back to the value union.</p>
 <h3 id="b94-psalm-this-out-phpstan-self-out-method-level-template-mutation-is-not-modelled">B94. <code>@psalm-this-out</code> / <code>@phpstan-self-out</code> method-level template mutation is not modelled<a class="headerlink" href="#b94-psalm-this-out-phpstan-self-out-method-level-template-mutation-is-not-modelled" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Effort: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">final class MutableBox {</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    public function __construct(public mixed $value) {}</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    /**</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">     * @template U</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">     * @param U $value</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">     * @psalm-this-out self&lt;U&gt;</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="x">     * @phpstan-self-out self&lt;U&gt;</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="x">     */</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="x">    public function replace(mixed $value): void {}</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="x">}</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="x">/** @param MutableBox&lt;int&gt; $box */</span>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="x">function f(MutableBox $box): void {</span>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="x">    $box-&gt;replace(&#39;x&#39;);</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="x">    takesIntBox($box);    // still reported clean — should now fail</span>
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="x">    takesStringBox($box); // reported: MutableBox&lt;int&gt; is not MutableBox&lt;string&gt; — should now pass</span>
-<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">final class MutableBox {</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    public function __construct(public mixed $value) {}</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    /**</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">     * @template U</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">     * @param U $value</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">     * @psalm-this-out self&lt;U&gt;</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">     * @phpstan-self-out self&lt;U&gt;</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">     */</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">    public function replace(mixed $value): void {}</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="x">}</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="x">/** @param MutableBox&lt;int&gt; $box */</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="x">function f(MutableBox $box): void {</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="x">    $box-&gt;replace(&#39;x&#39;);</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="x">    takesIntBox($box);    // still reported clean — should now fail</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="x">    takesStringBox($box); // reported: MutableBox&lt;int&gt; is not MutableBox&lt;string&gt; — should now pass</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>@psalm-this-out self&lt;U&gt;</code> / <code>@phpstan-self-out self&lt;U&gt;</code> on a method says the
 call mutates <code>$this</code>'s template parameter to <code>U</code>, so after
@@ -1760,11 +1872,11 @@ would need a mechanism to re-bind a receiver's template arguments after a
 method call the way an assignment re-binds a variable's type.</p>
 <h3 id="b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch">B124. A ternary's truthy condition does not narrow its own then branch<a class="headerlink" href="#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @return string|false */</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function content() { return &#39;&#39;; }</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">$x = content();</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">useString($x ? $x : &#39;&#39;); // reported: got string|false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @return string|false */</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function content() { return &#39;&#39;; }</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">$x = content();</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">useString($x ? $x : &#39;&#39;); // reported: got string|false</span>
 </code></pre></div>
 <p>The then branch of a full ternary is resolved with the cursor placed
 inside it (<code>resolve_conditional_chain</code>,
@@ -1783,23 +1895,23 @@ body, so the then branch's offset resolves against the narrowed scope
 instead of the declared one.</p>
 <h3 id="b122-repeated-conditional-writes-to-the-same-array-key-accumulate-redundant-union-snapshots">B122. Repeated conditional writes to the same array key accumulate redundant union snapshots<a class="headerlink" href="#b122-repeated-conditional-writes-to-the-same-array-key-accumulate-redundant-union-snapshots" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$rows = [];</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">foreach ($items as $item) {</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    if ($item-&gt;kind === &#39;a&#39;) {</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">        $rows[$item-&gt;id] = [&#39;a&#39; =&gt; $item-&gt;a];</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    }</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">    if ($item-&gt;kind === &#39;b&#39;) {</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">        $rows[$item-&gt;id] = [&#39;b&#39; =&gt; $item-&gt;b];</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">    }</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">    if ($item-&gt;kind === &#39;c&#39;) {</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">        $rows[$item-&gt;id] = [&#39;c&#39; =&gt; $item-&gt;c];</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">    }</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="x">}</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="x">return $rows;</span>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="x">// declared: array&lt;int, array{a: mixed}|array{b: mixed}|array{c: mixed}&gt;</span>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="x">// inferred: array|array&lt;int|string, array{a: mixed}&gt;</span>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="x">//           |array&lt;int|string, array{a: mixed}|array{b: mixed}&gt;</span>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="x">//           |array&lt;int|string, array{a: mixed}|array{b: mixed}|array{c: mixed}&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$rows = [];</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">foreach ($items as $item) {</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    if ($item-&gt;kind === &#39;a&#39;) {</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">        $rows[$item-&gt;id] = [&#39;a&#39; =&gt; $item-&gt;a];</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">    }</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">    if ($item-&gt;kind === &#39;b&#39;) {</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">        $rows[$item-&gt;id] = [&#39;b&#39; =&gt; $item-&gt;b];</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="x">    }</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="x">    if ($item-&gt;kind === &#39;c&#39;) {</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="x">        $rows[$item-&gt;id] = [&#39;c&#39; =&gt; $item-&gt;c];</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="x">    }</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="x">}</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="x">return $rows;</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="x">// declared: array&lt;int, array{a: mixed}|array{b: mixed}|array{c: mixed}&gt;</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="x">// inferred: array|array&lt;int|string, array{a: mixed}&gt;</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="x">//           |array&lt;int|string, array{a: mixed}|array{b: mixed}&gt;</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="x">//           |array&lt;int|string, array{a: mixed}|array{b: mixed}|array{c: mixed}&gt;</span>
 </code></pre></div>
 <p>Three mutually-exclusive <code>if</code> branches writing three different shapes to
 the same dynamic key, inside one loop, should merge into a single
