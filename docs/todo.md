@@ -103,8 +103,8 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B120 | [The short ternary (`?:`) keeps the condition's falsy branch in its own result](todo/bugs.md#b120-the-short-ternary--keeps-the-conditions-falsy-branch-in-its-own-result) | Medium-High | Low         |
 | B89 | [`assert($x !== null)` / `assert($x !== false)` does not narrow](todo/bugs.md#b89-assertx--null--assertx--false-does-not-narrow)                                           | Medium-High | Medium      |
+| B124 | [A ternary's truthy condition does not narrow its own then branch](todo/bugs.md#b124-a-ternarys-truthy-condition-does-not-narrow-its-own-then-branch)                     | Medium      | Low-Medium  |
 | B88 | [`!== false` does not narrow inside a plain `if`/`while` truthy branch](todo/bugs.md#b88-false-does-not-narrow-inside-a-plain-ifwhile-truthy-branch)                       | Medium      | Low         |
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |
 | B91 | [A native type hint silently accepts a PHPDoc-only pseudo-type](todo/bugs.md#b91-a-native-type-hint-silently-accepts-a-phpdoc-only-pseudo-type)                            | Medium      | Low-Medium  |

@@ -8418,3 +8418,61 @@ takesConfig(['host' => 'localhost', ...['port' => 3306]]);
     let messages = type_error_messages(&collect(php));
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+// ─── Short ternary ──────────────────────────────────────────────────────────
+
+/// `$x ?: $default` yields `$x` only where `$x` was truthy, so the falsy
+/// members of its type are not part of the result.
+#[test]
+fn a_short_ternary_drops_the_conditions_falsy_members() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function content() { return ''; }
+
+$body = content() ?: '';
+useString($body);
+useString(content() ?: '');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only the short form yields the condition's own value: a full ternary
+/// naming the same call in its then branch still contributes every member
+/// of that call's type.
+#[test]
+fn a_full_ternary_keeps_its_then_branch_whole() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function content() { return ''; }
+
+useString(content() ? content() : '');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+/// The condition can be truthy in more than one way, and all of those
+/// ways stay in the result.
+#[test]
+fn a_short_ternary_keeps_every_truthy_member_of_the_condition() {
+    let php = r#"<?php
+class A { public function a(): void {} }
+class B { public function b(): void {} }
+
+function useAOrB(A|B $value): void {}
+function useA(A $value): void {}
+
+/** @return A|B|null */
+function pick() { return null; }
+
+useAOrB(pick() ?: new A());
+useA(pick() ?: new A());
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}

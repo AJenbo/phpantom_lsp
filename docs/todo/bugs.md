@@ -232,29 +232,34 @@ demonstrates users expect it.
 would need a mechanism to re-bind a receiver's template arguments after a
 method call the way an assignment re-binds a variable's type.
 
-### B120. The short ternary (`?:`) keeps the condition's falsy branch in its own result
+### B124. A ternary's truthy condition does not narrow its own then branch
 
-**Impact: Medium-High · Effort: Low**
+**Impact: Medium · Effort: Low-Medium**
 
 ```php
-$body = $response->getContent() ?: '';
-assertStringContainsString('ok', $body); // reported: got string|false
+/** @return string|false */
+function content() { return ''; }
+
+$x = content();
+useString($x ? $x : ''); // reported: got string|false
 ```
 
-`resolve_conditional_chain` (`type_engine/variable/rhs_resolution/mod.rs:580`)
-handles a short ternary by reusing the condition expression as the
-"then" branch (`current.then.unwrap_or(current.condition)`), then adds
-that branch's *full* resolved type to the union whenever
-`static_condition_truthiness` cannot prove the condition false — which
-is always the case for a non-literal condition like a method call. So
-`$x ?: $default` keeps every falsy member of `$x`'s type (`false`,
-`null`, …) in the combined result, even though reaching the "then"
-value at runtime requires the condition to have been truthy.
+The then branch of a full ternary is resolved with the cursor placed
+inside it (`resolve_conditional_chain`,
+`type_engine/variable/rhs_resolution/mod.rs`) precisely so the
+forward walker's condition narrowing applies there, and an `instanceof`
+condition does narrow that way. A *truthiness* condition on a plain
+variable does not: `if ($x) { … }` strips `null`/`false` from `$x`
+inside the block, but the equivalent ternary leaves the then branch
+reading the un-narrowed type, so the idiomatic `$x ? $x : $default`
+keeps the falsy members the ternary exists to replace. The short form
+(`$x ?: $default`) resolves correctly, since it narrows the reused
+condition directly rather than relying on the walker.
 
-**Fix:** when `then_expr` is the reused condition (the short-ternary
-case), narrow its resolved type to the truthy subset — the same
-narrowing an `if ($x)` truthy branch already applies — before adding it
-to `combined`, instead of using the condition's raw resolved type.
+**Fix:** record the truthy-branch narrowing for a ternary condition the
+same way `apply_null_narrowing_truthy` records it for an `if`/`while`
+body, so the then branch's offset resolves against the narrowed scope
+instead of the declared one.
 
 ### B121. `assert($array[$key] instanceof Foo)` does not narrow the array-access subject
 

@@ -562,6 +562,22 @@ fn strip_null_alternatives(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
         .collect()
 }
 
+/// Keep only what can be truthy in each resolved alternative.
+///
+/// A short ternary (`$x ?: $default`) yields the condition's own value,
+/// but only on the branch where that value was truthy, so `string|false`
+/// contributes `string` and nothing more.  An alternative with no truthy
+/// part at all (`false`, `null`) is dropped: reaching it is impossible.
+fn truthy_alternatives(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
+    results
+        .into_iter()
+        .filter_map(|mut resolved| {
+            resolved.type_string = resolved.type_string.truthy_type()?;
+            Some(resolved)
+        })
+        .collect()
+}
+
 /// Resolve a ternary, or a chain of ternaries nested in each other's
 /// `else` branch (`$a ? 1 : ($b ? 2 : ($c ? 3 : 4))`), to the union of
 /// the branches that are reachable.
@@ -586,15 +602,22 @@ fn resolve_conditional_chain<'b>(
     loop {
         // A short ternary (`$a ?: $b`) reuses the condition as its then
         // branch.
+        let is_short = current.then.is_none();
         let then_expr = current.then.unwrap_or(current.condition);
         let truthiness = static_condition_truthiness(current.condition);
         if truthiness != Some(false) {
             let then_ctx = ctx.with_cursor_offset(then_expr.span().start.offset);
             let then_results = resolve_rhs_expression(then_expr, &then_ctx);
-            ResolvedType::extend_unique(
-                &mut combined,
-                widen_unresolved_branch(then_expr, then_results),
-            );
+            let then_results = widen_unresolved_branch(then_expr, then_results);
+            // The short form yields the condition's value, and reaching it
+            // means the condition was truthy, so its falsy members are not
+            // part of the result.
+            let then_results = if is_short {
+                truthy_alternatives(then_results)
+            } else {
+                then_results
+            };
+            ResolvedType::extend_unique(&mut combined, then_results);
         }
         if truthiness == Some(true) {
             return simplify_branch_results(combined);

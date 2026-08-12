@@ -1890,34 +1890,10 @@ pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
         return;
     }
 
-    let is_false = |t: &PhpType| matches!(t.kind(), TypeKind::Named(n) if n == "false");
-
     let stripped: Vec<ResolvedType> = types
         .into_iter()
         .filter_map(|mut rt| {
-            // Strip null
-            let ty = match rt.type_string.non_null_type() {
-                Some(non_null) => non_null,
-                None if rt.type_string == PhpType::null() => return None,
-                None => rt.type_string.clone(),
-            };
-            // Strip false
-            if is_false(&ty) {
-                return None;
-            }
-            let ty = match &ty.kind() {
-                TypeKind::Union(members) => {
-                    let non_false: Vec<PhpType> =
-                        members.iter().filter(|m| !is_false(m)).cloned().collect();
-                    match non_false.len() {
-                        0 => return None,
-                        1 => non_false.into_iter().next().unwrap(),
-                        _ => PhpType::union(non_false),
-                    }
-                }
-                _ => ty,
-            };
-            rt.type_string = ty;
+            rt.type_string = rt.type_string.truthy_type()?;
             Some(rt)
         })
         .collect();

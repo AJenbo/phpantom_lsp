@@ -2102,6 +2102,34 @@ impl PhpType {
         }
     }
 
+    /// Return the part of a type that can be truthy.
+    ///
+    /// For `string|false` returns `Some(Named("string"))`, for `?User`
+    /// `Some(Named("User"))`, and for `null`, `false`, or `?false` `None`,
+    /// since nothing those describe survives a truthiness check.
+    ///
+    /// Only the members that are *always* falsy are dropped, which is the
+    /// same subset a truthy `if ($x)` branch narrows a variable to: `int`
+    /// stays `int` rather than becoming a range excluding `0`, and `bool`
+    /// stays `bool` rather than becoming `true`.
+    pub fn truthy_type(&self) -> Option<PhpType> {
+        let is_falsy = |t: &PhpType| t.is_null() || t.is_false();
+        match self.kind() {
+            TypeKind::Nullable(inner) => inner.truthy_type(),
+            TypeKind::Union(members) => {
+                let truthy: Vec<PhpType> =
+                    members.iter().filter(|m| !is_falsy(m)).cloned().collect();
+                match truthy.len() {
+                    0 => None,
+                    1 => truthy.into_iter().next(),
+                    _ => Some(PhpType::union(truthy)),
+                }
+            }
+            _ if is_falsy(self) => None,
+            _ => Some(self.clone()),
+        }
+    }
+
     /// Unwrap one layer of `Nullable`, returning the inner type.
     ///
     /// For `Nullable(inner)` returns `inner`, for everything else returns `self`.
