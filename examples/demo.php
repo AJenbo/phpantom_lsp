@@ -2058,6 +2058,31 @@ class ShapeMethodDemo
             $count++;
         }
     }
+
+    /**
+     * Sibling branches writing the same key merge into one array rather
+     * than one cumulative snapshot per branch, so the inferred type
+     * matches the declared one.
+     *
+     * @param list<Pen|Pencil> $tools
+     * @return array<int, array{pen: Pen}|array{pencil: Pencil}>
+     */
+    public function branchedKeyWrites(array $tools): array
+    {
+        $rows = [];
+        $slot = 0;
+        foreach ($tools as $tool) {
+            if ($tool instanceof Pen) {
+                $rows[$slot] = ['pen' => $tool];
+            }
+            if ($tool instanceof Pencil) {
+                $rows[$slot] = ['pencil' => $tool];
+            }
+            $slot++;
+        }
+
+        return $rows;                     // array<int, array{pen: Pen}|array{pencil: Pencil}>
+    }
 }
 
 
@@ -8101,6 +8126,13 @@ function runDemoAssertions(): void
         assert($dynEntry instanceof Pen, 'Nested dynamic write must read back Pen');
         $dynCount++;
     }
+
+    // ── Sibling branches writing the same key ───────────────────────────
+    $branchedRows = $shapeDemo->branchedKeyWrites([new Pen(), new Pencil()]);
+    assert($branchedRows[0]['pen'] instanceof Pen,
+        'The Pen branch must write the pen shape at its slot');
+    assert($branchedRows[1]['pencil'] instanceof Pencil,
+        'The Pencil branch must write the pencil shape at its slot');
 
     // ── Ambiguous variables ─────────────────────────────────────────────
     if (rand(0, 1)) {

@@ -35,6 +35,7 @@ class Request {
     public function all(): array { return []; }
     public function only($keys): array { return []; }
     public function validate(array $rules): array { return []; }
+    /** @return array<string, mixed> */
     public function validated($key = null, $default = null) { return []; }
     public function safe(): ValidatedInput { return new ValidatedInput(); }
 }

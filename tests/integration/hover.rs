@@ -9683,6 +9683,124 @@ function run(mixed $key): void {
 }
 
 #[test]
+fn hover_repeated_conditional_keyed_writes_merge_into_one_array() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Item {
+    public string $kind = '';
+    public int $id = 0;
+    public int $a = 0;
+    public int $b = 0;
+    public int $c = 0;
+}
+/** @param list<Item> $items */
+function run(array $items): void {
+    $rows = [];
+    foreach ($items as $item) {
+        if ($item->kind === 'a') {
+            $rows[$item->id] = ['a' => $item->a];
+        }
+        if ($item->kind === 'b') {
+            $rows[$item->id] = ['b' => $item->b];
+        }
+        if ($item->kind === 'c') {
+            $rows[$item->id] = ['c' => $item->c];
+        }
+    }
+    $rows;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 22, 5).expect("expected hover on $rows");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array<int, array{a: int}|array{b: int}|array{c: int}>"),
+        "Sibling writes to the same key should merge into one array type, got: {}",
+        text
+    );
+}
+
+/// A conditional keyed write starts from `array{}`, which the write's own
+/// result covers — the merged type must not keep the empty-array snapshot
+/// alongside it.
+#[test]
+fn hover_conditional_keyed_write_absorbs_the_empty_start() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Pen {}
+function run(int $id, bool $c): void {
+    $rows = [];
+    if ($c) {
+        $rows[$id] = new Pen();
+    }
+    $rows;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $rows");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array<int, Pen>") && !text.contains('|'),
+        "Empty start should be absorbed by the write's result, got: {}",
+        text
+    );
+}
+
+/// Pre-declaring the output array (`$out = [];`) before a call that fills
+/// it by reference must not leave the variable typed as the empty array —
+/// the call is exactly what invalidates that.
+#[test]
+fn hover_empty_array_does_not_survive_a_pass_by_ref_fill() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** @param array<string> $out */
+function fill(array &$out): void {}
+function run(): void {
+    $out = [];
+    fill($out);
+    $out;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 6, 5).expect("expected hover on $out");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array<string>"),
+        "The call's parameter type should replace the empty start, got: {}",
+        text
+    );
+}
+
+/// Arrays built in genuinely different shapes by sibling branches are
+/// distinct values, not snapshots of one array, so both survive the merge.
+#[test]
+fn hover_reassigned_arrays_in_sibling_branches_stay_a_union() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function run(bool $c): void {
+    if ($c) {
+        $rows = [1, 2];
+    } else {
+        $rows = ['a', 'b'];
+    }
+    $rows;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $rows");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("list<int>") && text.contains("list<string>"),
+        "Unrelated array values must stay a union, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_push_style_produces_list() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

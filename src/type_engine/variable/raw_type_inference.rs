@@ -32,9 +32,11 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     let mut types: Vec<PhpType> = Vec::new();
     let mut has_string_keys = false;
     let mut saw_spread = false;
+    let mut saw_element = false;
     let mut shape_entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
 
     for elem in elements {
+        saw_element = true;
         match elem {
             ArrayElement::KeyValue(kv) => {
                 has_string_keys = true;
@@ -81,6 +83,15 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
             }
             ArrayElement::Missing(_) => {}
         }
+    }
+
+    // `[]` is exactly the empty array, which a bare `array` (an array of
+    // unknown contents) does not say. Recording it as `array{}` lets a
+    // later write's result absorb it when branches rejoin, instead of
+    // leaving `array|array<int, Foo>` behind for every array built up
+    // conditionally from an empty start.
+    if !saw_element {
+        return Some(PhpType::array_shape(Vec::new()));
     }
 
     if has_string_keys && !shape_entries.is_empty() {

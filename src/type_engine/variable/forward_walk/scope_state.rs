@@ -244,7 +244,10 @@ impl ScopeState {
                             continue;
                         }
                         // If j is a strict subset of i, drop j.
-                        if types[j] != types[i] && types[j].is_subset_of(&types[i]) {
+                        if types[j] != types[i]
+                            && (types[j].is_subset_of(&types[i])
+                                || array_snapshot_covered_by(&types[j], &types[i]))
+                        {
                             keep[j] = false;
                         }
                     }
@@ -258,6 +261,29 @@ impl ScopeState {
             }
         }
     }
+}
+
+/// Whether one array-typed branch snapshot is fully covered by another.
+///
+/// A keyed write (`$rows[$id] = …`) records the type of the *whole*
+/// array, so a variable written in several sibling branches collects one
+/// cumulative snapshot per branch: `array<int, A>` from the first branch,
+/// `array<int, A|B>` from the second, and so on.  These are alternative
+/// descriptions of the same array rather than genuinely different values,
+/// and keeping them all produces self-overlapping unions like
+/// `array{}|array<int, A>|array<int, A|B>`.  Dropping every snapshot a
+/// sibling already covers leaves the single widest one.
+///
+/// A bare `array` never covers a parameterised sibling: it carries no
+/// element information, so collapsing onto it would trade the only useful
+/// snapshot for the least useful one.  Two arrays that describe genuinely
+/// different values (`array<int, int>` and `array<int, string>` from
+/// separate assignments) cover neither way and both survive.
+fn array_snapshot_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
+    covered.is_array_like()
+        && cover.is_array_like()
+        && !matches!(cover.kind(), crate::php_type::TypeKind::Named(_))
+        && covered.is_subtype_of(cover)
 }
 
 /// Drop virtual members from `existing`'s class_info that the `incoming`

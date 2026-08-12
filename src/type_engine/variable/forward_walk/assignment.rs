@@ -1251,7 +1251,14 @@ pub(crate) fn process_assignment_expr<'b>(
                         .last()
                         .map(|rt| rt.type_string.clone())
                         .unwrap_or_else(PhpType::array);
-                    if !base_type.is_array_shape() {
+                    // Pushing onto a tracked shape would have to append a
+                    // positional entry, so the shape is left alone. An
+                    // empty shape (`$var = []`) tracks no keys worth
+                    // keeping, so the push builds a list as usual.
+                    let onto_tracked_shape = base_type
+                        .shape_entries()
+                        .is_some_and(|entries| !entries.is_empty());
+                    if !onto_tracked_shape {
                         let merged =
                             super::super::resolution::merge_push_type(&base_type, &value_type);
                         scope.set(&var_name, vec![ResolvedType::from_type_string(merged)]);
@@ -2596,6 +2603,13 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 let existing = scope.get(&var_name);
                 let refined = (!existing.is_empty())
                     .then(|| ResolvedType::types_joined(existing))
+                    // An empty array shape (`$matches = [];` before
+                    // `preg_match_all(…, $matches)`) records no element
+                    // precision, only that nothing had been written yet —
+                    // which is exactly what the call invalidates. It is a
+                    // subtype of every array hint, so without this it would
+                    // survive the call and claim the result is still empty.
+                    .filter(|existing| !existing.shape_entries().is_some_and(<[_]>::is_empty))
                     .filter(|existing| existing.is_subtype_of(&effective_hint))
                     .map(|existing| existing.widen_scalar_literals())
                     .unwrap_or(effective_hint);

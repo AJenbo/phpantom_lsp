@@ -38,7 +38,7 @@ final class Foo
 		assertType('null', $nullLiteral);
 		assertType('Lorem', $loremObjectLiteral);
 		assertType('Foo', $foo);
-		assertType('array', $arrayLiteral);
+		assertType('array{}', $arrayLiteral);
 	}
 
 	public function classConstants(): void

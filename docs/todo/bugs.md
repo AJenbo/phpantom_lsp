@@ -388,43 +388,29 @@ same way `apply_null_narrowing_truthy` records it for an `if`/`while`
 body, so the then branch's offset resolves against the narrowed scope
 instead of the declared one.
 
-### B122. Repeated conditional writes to the same array key accumulate redundant union snapshots
+### B128. A `foreach` key variable is left untyped
 
 **Impact: Medium · Effort: Medium**
 
 ```php
-$rows = [];
-foreach ($items as $item) {
-    if ($item->kind === 'a') {
-        $rows[$item->id] = ['a' => $item->a];
-    }
-    if ($item->kind === 'b') {
-        $rows[$item->id] = ['b' => $item->b];
-    }
-    if ($item->kind === 'c') {
-        $rows[$item->id] = ['c' => $item->c];
+/** @param list<int> $xs */
+function f(array $xs): void {
+    foreach ($xs as $i => $x) {
+        $i;  // declared: int
+             // inferred: nothing (falls through to mixed)
     }
 }
-return $rows;
-// declared: array<int, array{a: mixed}|array{b: mixed}|array{c: mixed}>
-// inferred: array|array<int|string, array{a: mixed}>
-//           |array<int|string, array{a: mixed}|array{b: mixed}>
-//           |array<int|string, array{a: mixed}|array{b: mixed}|array{c: mixed}>
 ```
 
-Three mutually-exclusive `if` branches writing three different shapes to
-the same dynamic key, inside one loop, should merge into a single
-`array<int, ShapeA|ShapeB|ShapeC>`. Instead each subsequent keyed write
-appears to snapshot the *cumulative* union built so far and add it as a
-new, separate branch alongside the earlier snapshots, so the final type
-is a union of increasingly-nested partial unions rather than one flat
-merge — and the whole thing is unioned with a bare `array` on top. This
-inflates real return-type signatures into unreadable, self-overlapping
-unions and produces `type_mismatch_return` false positives against the
-function's own honestly-narrower declared return type.
+The value variable of a `foreach` is resolved from the subject's element
+type, but the key variable is not resolved at all, for a `list<T>`, an
+`array<K, V>`, or an array shape alike. Every consumer that asks what
+`$i` is gets nothing and falls back to `mixed`, so an argument check on
+the key says nothing and a keyed write through it (`$rows[$i] = …`)
+widens the array's key type to `int|string` even where the subject is a
+list and the key can only be `int`.
 
-**Fix:** in `process_array_key_assignment`
-(`type_engine/variable/forward_walk/assignment.rs`), when a key already
-has a recorded value type from an earlier branch in the same merge
-scope, union the new branch's shape into the existing per-key value type
-in place rather than recording a new whole-array snapshot each time.
+**Fix:** bind the key variable alongside the value variable in the
+`foreach` handler (`type_engine/variable/forward_walk/control_flow.rs`),
+taking its type from `iterable_key_type()` on the resolved subject the
+same way the value variable takes `iterable_element_type()`.

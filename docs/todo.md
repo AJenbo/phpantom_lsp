@@ -108,8 +108,8 @@ unlikely to move the needle for most users.
 | B128 | [A variable assigned in a loop condition is not narrowed by that condition](todo/bugs.md#b128-a-variable-assigned-in-a-loop-condition-is-not-narrowed-by-that-condition) | Medium      | Low-Medium  |
 | B129 | [Arithmetic on a refined int widens to `int\|float`](todo/bugs.md#b129-arithmetic-on-a-refined-int-widens-to-intfloat)                                                     | Medium      | Low         |
 | B126 | [A scalar check on a property narrows nothing](todo/bugs.md#b126-a-scalar-check-on-a-property-narrows-nothing)                                                            | Medium      | Medium      |
+| B128 | [A `foreach` key variable is left untyped](todo/bugs.md#b128-a-foreach-key-variable-is-left-untyped)                                                                     | Medium      | Medium      |
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |
-| B122 | [Repeated conditional writes to the same array key accumulate redundant union snapshots](todo/bugs.md#b122-repeated-conditional-writes-to-the-same-array-key-accumulate-redundant-union-snapshots) | Medium      | Medium      |
 | B92 | [An array literal's element types widen to base scalar types on a dynamic-key read](todo/bugs.md#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read) | Low-Medium  | High        |
 | B93 | [`CONSTANT[T]` does not resolve per templated key](todo/bugs.md#b93-constantt-does-not-resolve-per-templated-key)                                                           | Low-Medium  | High        |
 | B127 | [An inline `@method` template parameter is read as a class name](todo/bugs.md#b127-an-inline-method-template-parameter-is-read-as-a-class-name)                            | Low         | Low-Medium  |
