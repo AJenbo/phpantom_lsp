@@ -1464,6 +1464,69 @@ function test(string $extra): void {
     );
 }
 
+/// A dynamic key over a string-keyed literal reads the union of the values
+/// written against those keys, not the base types they belong to.
+#[test]
+fn no_diagnostic_for_a_dynamic_key_read_off_a_string_keyed_numeric_literal_array() {
+    let php = r#"<?php
+/** @param numeric $v */
+function takes_numeric($v): void {}
+
+function test(string $k): void {
+    $values = ['a' => 1, 'b' => 1.5, 'c' => '123'];
+    takes_numeric($values[$k]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Every value written into the shape is numeric, got: {}",
+        type_error_messages(&diags).join("; ")
+    );
+}
+
+/// A constant table is as readable through a dynamic key as a local literal
+/// is: the entries it names are fixed at the point it is declared.
+#[test]
+fn no_diagnostic_for_a_dynamic_key_read_off_a_numeric_constant_table() {
+    let php = r#"<?php
+/** @param numeric $v */
+function takes_numeric($v): void {}
+
+class Ids {
+    const TABLE = [1, 1.5, '123'];
+}
+
+function test(string $k): void {
+    takes_numeric(Ids::TABLE[$k]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Every entry of the constant table is numeric, got: {}",
+        type_error_messages(&diags).join("; ")
+    );
+}
+
+/// A read that lands on a value the target cannot hold still reports, and
+/// names the specific value that fails rather than its base type.
+#[test]
+fn a_dynamic_key_read_reports_the_literal_value_that_fails() {
+    let php = r#"<?php
+function takesInt(int $x): void {}
+
+function test(): void {
+    $values = [1, 1.5, '123'];
+    $key = array_rand($values);
+    takesInt($values[$key]);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("1|1.5|'123'"), "{messages:?}");
+}
+
 #[test]
 fn no_diagnostic_for_numeric_string_literal_to_numeric_string() {
     let php = r#"<?php
@@ -9256,6 +9319,123 @@ $line = readLine();
 for (; $line !== false; $line = readLine()) {
     useString($line);
 }
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("null"),
+        "only false should be narrowed away, got {messages:?}"
+    );
+}
+
+// ─── `assert()` narrows the way its `if` equivalent does ────────────────────
+
+/// The defensive idiom guarding a `T|false` return: `assert()` proves its
+/// argument for everything that follows, so the sentinel is gone by the
+/// time the value is used.
+#[test]
+fn an_assert_rules_out_the_false_it_names() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+assert($line !== false);
+useString($line);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The `null` sentinel is ruled out by the same shape.
+#[test]
+fn an_assert_rules_out_the_null_it_names() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|null */
+function readLine() { return null; }
+
+$line = readLine();
+assert($line !== null);
+useString($line);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A type-guard call inside the assert narrows just as it would inside an
+/// `if`.
+#[test]
+fn an_assert_applies_a_type_guard_call() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|int */
+function readLine() { return 1; }
+
+$line = readLine();
+assert(is_string($line));
+useString($line);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// An `&&` chain proves each of its operands, so both subjects narrow.
+#[test]
+fn an_assert_applies_every_operand_of_an_and_chain() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+$first = readLine();
+$second = readLine();
+assert($first !== false && $second !== false);
+useString($first);
+useString($second);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The fully-qualified spelling a namespaced file uses reaches the same
+/// narrowing.
+#[test]
+fn a_fully_qualified_assert_narrows_too() {
+    let php = r#"<?php
+namespace App;
+
+function useString(string $value): void {}
+
+/** @return string|false */
+function readLine() { return false; }
+
+$line = readLine();
+\assert($line !== false);
+useString($line);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only the sentinel the assert names is ruled out: `null` survives an
+/// `assert($x !== false)`.
+#[test]
+fn an_assert_keeps_the_members_it_does_not_name() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false|null */
+function readLine() { return null; }
+
+$line = readLine();
+assert($line !== false);
+useString($line);
 "#;
     let messages = type_error_messages(&collect(php));
     assert_eq!(messages.len(), 1, "got {messages:?}");

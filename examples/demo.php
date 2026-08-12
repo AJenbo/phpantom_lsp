@@ -604,6 +604,14 @@ class TypeGuardNarrowingDemo
         foreach ($more as $pen) {
             $pen->write();                        // array<int, Pen> → Pen
         }
+
+        // `assert()` is the same guard written as one statement: it proves
+        // its condition for everything below it, so the sentinel is gone.
+        $asserted = loadPensOrFail();              // array<int, Pen>|false
+        assert($asserted !== false);
+        foreach ($asserted as $pen) {
+            $pen->write();                        // array<int, Pen> → Pen
+        }
     }
 }
 

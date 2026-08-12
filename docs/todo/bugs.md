@@ -11,64 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B89. `assert($x !== null)` / `assert($x !== false)` does not narrow
-
-**Impact: Medium-High · Effort: Medium**
-
-```php
-$handle = fopen('php://memory', 'r');
-assert($handle !== false);
-fclose($handle); // reported: fclose() expects resource, got resource|false
-```
-
-`process_assert_narrowing` (`type_engine/variable/forward_walk/assignment.rs:2649`)
-only recognizes `assert($x instanceof Foo)`, `@phpstan-assert`/`@psalm-assert`
-docblock-declared assertions, and built-in type-guard calls
-(`is_string()`/`assertIsString()` and friends) — a bare equality-comparison
-argument (`$x !== null`, `$x !== false`, `$x === null`, …) is never routed
-through the shared condition-narrowing pipeline the way an `if`/`while`
-condition is. This affects both `null` and `false`, independently of B88 —
-even after B88 is fixed, `assert($x !== false)` stays broken because
-`assert()`'s own narrowing never calls `apply_condition_narrowing` at all for
-this form.
-
-This is a common defensive idiom (`fopen`/`pg_connect`/`finfo_open`-style
-`T|false` returns guarded with `assert($handle !== false)` before use) — every
-one of `phpy`, Qodana, and Intelephense passes this case in
-`php-typing-conformance`'s corpus.
-
-**Fix:** in `process_assert_narrowing`, run the assert's argument expression
-through `apply_condition_narrowing` (the same pipeline `if`/`while` conditions
-use) rather than re-implementing a narrower parallel set of cases. That also
-picks up B88's fix for `assert($x !== false)` for free once B88 lands.
-
-### B92. An array literal's element types widen to base scalar types on a dynamic-key read
-
-**Impact: Low-Medium · Effort: High**
-
-```php
-function takesInt(int $x): void {}
-$values = [1, 1.5, '123'];
-$key = array_rand($values);
-takesInt($values[$key]); // reported: got int|float|string
-```
-
-Indexing a literal array with a non-literal key resolves the value to the
-union of the literal array's *base* member types (`int|float|string`)
-instead of the union of the *specific literal values* it was written with
-(`1|1.5|'123'`). The distinction matters for a return type like `@return
-numeric`: each literal individually satisfies `numeric` (`1`, `1.5`, and
-`'123'` are all trivially numeric), but the widened `string` member cannot be
-proven numeric on its own, so a value that is provably `numeric` at every
-possible branch is reported as a mismatch.
-
-Only Qodana passes this case in `php-typing-conformance`'s corpus (`phpy` and
-Intelephense do not), so the signal is weaker than the other entries here.
-
-**Fix:** preserve literal member types through a dynamic-key array access the
-same way a literal-key access already does, rather than widening to base
-scalar types as soon as the key stops being a compile-time constant.
-
 ### B134. A constant operand is only read where a `@template` is bound
 
 **Impact: Low · Effort: Medium**

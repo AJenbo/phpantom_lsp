@@ -39,6 +39,7 @@ These functions have return type semantics that don't fit into either
 | `array_rand`                         | Returns key type of the input array                            | `ArrayRandFunctionReturnTypeExtension`          |
 | `array_count_values`                 | Returns `array<TValue, int>`                                   | `ArrayCountValuesDynamicReturnTypeExtension`    |
 | `array_key_first` / `array_key_last` | Returns key type (usually scalar, low completion value)        | `ArrayFirstLastDynamicReturnTypeExtension`      |
+| `key`                                | Returns the key type of the array at the internal pointer      | `KeyFunctionDynamicReturnTypeExtension`         |
 | `array_find_key`                     | Returns key type (PHP 8.4)                                     | `ArrayFindKeyFunctionReturnTypeExtension`       |
 | `compact`                            | Builds typed array from variable names                         | `CompactFunctionReturnTypeExtension`            |
 | `count` / `sizeof`                   | Returns precise int range based on array size                  | `CountFunctionReturnTypeExtension`              |

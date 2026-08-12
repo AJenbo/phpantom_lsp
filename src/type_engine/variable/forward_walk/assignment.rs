@@ -2656,6 +2656,36 @@ pub(crate) fn extract_call_arg_variables<'b>(expr: &'b Expression<'b>) -> Vec<St
     vars
 }
 
+/// The condition expression of an `assert()` call, or `None` when `expr`
+/// is not one.
+///
+/// Matches every spelling PHP accepts for the built-in: unqualified,
+/// fully-qualified (`\assert`), and any letter case.
+fn assert_condition_argument<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    let Expression::Call(Call::Function(fc)) = expr else {
+        return None;
+    };
+    let Expression::Identifier(ident) = fc.function else {
+        return None;
+    };
+    let raw = bytes_to_str(ident.value());
+    if !raw
+        .strip_prefix('\\')
+        .unwrap_or(raw)
+        .eq_ignore_ascii_case("assert")
+    {
+        return None;
+    }
+    fc.argument_list.arguments.first().map(|arg| match arg {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
+    })
+}
+
 /// Process assert narrowing (assert($x instanceof Foo), @phpstan-assert, etc.)
 pub(crate) fn process_assert_narrowing<'b>(
     expr: &'b Expression<'b>,
@@ -2756,6 +2786,16 @@ pub(crate) fn process_assert_narrowing<'b>(
         }
     }
 
+    // `assert(<condition>)` proves its argument true for everything that
+    // follows in the same scope, exactly the way entering `if (<condition>)`
+    // proves it for the block body.  Feeding the argument into the same
+    // pipeline the `if` takes means every guard form is honoured in both
+    // places: `$x !== null`, `$x !== false`, `is_string($x)`, `&&` chains,
+    // and so on.
+    if let Some(condition) = assert_condition_argument(expr) {
+        apply_condition_narrowing(condition, scope, ctx);
+    }
+
     // Apply assert narrowing to each variable in scope.
     let scope_snapshot = scope.locals.clone();
     let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
@@ -2784,23 +2824,6 @@ pub(crate) fn process_assert_narrowing<'b>(
         };
         let before = scope.get(&var_name).to_vec();
         let mut results = before.clone();
-
-        // assert($x instanceof Foo)
-        let mut assert_shape = narrowing::NarrowedShape::NotApplied;
-        ResolvedType::apply_narrowing(&mut results, |classes| {
-            narrowing::try_apply_assert_instanceof_narrowing(
-                expr,
-                &var_ctx,
-                classes,
-                &mut assert_shape,
-            )
-        });
-        // An `assert()` proving a mock is both its declared class and the
-        // asserted interface leaves both classes side by side; they
-        // describe one value, not a choice between two.
-        if assert_shape == narrowing::NarrowedShape::Intersection {
-            ResolvedType::tag_as_intersection(&mut results);
-        }
 
         // @phpstan-assert / @psalm-assert
         let mut type_guard: Option<(narrowing::TypeGuardKind, bool)> = None;
