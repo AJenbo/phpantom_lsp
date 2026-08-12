@@ -860,17 +860,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b137-a-scalar-check-on-an-argument-less-method-call-narrows-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B137. A scalar check on an argument-less method call narrows nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1371,17 +1360,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b137-a-scalar-check-on-an-argument-less-method-call-narrows-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B137. A scalar check on an argument-less method call narrows nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1496,31 +1474,6 @@ member key that is at fault.</p>
 → strip <code>false</code>, <code>extract_non_false_check_var</code> → narrow to <code>false</code>), and
 route <code>!empty($x)</code> through <code>strip_falsy_from_scope</code> rather than
 <code>strip_null_from_scope</code>.</p>
-<h3 id="b137-a-scalar-check-on-an-argument-less-method-call-narrows-nothing">B137. A scalar check on an argument-less method call narrows nothing<a class="headerlink" href="#b137-a-scalar-check-on-an-argument-less-method-call-narrows-nothing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Holder {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    public function value(): string|false { return false; }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public function run(): void {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        if ($this-&gt;value() !== false) {</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">            useString($this-&gt;value()); // reported: got string|false</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">        }</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    }</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
-</code></pre></div>
-<p>An argument-less call is a narrowing subject (<code>expr_to_subject_key</code> keys it
-under <code>$this-&gt;value()</code>, and <code>narrowed_call</code> reads that key back), and an
-<code>instanceof</code> check on one narrows correctly. A scalar check does not,
-because the key is never seeded: <code>resolve_member_key_type</code>
-(<code>type_engine/variable/forward_walk/cond_narrowing.rs</code>) skips a call whose
-return type resolves to no class, on the grounds that a template parameter
-or generic alias is answered better by the call resolver at the use site.
-A concrete scalar union like <code>string|false</code> is caught by that rule too, so
-there is nothing in scope for the check to strip <code>false</code> from.</p>
-<p><strong>Fix:</strong> seed a call key whose declared return type is built entirely from
-keyword types. Those cannot be template parameters, so the call resolver
-has nothing better to say about them, and seeding lets the same scalar
-narrowing that already works for a property key apply.</p>
 
 
 
