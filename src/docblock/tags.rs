@@ -1285,13 +1285,21 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     // `new ReflectionClass($classString)`, dropping the template binding).
     match native_inner.kind() {
         TypeKind::Union(members) | TypeKind::Intersection(members) => {
-            return members.iter().any(|m| {
+            if members.iter().any(|m| {
                 !m.is_scalar()
                     || m.is_bare_array()
                     || m.is_iterable()
                     || m.is_callable()
                     || m.is_object()
-            });
+            }) {
+                return true;
+            }
+            // An all-scalar native union can still be refined member by
+            // member: `bool|string` → `false|string` is the same `bool` →
+            // `false` refinement a lone native `bool` already accepts
+            // below, and without it the literal `false` the `!== false`
+            // idiom narrows away never reaches the type at all.
+            return refines_native_union(doc_inner, members);
         }
         _ => {}
     }
@@ -1320,6 +1328,26 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
 
     // Native type is a non-scalar class — docblock can always refine.
     true
+}
+
+/// Whether a docblock type refines the members of the native union it is
+/// written on.
+///
+/// Every member the docblock names has to line up with a native member it
+/// narrows or restates, which is what separates `bool|string` →
+/// `false|string` (each member accounted for) from `bool|string` →
+/// `array<int>` (a docblock describing something else entirely, where the
+/// native hint is the more trustworthy of the two).
+fn refines_native_union(doc_type: &PhpType, native_members: &[PhpType]) -> bool {
+    let doc_members: &[PhpType] = match doc_type.kind() {
+        TypeKind::Union(members) | TypeKind::Intersection(members) => members,
+        _ => std::slice::from_ref(doc_type),
+    };
+    doc_members.iter().all(|doc| {
+        native_members
+            .iter()
+            .any(|native| doc.equivalent(native) || is_compatible_refinement_typed(doc, native))
+    })
 }
 
 /// Check whether a `PhpType` has generic parameters or shape braces.

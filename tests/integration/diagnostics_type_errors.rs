@@ -8476,3 +8476,49 @@ useA(pick() ?: new A());
     let messages = type_error_messages(&collect(php));
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
+
+// ─── Docblock refinement of a native union ──────────────────────────────────
+
+/// A docblock may narrow one member of an all-scalar native union: the
+/// value reads as `false|string` rather than the declared `bool|string`.
+#[test]
+fn a_docblock_refines_one_member_of_a_native_scalar_union() {
+    let php = r#"<?php
+function useInt(int $value): void {}
+
+/**
+ * @return false|string
+ */
+function parseImage(array $fragments): bool|string { return false; }
+
+useInt(parseImage([]));
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("false|string"),
+        "the docblock should refine `bool` to `false`, got {messages:?}"
+    );
+}
+
+/// A docblock describing something the native union does not mention is
+/// still ignored: the native hint is the more trustworthy of the two.
+#[test]
+fn a_docblock_unrelated_to_the_native_union_is_ignored() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/**
+ * @return array<int>
+ */
+function widen(): bool|string { return ''; }
+
+useString(widen());
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("bool|string"),
+        "the native union should stand, got {messages:?}"
+    );
+}

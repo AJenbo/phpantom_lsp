@@ -109,7 +109,6 @@ unlikely to move the needle for most users.
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |
 | B91 | [A native type hint silently accepts a PHPDoc-only pseudo-type](todo/bugs.md#b91-a-native-type-hint-silently-accepts-a-phpdoc-only-pseudo-type)                            | Medium      | Low-Medium  |
 | B121 | [`assert($array[$key] instanceof Foo)` does not narrow the array-access subject](todo/bugs.md#b121-assertarraykey-instanceof-foo-does-not-narrow-the-array-access-subject) | Medium      | Low         |
-| B123 | [A docblock cannot refine one member of an all-scalar native return union](todo/bugs.md#b123-a-docblock-cannot-refine-one-member-of-an-all-scalar-native-return-union)    | Medium      | Low         |
 | B122 | [Repeated conditional writes to the same array key accumulate redundant union snapshots](todo/bugs.md#b122-repeated-conditional-writes-to-the-same-array-key-accumulate-redundant-union-snapshots) | Medium      | Medium      |
 | B92 | [An array literal's element types widen to base scalar types on a dynamic-key read](todo/bugs.md#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read) | Low-Medium  | High        |
 | B93 | [`CONSTANT[T]` does not resolve per templated key](todo/bugs.md#b93-constantt-does-not-resolve-per-templated-key)                                                           | Low-Medium  | High        |
