@@ -1066,8 +1066,18 @@ pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) 
             continue;
         };
         let value_text = elem[arrow_pos + 2..].trim();
+        // `resolve_arg_text_to_type` widens a scalar literal to its base
+        // type (`1` → `int`), which would leave `value-of<T>` over the
+        // bound shape with the scalar rather than the literal the caller
+        // wrote. Keep int/float/string literals precise; everything else
+        // (`true`/`false`, `null`, variables, calls) resolves as before.
         let value_type =
-            Backend::resolve_arg_text_to_type(value_text, ctx).unwrap_or_else(PhpType::mixed);
+            crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
+                value_text,
+            )
+            .filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+            .or_else(|| Backend::resolve_arg_text_to_type(value_text, ctx))
+            .unwrap_or_else(PhpType::mixed);
         entries.push(crate::php_type::ShapeEntry {
             key: Some(key),
             value_type,

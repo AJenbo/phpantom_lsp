@@ -7877,3 +7877,35 @@ acceptsFlagName(firstKey(['other' => false]));
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'other'"), "{messages:?}");
 }
+
+/// The counterpart to the `key-of` case above: `value-of<T>` over a
+/// template bound from an array literal projects each element's own
+/// literal value, not the scalar type it widens to.
+#[test]
+fn value_of_template_binds_to_call_site_array_literal_values() {
+    let php = r#"<?php
+namespace App;
+
+/**
+ * @template T of array<array-key, mixed>
+ * @param T $items
+ * @return value-of<T>
+ */
+function firstValue(array $items) { foreach ($items as $v) { return $v; } throw new \RuntimeException(); }
+
+/** @param 1|10 $level */
+function acceptsLevel(int $level): void {}
+
+/** @param 'on'|'off' $mode */
+function acceptsMode(string $mode): void {}
+
+acceptsLevel(firstValue(['low' => 1, 'high' => 10]));
+acceptsMode(firstValue(['a' => 'on', 'b' => 'off']));
+acceptsLevel(firstValue(['high' => 99]));
+acceptsMode(firstValue(['a' => 'maybe']));
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(messages[0].contains("99"), "{messages:?}");
+    assert!(messages[1].contains("'maybe'"), "{messages:?}");
+}
