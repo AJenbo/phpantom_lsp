@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786513417881,
+  "lastUpdate": 1786534741374,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19141,6 +19141,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "863f3edccf702b00bfc7a33d13a83e53c0fb1197",
+          "message": "A native type hint naming a PHPDoc-only pseudo-type is reported",
+          "timestamp": "2026-08-12T13:22:24+02:00",
+          "tree_id": "f34b91d84e581fc6120105f2fd855fc0f7d1a1bf",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/863f3edccf702b00bfc7a33d13a83e53c0fb1197"
+        },
+        "date": 1786534737046,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.6,
             "unit": "MiB"
           }
         ]
