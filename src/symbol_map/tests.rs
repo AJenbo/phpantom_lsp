@@ -1186,6 +1186,49 @@ fn static_method_tag_with_parenthesised_return_type() {
     assert_eq!(class_ref_at(&map, php, "Wrapped"), "Wrapped");
 }
 
+#[test]
+fn method_tag_inline_template_is_registered_as_template_def() {
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method TVal get<TVal of mixed>(TVal $default)\n",
+        " */\n",
+        "class Box {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let return_offset = php.find("TVal get").unwrap() as u32;
+    assert!(
+        map.find_template_def("TVal", return_offset).is_some(),
+        "TVal in the return type should resolve to the tag's own inline template"
+    );
+
+    let param_offset = php.find("TVal $default").unwrap() as u32;
+    assert!(
+        map.find_template_def("TVal", param_offset).is_some(),
+        "TVal in the parameter type should resolve to the tag's own inline template"
+    );
+}
+
+#[test]
+fn method_tag_inline_template_does_not_leak_into_other_method_tags() {
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method TVal get<TVal of mixed>(TVal $default)\n",
+        " * @method void set(TVal $value)\n",
+        " */\n",
+        "class Box {}\n",
+    );
+    let map = parse_and_extract(php);
+
+    let leaked_offset = php.find("TVal $value").unwrap() as u32;
+    assert!(
+        map.find_template_def("TVal", leaked_offset).is_none(),
+        "an inline template from one @method tag must not scope into another"
+    );
+}
+
 // ── @template tag tests ─────────────────────────────────────────────
 
 #[test]

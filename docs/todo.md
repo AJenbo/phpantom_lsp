@@ -109,7 +109,6 @@ unlikely to move the needle for most users.
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |
 | B92 | [An array literal's element types widen to base scalar types on a dynamic-key read](todo/bugs.md#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read) | Low-Medium  | High        |
 | B93 | [`CONSTANT[T]` does not resolve per templated key](todo/bugs.md#b93-constantt-does-not-resolve-per-templated-key)                                                           | Low-Medium  | High        |
-| B127 | [An inline `@method` template parameter is read as a class name](todo/bugs.md#b127-an-inline-method-template-parameter-is-read-as-a-class-name)                            | Low         | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

@@ -29,7 +29,7 @@ use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 
 use super::{
-    ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolSpan,
+    ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolSpan, TemplateParamDef,
     self_static_parent_kind,
 };
 use crate::util::strip_fqn_prefix;
@@ -151,6 +151,15 @@ pub(super) struct DocblockSymbols {
     /// `@template` parameter definitions, as
     /// `(name, offset of the name token, bound, variance)`.
     pub templates: Vec<(String, u32, Option<PhpType>, TemplateVariance)>,
+    /// Inline `<T of Bound>` template parameters declared on an individual
+    /// `@method` tag.
+    ///
+    /// Unlike [`Self::templates`], each entry already carries its own scope
+    /// (the `@method` tag's own span) rather than deferring to the caller:
+    /// the scope must be confined to that one tag, since a different
+    /// `@method` tag in the same docblock may reuse the same template name
+    /// for something unrelated.
+    pub method_templates: Vec<TemplateParamDef>,
     /// The parameters this docblock names: the variable of a `@param` tag, and
     /// the subject of any conditional type (`$strict` in
     /// `($strict is true ? A : B)`).
@@ -278,7 +287,7 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
         }
 
         // ── Tags that declare a member or a template parameter ──────
-        TagValue::Method(value) => emit_method_tag_symbols(value, sink),
+        TagValue::Method(value) => emit_method_tag_symbols(value, docblock, base_offset, sink),
         TagValue::Property(value)
         | TagValue::PropertyRead(value)
         | TagValue::PropertyWrite(value) => emit_property_tag_symbols(value, sink),
@@ -314,7 +323,12 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
 }
 
 /// Emit the return type, name and parameter types of a `@method` tag.
-fn emit_method_tag_symbols(value: &MethodTagValue<'_>, sink: &mut DocblockSink<'_>) {
+fn emit_method_tag_symbols(
+    value: &MethodTagValue<'_>,
+    docblock: &str,
+    base_offset: u32,
+    sink: &mut DocblockSink<'_>,
+) {
     if let Some(return_type) = value.return_type {
         emit_type_symbols(return_type, sink);
     }
@@ -329,10 +343,22 @@ fn emit_method_tag_symbols(value: &MethodTagValue<'_>, sink: &mut DocblockSink<'
     });
 
     if let Some(templates) = value.templates {
+        // Scoped to this tag's own span (return type through parameter
+        // list), not the whole class docblock: a different `@method` tag
+        // in the same docblock may declare an unrelated template under
+        // the same name.
+        let scope = value.span();
         for entry in templates.entries.iter() {
-            if let Some(bound) = entry.template.bound {
-                emit_type_symbols(bound.r#type, sink);
-            }
+            let (name, name_offset, bound, variance) =
+                template_tag_value_parts(&entry.template, docblock, base_offset, sink);
+            sink.found.method_templates.push(TemplateParamDef {
+                name_offset,
+                name,
+                bound,
+                variance,
+                scope_start: scope.start.offset,
+                scope_end: scope.end.offset,
+            });
         }
     }
 
@@ -370,6 +396,21 @@ fn emit_template_tag_symbols(
     base_offset: u32,
     sink: &mut DocblockSink<'_>,
 ) {
+    let parts = template_tag_value_parts(value, docblock, base_offset, sink);
+    sink.found.templates.push(parts);
+}
+
+/// Read a `TemplateTagValue`'s name, bound and variance, emitting spans for
+/// the bound's own type references along the way.
+///
+/// Shared by `@template` tags and the inline `<T of Bound>` list a
+/// `@method` tag may carry — both use the same PHPDoc grammar node.
+fn template_tag_value_parts(
+    value: &CstTemplateTagValue<'_>,
+    docblock: &str,
+    base_offset: u32,
+    sink: &mut DocblockSink<'_>,
+) -> (String, u32, Option<PhpType>, TemplateVariance) {
     let bound = value.bound.map(|bound| {
         emit_type_symbols(bound.r#type, sink);
         PhpType::parse(&type_text(docblock, base_offset, bound.r#type.span()))
@@ -381,12 +422,12 @@ fn emit_template_tag_symbols(
         TemplateTagValueVariance::Contravariant => TemplateVariance::Contravariant,
     };
 
-    sink.found.templates.push((
+    (
         crate::atom::bytes_to_str(value.name.value).to_owned(),
         value.name.span.start.offset,
         bound,
         variance,
-    ));
+    )
 }
 
 /// Emit the symbol an `@see` tag references.

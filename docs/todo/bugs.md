@@ -185,29 +185,6 @@ rival, not just a feature gap.
 or equality check on `$subject->prop` is true only for one member of an
 object union, narrow the union to that member.
 
-### B127. An inline `@method` template parameter is read as a class name
-
-**Impact: Low · Effort: Low-Medium**
-
-```php
-/**
- * @method TVal get<TVal of mixed>(TVal $default)
- */
-class Box {}
-// reported twice: Class 'Demo\TVal' not found
-```
-
-A `@method` tag may declare its own template parameters inline, between
-the method name and its parameter list, and PHPantom does not read that
-declaration: `TVal` is not registered as a template parameter for the
-tag, so both occurrences of it (the return type and the parameter type)
-resolve as class references and are reported as unknown classes. This is
-visible in `examples/demo.php`, which carries the two diagnostics.
-
-**Fix:** parse the `<TVal of mixed>` list in a `@method` tag as the
-tag's own `@template` parameters, and register them so the symbol map's
-template-definition lookup finds them for the tag's own span.
-
 ### B92. An array literal's element types widen to base scalar types on a dynamic-key read
 
 **Impact: Low-Medium · Effort: High**

@@ -397,6 +397,28 @@ class MyProvider {
         );
     }
 
+    #[test]
+    fn no_diagnostic_for_method_tag_inline_template() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "\n",
+            "/**\n",
+            " * @method TVal get<TVal of mixed>(TVal $default)\n",
+            " */\n",
+            "class Box {}\n",
+        );
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            !diags.iter().any(|d| d.message.contains("TVal")),
+            "should not flag a @method tag's own inline template param, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     // ── Multiple unknown classes in one file ────────────────────────────
 
     #[test]

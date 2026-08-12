@@ -57,6 +57,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
                 scope_end,
             });
         }
+        ctx.template_defs.extend(found.method_templates);
     }
 
     // Whether this class is (syntactically) an Artisan console command, so
@@ -174,6 +175,7 @@ pub(super) fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut Ext
                 scope_end,
             });
         }
+        ctx.template_defs.extend(found.method_templates);
     }
 
     for member in iface.members.iter() {
@@ -207,6 +209,7 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
                 scope_end,
             });
         }
+        ctx.template_defs.extend(found.method_templates);
     }
 
     for member in trait_def.members.iter() {
@@ -252,6 +255,7 @@ pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut Extraction
                 scope_end,
             });
         }
+        ctx.template_defs.extend(found.method_templates);
     }
 
     for member in enum_def.members.iter() {
