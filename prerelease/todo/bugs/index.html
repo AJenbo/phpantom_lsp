@@ -883,10 +883,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b93-constantt-does-not-resolve-per-templated-key" class="md-nav__link">
+  <a href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B93. <code>CONSTANT[T]</code> does not resolve per templated key
+        B134. A constant operand is only read where a <code>@template</code> is bound
       </span>
     </span>
   </a>
@@ -1416,10 +1416,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b93-constantt-does-not-resolve-per-templated-key" class="md-nav__link">
+  <a href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B93. <code>CONSTANT[T]</code> does not resolve per templated key
+        B134. A constant operand is only read where a <code>@template</code> is bound
       </span>
     </span>
   </a>
@@ -1592,32 +1592,32 @@ Intelephense do not), so the signal is weaker than the other entries here.</p>
 <p><strong>Fix:</strong> preserve literal member types through a dynamic-key array access the
 same way a literal-key access already does, rather than widening to base
 scalar types as soon as the key stops being a compile-time constant.</p>
-<h3 id="b93-constantt-does-not-resolve-per-templated-key">B93. <code>CONSTANT[T]</code> does not resolve per templated key<a class="headerlink" href="#b93-constantt-does-not-resolve-per-templated-key" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: High</strong></p>
+<h3 id="b134-a-constant-operand-is-only-read-where-a-template-is-bound">B134. A constant operand is only read where a <code>@template</code> is bound<a class="headerlink" href="#b134-a-constant-operand-is-only-read-where-a-template-is-bound" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">/**</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x"> * @template T of key-of&lt;ID_TABLE&gt;</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x"> * @param T $type</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x"> * @return ID_TABLE[T]</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x"> */</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">function lookUp(string $type = &#39;immutable&#39;): int|string {</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">    return ID_TABLE[$type];</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">}</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x">takesInt(lookUp(&#39;immutable&#39;)); // reported: got int|string, wanted int</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">/** @param key-of&lt;ID_TABLE&gt; $key */</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">function acceptsKey(string $key): void {}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">/** @return value-of&lt;ID_TABLE&gt; */</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">function anyValue() { return 1; }</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">acceptsKey(&#39;nope&#39;);            // not reported: should be &#39;immutable&#39;|&#39;mutable&#39;</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">takesInt(anyValue());          // not reported: should be int|string</span>
 </code></pre></div>
-<p><code>ID_TABLE[T]</code> in a <code>@return</code> tag should resolve, per call site, to the type
-of the <em>specific</em> key the template argument is bound to — <code>lookUp('immutable')</code>
-should read as <code>int</code>, <code>lookUp('mutable')</code> as <code>string</code> — not to the union of
-every value the constant array holds. PHPantom currently returns the whole
-table's value union regardless of which key <code>T</code> is bound to at the call
-site, so calls that should pass a narrower parameter type are rejected.</p>
-<p>Both <code>phpy</code> and Qodana pass this case in <code>php-typing-conformance</code>'s corpus
-(Intelephense does not).</p>
-<p><strong>Fix:</strong> when substituting a template parameter bound to <code>key-of&lt;CONSTANT&gt;</code>
-at a call site, resolve <code>CONSTANT[T]</code> by indexing the constant's array type
-at that specific literal key rather than falling back to the value union.</p>
+<p>A constant holding an array literal is now read as its own array shape, so
+<code>key-of&lt;ID_TABLE&gt;</code> and <code>ID_TABLE[K]</code> evaluate — but only along the path that
+builds a template substitution map for a call, which runs solely when the
+function or method declares <code>@template</code> params. A <code>key-of&lt;CONSTANT&gt;</code>
+parameter or a <code>value-of&lt;CONSTANT&gt;</code> return on a plain function is still left
+unevaluated and widens to its bound, so neither constrains anything.</p>
+<p><strong>Fix:</strong> run the constant-operand expansion (<code>constant_operand_shape</code> in
+<code>type_engine/call_resolution/</code>) wherever a declared parameter or return type
+containing an unevaluated operator is read, not only from
+<code>finish_template_subs</code>. The awkward part is that the expansion needs a
+<code>ResolutionCtx</code> while the sites that read those types (the argument
+compatibility check, the untemplated return path) have varying access to
+one, so the shared entry point has to come first.</p>
 
 
 
