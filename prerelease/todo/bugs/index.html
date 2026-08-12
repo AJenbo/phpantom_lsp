@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,37 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b83-a-partially-compatible-union-argument-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B83. A partially-compatible union argument is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1282,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1298,25 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b83-a-partially-compatible-union-argument-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B83. A partially-compatible union argument is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1277,7 +1349,29 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<p>No outstanding items.</p>
+<h3 id="b83-a-partially-compatible-union-argument-is-not-reported">B83. A partially-compatible union argument is not reported<a class="headerlink" href="#b83-a-partially-compatible-union-argument-is-not-reported" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p>Passing a union argument where only <em>some</em> members satisfy the declared
+parameter type is accepted silently. The check appears to ask whether any
+member of the argument union is compatible, where it should ask whether
+every member is.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @return 1|99 */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function gives() { return 1; }</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">/** @param 1|10 $level */</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function acceptsLevel(int $level): void {}</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">acceptsLevel(gives());   // missed: 99 does not satisfy 1|10</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">acceptsLevel(98|99);     // reported correctly (no member overlaps)</span>
+</code></pre></div>
+<p>A zero-overlap union (<code>98|99</code> against <code>1|10</code>) is reported, so the union
+handling runs, it just stops at the first compatible member. The same
+laxness applies to any union source, not just literal unions: an
+<code>int|string</code> argument passed to an <code>int</code> parameter is a real error PHP
+will raise at runtime for the <code>string</code> case.</p>
+<p>Fix: change the union-argument compatibility check so every member of
+the argument type must satisfy the parameter type, and report the
+offending members in the message.</p>
 
 
 
