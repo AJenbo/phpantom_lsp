@@ -352,32 +352,3 @@ demonstrates users expect it.
 **Fix:** not investigated beyond confirming the annotation has no effect;
 would need a mechanism to re-bind a receiver's template arguments after a
 method call the way an assignment re-binds a variable's type.
-
-### B124. A ternary's truthy condition does not narrow its own then branch
-
-**Impact: Medium · Effort: Low-Medium**
-
-```php
-/** @return string|false */
-function content() { return ''; }
-
-$x = content();
-useString($x ? $x : ''); // reported: got string|false
-```
-
-The then branch of a full ternary is resolved with the cursor placed
-inside it (`resolve_conditional_chain`,
-`type_engine/variable/rhs_resolution/mod.rs`) precisely so the
-forward walker's condition narrowing applies there, and an `instanceof`
-condition does narrow that way. A *truthiness* condition on a plain
-variable does not: `if ($x) { … }` strips `null`/`false` from `$x`
-inside the block, but the equivalent ternary leaves the then branch
-reading the un-narrowed type, so the idiomatic `$x ? $x : $default`
-keeps the falsy members the ternary exists to replace. The short form
-(`$x ?: $default`) resolves correctly, since it narrows the reused
-condition directly rather than relying on the walker.
-
-**Fix:** record the truthy-branch narrowing for a ternary condition the
-same way `apply_null_narrowing_truthy` records it for an `if`/`while`
-body, so the then branch's offset resolves against the narrowed scope
-instead of the declared one.

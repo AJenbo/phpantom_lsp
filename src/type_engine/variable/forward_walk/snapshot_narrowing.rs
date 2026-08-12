@@ -115,10 +115,11 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
         Expression::Conditional(conditional) => {
             // Only apply narrowing when the condition adds information the
             // guarded branch relies on: an instanceof check (simple or
-            // compound OR) or a member-existence proof
-            // (`property_exists`/`method_exists`/`isset($x->prop)`).
-            // General truthiness/null narrowing is too broad and can
-            // produce incorrect scope snapshots for arbitrary ternaries.
+            // compound OR), a member-existence proof
+            // (`property_exists`/`method_exists`/`isset($x->prop)`), or a
+            // null/false/truthiness guard (`$x !== null`, `isset($x)`, the
+            // bare `$x` check) — the same forms `apply_null_narrowing_truthy`
+            // recognises for `if`/`while` bodies.
             let has_narrowing = {
                 let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
                 var_names.iter().any(|vn| {
@@ -127,6 +128,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                             .is_some()
                 })
             } || condition_proves_member(conditional.condition, scope)
+                || condition_proves_null_or_truthy(conditional.condition)
                 || !assertion_alias_extractions(conditional.condition, scope).is_empty();
             if has_narrowing {
                 let mut then_scope = scope.clone();

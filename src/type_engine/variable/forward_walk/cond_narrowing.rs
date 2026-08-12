@@ -60,10 +60,11 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
             }
         }
         Expression::Conditional(conditional) => {
-            // Check if the condition contains an instanceof check or a
+            // Check if the condition contains an instanceof check, a
             // member-existence proof
-            // (`property_exists`/`method_exists`/`isset($x->prop)`) for
-            // any variable currently in scope.
+            // (`property_exists`/`method_exists`/`isset($x->prop)`), or a
+            // null/false/truthiness guard (`$x !== null`, `isset($x)`, the
+            // bare `$x` check) for any variable currently in scope.
             let has_narrowing = {
                 let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
                 var_names.iter().any(|vn| {
@@ -77,6 +78,7 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
                             .is_some()
                 })
             } || condition_proves_member(conditional.condition, scope)
+                || condition_proves_null_or_truthy(conditional.condition)
                 || !assertion_alias_extractions(conditional.condition, scope).is_empty();
             if has_narrowing {
                 if let Some(then_expr) = conditional.then {
@@ -887,6 +889,25 @@ pub(crate) fn condition_proves_member(condition: &Expression<'_>, scope: &ScopeS
         var_names
             .iter()
             .any(|vn| narrowing::try_extract_member_exists_guard(operand, vn.as_str()).is_some())
+    })
+}
+
+/// Like [`condition_proves_member`], but for the null/false/truthiness
+/// guards [`apply_null_narrowing_truthy`] recognises: `$x !== null`,
+/// `isset($x)`, `!empty($x)`, `$x !== false`, and the bare `$x` truthy
+/// check. The then-branch of `$x ? $x : $default` depends on the proof
+/// that `$x` is truthy exactly as much as an `if ($x) { … }` body does.
+pub(crate) fn condition_proves_null_or_truthy(condition: &Expression<'_>) -> bool {
+    collect_and_chain_operands(condition).iter().any(|operand| {
+        extract_non_null_check_var(operand).is_some()
+            || extract_non_false_check_var(operand).is_some()
+            || !extract_isset_vars(operand).is_empty()
+            || !extract_not_isset_vars(operand).is_empty()
+            || extract_null_equality_check_var(operand).is_some()
+            || extract_not_empty_var(operand).is_some()
+            || expr_to_var_name(operand)
+                .or_else(|| narrowing::expr_to_subject_key(operand))
+                .is_some()
     })
 }
 

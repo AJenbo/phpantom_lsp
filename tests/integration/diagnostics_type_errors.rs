@@ -8477,6 +8477,25 @@ useA(pick() ?: new A());
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
+/// A full ternary whose condition is the same bare variable as its then
+/// branch narrows that branch the same way an `if ($x) { … }` body would:
+/// reaching the then branch proves `$x` was truthy, so its falsy members
+/// are not part of the result.
+#[test]
+fn a_full_ternarys_bare_variable_condition_narrows_its_own_then_branch() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @return string|false */
+function content() { return ''; }
+
+$x = content();
+useString($x ? $x : '');
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 // ─── Docblock refinement of a native union ──────────────────────────────────
 
 /// A docblock may narrow one member of an all-scalar native union: the
