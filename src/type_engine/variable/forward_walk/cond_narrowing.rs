@@ -2838,12 +2838,16 @@ fn resolve_member_key_type(
             ctx.class_loader,
         );
         if resolved_classes.is_empty() {
-            // A return type that names nothing loadable — a template
-            // parameter, a generic alias — is answered better by the
-            // call resolver at the use site, which substitutes from the
-            // receiver.  Seeding the bare hint here would shadow that
-            // with a type no class stands behind.
-            if is_call {
+            // A return type that names nothing loadable is usually a
+            // template parameter or a generic alias, answered better by
+            // the call resolver at the use site, which substitutes from
+            // the receiver.  Seeding the bare hint here would shadow that
+            // with a type no class stands behind.  A hint built entirely
+            // from keyword types (`string|false`, `bool|null`, ...) can
+            // never be a template parameter or alias, though, so seeding
+            // it is safe and lets scalar narrowing apply to call keys the
+            // same way it already does for property keys.
+            if is_call && !is_all_keyword_type(&hint) {
                 continue;
             }
             ResolvedType::extend_unique(
@@ -2859,6 +2863,21 @@ fn resolve_member_key_type(
     }
 
     member_results
+}
+
+/// Whether `hint` is built entirely from keyword types (`string`, `false`,
+/// `null`, other scalars and pseudo-types) with no class-like name
+/// anywhere in it.  Such a hint can never be a template parameter or a
+/// generic alias, so it is safe to seed even when it names nothing
+/// loadable.
+fn is_all_keyword_type(hint: &PhpType) -> bool {
+    match hint.kind() {
+        TypeKind::Named(name) => crate::php_type::is_keyword_type(name),
+        TypeKind::Nullable(inner) => is_all_keyword_type(inner),
+        TypeKind::Union(members) => members.iter().all(is_all_keyword_type),
+        TypeKind::Literal(_) => true,
+        _ => false,
+    }
 }
 
 pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &mut Vec<String>) {

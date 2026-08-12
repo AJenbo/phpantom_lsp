@@ -738,3 +738,65 @@ function run(Holder $h): void {{
     let messages = type_error_messages(&backend, uri, &text);
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
+
+/// A `Holder` whose argument-less method returns `T|false` — the call-key
+/// equivalent of `HANDLE_SCAFFOLD`'s property, seeded the same way once
+/// the guard names it.
+const HANDLE_CALL_SCAFFOLD: &str = r#"<?php
+namespace HandleCall;
+
+function useString(string $value): void {}
+
+class Holder {
+    public function value(): string|false {
+        return false;
+    }
+}
+"#;
+
+/// `if ($h->value() === false) { return; }` narrows the argument-less call
+/// the same way an equivalent property check narrows a property.
+#[test]
+fn a_false_equality_guard_clause_narrows_an_argument_less_call() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_call_guard_return.php";
+    let text = format!(
+        "{HANDLE_CALL_SCAFFOLD}
+function run(Holder $h): void {{
+    if ($h->value() === false) {{
+        return;
+    }}
+    useString($h->value());
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The `!== false` guard shape from B137's original repro, narrowing a
+/// call on `$this` rather than an injected argument.
+#[test]
+fn a_not_equal_false_guard_narrows_an_argument_less_call_on_this() {
+    let backend = create_test_backend();
+    let uri = "file:///handle_call_guard_this.php";
+    let text = format!(
+        "{HANDLE_CALL_SCAFFOLD}
+class C {{
+    private Holder $holder;
+
+    public function __construct(Holder $holder) {{
+        $this->holder = $holder;
+    }}
+
+    public function run(): void {{
+        if ($this->holder->value() !== false) {{
+            useString($this->holder->value());
+        }}
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}

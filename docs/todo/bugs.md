@@ -111,34 +111,3 @@ member key that is at fault.
 → strip `false`, `extract_non_false_check_var` → narrow to `false`), and
 route `!empty($x)` through `strip_falsy_from_scope` rather than
 `strip_null_from_scope`.
-
-### B137. A scalar check on an argument-less method call narrows nothing
-
-**Impact: Low-Medium · Effort: Low-Medium**
-
-```php
-class Holder {
-    public function value(): string|false { return false; }
-
-    public function run(): void {
-        if ($this->value() !== false) {
-            useString($this->value()); // reported: got string|false
-        }
-    }
-}
-```
-
-An argument-less call is a narrowing subject (`expr_to_subject_key` keys it
-under `$this->value()`, and `narrowed_call` reads that key back), and an
-`instanceof` check on one narrows correctly. A scalar check does not,
-because the key is never seeded: `resolve_member_key_type`
-(`type_engine/variable/forward_walk/cond_narrowing.rs`) skips a call whose
-return type resolves to no class, on the grounds that a template parameter
-or generic alias is answered better by the call resolver at the use site.
-A concrete scalar union like `string|false` is caught by that rule too, so
-there is nothing in scope for the check to strip `false` from.
-
-**Fix:** seed a call key whose declared return type is built entirely from
-keyword types. Those cannot be template parameters, so the call resolver
-has nothing better to say about them, and seeding lets the same scalar
-narrowing that already works for a property key apply.
