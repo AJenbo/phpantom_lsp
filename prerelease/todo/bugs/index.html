@@ -915,17 +915,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b132-a-mismatched-generic-type-argument-is-never-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B132. A mismatched generic type argument is never reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1481,17 +1470,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b132-a-mismatched-generic-type-argument-is-never-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B132. A mismatched generic type argument is never reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1728,43 +1706,6 @@ site, so calls that should pass a narrower parameter type are rejected.</p>
 <p><strong>Fix:</strong> when substituting a template parameter bound to <code>key-of&lt;CONSTANT&gt;</code>
 at a call site, resolve <code>CONSTANT[T]</code> by indexing the constant's array type
 at that specific literal key rather than falling back to the value union.</p>
-<h3 id="b132-a-mismatched-generic-type-argument-is-never-reported">B132. A mismatched generic type argument is never reported<a class="headerlink" href="#b132-a-mismatched-generic-type-argument-is-never-reported" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">final class Box {</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    /** @param T $value */</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    public function __construct(public mixed $value) {}</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">}</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">/** @param Box&lt;int&gt; $box */</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">function takesIntBox(Box $box): void {}</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="x">function f(): void {</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="x">    /** @var Box&lt;string&gt; $box */</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="x">    $box = new Box(&#39;x&#39;);</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="x">    takesIntBox($box);   // reported clean — should fail</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="x">}</span>
-</code></pre></div>
-<p>Passing a <code>Box&lt;string&gt;</code> where a <code>Box&lt;int&gt;</code> is declared is accepted. Both
-compatibility checks that know about generic arguments only ever return
-<code>true</code> on success and otherwise fall through: the same-base covariance block
-in <code>is_type_compatible</code> (<code>src/diagnostics/type_errors/compatibility.rs</code>) and
-the one in <code>is_subtype_of_typed</code> (<code>src/class_lookup.rs</code>). Control reaches the
-final nominal hierarchy check, which compares <code>base_name()</code> against
-<code>base_name()</code> — <code>Box</code> against <code>Box</code> — and answers <code>true</code>, discarding the type
-arguments entirely.</p>
-<p>Two things combine to get there. The disjointness test the covariance block
-uses recurses through the full <code>is_type_compatible</code>, so <code>int</code> vs <code>string</code>
-comes back compatible via PHP's scalar-coercion leniency and the arguments
-are never judged disjoint. Nothing downstream then re-examines them.</p>
-<p>This is the check that would let the <code>@psalm-this-out</code> / <code>@phpstan-self-out</code>
-receiver mutation be observed through a diagnostic rather than only through
-hover.</p>
-<p><strong>Fix:</strong> decide argument compatibility with an invariance-aware comparison
-rather than the coercion-lenient one, and have the base-name fallback refuse
-to answer for a generic type whose arguments were not already checked, so a
-mismatch is reported instead of falling through to a name match. T32's audit
-of the <code>MAYBE</code> escape hatches covers the leniency side of this.</p>
 
 
 
