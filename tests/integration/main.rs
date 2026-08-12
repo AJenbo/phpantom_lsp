@@ -126,6 +126,7 @@ mod diagnostics_implementation_errors;
 mod diagnostics_incompatible_override;
 mod diagnostics_invalid_class_kind;
 mod diagnostics_match_type_errors;
+mod diagnostics_property_discriminant;
 mod diagnostics_property_type_errors;
 mod diagnostics_psr4_mismatch;
 mod diagnostics_readonly_writes;

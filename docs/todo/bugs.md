@@ -86,40 +86,6 @@ through `apply_condition_narrowing` (the same pipeline `if`/`while` conditions
 use) rather than re-implementing a narrower parallel set of cases. That also
 picks up B88's fix for `assert($x !== false)` for free once B88 lands.
 
-### B90. An object union is not narrowed by a discriminating property check
-
-**Impact: Medium · Effort: Medium-High**
-
-```php
-final class StrBox { public string $v = ''; }
-final class IntBox { public int $v = 0; }
-
-function pick(StrBox|IntBox $b): StrBox {
-    if (is_string($b->v)) {
-        return $b; // reported: StrBox|IntBox is incompatible with StrBox
-    }
-    throw new \LogicException('not a StrBox');
-}
-```
-
-PHPantom already narrows an **array-shape** union by a literal-equality check
-on one shape key (confirmed: `if ($a['tag'] === true) { return $a['name']; }`
-on an `array{tag: true, name: string}|array{tag: false, code: int}` union
-resolves cleanly) — but has no equivalent for an **object property**
-discriminant. `is_string($b->v)` should narrow `StrBox|IntBox` to `StrBox`
-the same way the array-shape case narrows its union, since only `StrBox::$v`
-is typed `string`.
-
-Both `phpy` and Qodana pass this case in `php-typing-conformance`'s corpus
-(Intelephense does not); Mago and Phan also narrow it correctly per that
-corpus's own notes, so this is also a correctness gap against our named
-rival, not just a feature gap.
-
-**Fix:** locate the array-shape-union-by-key-equality narrowing in
-`cond_narrowing.rs` and add the property-access equivalent: when a type guard
-or equality check on `$subject->prop` is true only for one member of an
-object union, narrow the union to that member.
-
 ### B92. An array literal's element types widen to base scalar types on a dynamic-key read
 
 **Impact: Low-Medium · Effort: High**

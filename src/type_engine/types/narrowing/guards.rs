@@ -791,6 +791,24 @@ pub(crate) fn apply_type_guard_exclusion(kind: TypeGuardKind, results: &mut Vec<
     results.retain(|rt| !rt.type_string.is_empty_sentinel());
 }
 
+/// Report whether `ty` can produce the given outcome for a type guard:
+/// with `expect_match = true`, whether the guard can pass; with `false`,
+/// whether it can fail.
+///
+/// A `false` answer is a proof, not a guess: no value of `ty` reaches
+/// that branch.  That is what lets a union of objects be discriminated by
+/// a check on one of their properties.
+pub(crate) fn guard_outcome_possible(
+    ty: &PhpType,
+    kind: TypeGuardKind,
+    expect_match: bool,
+) -> bool {
+    match filter_type_by_guard(ty, kind, expect_match) {
+        Some(filtered) => !filtered.is_empty_sentinel(),
+        None => true,
+    }
+}
+
 /// Filter a `PhpType` to keep only members that match (or don't match)
 /// the given type-guard kind.
 ///

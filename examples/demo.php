@@ -427,6 +427,44 @@ class CompoundNarrowingDemo
 }
 
 
+// ── Discriminating-Property Narrowing ───────────────────────────────────────
+// A union of object types is narrowed by a check on a property only some of
+// its members could have passed, the way TypeScript discriminates on a tag.
+
+class PropertyDiscriminantDemo
+{
+    /**
+     * A type guard on the property rules out the member that declares that
+     * property with an incompatible type.
+     */
+    public function byTypeGuard(): int
+    {
+        $tag = pickTag();                         // TextTag|NumberTag
+        if (is_string($tag->tag)) {
+            return $tag->letters();               // narrowed to TextTag
+            // MUST NOT appear: digits() (NumberTag only)
+        }
+
+        return $tag->digits();                    // narrowed to NumberTag (else branch)
+    }
+
+    /**
+     * A tagged union: each member pins its tag to one value, so comparing
+     * against that value picks the member out.
+     */
+    public function byTagValue(): float
+    {
+        $sample = pickWeighing();                 // Weighed|Unweighed
+        if ($sample->state === 'weighed') {
+            return $sample->grams;                // narrowed to Weighed
+            // MUST NOT appear: reason() (Unweighed only)
+        }
+
+        return 0.0;
+    }
+}
+
+
 // ── property_exists() / method_exists() Narrowing ───────────────────────────
 // A member-existence guard proves the (otherwise unknown) member for the rest
 // of the branch, mirroring PHPStan's `object&hasProperty(...)` intersection.
@@ -6793,6 +6831,36 @@ class Banana
     public function weigh(): float { return 0.2; }
 }
 
+final class TextTag
+{
+    public string $tag = 'granite';
+
+    public function letters(): int { return strlen($this->tag); }
+}
+
+final class NumberTag
+{
+    public int $tag = 42;
+
+    public function digits(): int { return strlen((string) $this->tag); }
+}
+
+final class Weighed
+{
+    /** @var 'weighed' */
+    public string $state = 'weighed';
+
+    public float $grams = 5.0;
+}
+
+final class Unweighed
+{
+    /** @var 'unweighed' */
+    public string $state = 'unweighed';
+
+    public function reason(): string { return 'no scale'; }
+}
+
 interface Labelled
 {
     public function label(): string;
@@ -7081,6 +7149,16 @@ function getAppConfig(): array { return []; }
 function pickRockOrBanana(): Rock|Banana
 {
     return new Rock();
+}
+
+function pickTag(): TextTag|NumberTag
+{
+    return new TextTag();
+}
+
+function pickWeighing(): Weighed|Unweighed
+{
+    return new Weighed();
 }
 
 /** @param numeric $value */
@@ -7451,6 +7529,17 @@ function runDemoAssertions(): void
     assert(
         $compound->assertedBoth(new LabelledRock()) === 'smash!:granite',
         'assert() proves the extra interface without losing the declared class',
+    );
+
+    // ── Discriminating-property narrowing ───────────────────────────────
+    $discriminant = new PropertyDiscriminantDemo();
+    assert(
+        $discriminant->byTypeGuard() === 7,
+        'is_string() on the tag picks TextTag, whose letters() counts "granite"',
+    );
+    assert(
+        $discriminant->byTagValue() === 5.0,
+        "state === 'weighed' picks Weighed, the only member with grams",
     );
 
     // ── class-string guard keeps its type argument ─────────────────────
