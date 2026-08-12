@@ -879,3 +879,92 @@ to the current class name identically to `Expression::Self_`.
 upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
 `self::` cases survive); port them back.
+
+---
+
+## T38. Several core builtins have a return type that depends on an argument's value or shape
+**Impact: High · Effort: Medium**
+
+```php
+$json = json_encode($value, JSON_THROW_ON_ERROR);
+needsString($json); // reported: got string|false — THROW_ON_ERROR makes false impossible
+
+$out = preg_replace($pattern, $replacement, $subject); // $subject: string
+needsString($out); // reported: got string|array<string> — $subject is a string, so the array branch can't happen
+```
+
+phpstorm-stubs (and PHPantom's own signatures) declare these functions
+with the flat union of every possible overload's return type, because
+the stub format has no way to express "the return type depends on the
+value of this specific argument." PHPStan instead ships a
+`DynamicFunctionReturnTypeExtension` per case:
+`JsonThrowOnErrorDynamicReturnTypeExtension` drops the `false` branch of
+`json_encode`/`json_decode` when the flags argument provably includes
+the `JSON_THROW_ON_ERROR` bit; a `preg_replace`/`preg_replace_callback`/
+`str_replace`/`str_ireplace` family extension picks the `array` or
+`string` branch based on whether the `$subject` argument is an array or
+a string; `pathinfo()` similarly depends on whether a `$flags` argument
+is present. None of this is modelled today, so PHPantom always reports
+the full declared union regardless of the actual call site — one of the
+largest sources of `type_mismatch_argument`/`_return` false positives
+found in the 2026-08-12 sample-project sweep (over 150 instances of the
+`preg_replace`/`str_replace`-family shape alone, plus dozens more from
+`json_encode`/`json_decode`).
+
+**Fix:** add a small dynamic-return-type mechanism for builtin functions,
+mirroring the existing PHPStan conditional-return-type support
+(`php_type/transform.rs`'s `ConditionalType` handling, added for
+user-defined `@return ($x is Y ? A : B)` docblocks): for a short,
+explicit list of builtin functions, inspect the resolved argument type
+or literal value at the call site and pick the matching branch instead
+of returning the raw stub union. Start with `json_encode`/`json_decode`
+(`JSON_THROW_ON_ERROR` bit test) and the `preg_replace`/`str_replace`
+family (array-vs-string `$subject`), since those account for most of
+the volume found.
+
+---
+
+## T39. No leniency modelling for builtin functions whose failure branch is conventionally never checked
+**Impact: Medium-High · Effort: Medium**
+
+```php
+$tmp = tempnam(sys_get_temp_dir(), 'x');
+file_put_contents($tmp, $data); // reported: $filename expects string, got string|false
+```
+
+`tempnam()`, `fopen()` in several modes, `mkdir()`, `curl_init()`,
+`password_hash()`, `mktime()`, and roughly 200 other builtins declare a
+failure return (`false`, `-1`, …) that real-world code almost never
+checks, because the failure mode is either exceptionally rare or the
+caller would have nothing sensible to do about it locally anyway.
+PHPStan special-cases exactly this: its own function-reflection map
+wraps these functions' return types in `__benevolent<T>`, and its type
+checker only enforces the wrapped branch when the value is directly,
+strictly compared against it (`=== false`) — passing the value on to
+another function or storing it is not flagged. PHPantom enforces the
+full union everywhere with no equivalent leniency, so ordinary
+filesystem/network/date code that never checks these return values
+(idiomatic, and accepted by PHPStan at `level: max`) produces a steady
+stream of `type_mismatch_argument` false positives — nearly 300
+instances of a `|false` mismatch traceable to this pattern in the
+2026-08-12 sample-project sweep, spread across every project that
+touches the filesystem.
+
+Note PHPantom already parses the `__benevolent<T>` syntax (it can appear
+in a project's own docblocks) but discards the leniency entirely,
+unwrapping straight to the inner union (`php_type/parse.rs:309`,
+"treat the type as its inner `T`") — that unwrap is correct for a type
+*display* (there's nothing else `__benevolent<T>` could mean to a
+reader), but nothing downstream re-applies the leniency it named during
+argument/property/return compatibility checking.
+
+**Fix:** hand-maintain a small allowlist of "benevolent" builtin function
+names, borrowed from PHPStan's own `resources/functionMap.php`
+(`__benevolent<…>`-tagged entries; license-compatible, see
+`references/phpstan-src`) as the leniency wrapper. Have the leniency
+apply where `is_type_compatible`
+(`diagnostics/type_errors/compatibility.rs`, see T32) already carries
+other diagnostic-only leniency rules: strip the benevolent branch from
+the resolved type before argument/property/return comparison, unless
+the immediate use is a strict `===`/`!==` comparison against that exact
+branch.
