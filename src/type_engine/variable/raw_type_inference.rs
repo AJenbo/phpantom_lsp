@@ -29,6 +29,13 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     // `list<T>` to avoid unbounded shape growth.
     const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
 
+    // Maximum number of distinct alternatives to keep in the `list<T>`
+    // element union before falling back to the base scalar types. A
+    // literal array that names more distinct values than this is a data
+    // table rather than a set of alternatives worth reasoning about, and
+    // the union's pairwise absorption is quadratic in its member count.
+    const MAX_ELEMENT_ALTERNATIVES: usize = 32;
+
     let mut types: Vec<PhpType> = Vec::new();
     let mut has_string_keys = false;
     let mut saw_spread = false;
@@ -71,11 +78,12 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
             }
             ArrayElement::Variadic(v) => {
                 // Spread: `...$other` — try to resolve iterable element type.
+                // A spread copies values the source already knows, so its
+                // element type carries over as written, the same as a value
+                // element beside it.
                 saw_spread = true;
                 if let Some(raw) = super::foreach_resolution::resolve_expression_type(v.value, ctx)
-                    && let Some(elem) = raw
-                        .iterable_element_type()
-                        .map(|element| element.widen_scalar_literals())
+                    && let Some(elem) = raw.iterable_element_type()
                     && !types.contains(&elem)
                 {
                     types.push(elem);
@@ -123,7 +131,22 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
         return Some(PhpType::array_shape(shape_entries));
     }
 
-    let elem_type = if types.len() == 1 {
+    // Preserved literals need absorbing against their siblings, so that a
+    // list written as `[$stringVar, 'yes', 'no']` is `list<string>` rather
+    // than `list<string|'yes'|'no'>`. A list that names more distinct
+    // values than the cap is a data table, not a set of alternatives worth
+    // carrying, and the join's pairwise absorption is quadratic in the
+    // member count, so those widen to their base types first.
+    //
+    // Element sets with no literal in them keep the plain union: the join
+    // also rewrites `?T` into `T|null`, and that spelling change alone
+    // moves types that were never imprecise to begin with.
+    let elem_type = if types.iter().any(|t| t.as_literal().is_some()) {
+        if types.len() > MAX_ELEMENT_ALTERNATIVES {
+            types = types.iter().map(PhpType::widen_scalar_literals).collect();
+        }
+        PhpType::join_runtime_value_types(types)
+    } else if types.len() == 1 {
         types.into_iter().next().unwrap()
     } else {
         PhpType::union(types)
@@ -150,15 +173,17 @@ fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> String {
 }
 
 /// Infer the type of a single array element value expression.
+///
+/// A scalar literal keeps its exact value here. The array's contents are
+/// fully known at the point the literal is written, so `[1, 1.5, '123']`
+/// records `1|1.5|'123'` and a read off it can still be proven `numeric`.
+/// Precision is given up where the array is *mutated* instead: a later
+/// push or keyed write widens through [`merge_push_type`] and friends,
+/// because a value arriving after construction says the array is being
+/// built up rather than written out.
+///
+/// [`merge_push_type`]: super::resolution::merge_push_type
 fn infer_element_type<'b>(
-    value: &'b Expression<'b>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<PhpType> {
-    infer_element_type_precise(value, ctx).map(|ty| ty.widen_scalar_literals())
-}
-
-/// Resolve an array element before the collection storage boundary widens it.
-fn infer_element_type_precise<'b>(
     value: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
@@ -237,7 +262,7 @@ fn infer_element_type_precise<'b>(
             )
         }
         // ── Parenthesized ──
-        Expression::Parenthesized(p) => infer_element_type_precise(p.expression, ctx),
+        Expression::Parenthesized(p) => infer_element_type(p.expression, ctx),
         // ── Property access, method calls on objects, etc. ──
         // Delegate to the unified pipeline which resolves property
         // type hints and method return types through the class

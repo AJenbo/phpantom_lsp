@@ -82,7 +82,10 @@ namespace PsalmTest_loop_foreach_5 {
     foreach (["a", "b", "c"] as $tag) {
     }
 
-    assertType('string', $tag);
+    // PHPantom is stricter than Psalm here: the literal array states its
+    // contents, so iterating it yields the values it names rather than the
+    // widened `string` Psalm reports. This is PHPStan's answer too.
+    assertType("'a'|'b'|'c'", $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithRedefinedAsNull
@@ -129,7 +132,9 @@ namespace PsalmTest_loop_foreach_8 {
       }
     }
 
-    assertType('null|string', $tag);
+    // PHPantom keeps the literal values the array names, where Psalm widens
+    // them to `string`.
+    assertType("null|'a'|'b'|'c'", $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithBreakInIf
@@ -143,7 +148,9 @@ namespace PsalmTest_loop_foreach_9 {
       }
     }
 
-    assertType('null|string', $tag);
+    // PHPantom keeps the literal values the array names, where Psalm widens
+    // them to `string`.
+    assertType("'a'|'b'|'c'|null", $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithBreakInElseAndIntSet
@@ -157,10 +164,11 @@ namespace PsalmTest_loop_foreach_10 {
       }
     }
 
-    // PHPantom is stricter than Psalm here on two counts: since ["a","b","c"]
-    // is non-empty the pre-loop null cannot survive into post-loop scope, and
-    // the assigned `5` keeps its literal value instead of widening to `int`.
-    assertType('5|string', $tag);
+    // PHPantom is stricter than Psalm here on three counts: since ["a","b","c"]
+    // is non-empty the pre-loop null cannot survive into post-loop scope, the
+    // assigned `5` keeps its literal value instead of widening to `int`, and
+    // the array's own values survive iteration instead of widening to `string`.
+    assertType("5|'a'|'b'|'c'", $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithRedefineAndBreak

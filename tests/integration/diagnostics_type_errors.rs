@@ -1397,6 +1397,73 @@ function test(): void {
 
 // ─── Numeric string literals vs numeric-string ──────────────────────────────
 
+/// Every value in `[1, 1.5, '123']` is numeric, so a read off the array is
+/// numeric whichever entry the key lands on. Widening the members to
+/// `int|float|string` at construction loses that: a bare `string` cannot be
+/// proven numeric, and a value that is numeric on every branch gets reported.
+#[test]
+fn no_diagnostic_for_a_dynamic_key_read_off_an_all_numeric_literal_array() {
+    let php = r#"<?php
+/** @param numeric $v */
+function takes_numeric($v): void {}
+
+function test(): void {
+    $values = [1, 1.5, '123'];
+    $key = array_rand($values);
+    takes_numeric($values[$key]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Every entry of the literal array is numeric, got: {}",
+        type_error_messages(&diags).join("; ")
+    );
+}
+
+/// The literal-key counterpart of the case above: the entry addressed by
+/// `[2]` is the exact value written at that position.
+#[test]
+fn no_diagnostic_for_a_literal_key_read_off_an_all_numeric_literal_array() {
+    let php = r#"<?php
+/** @param numeric $v */
+function takes_numeric($v): void {}
+
+function test(): void {
+    $values = [1, 1.5, '123'];
+    takes_numeric($values[2]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "The entry at index 2 is the numeric string '123', got: {}",
+        type_error_messages(&diags).join("; ")
+    );
+}
+
+/// A value written after construction says the array is being built up, so
+/// the entries it can hold are no longer just the ones spelled out.
+#[test]
+fn a_push_after_construction_widens_the_stored_literal_values() {
+    let php = r#"<?php
+/** @param numeric $v */
+function takes_numeric($v): void {}
+
+function test(string $extra): void {
+    $values = [1, 1.5, '123'];
+    $values[] = $extra;
+    $key = array_rand($values);
+    takes_numeric($values[$key]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "The pushed string is not provably numeric, got no diagnostic"
+    );
+}
+
 #[test]
 fn no_diagnostic_for_numeric_string_literal_to_numeric_string() {
     let php = r#"<?php

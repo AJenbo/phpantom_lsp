@@ -1059,7 +1059,7 @@ class Foo {
 
     // A @return docblock should be added with the rich type.
     assert!(
-        result.contains("@return list<string>"),
+        result.contains("@return list<'string'>"),
         "should add @return docblock with the rich type:\n{}",
         result
     );
@@ -1105,11 +1105,11 @@ class Foo {
         result
     );
 
-    // The @return docblock must carry the rich `list<string>` type, not
+    // The @return docblock must carry the rich `list<'hello'>` type, not
     // `array<mixed>` from an unbalanced single-line fragment.
     assert!(
-        result.contains("@return list<string>"),
-        "multi-line array literal should still infer list<string>:\n{}",
+        result.contains("@return list<'hello'>"),
+        "multi-line array literal should still infer the element type:\n{}",
         result
     );
 }
@@ -1260,8 +1260,8 @@ class Foo {
 #[test]
 fn return_type_update_generic_creates_docblock() {
     // Current: native `array`, no @return tag.  Our inference sees
-    // `$frogs = [1, 2, 3]` → effective `list<int>`, native `array`.
-    // `list<int>` != `array` → use our inference.
+    // `$frogs = [1, 2, 3]` → effective `list<1|2|3>`, native `array`.
+    // `list<1|2|3>` != `array` → use our inference.
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -1295,9 +1295,9 @@ class Foo {
         "should create docblock:\n{}",
         result
     );
-    // Our inference produces `list<int>`, not PHPStan's `array<int, int>`.
+    // Our inference produces `list<1|2|3>`, not PHPStan's `array<int, int>`.
     assert!(
-        result.contains("@return list<int>"),
+        result.contains("@return list<1|2|3>"),
         "should have @return tag with our inferred type:\n{}",
         result
     );
@@ -1355,8 +1355,8 @@ function foo(): int {
 #[test]
 fn return_type_update_generic_replaces_existing_return_tag() {
     // Current: native `array`, @return `array<int, string>`.  Our
-    // inference sees `$frogs = [1, 2, 3]` → effective `list<int>`.
-    // `list<int>` != `array<int, string>` → use our inference.
+    // inference sees `$frogs = [1, 2, 3]` → effective `list<1|2|3>`.
+    // `list<1|2|3>` != `array<int, string>` → use our inference.
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -1386,9 +1386,9 @@ function foo(): array {
     let edits = extract_edits(&resolved);
     let result = apply_edits(content, &edits);
 
-    // Our inference produces `list<int>`, not PHPStan's `array<int, int>`.
+    // Our inference produces `list<1|2|3>`, not PHPStan's `array<int, int>`.
     assert!(
-        result.contains("@return list<int>"),
+        result.contains("@return list<1|2|3>"),
         "should replace @return with our inferred type:\n{}",
         result
     );
@@ -1408,7 +1408,7 @@ function foo(): array {
 
 #[test]
 fn return_type_tip_fallback_with_generics() {
-    // Current @return is `list<int>` which matches our inference
+    // Current @return is `list<1|2|3>` which matches our inference
     // exactly.  PHPStan says the actual return type is
     // `array<int, int>`.  Since our inference agrees with the
     // declaration, we trust the PHPStan tip.
@@ -1416,7 +1416,7 @@ fn return_type_tip_fallback_with_generics() {
     let uri = "file:///test.php";
     let content = r#"<?php
 /**
- * @return list<int>
+ * @return list<1|2|3>
  */
 function foo(): array {
     $frogs = [1, 2, 3];
@@ -1441,7 +1441,7 @@ function foo(): array {
     let edits = extract_edits(&resolved);
     let result = apply_edits(content, &edits);
 
-    // Our inference matches the current @return (`list<int>`), so we
+    // Our inference matches the current @return (`list<1|2|3>`), so we
     // trust the PHPStan tip: `array<int, int>`.
     assert!(
         result.contains("@return array<int, int>"),

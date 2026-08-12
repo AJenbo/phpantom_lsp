@@ -304,7 +304,11 @@ impl PhpType {
     }
 }
 
-fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -> bool {
+/// Whether `subtype`'s produced values are a subset of `supertype`'s, so a
+/// join of the two can drop `subtype` without losing an alternative.
+///
+/// Only scalar value domains take part; see [`is_runtime_scalar_value_domain`].
+pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -> bool {
     if !is_runtime_scalar_value_domain(subtype) || !is_runtime_scalar_value_domain(supertype) {
         return false;
     }

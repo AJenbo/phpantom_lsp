@@ -3904,9 +3904,9 @@ async fn test_array_shape_inferred_from_literal_array() {
 
             // Verify inferred types in detail
             let k1 = items.iter().find(|i| i.label == "key1").unwrap();
-            assert_eq!(k1.detail.as_deref(), Some("key1: int"));
+            assert_eq!(k1.detail.as_deref(), Some("key1: 1"));
             let k2 = items.iter().find(|i| i.label == "key2").unwrap();
-            assert_eq!(k2.detail.as_deref(), Some("key2: string"));
+            assert_eq!(k2.detail.as_deref(), Some("key2: 'hello'"));
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -3977,13 +3977,13 @@ async fn test_array_shape_inferred_from_literal_with_various_types() {
                     .and_then(|i| i.detail.clone())
                     .unwrap_or_default()
             };
-            assert_eq!(find("name"), "name: string");
-            assert_eq!(find("age"), "age: int");
-            assert_eq!(find("score"), "score: float");
+            assert_eq!(find("name"), "name: 'Alice'");
+            assert_eq!(find("age"), "age: 42");
+            assert_eq!(find("score"), "score: 3.14");
             assert_eq!(find("active"), "active: bool");
             assert_eq!(find("deleted"), "deleted: null");
             assert_eq!(find("user"), "user: User");
-            assert_eq!(find("tags"), "tags: array{string, string}");
+            assert_eq!(find("tags"), "tags: array{'a', 'b'}");
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -4062,7 +4062,9 @@ async fn test_array_shape_incremental_key_assignments() {
                     .and_then(|i| i.detail.clone())
                     .unwrap_or_default()
             };
-            assert_eq!(find("key1"), "key1: int");
+            // Written in the literal, so the exact value survives; the two
+            // keys assigned afterwards widen at the mutation boundary.
+            assert_eq!(find("key1"), "key1: 1");
             assert_eq!(find("key2"), "key2: string");
             assert_eq!(find("key3"), "key3: bool");
         }

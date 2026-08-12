@@ -105,8 +105,8 @@ unlikely to move the needle for most users.
 | B89 | [`assert($x !== null)` / `assert($x !== false)` does not narrow](todo/bugs.md#b89-assertx--null--assertx--false-does-not-narrow)                                           | Medium-High | Medium      |
 | B126 | [A scalar check on a property narrows nothing](todo/bugs.md#b126-a-scalar-check-on-a-property-narrows-nothing)                                                            | Medium      | Medium      |
 | B90 | [An object union is not narrowed by a discriminating property check](todo/bugs.md#b90-an-object-union-is-not-narrowed-by-a-discriminating-property-check)                 | Medium      | Medium-High |
-| B92 | [An array literal's element types widen to base scalar types on a dynamic-key read](todo/bugs.md#b92-an-array-literals-element-types-widen-to-base-scalar-types-on-a-dynamic-key-read) | Low-Medium  | High        |
 | B134 | [A constant operand is only read where a `@template` is bound](todo/bugs.md#b134-a-constant-operand-is-only-read-where-a-template-is-bound)                               | Low         | Medium      |
+| B135 | [A conditional return type is not resolved from an argument's default](todo/bugs.md#b135-a-conditional-return-type-is-not-resolved-from-an-arguments-default) | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

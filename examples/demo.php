@@ -2141,6 +2141,30 @@ class ShapeMethodDemo
     }
 
     /**
+     * An array literal states its contents, so the exact values it names
+     * survive a read off it — including a read through a key that is only
+     * known at runtime. Mutating the array afterwards is what gives that
+     * up: a value written after construction stands in for however many
+     * more follow, so the stored values widen to their base types.
+     */
+    public function literalValuesSurviveTheRead(string $extra): void
+    {
+        $numbers = [1, 1.5, '123'];
+        $key = array_rand($numbers);
+        takesNumeric($numbers[$key]);     // 1|1.5|'123' — numeric on every branch
+        takesNumeric($numbers[2]);        // '123' at the position it was written
+
+        $grades = ['a', 'b', 'c'];
+        foreach ($grades as $grade) {
+            takesGrade($grade);           // 'a'|'b'|'c', not plain string
+        }
+
+        $mutated = [1, 1.5, '123'];
+        $mutated[] = $extra;              // list<1|1.5|string> — the push widens
+        takesScalar($mutated[0]);
+    }
+
+    /**
      * Sibling branches writing the same key merge into one array rather
      * than one cumulative snapshot per branch, so the inferred type
      * matches the declared one.
@@ -7041,6 +7065,14 @@ function pickRockOrBanana(): Rock|Banana
     return new Rock();
 }
 
+/** @param numeric $value */
+function takesNumeric(int|float|string $value): void {}
+
+/** @param 'a'|'b'|'c' $grade */
+function takesGrade(string $grade): void {}
+
+function takesScalar(int|float|string|bool $value): void {}
+
 /** @return array<int, Pen>|false */
 function loadPensOrFail(): array|false
 {
@@ -8298,6 +8330,16 @@ function runDemoAssertions(): void
     foreach ($keyedKit as $shapeKey => $shapePen) {
         assert(is_string($shapeKey), 'A string-keyed shape foreach key must be string');
         assert($shapePen instanceof Pen, 'A shape foreach value must be Pen');
+    }
+
+    // ── Literal values surviving an array read ──────────────────────────
+    $litNumbers = [1, 1.5, '123'];
+    assert(is_numeric($litNumbers[array_rand($litNumbers)]),
+        'Every entry of [1, 1.5, \'123\'] is numeric, whichever key is drawn');
+    assert($litNumbers[2] === '123', 'A literal-key read yields the value written at that position');
+    foreach (['a', 'b', 'c'] as $litGrade) {
+        assert(in_array($litGrade, ['a', 'b', 'c'], true),
+            'Iterating a literal array yields the values it names');
     }
 
     // ── Dynamic (non-literal) key on a shape ────────────────────────────

@@ -120,33 +120,6 @@ rival, not just a feature gap.
 or equality check on `$subject->prop` is true only for one member of an
 object union, narrow the union to that member.
 
-### B92. An array literal's element types widen to base scalar types on a dynamic-key read
-
-**Impact: Low-Medium · Effort: High**
-
-```php
-function takesInt(int $x): void {}
-$values = [1, 1.5, '123'];
-$key = array_rand($values);
-takesInt($values[$key]); // reported: got int|float|string
-```
-
-Indexing a literal array with a non-literal key resolves the value to the
-union of the literal array's *base* member types (`int|float|string`)
-instead of the union of the *specific literal values* it was written with
-(`1|1.5|'123'`). The distinction matters for a return type like `@return
-numeric`: each literal individually satisfies `numeric` (`1`, `1.5`, and
-`'123'` are all trivially numeric), but the widened `string` member cannot be
-proven numeric on its own, so a value that is provably `numeric` at every
-possible branch is reported as a mismatch.
-
-Only Qodana passes this case in `php-typing-conformance`'s corpus (`phpy` and
-Intelephense do not), so the signal is weaker than the other entries here.
-
-**Fix:** preserve literal member types through a dynamic-key array access the
-same way a literal-key access already does, rather than widening to base
-scalar types as soon as the key stops being a compile-time constant.
-
 ### B134. A constant operand is only read where a `@template` is bound
 
 **Impact: Low · Effort: Medium**
@@ -178,3 +151,28 @@ containing an unevaluated operator is read, not only from
 `ResolutionCtx` while the sites that read those types (the argument
 compatibility check, the untemplated return path) have varying access to
 one, so the shared entry point has to come first.
+
+### B135. A conditional return type is not resolved from an argument's default
+
+**Impact: Low · Effort: Medium**
+
+```php
+function test(string $s): int {
+    return str_word_count($s);          // reported: got array<string>|int
+}
+```
+
+`str_word_count()`'s return type depends on its `$format` argument: `0`
+(the default) returns `int`, `1` and `2` return `array<string>`. Neither
+the passed value nor the declared default narrows it, so every call reads
+back the full union and any use in a typed position is reported. Passing
+`1` explicitly is equally unresolved, so `return str_word_count($s, 1);`
+from an `array` return type is reported too.
+
+This is what `examples/laravel/app/View/Components/PostSummary.php:37`
+trips over, which is why the Laravel example reports four errors where
+`docs/CONTRIBUTING.md` documents three.
+
+**Fix:** resolve a conditional return type against the call's arguments,
+falling back to a parameter's declared default when the argument is
+omitted, rather than joining every branch.

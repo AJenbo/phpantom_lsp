@@ -2092,8 +2092,13 @@ impl PhpType {
     ///
     /// Equivalent members are kept once and nested shape members are
     /// joined rather than accumulated, so repeated merges cannot grow
-    /// the value type without bound.
+    /// the value type without bound. A member whose produced values are
+    /// already covered by another (`123` beside `int`) is dropped for the
+    /// same reason: one branch writing a literal and another writing the
+    /// base type must not leave both spellings behind.
     fn join_values(a: &PhpType, b: &PhpType) -> PhpType {
+        use crate::php_type::normalize::is_runtime_value_subtype;
+
         if a.equivalent(b) {
             return a.clone();
         }
@@ -2101,6 +2106,13 @@ impl PhpType {
         'incoming: for m in b.union_members() {
             for existing in members.iter_mut() {
                 if existing.equivalent(m) {
+                    continue 'incoming;
+                }
+                if is_runtime_value_subtype(m, existing) {
+                    continue 'incoming;
+                }
+                if is_runtime_value_subtype(existing, m) {
+                    *existing = m.clone();
                     continue 'incoming;
                 }
                 if let Some(joined) = existing.join_shapes(m) {

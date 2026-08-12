@@ -68,6 +68,8 @@ namespace PsalmTest_annotation_3 {
 namespace PsalmTest_annotation_4 {
     $_arr = ["foo\bar\nbaz" => "literal"];
 
-    assertType("array{'foo\\bar\\nbaz': string}", $_arr);
+    // PHPantom keeps the value the literal names, where Psalm widens it to
+    // `string`. Only the key's escaping is what this case is really about.
+    assertType("array{'foo\\bar\\nbaz': 'literal'}", $_arr);
 }
 

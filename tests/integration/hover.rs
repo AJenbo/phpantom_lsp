@@ -407,7 +407,7 @@ function test() {
 }
 
 #[test]
-fn hover_preserves_scalar_literals_but_widens_collections() {
+fn hover_preserves_scalar_literals_through_a_collection_but_widens_a_push() {
     let backend = create_test_backend();
     let uri = "file:///literal-hover.php";
     let content = r#"<?php
@@ -415,29 +415,38 @@ function test(bool $flag): void {
     $scalar = 'draft';
     $choice = $flag ? 'asc' : 'desc';
     $collection = [$scalar, $choice];
-    echo $scalar, $choice, $collection;
+    $pushed = [$scalar];
+    $pushed[] = $choice;
+    echo $scalar, $choice, $collection, $pushed;
 }
 "#;
 
-    let scalar = hover_at(&backend, uri, content, 5, 10).expect("hover on $scalar");
+    let scalar = hover_at(&backend, uri, content, 7, 10).expect("hover on $scalar");
     assert!(
         hover_text(&scalar).contains("$scalar = 'draft'"),
         "scalar hover should preserve the exact literal: {}",
         hover_text(&scalar)
     );
 
-    let choice = hover_at(&backend, uri, content, 5, 19).expect("hover on $choice");
+    let choice = hover_at(&backend, uri, content, 7, 19).expect("hover on $choice");
     assert!(
         hover_text(&choice).contains("$choice = 'asc'|'desc'"),
         "compound scalar hover should preserve the literal union: {}",
         hover_text(&choice)
     );
 
-    let collection = hover_at(&backend, uri, content, 5, 28).expect("hover on $collection");
+    let collection = hover_at(&backend, uri, content, 7, 28).expect("hover on $collection");
     assert!(
-        hover_text(&collection).contains("$collection = list<string>"),
-        "collection hover should widen stored literal values: {}",
+        hover_text(&collection).contains("$collection = list<'draft'|'asc'|'desc'>"),
+        "a literal collection should keep the values it was written with: {}",
         hover_text(&collection)
+    );
+
+    let pushed = hover_at(&backend, uri, content, 7, 42).expect("hover on $pushed");
+    assert!(
+        hover_text(&pushed).contains("$pushed = list<string>"),
+        "a push after construction should widen the stored values: {}",
+        hover_text(&pushed)
     );
 }
 
@@ -7970,8 +7979,8 @@ class Logger {
         text
     );
     assert!(
-        text.contains("level: string"),
-        "level should be string (from literal), got: {}",
+        text.contains("level: 'info'"),
+        "level should keep the literal it was written with, got: {}",
         text
     );
 }
@@ -9889,7 +9898,7 @@ function run(bool $c): void {
     let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $rows");
     let text = hover_text(&hover);
     assert!(
-        text.contains("list<int>") && text.contains("list<string>"),
+        text.contains("list<1|2>") && text.contains("list<'a'|'b'>"),
         "Unrelated array values must stay a union, got: {}",
         text
     );
@@ -13429,14 +13438,14 @@ fn hover_array_literal_mixed_positional_and_keyed_entries() {
     let h_first = hover_at(&backend, uri, content, 3, 6).expect("hover $first");
     let first = hover_text(&h_first);
     assert!(
-        first.contains("string"),
-        "$row[0] should resolve to the dropped positional entry's type (string), got: {first}"
+        first.contains("'first'"),
+        "$row[0] should resolve to the positional entry's value, got: {first}"
     );
     let h_second = hover_at(&backend, uri, content, 4, 6).expect("hover $second");
     let second = hover_text(&h_second);
     assert!(
-        second.contains("int"),
-        "$row['b'] should still resolve to the keyed entry's type (int), got: {second}"
+        second.contains("1"),
+        "$row['b'] should still resolve to the keyed entry's value, got: {second}"
     );
 }
 

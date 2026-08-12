@@ -616,8 +616,12 @@ function test(
     );
 }
 
+/// Writing an array literal states its contents, so the values it names
+/// survive into its type. Mutating one afterwards does not: a push or a
+/// keyed write says the array is being built up rather than written out,
+/// and the value arriving there stands in for however many more follow.
 #[test]
-fn collection_tracking_widens_only_at_mutable_collection_boundaries() {
+fn collection_tracking_widens_at_mutation_but_not_at_construction() {
     let content = r#"<?php
 /**
  * @param Iterator<int, 'draft'> $iterator
@@ -666,15 +670,15 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
 
     assert_eq!(
         resolve_literal_test_var(content, "$shape"),
-        "array{direction: string, code: int}"
+        "array{direction: 'asc'|'desc', code: 1|2}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$list"),
-        "list<string|int>"
+        "list<'left'|'right'|1|2>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$nested"),
-        "array{meta: array{string}}"
+        "array{meta: array{'a'|'b'}}"
     );
     assert_eq!(resolve_literal_test_var(content, "$pushed"), "list<string>");
     assert_eq!(
@@ -687,12 +691,15 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$from_variable"),
-        "list<string>"
+        "list<'draft'>"
     );
-    assert_eq!(resolve_literal_test_var(content, "$spread"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$spread"),
+        "list<'draft'>"
+    );
     assert_eq!(
         resolve_literal_test_var(content, "$tuple_spread"),
-        "list<string>"
+        "list<'left'|'right'>"
     );
     assert_eq!(resolve_literal_test_var(content, "$mapped"), "list<string>");
     assert_eq!(
