@@ -838,17 +838,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b87-an-instanceof-on-a-two-level-property-path-drops-the-declared-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B87. An <code>instanceof</code> on a two-level property path drops the declared class
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1327,17 +1316,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b87-an-instanceof-on-a-two-level-property-path-drops-the-declared-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B87. An <code>instanceof</code> on a two-level property path drops the declared class
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1390,25 +1368,6 @@ is measured against.</p>
 <p><strong>Fix:</strong> give <code>resolve_rhs_call</code> the same narrowing lookup
 <code>Expression::Access</code> has, keyed with the same text
 <code>narrowable_call_key</code> builds so both sides agree on the key.</p>
-<h3 id="b87-an-instanceof-on-a-two-level-property-path-drops-the-declared-class">B87. An <code>instanceof</code> on a two-level property path drops the declared class<a class="headerlink" href="#b87-an-instanceof-on-a-two-level-property-path-drops-the-declared-class" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">if ($this-&gt;holder-&gt;service instanceof MockInterface) {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    $x = $this-&gt;holder-&gt;service;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $this-&gt;realMethod($x);  // reported: got MockInterface</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>$this-&gt;service instanceof MockInterface</code> on a one-level path resolves to
-<code>EpaymentService&amp;MockInterface</code>, but adding a level loses the declared
-class and leaves only the interface.  <code>seed_property_keys_into_scope</code>
-(<code>type_engine/variable/forward_walk/cond_narrowing.rs</code>) resolves nothing
-for the two-level key, so the merge below it takes the "untyped subject,
-instanceof provides the type" branch and replaces rather than intersects.
-Every consumer that reads the narrowed subject is then measured against
-the interface alone, so a member or parameter belonging to the concrete
-class is reported.</p>
-<p><strong>Fix:</strong> make the seeding resolve a multi-level property path to the same
-type the one-level path resolves to, so the merge sees a declared type to
-intersect with.</p>
 
 
 
