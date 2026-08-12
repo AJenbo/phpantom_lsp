@@ -1504,17 +1504,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T37. Readonly write forms the <code>invalid_readonly_write</code> diagnostic still misses
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1951,17 +1940,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T34. <code>static::CONST</code> over-narrows to the declaring class's value
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T37. Readonly write forms the <code>invalid_readonly_write</code> diagnostic still misses
       </span>
     </span>
   </a>
@@ -2762,31 +2740,6 @@ to the current class name identically to <code>Expression::Self_</code>.</p>
 upstream's <code>nsrt/class-constant-types.php</code> were dropped when
 <code>tests/phpstan_nsrt/class-constant-types.php</code> was ported (only the
 <code>self::</code> cases survive); port them back.</p>
-<hr />
-<h2 id="t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses">T37. Readonly write forms the <code>invalid_readonly_write</code> diagnostic still misses<a class="headerlink" href="#t37-readonly-write-forms-the-invalid_readonly_write-diagnostic-still-misses" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p><code>src/diagnostics/readonly_writes.rs</code> flags assignments, compound
-assignments, and increments whose target is a <code>readonly</code> property. Four
-write forms PHP rejects just as hard are still silent:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">readonly class Point {          // 1. every property is implicitly readonly</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    public function __construct(public int $x) {}</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">}</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">unset($box-&gt;value);             // 2. Cannot unset readonly property</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">$box-&gt;items[] = &#39;x&#39;;            // 3. Cannot modify readonly property</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">[$box-&gt;value, $other] = $pair;  // 4. destructuring is a write too</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">$ref = &amp;$box-&gt;value;            // 5. Cannot acquire reference</span>
-</code></pre></div>
-<p>The <code>readonly class</code> case is the one that matters most, and it is the
-one that needs new metadata: <code>PropertyInfo::is_readonly</code> is deliberately
-<code>false</code> for the properties of a <code>readonly class</code> (a subclass of one may
-not repeat the keyword, and override completion depends on that), so
-<code>ClassInfo</code> needs an <code>is_readonly</code> flag of its own, set from the class
-modifiers in <code>src/parser/classes.rs</code> and inherited by subclasses the way
-PHP inherits it.</p>
-<p>Case 3 needs the property's type checked first: <code>$obj-&gt;offsetSet(…)</code> on
-a readonly property holding an <code>ArrayAccess</code> object is legal, so only an
-array-typed property may be flagged.</p>
 
 
 
