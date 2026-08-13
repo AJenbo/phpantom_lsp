@@ -138,6 +138,14 @@ impl PhpType {
                 LiteralValue::Float(_) => PhpType::float(),
                 LiteralValue::String(_) => PhpType::string(),
             },
+            // `true` and `false` are spelled as keyword names rather than
+            // `TypeKind::Literal`, but they are exact values all the same
+            // and widen at the boundary like every other literal.
+            TypeKind::Named(name)
+                if name.eq_ignore_ascii_case("true") || name.eq_ignore_ascii_case("false") =>
+            {
+                PhpType::bool()
+            }
             TypeKind::Union(members) => {
                 let mut widened: Vec<PhpType> = Vec::with_capacity(members.len());
                 let mut seen = HashSet::with_capacity(members.len());
@@ -160,6 +168,75 @@ impl PhpType {
             }
             TypeKind::Nullable(inner) => PhpType::nullable(inner.widen_scalar_literals()),
             _ => self.clone(),
+        }
+    }
+
+    /// Replace the `true` and `false` halves of this type with `bool`.
+    ///
+    /// `true` and `false` are types in their own right from PHP 8.2 on, and
+    /// the type engine tracks them so a truthiness check has something to
+    /// subtract. A declaration written back into source is a different
+    /// matter: `bool` is what the author would have typed, it does not
+    /// commit the signature to one half, and it parses on every supported
+    /// PHP version.
+    #[must_use]
+    pub(crate) fn widen_boolean_literals(&self) -> PhpType {
+        if let TypeKind::Benevolent(inner) = self.raw_kind() {
+            return PhpType::benevolent(inner.widen_boolean_literals());
+        }
+        match self.kind() {
+            TypeKind::Named(name)
+                if name.eq_ignore_ascii_case("true") || name.eq_ignore_ascii_case("false") =>
+            {
+                PhpType::bool()
+            }
+            TypeKind::Union(members) => PhpType::union(
+                members
+                    .iter()
+                    .map(PhpType::widen_boolean_literals)
+                    .collect(),
+            ),
+            TypeKind::Nullable(inner) => PhpType::nullable(inner.widen_boolean_literals()),
+            _ => self.clone(),
+        }
+    }
+
+    /// Drop the alternatives of this type that a native declaration of
+    /// `native` forbids.
+    ///
+    /// An implementation without its own docblock inherits the interface's
+    /// `@return`, but its own native hint is a promise the interface's wider
+    /// union does not get to override: an interface declaring
+    /// `@return array<string, mixed>|list<mixed>|string` and an
+    /// implementation declaring `: array` can only ever return an array.
+    ///
+    /// Only alternatives whose value domain is unmistakable take part. Class
+    /// names, templates, `object`, `callable`, and `iterable` all straddle
+    /// several domains (a class can be `Traversable`, a string can be
+    /// callable), so anything that cannot be classified on both sides is
+    /// kept — the result is never narrower than what can be proved.
+    #[must_use]
+    pub(crate) fn without_alternatives_the_native_type_forbids(&self, native: &PhpType) -> PhpType {
+        let TypeKind::Union(members) = self.kind() else {
+            return self.clone();
+        };
+        let Some(allowed) = native_value_domains(native) else {
+            return self.clone();
+        };
+
+        let kept: Vec<PhpType> = members
+            .iter()
+            .filter(|member| match value_domain(member) {
+                Some(domain) => allowed.contains(&domain),
+                None => true,
+            })
+            .cloned()
+            .collect();
+
+        match kept.len() {
+            0 => self.clone(),
+            1 => kept.into_iter().next().unwrap(),
+            _ => PhpType::union(kept),
         }
     }
 
@@ -394,6 +471,99 @@ fn is_runtime_scalar_value_domain(ty: &PhpType) -> bool {
 // ---------------------------------------------------------------------------
 // Simplification helpers (private)
 // ---------------------------------------------------------------------------
+
+/// A runtime value domain that no other domain overlaps.
+///
+/// Deliberately excludes `object`, `callable`, `iterable`, and `resource`:
+/// each of those admits values from more than one domain (a `callable` may
+/// be a string, an array, or an object), so a type naming one proves
+/// nothing about which domain a sibling alternative belongs to.
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub(crate) enum ValueDomain {
+    Array,
+    String,
+    Int,
+    Float,
+    Bool,
+    Null,
+}
+
+/// The domains a native declaration of `ty` admits, or `None` when it
+/// admits values this classification cannot pin down.
+fn native_value_domains(ty: &PhpType) -> Option<Vec<ValueDomain>> {
+    match ty.kind() {
+        TypeKind::Nullable(inner) => {
+            let mut domains = native_value_domains(inner)?;
+            domains.push(ValueDomain::Null);
+            Some(domains)
+        }
+        TypeKind::Union(members) => {
+            let mut domains = Vec::with_capacity(members.len());
+            for member in members {
+                domains.extend(native_value_domains(member)?);
+            }
+            Some(domains)
+        }
+        _ => {
+            let mut domains = vec![value_domain(ty)?];
+            // A native `float` accepts an `int` return and coerces it, so a
+            // docblock naming `int` beside it is describing what the body
+            // produces rather than contradicting the declaration.
+            if domains == [ValueDomain::Float] {
+                domains.push(ValueDomain::Int);
+            }
+            Some(domains)
+        }
+    }
+}
+
+/// The single domain every value of `ty` belongs to, or `None` when `ty`
+/// spans several (or names something this cannot classify).
+fn value_domain(ty: &PhpType) -> Option<ValueDomain> {
+    match ty.kind() {
+        TypeKind::Array(_) | TypeKind::ArrayShape(_) | TypeKind::ListShape(_) => {
+            Some(ValueDomain::Array)
+        }
+        TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(ValueDomain::String),
+        TypeKind::IntRange(_, _) => Some(ValueDomain::Int),
+        TypeKind::Literal(value) => Some(match &**value {
+            LiteralValue::Int(_) => ValueDomain::Int,
+            LiteralValue::Float(_) => ValueDomain::Float,
+            LiteralValue::String(_) => ValueDomain::String,
+        }),
+        TypeKind::Generic(generic) => named_value_domain(&generic.name),
+        TypeKind::Named(name) => named_value_domain(name),
+        _ => None,
+    }
+}
+
+/// The domain a keyword type name belongs to, or `None` for class names,
+/// templates, and the keywords that straddle domains.
+fn named_value_domain(name: &str) -> Option<ValueDomain> {
+    match native_scalar_name(name)? {
+        "array" => Some(ValueDomain::Array),
+        "string" => Some(ValueDomain::String),
+        "int" => Some(ValueDomain::Int),
+        "float" => Some(ValueDomain::Float),
+        "bool" | "true" | "false" => Some(ValueDomain::Bool),
+        "null" => Some(ValueDomain::Null),
+        _ => None,
+    }
+}
+
+/// Whether `types` names the same alternative more than once.
+///
+/// [`dedup_types`] allocates a hash table, which is wasted work on the
+/// overwhelmingly common case of a union that is already distinct. Unions
+/// are small (two or three members in almost every real type), so a
+/// pairwise scan answers the question without touching the allocator.
+pub(crate) fn has_duplicate_members(types: &[PhpType]) -> bool {
+    types.iter().enumerate().skip(1).any(|(index, ty)| {
+        types[..index]
+            .iter()
+            .any(|seen| equivalent_for_dedup(seen, ty))
+    })
+}
 
 /// Deduplicate types while treating identifiers, but not literal payloads, as
 /// case-insensitive.

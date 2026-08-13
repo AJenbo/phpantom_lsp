@@ -10,7 +10,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{CallableParam, PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 use crate::virtual_members::laravel::validated_shape;
 
@@ -649,11 +649,52 @@ pub(crate) fn infer_closure_literal_type(
         _ => None,
     });
 
-    if let Some(ret) = inferred_return {
-        PhpType::callable_spec("Closure", Vec::new(), Some(ret))
+    let params = declared_closure_params(expr, ctx);
+    if inferred_return.is_some() || !params.is_empty() {
+        PhpType::callable_spec("Closure", params, inferred_return)
     } else {
         PhpType::closure()
     }
+}
+
+/// The parameter list a closure or arrow function literal declares, as
+/// callable-signature parameters.
+///
+/// A literal's arity and parameter types are part of the type it produces:
+/// `fn (BrandView $b) => …` is a `Closure(BrandView): …`, and dropping the
+/// parameters makes it fail every declared `Closure(BrandView): …` it is
+/// handed to. A parameter with no native hint contributes `mixed`, which a
+/// contravariant check accepts from any expected parameter type; a hinted
+/// one goes through the class loader so the short name written in the
+/// literal matches the fully-qualified name in the expectation.
+fn declared_closure_params(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<CallableParam> {
+    let parameter_list = match expr {
+        Expression::Closure(closure) => &closure.parameter_list,
+        Expression::ArrowFunction(arrow) => &arrow.parameter_list,
+        _ => return Vec::new(),
+    };
+
+    parameter_list
+        .parameters
+        .iter()
+        .map(|param| CallableParam {
+            type_hint: param
+                .hint
+                .as_ref()
+                .map(|hint| {
+                    crate::util::resolve_php_type_names(
+                        &crate::parser::extract_hint_type(hint),
+                        ctx.class_loader,
+                    )
+                })
+                .unwrap_or_else(PhpType::mixed),
+            optional: param.default_value.is_some(),
+            variadic: param.ellipsis.is_some(),
+        })
+        .collect()
 }
 
 /// Resolve a plain function call: `someFunc()`, array functions, variable

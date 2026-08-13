@@ -710,9 +710,21 @@ impl PhpType {
         TypeKind::Raw(text.into()).into()
     }
 
-    /// Union of two or more members.  Does not normalise — see
+    /// Union of two or more members.
+    ///
+    /// Repeated alternatives are dropped (and a union left with a single
+    /// alternative is unwrapped), because a union that names the same type
+    /// twice is never anything but noise in a hover or a diagnostic. No
+    /// other normalisation happens here — for `true|false` → `bool`,
+    /// subtype absorption, and nested-union flattening see
     /// [`simplified`](PhpType::simplified).
-    pub fn union(members: Vec<PhpType>) -> PhpType {
+    pub fn union(mut members: Vec<PhpType>) -> PhpType {
+        if normalize::has_duplicate_members(&members) {
+            normalize::dedup_types(&mut members);
+            if members.len() == 1 {
+                return members.into_iter().next().unwrap();
+            }
+        }
         TypeKind::Union(members.into()).into()
     }
 
@@ -2302,17 +2314,32 @@ impl PhpType {
     /// `Some(Named("User"))`, and for `null`, `false`, or `?false` `None`,
     /// since nothing those describe survives a truthiness check.
     ///
-    /// Only the members that are *always* falsy are dropped, which is the
-    /// same subset a truthy `if ($x)` branch narrows a variable to: `int`
-    /// stays `int` rather than becoming a range excluding `0`, and `bool`
-    /// stays `bool` rather than becoming `true`.
+    /// Members that are *always* falsy are dropped and `bool` keeps only
+    /// its `true` half, which is the subset a truthy `if ($x)` branch
+    /// narrows a variable to. Refinements a truthy test could also justify
+    /// but that PHP has no plain spelling for are left alone: `int` stays
+    /// `int` rather than becoming a range excluding `0`.
     pub fn truthy_type(&self) -> Option<PhpType> {
         let is_falsy = |t: &PhpType| t.is_null() || t.is_false();
+        // A `bool` that survives a truthy test can only have been `true`,
+        // and keeping it as `bool` makes the check unfalsifiable: a
+        // variable seeded `false` and reassigned in one branch would go on
+        // carrying its falsy half for the rest of the scope.
+        let truthy_half = |t: &PhpType| {
+            if t.is_bool() {
+                PhpType::true_()
+            } else {
+                t.clone()
+            }
+        };
         match self.kind() {
             TypeKind::Nullable(inner) => inner.truthy_type(),
             TypeKind::Union(members) => {
-                let truthy: Vec<PhpType> =
-                    members.iter().filter(|m| !is_falsy(m)).cloned().collect();
+                let truthy: Vec<PhpType> = members
+                    .iter()
+                    .filter(|m| !is_falsy(m))
+                    .map(truthy_half)
+                    .collect();
                 match truthy.len() {
                     0 => None,
                     1 => truthy.into_iter().next(),
@@ -2320,7 +2347,7 @@ impl PhpType {
                 }
             }
             _ if is_falsy(self) => None,
-            _ => Some(self.clone()),
+            _ => Some(truthy_half(self)),
         }
     }
 

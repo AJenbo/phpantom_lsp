@@ -786,7 +786,7 @@ mod tests {
             component_workspace("resources/views/components/panel.blade.php", body);
         open_blade(&backend, &uri, body).await;
 
-        for (line, expected) in [(1u32, "'info'"), (2, "bool"), (3, "array")] {
+        for (line, expected) in [(1u32, "'info'"), (2, "false"), (3, "array")] {
             let hover = hover_text(&backend, &uri, line, 5).await;
             assert!(
                 hover.contains(expected),

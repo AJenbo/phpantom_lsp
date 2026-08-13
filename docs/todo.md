@@ -23,9 +23,39 @@ within the same impact tier.
 
 ## Sprint 6 — 0.10.0 release, full indexing
 
-| #   | Item                                                                                                                  | Impact     | Effort |
-| --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-|     | **Release 0.10.0**                                                                                                                              |             |             |
+| #    | Item                                                                                                                                                      | Impact      | Effort      |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| B145 | [A non-literal string or int write key widens to `int\|string`](todo/bugs.md#b145-a-non-literal-string-or-int-write-key-widens-to-intstring)               | High        | Low-Medium  |
+| B140 | [Interface phpDoc is not inherited by an implementation without its own docblock](todo/bugs.md#b140-interface-phpdoc-is-not-inherited-by-an-implementation-without-its-own-docblock) | High | Low-Medium |
+| B167 | [Factory `create()`/`make()` keep the collection half on single-model chains](todo/bugs.md#b167-factory-createmake-keep-the-collection-half-on-single-model-chains) | Medium-High | Low-Medium |
+| B171 | [A subclass `@property` tag loses to an inherited real property](todo/bugs.md#b171-a-subclass-property-tag-loses-to-an-inherited-real-property)            | Medium      | Low-Medium  |
+| B153 | [Short-circuit operators do not narrow their right operand](todo/bugs.md#b153-short-circuit-operators-do-not-narrow-their-right-operand)                   | Medium      | Low-Medium  |
+| B163 | [Residual `int` arithmetic and assignment widenings](todo/bugs.md#b163-residual-int-arithmetic-and-assignment-widenings)                                   | Low-Medium  | Low-Medium  |
+| B139 | [Conditional return types are not evaluated against argument types](todo/bugs.md#b139-conditional-return-types-are-not-evaluated-against-argument-types)   | High        | Medium      |
+| B142 | [Builtins with argument-dependent return types, round two](todo/bugs.md#b142-builtins-with-argument-dependent-return-types-round-two)                      | High        | Medium      |
+| B144 | [`preg_match` `$matches` is nullable and shapeless](todo/bugs.md#b144-preg_match-matches-is-nullable-and-shapeless)                                        | High        | Medium      |
+| B146 | [Array builtins lose key and element generics](todo/bugs.md#b146-array-builtins-lose-key-and-element-generics)                                             | High        | Medium      |
+| B149 | [`instanceof` narrowing extends the union instead of filtering it](todo/bugs.md#b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it)       | High        | Medium      |
+| B152 | [A ternary's arms do not receive the condition's narrowing](todo/bugs.md#b152-a-ternarys-arms-do-not-receive-the-conditions-narrowing)                     | High        | Medium      |
+| B165 | [`__()` / `trans()` report their raw `string\|array\|null` signature](todo/bugs.md#b165-__--trans-report-their-raw-stringarraynull-signature)              | High        | Medium      |
+| B166 | [Console `argument()` / `option()` ignore the command's `$signature`](todo/bugs.md#b166-console-argument--option-ignore-the-commands-signature)            | High        | Medium      |
+| B141 | [A `never` conditional branch does not assert the condition](todo/bugs.md#b141-a-never-conditional-branch-does-not-assert-the-condition) (depends on B139) | Medium-High | Medium      |
+| B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
+| B150 | [Branch-local reassignment and narrowing are wrong at the join point](todo/bugs.md#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point) | Medium-High | Medium    |
+| B151 | [Negated compound guards with an early exit narrow nothing](todo/bugs.md#b151-negated-compound-guards-with-an-early-exit-narrow-nothing)                   | Medium-High | Medium      |
+| B154 | [A check on a nullsafe chain does not narrow the receiver](todo/bugs.md#b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver)                     | Medium-High | Medium      |
+| B157 | [`@phpstan-assert` tags on called methods are ignored](todo/bugs.md#b157-phpstan-assert-tags-on-called-methods-are-ignored)                                | Medium-High | Medium      |
+| B168 | [`Request` input accessors deserve precise per-argument types](todo/bugs.md#b168-request-input-accessors-deserve-precise-per-argument-types)               | Medium-High | Medium      |
+| B169 | [Blade `@if` narrowing does not reach `@include`d variables](todo/bugs.md#b169-blade-if-narrowing-does-not-reach-included-variables)                       | Medium-High | Medium      |
+| B143 | [Conditional-return arguments written as expressions still read as nothing](todo/bugs.md#b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing) (depends on B139) | Medium | Medium |
+| B156 | [`assert()` still misses some provable conditions](todo/bugs.md#b156-assert-still-misses-some-provable-conditions)                                         | Medium      | Medium      |
+| B159 | [An inline `@var` re-pins the variable on every read](todo/bugs.md#b159-an-inline-var-re-pins-the-variable-on-every-read)                                  | Medium      | Medium      |
+| B174 | [A `break` that leaves a loop early is missing from the post-loop join](todo/bugs.md#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join) | Medium      | Medium      |
+| B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
+| B155 | [A checked call expression is forgotten by the next identical call](todo/bugs.md#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call)   | Medium-High | Medium-High |
+| B158 | [Strict `in_array` against a constant list does not narrow the needle](todo/bugs.md#b158-strict-in_array-against-a-constant-list-does-not-narrow-the-needle) (depends on B155) | Low-Medium | Medium |
+| B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state)                                     | Medium      | Medium-High |
+|      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 

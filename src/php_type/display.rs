@@ -46,7 +46,15 @@ impl fmt::Display for PhpType {
                     if i > 0 {
                         write!(f, "&")?;
                     }
-                    write!(f, "{ty}")?;
+                    // `&` binds tighter than `|`, so a union member has to
+                    // keep its parentheses: without them `(A|B)&C` reads
+                    // back as `A|(B&C)`, which drops the intersection from
+                    // the first branch.
+                    if matches!(ty.kind(), TypeKind::Union(_) | TypeKind::Callable(_)) {
+                        write!(f, "({ty})")?;
+                    } else {
+                        write!(f, "{ty}")?;
+                    }
                 }
                 Ok(())
             }

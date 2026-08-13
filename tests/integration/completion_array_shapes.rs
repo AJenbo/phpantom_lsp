@@ -3980,7 +3980,7 @@ async fn test_array_shape_inferred_from_literal_with_various_types() {
             assert_eq!(find("name"), "name: 'Alice'");
             assert_eq!(find("age"), "age: 42");
             assert_eq!(find("score"), "score: 3.14");
-            assert_eq!(find("active"), "active: bool");
+            assert_eq!(find("active"), "active: true");
             assert_eq!(find("deleted"), "deleted: null");
             assert_eq!(find("user"), "user: User");
             assert_eq!(find("tags"), "tags: array{'a', 'b'}");

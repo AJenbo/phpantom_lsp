@@ -11,4 +11,606 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-No outstanding items.
+Most entries below come from the 2026-08-13 sample-project sweep (345
+diagnostics across ten projects, ~330 of them false positives). Site
+counts refer to that sweep; the git-ignored triage log has the full
+per-project inventory. Entries filed later say where they came from.
+
+## Conditional and argument-dependent return types
+
+### B139. Conditional return types are not evaluated against argument *types*
+
+**Impact: High · Effort: Medium**
+
+The engine evaluates `@return ($flag is true ? A : B)` when the
+argument is a literal value (and falls back to the parameter default
+when it is omitted), but a condition keyed on the argument's *type*
+is never decided — the whole union of branches is returned instead:
+
+```php
+/** @return ($id is array<mixed> ? Collection<int, TModel> : TModel|null) */
+public function find($id, $columns = ['*']) {}
+
+$order = Order::find(7);   // reported Collection<int, Order>|Order|null
+```
+
+Undecided type conditions from the sweep: `$id is array<mixed>|Arrayable`
+(Eloquent `find`/`findOrFail`, ~24 sites), `$items is EloquentCollection`
+/ `$into is class-string<…>` (spatie/laravel-data `Data::collect()`,
+~22 sites once B140 lands), `$callback is null` (`tap()`, which also
+leaks the raw template name `TValue` into the union), and Symfony's
+`ContainerInterface::get()` (`B is 0|1` against the omitted argument's
+default `1`). Two cosmetic side effects to clear with it: a model's
+custom collection (`#[CollectedBy]` / `$collectionClass`) is emitted
+*alongside* the generic `Collection<int, TModel>` it stands for, and
+nested conditionals collapse into unions containing an unresolved
+`array-key` where `TKey` should have been substituted.
+
+**Fix:** decide `is` conditions with `is_type_compatible` on the
+resolved argument type (falling back to the declared default's type
+when the argument is omitted), recursing into nested conditionals, and
+only union the branches when the condition is genuinely undecidable.
+
+### B140. Interface phpDoc is not inherited by an implementation without its own docblock
+
+**Impact: High · Effort: Low-Medium**
+
+`Spatie\LaravelData\Concerns\BaseData::collect()` (a trait method) has
+no docblock; the conditional `@return` lives on the interface
+`Spatie\LaravelData\Contracts\BaseData` that the `Data` base class
+implements. PHPStan inherits phpDoc from implemented interfaces when
+the implementation (including one supplied by a trait) has none;
+PHPantom reads only the native signature, so every `X::collect(...)`
+returns the raw eleven-member union. ~22 sites across three Laravel
+projects, always as `array`/`Collection` inputs whose result feeds a
+declared `array<X>`/`Collection<int, X>`.
+
+**Fix:** when a method has no own docblock, look it up on the
+interfaces the declaring class (transitively) implements, the same way
+parent-class docblocks are already inherited.
+
+### B141. A `never` conditional branch does not assert the condition
+
+**Impact: Medium-High · Effort: Medium**
+
+```php
+/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */
+function throw_unless($condition, ...$args) {}
+
+$dispatcher = Model::getEventDispatcher();      // Dispatcher|null
+throw_unless($dispatcher, 'Exception', '…');
+Model::setEventDispatcher($dispatcher);         // reported Dispatcher|null
+```
+
+When a call's conditional return resolves to `never` for some subtype
+of an argument, that subtype cannot survive the call; PHPStan derives
+an implicit assertion from it. PHPantom keeps the argument unchanged,
+so every `throw_unless`/`throw_if`/`abort_unless` guard is invisible
+(7 sites in one test file alone).
+
+**Fix:** after B139, when the branch selected by a *falsy/truthy
+subtype* of an argument is `never`, subtract that subtype from the
+argument expression in the following scope — the same subtraction the
+`if (!$x) { throw … }` form already gets.
+
+### B142. Builtins with argument-dependent return types, round two
+
+**Impact: High · Effort: Medium**
+
+The T38 work covered the replace family and `json_encode`. The sweep
+surfaced the next tier, ~34 sites:
+
+- `pathinfo($p, PATHINFO_FILENAME)` returns `string` for any flags
+  other than `PATHINFO_ALL`; the shaped array (whose `dirname`/
+  `extension` keys are *optional*) only applies to the 1-arg form.
+  18 sites, the single biggest builtin offender.
+- `print_r($v, true)` returns `string`, not `string|true`.
+- `hrtime(true)` returns `int|float`, never `array{int, int}|false`.
+- `microtime()` honours `#[TypeContract(true: 'float', false: 'string')]`
+  on its parameter — the attribute is currently ignored.
+- `getenv('NAME')` returns `string|false`; only the 0-arg variant
+  returns `array<string, string>` (arity-keyed functionMap variant).
+- `mb_convert_encoding(string $s, …)` returns `string`; the `array`
+  branch only applies to an array subject.
+- `abs(int)` is `int`, `abs(float)` is `float` — not `int|float`.
+- `array_sum(array<int>)` is `int` (`array_product` likewise).
+- `SimpleXMLElement::saveXML()`/`asXML()` return `string|false` when
+  `$filename` is null, `bool` otherwise — never a bare `string|bool`
+  that `assertNotFalse` cannot split.
+- `ReflectionClass<T>::newInstance()`/`newInstanceArgs()`/
+  `newInstanceWithoutConstructor()` return `T`, not `?object`.
+
+**Fix:** stub patches / conditional signatures per function, same
+mechanism as T38.
+
+### B143. Conditional-return arguments written as expressions still read as nothing
+
+**Impact: Medium · Effort: Medium**
+
+The successor to B124. The replace-family conditional keys on
+`$subject`, but the subject's type is only read for simple argument
+shapes, so `str_replace(NS, '', $class)` on a `string` parameter, or
+`preg_replace($pats, $reps, file_get_contents($f) ?: '')`, still
+returns `array|string` (5 sites). Same story for flag arguments built
+from expressions: `json_encode($v, $options | self::FLAGS)` and
+`json_encode($v, $encodeOptions)` where the local was assigned a
+constant `|` chain never strip `false` even though the
+`JSON_THROW_ON_ERROR` bit is provably set (3 sites).
+
+**Fix:** resolve conditional-return argument types through the shared
+`resolve_expression_type` pipeline rather than a call-site text reader,
+and evaluate flag bits against an integer range ("bit definitely set")
+instead of requiring a literal constant.
+
+## preg_match
+
+### B144. `preg_match` `$matches` is nullable and shapeless
+
+**Impact: High · Effort: Medium**
+
+The single largest false-positive source of the sweep (~40 sites in
+seven projects):
+
+```php
+if (preg_match('/(?<amount>\d+)(?<unit>\w*)/', $size, $match)) {
+    strtolower($match['unit']);   // reported: got null|string
+}
+```
+
+Three compounding defects:
+
+1. The stub's `?array &$matches = null` default leaks into the
+   written-back type, so `$matches` is `array<string>|null` after the
+   call and every offset read yields `string|null`. After a truthy
+   `preg_match` (and unconditionally after `preg_match_all`),
+   `$matches` is definitely an array.
+2. No match-shape inference for literal patterns: PHPStan's
+   `RegexArrayShapeMatcher` types group 0 and every always-matching
+   group as `string` (`string|null` only under
+   `PREG_UNMATCHED_AS_NULL`), with named groups as keys. PDepend,
+   PHPMD, AGCMS and Bladestan all index `$match[1]`/`$match['name']`
+   directly inside the guard.
+3. `preg_match_all` group reads (`$matches[1]`) should be
+   `list<string>`, not `array<string>|null`.
+
+**Fix:** treat the by-ref out-parameter as definitely-assigned
+non-null after the call; add a literal-pattern group-shape analysis
+(port the capture-group walk from PHPStan's `RegexArrayShapeMatcher`).
+
+## Array types
+
+### B145. A non-literal string or int write key widens to `int|string`
+
+**Impact: High · Effort: Low-Medium**
+
+```php
+/** @return array<string, string> */
+function flags(array $countries): array {
+    $flags = [];
+    foreach ($countries as $c) { $flags[$c->value] = $c->flag(); }
+    return $flags;   // reported array<int|string, string>
+}
+```
+
+`normalize_array_key` (`type_engine/variable/resolution.rs`, the
+`is_string_subtype()` arm) widens every non-literal `string` key to
+`int|string` on the grounds that a numeric string becomes an int key
+at runtime. PHPStan deliberately keeps `string` (only *literal*
+decimal-int strings convert), and every consumer declares
+`array<string, T>`, so the widening produces a mismatch at ~28 sites
+across six projects — including keys after an explicit `(string)`
+cast, backed-enum `->value` reads, and `ReflectionProperty::getName()`.
+Int-typed key expressions (`$result[++$line]`, `$products[$item->id]`
+after `assert(is_int(...))`) equally widen to `array-key`.
+
+**Fix:** drop the broad-string arm; use the key expression's resolved
+type (string stays `string`, int stays `int`), keeping the int
+conversion for literal decimal keys only. Apply the same rule to
+`foreach` key inference.
+
+### B146. Array builtins lose key and element generics
+
+**Impact: High · Effort: Medium**
+
+~20 sites across six projects, all the same underlying gap — the
+signature's `int[]|string[]`/`array-key` placeholders are returned
+verbatim instead of substituting the input's generics:
+
+- `array_keys(array<K, V>)` → `list<K>` (10 sites; the stub-literal
+  `array<int>|array<string>` union then fails against
+  `array<string>`/`list<int>` on the wrong branch).
+- `array_search($needle, array<K, V>)` → `K|false`; `key()`,
+  `array_key_first/last(array<K, V>)` → `K|null`.
+- `array_values(array<K, V>)` → `list<V>`.
+- `array_filter`/`array_map` (single-array form) preserve the key
+  type; `array_filter` with no callback also strips falsy members
+  from the value type (`array<string, string|null>` →
+  `array<string, non-falsy-string>`).
+- `array_flip(array<K, V>)` → `array<V, K>`.
+
+**Fix:** per-function generic signatures in the stub patch layer.
+
+### B147. Array literals are not tuples: slot reads return the union of all elements
+
+**Impact: Medium-High · Effort: Medium**
+
+```php
+$rows[] = [$violation, $location, $name];        // RuleViolation, string, string
+foreach ($rows as $row) {
+    [$violation, $location, $name] = $row;       // each: RuleViolation|string
+    $writer->write($location);                   // reported: RuleViolation|string
+}
+```
+
+A list literal collapses to `array<union-of-values>`, so list
+destructuring and constant-offset reads cannot select a slot (6 sites
+in PHPMD/PDepend). Two adjacent literal defects: a literal with a
+*non-constant* key renders as the bogus shape `array{mixed: int}`
+(stringifying the key's type as a field name) instead of falling back
+to `array<K, V>`, and `(object) []` is not recognised as `stdClass`.
+
+**Fix:** keep constant-array shapes for literals (ordered slots +
+known keys), select slots on destructure/offset reads, fall back to a
+generic array only for non-constant keys.
+
+### B148. Element writes do not refine tracked array state
+
+**Impact: Medium · Effort: Medium-High**
+
+Several forms of the same weakness (~7 sites):
+
+- `$a[$k][] = $v` never updates the inner element type: a value
+  initialised as `[]` stays `array{}` in the outgoing type even
+  though every loop iteration appends strings.
+- The intermediate empty-array state from
+  `if (!isset($a[$k])) { $a[$k] = []; } $a[$k][$id] = $x;` survives
+  the loop fix-point, leaving `array{}|array<int, string>` where
+  PHPStan reports `non-empty-array<int, string>`.
+- `$a += ['slot' => $obj]` degrades to unconstrained `array`.
+- A constant shape `array{item: string, qty: int}` fails the subtype
+  check against `array<string, mixed>`, so shaped rows are rejected
+  by a declared `array<int, array<string, mixed>>`.
+
+**Fix:** refine the per-key state on nested writes (including
+auto-vivification), merge `+=` like an array-shape union, and make
+constant shapes satisfy their generic supertypes.
+
+## Narrowing
+
+### B149. `instanceof` narrowing extends the union instead of filtering it
+
+**Impact: High · Effort: Medium**
+
+```php
+$obj = $container->get('config');       // object|null
+assert($obj instanceof Configuration);
+return $obj;                            // reported object|null|Configuration
+```
+
+`assert($x instanceof T)` (and the `if (!$x instanceof T) { throw }`
+guard) *adds* `T` to the union instead of replacing it (5 sites in
+PDepend alone). Related `instanceof` defects seen in the same sweep:
+the fall-through of `if (!$v instanceof C) { return; }` removes other
+classes but not scalar/array members of the union (2 sites); negated
+`instanceof` inside a branch doesn't narrow the branch at all
+(3 sites); and a successful check on an interface produces the bare
+interface instead of `Receiver&Interface`, which then fails the
+declared return type (2 sites).
+
+**Fix:** implement `instanceof` as union filtering/intersection in
+both polarities, for `assert()` and guard forms alike.
+
+### B150. Branch-local reassignment and narrowing are wrong at the join point
+
+**Impact: Medium-High · Effort: Medium**
+
+Two inverse defects at `if`/`else` merges (~5 sites):
+
+- A reassignment inside a branch is *not* applied after the join:
+  `if ($v instanceof AbstractNode) { $v = $v->getNode(); }` still
+  carries `AbstractNode` afterwards; `if ($r instanceof User)
+  { $r = $r->getToken(); }` still carries `User`.
+- A narrowing *does* leak past the join: after
+  `if ($r instanceof Verbose) { … }` the post-if type keeps the
+  branch-narrowed member instead of re-merging to the declared type.
+
+**Fix:** at the merge, each branch contributes its end-state (declared
+type transformed by that branch's assignments/narrowings), and the
+join is the union of branch end-states — nothing more, nothing less.
+
+### B151. Negated compound guards with an early exit narrow nothing
+
+**Impact: Medium-High · Effort: Medium**
+
+```php
+if (!is_string($payload) || $payload === '') { continue; }
+$this->fromPayload($payload);   // reported: got string|array|null
+```
+
+The `if (!guard1 || !guard2) { exit; }` idiom — with `return`,
+`continue`, `throw`, or `abort()` as the exit — leaves the
+fall-through scope un-narrowed (~10 sites across five projects).
+Single-guard forms fail too: `if (!is_resource($h)) { return; }`,
+`if (!is_array($x)) { $x = [$x]; }` (both arms), and `!== ''`
+producing `non-empty-string` on the fall-through path. `is_array` and
+`is_resource` appear to lack guard support in any position, while
+`is_string`/`is_int` work in the plain `if` form — audit the `is_*`
+family for coverage while in there.
+
+**Fix:** apply De Morgan over `||`/`&&` in a negated condition whose
+branch terminates, narrowing the fall-through with each conjunct; fill
+the `is_array`/`is_resource` guard gaps.
+
+### B152. A ternary's arms do not receive the condition's narrowing
+
+**Impact: High · Effort: Medium**
+
+```php
+$period = is_string($req) ? $req : 'today';   // reported string|array|null
+$icon   = $tier->app_icon ? image($tier->app_icon) : '';   // reported null|string
+```
+
+The condition narrows neither the true arm nor the false arm — the
+raw union flows into both (~14 sites across six projects, the
+second-largest pure-narrowing cluster). The failure is worst in
+argument position: the same ternary in assignment position sometimes
+works, so the machinery exists but is not wired into every expression
+context. `$pos === false ? null : $pos` keeping `false` in the else
+arm is the same defect in negative polarity.
+
+**Fix:** run condition type-specification when resolving a ternary
+(both arms, both polarities), independent of the expression's
+syntactic position; `?:` reuses the subject's truthy/falsy split.
+
+### B153. Short-circuit operators do not narrow their right operand
+
+**Impact: Medium · Effort: Low-Medium**
+
+The right operand of `&&` sees the left operand's positive narrowing
+(`is_array($this->address) && array_key_exists($k, $this->address)`
+— note the property subject), and the right operand of `||` sees the
+*negative* narrowing (`$hash === false || $this->isModified($f, $hash)`;
+`null === $x || $this->check($customer, $x)`). Neither happens today
+(4 sites). The same condition-scope plumbing should make an
+assignment inside an `elseif` condition truthy-narrow its variable
+(`} elseif ($token = $req->bearerToken()) {`).
+
+**Fix:** evaluate the left operand's type specification into the
+scope used for the right operand, per polarity.
+
+### B154. A check on a nullsafe chain does not narrow the receiver
+
+**Impact: Medium-High · Effort: Medium**
+
+```php
+$image = Productimage::where(…)->first();       // Productimage|null
+if ($image?->file_id !== null) {
+    $this->scheduleDeletion($image->file_id);
+    $this->repo->delete($image);                // reported Productimage|null
+}
+```
+
+If `$image` were null the chain yields `null` and the comparison
+fails, so inside the branch the receiver is non-null. The same holds
+for a truthy check (`if (!$product?->translation?->is_live) return;`
+proves `$product` non-null afterwards) and for `===` against a
+non-nullable RHS. 5 sites in four projects.
+
+**Fix:** when a condition proves a nullsafe chain's result non-null
+(or compares it to a type that excludes the short-circuit `null`),
+narrow every receiver in the chain to non-null in that branch.
+
+### B155. A checked call expression is forgotten by the next identical call
+
+**Impact: Medium-High · Effort: Medium-High**
+
+```php
+if (mb_strpos($slug, $marker) !== false) {
+    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false
+}
+$from = $this->option('from') ? Carbon::parse($this->option('from')) : null;
+```
+
+Narrowing is keyed on variables only; a structurally identical
+side-effect-free call repeated inside the guarded scope re-resolves
+from scratch (~6 sites). PHPStan keys `SpecifiedTypes` on the printed
+expression and invalidates on side effects; Phpactor caches by node
+identity.
+
+**Fix:** key the narrowing store by a canonical expression form
+(receiver chain + arguments) for deterministic/pure calls, and
+invalidate entries when a statement could change their inputs.
+
+### B156. `assert()` still misses some provable conditions
+
+**Impact: Medium · Effort: Medium**
+
+Follow-ups to the shipped `assert()` work, each reproduced in the
+sweep: `assert(is_string($version))` on a value read from a
+`stdClass` property inside a `foreach` leaves `mixed`;
+`assert($weights !== [])` does not produce `non-empty-array` (so a
+subsequent `array_key_last` keeps `null`); `assert(isset($m[0]))`
+does not remove `null` from the following offset read.
+
+**Fix:** route these condition shapes through the same reconciler the
+`if` forms use; the gaps are in subject kinds (property-of-mixed,
+array offset) and in the `!== []` → non-empty rule.
+
+### B157. `@phpstan-assert` tags on called methods are ignored
+
+**Impact: Medium-High · Effort: Medium**
+
+PHPUnit's assertions declare their effect in phpDoc
+(`@phpstan-assert resource $actual` on `assertIsResource()`,
+`@psalm-assert =ExpectedType $actual` on `assertInstanceOf()`, and so
+on). PHPantom honours several assertions (`assertNotFalse`,
+`assertIsArray`, and `assertNotNull` all narrow correctly) but the
+coverage comes from hard-coded knowledge, not the tags: in the same
+sweep `assertIsResource` and `assertInstanceOf` (mock intersections)
+left their argument untouched (~6 sites in test suites).
+
+**Fix:** read `@phpstan-assert` / `@phpstan-assert-if-true` /
+`@phpstan-assert-if-false` (and the `@psalm-assert` aliases,
+including the `=` exact-type prefix) from called
+functions/methods and apply them as type specifications; drop the
+hard-coded PHPUnit list in favour of the tags.
+
+### B158. Strict `in_array` against a constant list does not narrow the needle
+
+**Impact: Low-Medium · Effort: Medium**
+
+`if (!in_array($user->getEmail(), self::APPROVED, true)) { abort(403); }`
+proves on the fall-through that the needle is one of the constant
+list's literals (⊆ `string`), removing `null`. Requires B155's
+expression keying for method-call needles. 2 sites.
+
+### B159. An inline `@var` re-pins the variable on every read
+
+**Impact: Medium · Effort: Medium**
+
+```php
+/** @var null|list<array{…}> $cached */
+$cached = Cache::get(self::KEY);
+if ($cached !== null) {
+    return array_slice($cached, 0, $limit);   // reported null|list<…>
+}
+```
+
+A plain `!== null` guard that works on any ordinary variable does
+nothing here — and a later reassignment (`$x = []; … $x = narrow();`)
+is also overridden by the annotation. The `@var` should seed the
+assignment it documents and then submit to normal flow narrowing
+(3 sites).
+
+### B163. Residual `int` arithmetic and assignment widenings
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+Two leftovers from the shipped arithmetic-precision work:
+`($a[$k] ?? 0) + $int` widens to `int|float`, and an `int` value
+assigned to a `float`-typed property is reported instead of accepting
+the standard numeric widening.
+
+### B174. A `break` that leaves a loop early is missing from the post-loop join
+
+**Impact: Medium · Effort: Medium**
+
+```php
+$a = 'x';
+do {
+    if (rand(0, 1)) { break; }   // leaves with $a === 'x'
+    $a = 1;
+} while (rand(0, 1));
+$a;                              // reported 1, should be 'x'|1
+```
+
+The state a `break` carries out of a loop does not reach the post-loop
+merge, so only the paths that ran to the end of the body contribute. The
+inverse shows up in a nested loop, where a `break` out of the *inner*
+loop loses the assignment it made: `foreach { foreach { … $b = 1;
+break; } } $b;` reports the pre-loop value alone. Both forms are visible
+in Psalm's `falseToBool` loop tests (the three `// SKIP` assertions in
+`tests/psalm_assertions/loop_do.php` and `loop_foreach.php`), which were
+only passing while every boolean widened to `bool` and made the merge
+result the same either way.
+
+**Fix:** record each `break`'s scope state as an exit edge of the loop it
+leaves, and union those edges into the post-loop scope alongside the
+normal fall-through.
+
+## Laravel
+
+### B165. `__()` / `trans()` report their raw `string|array|null` signature
+
+**Impact: High · Effort: Medium**
+
+27 sites in one project: every `{{ __('key') }}` echo, `__()` fed to
+an `HtmlString`, and `assertSee(__('key'))` mismatches because the
+helper's framework signature is `string|array|null`. PHPantom already
+indexes translation keys and their shapes (`trans_keys.rs`); a
+literal-key call can resolve to the actual translation's type
+(`string` for a leaf, `array<…>` for a group), which is strictly
+better than larastan's benevolent-union hand-wave. A keyless `__()`
+returns `null`; an unresolvable dynamic key should stay permissive
+(treat as accepting-any-branch rather than reporting every branch).
+
+### B166. Console `argument()` / `option()` ignore the command's `$signature`
+
+**Impact: High · Effort: Medium**
+
+29 sites in one project. `$this->argument('name')` /
+`$this->option('markets')` return the framework's raw
+`array|string|float|int|bool|null` union. The command's own
+`$signature` string decides the real type per entry: a value-less
+`{--flag}` is `bool`, `{--opt=}` is `string|null`, `{arg}` is
+`string`, `{arg*}` is `array<string>`. PHPantom already parses
+signature strings for command-name indexing; extend that to type
+these two accessors (Symfony `InputDefinition` semantics).
+
+### B167. Factory `create()`/`make()` keep the collection half on single-model chains
+
+**Impact: Medium-High · Effort: Low-Medium**
+
+The shipped factory-count narrowing misses chains that pass through
+`for()`/`has()`/`state()` (`$factory->for($brand)->create()` reports
+`ProductCollection|Product`) and the count-argument static form
+(`Product::factory($n)->create()` should be pure
+`Collection<int, Product>`). Track the single-vs-collection state
+across the whole fluent chain, in both directions. 8 sites.
+
+### B168. `Request` input accessors deserve precise per-argument types
+
+**Impact: Medium-High · Effort: Medium**
+
+`$request->header('User-Agent', '')` reports `string|array|null`
+against a `string` parameter — with a string default the real type is
+`string`. `query()` with no key returns the full `array`;
+`file('key')` is `UploadedFile|null` for a scalar key (larastan wraps
+it in a benevolent union; resolving on the key/default is more
+precise). Model the conditional shapes natively for
+`header`/`query`/`input`/`cookie`/`file`. 5 sites. (Unguarded
+`query('x')` uses that really can receive arrays were patched in the
+sample sources as genuine.)
+
+### B169. Blade `@if` narrowing does not reach `@include`d variables
+
+**Impact: Medium-High · Effort: Medium**
+
+```blade
+@if ($product)
+    @include('products.edit.page-links-product')   {{-- expects non-null $product --}}
+@endif
+```
+
+An inherited variable is checked against the template's *declared*
+signature type at the `@include` site, ignoring the enclosing Blade
+control flow that provably narrows it (4 sites in two projects). Use
+the flow-narrowed scope at the include position — the compiled
+virtual PHP already contains the real `if`, so the walker has the
+narrowing; it is the include-contract check that reads the wrong
+scope.
+
+### B171. A subclass `@property` tag loses to an inherited real property
+
+**Impact: Medium · Effort: Low-Medium**
+
+A model declaring `@property string $connection` still resolves
+`$model->connection` through `Illuminate\Database\Eloquent\Model`'s
+inherited `protected $connection` (`string|null`) and the generic
+attribute fallback (`UnitEnum|string|null`). A magic read must prefer
+the class's own `@property` tag over a non-public inherited property.
+1 site, but the shadowing pattern (`$connection`, `$table`, `$keyType`)
+is common on Eloquent models.
+
+## Miscellaneous
+
+### B173. Classes shipped inside a dependency's phar are invisible
+
+**Impact: Low-Medium · Effort: Medium**
+
+A project extending PHPStan (`vendor/phpstan/phpstan` ships
+`phpstan.phar` + stub headers) gets `mixed` for every
+`PHPStan\Type\*` value, cascading into downstream false positives
+(1 site — a custom extension calling `getConstantStrings()`). Check
+what the package's `bootstrap.php` exposes and whether indexing the
+phar (or its extracted stubs) is feasible.

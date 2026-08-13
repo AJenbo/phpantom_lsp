@@ -47,6 +47,31 @@ fn ancestor_has_richer_type(effective: &Option<PhpType>, native: &Option<PhpType
     }
 }
 
+/// The return type `existing` should take from `ancestor`, or `None` when
+/// it keeps its own.
+///
+/// The ancestor's docblock applies when (a) the child has no return type at
+/// all, or (b) the child's effective type equals its native type (no
+/// docblock override of its own) and the ancestor has a richer docblock
+/// type. The child's *native* hint still has the last word: an override
+/// declaring `: array` cannot return the `string` half of an interface's
+/// `@return array|string`, so the inherited union is restricted to what the
+/// override's own declaration allows.
+fn inherited_return_type(existing: &MethodInfo, ancestor: &MethodInfo) -> Option<PhpType> {
+    if !(existing.return_type.is_none() && ancestor.return_type.is_some()
+        || lacks_docblock_override(&existing.return_type, &existing.native_return_type)
+            && ancestor_has_richer_type(&ancestor.return_type, &ancestor.native_return_type))
+    {
+        return None;
+    }
+
+    let inherited = ancestor.return_type.as_ref()?;
+    Some(match existing.native_return_type {
+        Some(ref native) => inherited.without_alternatives_the_native_type_forbids(native),
+        None => inherited.clone(),
+    })
+}
+
 /// Copy-on-write wrapper around [`enrich_method_from_ancestor`].
 ///
 /// Most class/ancestor method overlaps have nothing to propagate (the
@@ -73,10 +98,8 @@ pub(crate) fn enrich_method_arc_from_ancestor(
 /// copy-on-write clone.
 fn method_enrichment_would_change(existing: &MethodInfo, ancestor: &MethodInfo) -> bool {
     // Return type.
-    if (existing.return_type.is_none() && ancestor.return_type.is_some()
-        || lacks_docblock_override(&existing.return_type, &existing.native_return_type)
-            && ancestor_has_richer_type(&ancestor.return_type, &ancestor.native_return_type))
-        && existing.return_type != ancestor.return_type
+    if let Some(inherited) = inherited_return_type(existing, ancestor)
+        && existing.return_type.as_ref() != Some(&inherited)
     {
         return true;
     }
@@ -198,14 +221,8 @@ fn parameter_enrichment_would_change(
 /// when the child has `None`.
 pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &MethodInfo) {
     // ── Return type ─────────────────────────────────────────────
-    // Propagate when (a) the child has no return type at all, or
-    // (b) the child's effective type equals its native type (no
-    // docblock override) and the ancestor has a richer docblock type.
-    if existing.return_type.is_none() && ancestor.return_type.is_some()
-        || lacks_docblock_override(&existing.return_type, &existing.native_return_type)
-            && ancestor_has_richer_type(&ancestor.return_type, &ancestor.native_return_type)
-    {
-        existing.return_type = ancestor.return_type.clone();
+    if let Some(inherited) = inherited_return_type(existing, ancestor) {
+        existing.return_type = Some(inherited);
     }
 
     // ── Template parameters ─────────────────────────────────────

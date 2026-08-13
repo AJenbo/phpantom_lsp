@@ -4629,3 +4629,92 @@ fn benevolence_survives_a_rewrite() {
     assert_eq!(resolved.to_string(), "App\\Foo|false");
     assert!(ty.shorten().is_benevolent());
 }
+
+#[test]
+fn a_union_inside_an_intersection_keeps_its_parentheses() {
+    let ty = PhpType::parse("(FunctionNode|MethodNode)&MockObject");
+    assert_eq!(ty.to_string(), "(FunctionNode|MethodNode)&MockObject");
+    // Without the parentheses `&` would bind tighter than `|` on the way
+    // back in, dropping the intersection from the first branch.
+    assert_eq!(PhpType::parse(&ty.to_string()), ty);
+}
+
+#[test]
+fn a_union_drops_repeated_alternatives() {
+    let user = PhpType::named(atom("App\\Entity\\User"));
+    assert_eq!(
+        PhpType::union(vec![PhpType::string(), user.clone(), PhpType::string()]).to_string(),
+        "string|App\\Entity\\User"
+    );
+    assert_eq!(
+        PhpType::union(vec![
+            PhpType::null(),
+            PhpType::string(),
+            PhpType::array(),
+            PhpType::null(),
+        ])
+        .to_string(),
+        "null|string|array"
+    );
+    // Type names are case-insensitive, so a differently-spelled repeat is
+    // still a repeat — but a literal payload's case is part of its value.
+    assert_eq!(
+        PhpType::union(vec![PhpType::named(atom("String")), PhpType::string()]).to_string(),
+        "String"
+    );
+    assert_eq!(
+        PhpType::union(vec![
+            PhpType::literal_string_raw("'A'"),
+            PhpType::literal_string_raw("'a'"),
+        ])
+        .to_string(),
+        "'A'|'a'"
+    );
+    // A union left with one alternative is that alternative.
+    assert_eq!(
+        PhpType::union(vec![PhpType::string(), PhpType::string()]),
+        PhpType::string()
+    );
+}
+
+#[test]
+fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
+    let inherited = PhpType::parse("array<string, mixed>|list<mixed>|string");
+    assert_eq!(
+        inherited
+            .without_alternatives_the_native_type_forbids(&PhpType::array())
+            .to_string(),
+        "array<string, mixed>|list<mixed>"
+    );
+    // A nullable native type keeps the null half.
+    assert_eq!(
+        inherited
+            .without_alternatives_the_native_type_forbids(&PhpType::parse("?string"))
+            .to_string(),
+        "string"
+    );
+    // A class name spans no single value domain (it may be `Traversable`,
+    // `Stringable`, or invokable), so it survives whatever the native type
+    // says while its unmistakably-scalar sibling does not.
+    assert_eq!(
+        PhpType::parse("Traversable|string")
+            .without_alternatives_the_native_type_forbids(&PhpType::array())
+            .to_string(),
+        "Traversable"
+    );
+    // `object`, `callable`, and `iterable` are equally cross-cutting on the
+    // native side, so a declaration naming one rules out nothing.
+    assert_eq!(
+        inherited
+            .without_alternatives_the_native_type_forbids(&PhpType::parse("iterable"))
+            .to_string(),
+        inherited.to_string()
+    );
+    // A native `float` still accepts the `int` a body may produce.
+    assert_eq!(
+        PhpType::parse("int|float|string")
+            .without_alternatives_the_native_type_forbids(&PhpType::float())
+            .to_string(),
+        "int|float"
+    );
+}

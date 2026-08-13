@@ -1,0 +1,24 @@
+// test: an arrow function's parameters survive into its inferred closure type
+// feature: hover
+// The inferred type used to be `Closure(): array`, which then failed every
+// declared `Closure(BrandView): array`.
+// expect: Closure(BrandView): array
+---
+<?php
+
+class BrandView {}
+
+class Attributes
+{
+    /** @return array<string, mixed> */
+    public function attrs(BrandView $view): array
+    {
+        return [];
+    }
+
+    public function build(): void
+    {
+        $fn = fn (BrandView $view) => $this->attrs($view);
+        echo $f<>n;
+    }
+}

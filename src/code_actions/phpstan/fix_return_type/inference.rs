@@ -253,8 +253,14 @@ pub(crate) fn infer_return_type(
         return None;
     }
 
-    // Convert effective type → native PHP type hint.
+    // Convert effective type → native PHP type hint. A body that only ever
+    // returns `true` is typed `bool` in the signature rather than the
+    // standalone `true` type: that spelling needs PHP 8.2, and tightening a
+    // method's declared return to one boolean half would reject a subclass
+    // that legitimately returns the other. The exact value survives in the
+    // `@return` docblock.
     let native = effective
+        .widen_boolean_literals()
         .to_native_hint_typed()
         .unwrap_or_else(PhpType::mixed);
 

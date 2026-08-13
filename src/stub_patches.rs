@@ -59,7 +59,15 @@
 //!    return type (and thus the function's own return) stays in the
 //!    value-inspecting logic in `raw_type_inference.rs`.
 //!
-//! 6. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//! 6. **`ctype_*`** and **`define`** -- php-src declares both with `mixed`
+//!    where the stubs narrow: the `ctype_*` family takes `mixed $text`
+//!    (a non-string argument is a deprecation, not a type error), and
+//!    `define`'s `$value` is `mixed` since PHP 8.0, not the pre-7.0
+//!    scalar-or-array union the `@param` tag still spells out. We widen
+//!    both back so `ctype_digit($int)` and
+//!    `define('X', fopen(…))` stop being reported.
+//!
+//! 7. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
 //!    `mktime` and the rest of [`crate::benevolent_builtins`] declare a
 //!    failure branch that idiomatic PHP never checks. Their return type is
 //!    tagged so the diagnostics stop enforcing that branch. Unlike the
@@ -98,7 +106,7 @@
 //!    `@param` is untyped `object|array`.  We bind `TKey`/`TValue` from
 //!    the `$array` argument, matching PHPStan's stubs.
 //!
-//! 7. **Benevolent methods** -- the class-level half of function patch 6,
+//! 7. **Benevolent methods** -- the class-level half of function patch 7,
 //!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
 //!    `DateTime::modify` and `Closure::bind`.
 //!
@@ -136,6 +144,8 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         | "preg_filter" => patch_replace_family(func, "$subject", true),
         "str_replace" | "str_ireplace" => patch_replace_family(func, "$subject", false),
         "substr_replace" => patch_replace_family(func, "$string", false),
+        "define" => widen_parameter_to_mixed(func, "$value"),
+        name if name.starts_with("ctype_") => widen_parameter_to_mixed(func, "$text"),
         _ => {}
     }
     if crate::benevolent_builtins::function_is_benevolent(&func.name) {
@@ -151,6 +161,23 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
 fn mark_benevolent(return_type: &mut Option<PhpType>) {
     if let Some(ty) = return_type.take() {
         *return_type = Some(PhpType::benevolent(ty));
+    }
+}
+
+/// Widen a parameter the stubs type more narrowly than php-src does.
+///
+/// `ctype_digit()` and its siblings take `mixed $text` (passing an int is a
+/// deprecation, not a type error), and `define()`'s `$value` has been `mixed`
+/// since PHP 8.0, but the stubs keep the old `string` hint and the pre-7.0
+/// `null|array|bool|int|float|string` `@param` tag respectively. Both the
+/// docblock type and the native hint are widened so hover shows what the
+/// function really accepts.
+fn widen_parameter_to_mixed(func: &mut FunctionInfo, param_name: &str) {
+    for param in func.parameters.make_mut() {
+        if param.name == param_name {
+            param.type_hint = Some(PhpType::mixed());
+            param.native_type_hint = Some(PhpType::mixed());
+        }
     }
 }
 
@@ -945,5 +972,48 @@ mod tests {
             func.native_return_type,
             Some(PhpType::parse("StreamBucket|null"))
         );
+    }
+
+    #[test]
+    fn ctype_family_and_define_accept_mixed() {
+        for name in ["ctype_digit", "ctype_alpha", "ctype_xdigit"] {
+            let mut func = empty_function(name);
+            func.parameters = vec![param("$text", "string")].into();
+
+            apply_function_stub_patches(&mut func);
+
+            assert_eq!(
+                func.parameters[0].type_hint,
+                Some(PhpType::mixed()),
+                "{name} should accept mixed"
+            );
+            assert_eq!(func.parameters[0].native_type_hint, Some(PhpType::mixed()));
+        }
+
+        let mut define = empty_function("define");
+        define.parameters = vec![
+            param("$constant_name", "string"),
+            param("$value", "null|array|bool|int|float|string"),
+        ]
+        .into();
+
+        apply_function_stub_patches(&mut define);
+
+        assert_eq!(
+            define.parameters[0].type_hint,
+            Some(PhpType::string()),
+            "the constant name is still a string"
+        );
+        assert_eq!(define.parameters[1].type_hint, Some(PhpType::mixed()));
+    }
+
+    #[test]
+    fn an_unrelated_function_keeps_its_parameter_types() {
+        let mut func = empty_function("str_pad");
+        func.parameters = vec![param("$string", "string")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(func.parameters[0].type_hint, Some(PhpType::string()));
     }
 }

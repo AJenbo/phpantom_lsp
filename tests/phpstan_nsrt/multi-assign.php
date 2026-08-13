@@ -46,8 +46,8 @@ function multiAssignFloat(): void {
 
 function multiAssignBool(): void {
 	$a = $b = true;
-	assertType('bool', $a);
-	assertType('bool', $b);
+	assertType('true', $a);
+	assertType('true', $b);
 }
 
 function multiAssignObject(): void {

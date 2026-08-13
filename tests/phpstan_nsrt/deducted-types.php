@@ -31,8 +31,8 @@ final class Foo
 		$arrayLiteral = [];
 
 		assertType('1', $integerLiteral);
-		assertType('bool', $booleanLiteral);
-		assertType('bool', $anotherBooleanLiteral);
+		assertType('true', $booleanLiteral);
+		assertType('false', $anotherBooleanLiteral);
 		assertType('\'foo\'', $stringLiteral);
 		assertType('1.0', $floatLiteral);
 		assertType('null', $nullLiteral);

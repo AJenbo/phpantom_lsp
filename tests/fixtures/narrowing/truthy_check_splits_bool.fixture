@@ -1,0 +1,22 @@
+// test: a truthy check narrows a genuine `bool` to `true`
+// feature: hover
+// `$found` joins to `bool` across the loop; inside `if ($found)` only the
+// `true` half can have survived.
+// expect: true
+---
+<?php
+
+/** @param list<int> $items */
+function findThree(array $items): void
+{
+    $found = false;
+    foreach ($items as $item) {
+        if ($item === 3) {
+            $found = true;
+            break;
+        }
+    }
+    if ($found) {
+        echo $fou<>nd;
+    }
+}

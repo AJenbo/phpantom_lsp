@@ -406,9 +406,16 @@ impl ResolvedType {
     pub(crate) fn collapse_redundant_runtime_literals(
         results: Vec<ResolvedType>,
     ) -> Vec<ResolvedType> {
+        // `true` and `false` are spelled as keyword names rather than
+        // `TypeKind::Literal`, but they are literal values all the same:
+        // a branch that assigned `false` beside one that produced `bool`
+        // has nothing extra to say, and `true` beside `false` is `bool`.
         fn contains_scalar_literal(ty: &PhpType) -> bool {
             match ty.kind() {
                 TypeKind::Literal(_) => true,
+                TypeKind::Named(name) => {
+                    name.eq_ignore_ascii_case("true") || name.eq_ignore_ascii_case("false")
+                }
                 TypeKind::Union(members) => members.iter().any(contains_scalar_literal),
                 TypeKind::Nullable(inner) => contains_scalar_literal(inner),
                 _ => false,
@@ -439,7 +446,13 @@ impl ResolvedType {
             .filter(|result| result.class_info.is_none())
             .map(|result| result.type_string.clone())
             .collect();
+        // A benevolent union carries its marker above the members, and the
+        // join below rebuilds the union from those members alone. Losing
+        // the marker would put a builtin's failure branch (`tempnam()`'s
+        // `false`, and the rest of `benevolent_builtins`) back in force on
+        // code that has always been written without checking it.
         if non_class_types.is_empty()
+            || non_class_types.iter().any(PhpType::is_benevolent)
             || !non_class_types.iter().any(contains_scalar_literal)
             || non_class_types.iter().any(mixed_hides_alternatives)
         {
@@ -494,8 +507,24 @@ impl ResolvedType {
                 {
                     return resolved[0].type_string.clone();
                 }
-                let members: Vec<PhpType> =
-                    resolved.iter().map(|rt| rt.type_string.clone()).collect();
+                // An entry that is itself a union contributes its own
+                // alternatives rather than nesting: `$name ?? pathinfo(…)`
+                // joins a `string` entry with a `string|array{…}` one, and
+                // without flattening the repeated `string` is invisible to
+                // the union's own deduplication. A marked union is left
+                // whole, since the marker (benevolence, list ordering) sits
+                // above the union and would be lost by lifting its members
+                // out: an unflattened `__benevolent<string|false>` still
+                // says its failure branch is not worth enforcing.
+                let mut members: Vec<PhpType> = Vec::with_capacity(resolved.len());
+                for rt in resolved {
+                    match rt.type_string.raw_kind() {
+                        TypeKind::Union(alternatives) => {
+                            members.extend(alternatives.iter().cloned())
+                        }
+                        _ => members.push(rt.type_string.clone()),
+                    }
+                }
                 PhpType::union(members)
             }
         }

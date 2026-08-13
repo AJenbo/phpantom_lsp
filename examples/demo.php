@@ -1134,6 +1134,60 @@ class InheritedDocblockDemo
         // Grandparent @return flows through the entire chain.
         $deep = new ScaffoldingDeepChild();
         $deep->getPens()[0]->write();              // list<Pen> from grandparent
+
+        // The implementor's own `: array` outranks the wider interface
+        // docblock: the `string` half cannot survive that declaration.
+        $payload = (new ScaffoldingArrayPayload())->payload();
+        $payload;                                  // array<string, mixed>|list<mixed>
+    }
+}
+
+
+// ── Boolean Literals and Truthiness ─────────────────────────────────────────
+
+class BooleanLiteralDemo
+{
+    public function demo(string $raw, string $format): string
+    {
+        // `false` keeps its own type, so the truthiness check below has
+        // something to subtract instead of an unfalsifiable `bool`.
+        $time = false;
+        if ($raw !== '') {
+            $time = strtotime($raw);               // int|false
+        }
+        if ($time) {
+            return date($format, $time);           // int — the false half is gone
+        }
+
+        // A value that genuinely is `bool` narrows to `true` in the branch
+        // the check proved.
+        $found = false;
+        foreach ([1, 2, 3] as $item) {
+            if ($item === 2) {
+                $found = true;
+                break;
+            }
+        }
+        if ($found) {
+            $found;                                // true
+        }
+        return '';
+    }
+}
+
+
+// ── Closure Literal Signatures ──────────────────────────────────────────────
+
+class ClosureLiteralDemo
+{
+    public function demo(): void
+    {
+        // The parameters an arrow function declares are part of the type it
+        // produces, so it satisfies a declared `Closure(Pen): string`.
+        $describe = fn (Pen $pen) => $pen->color();
+        $describe;                                 // Closure(Demo\Pen): string
+
+        (new ScaffoldingPenDescriber())->describeWith($describe);
     }
 }
 
@@ -5741,6 +5795,28 @@ class ScaffoldingDeepChild extends ScaffoldingMidHolder
     public function getPens(): array { return [new Pen()]; }
 }
 
+interface ScaffoldingPayloadSource
+{
+    /** @return array<string, mixed>|list<mixed>|string */
+    public function payload();
+}
+
+class ScaffoldingArrayPayload implements ScaffoldingPayloadSource
+{
+    // No docblock of its own, so the interface's union is inherited — but
+    // `: array` rules out the `string` half of it.
+    public function payload(): array { return ['ok' => true]; }
+}
+
+class ScaffoldingPenDescriber
+{
+    /** @param \Closure(Pen): string $describe */
+    public function describeWith(Closure $describe): string
+    {
+        return $describe(new Pen());
+    }
+}
+
 class ScaffoldingAnimalStore
 {
     /** @return list<Pen> */
@@ -9030,6 +9106,22 @@ function runDemoAssertions(): void
     });
     $macroTarget = new ScaffoldingMacroTarget();
     assert($macroTarget->renderTwice() === 'renderedrendered', 'self::/static:: inside a macro closure must bind to ScaffoldingMacroTarget');
+
+    // ── Inherited docblock restricted by the override's own hint ────────
+    $arrayPayload = (new ScaffoldingArrayPayload())->payload();
+    assert(is_array($arrayPayload), 'ScaffoldingArrayPayload::payload() must return an array, never the string half');
+
+    // ── Boolean literals and truthiness ─────────────────────────────────
+    $booleanDemo = new BooleanLiteralDemo();
+    assert($booleanDemo->demo('', 'Y') === '', 'an unparsed timestamp must take the falsy branch');
+    assert($booleanDemo->demo('1970-01-02 UTC', 'Y') === '1970', 'a parsed timestamp must reach date()');
+
+    // ── Closure literal signatures ──────────────────────────────────────
+    $describePen = fn (Pen $pen) => $pen->color();
+    assert(
+        (new ScaffoldingPenDescriber())->describeWith($describePen) === 'black',
+        'an arrow function must satisfy a declared Closure(Pen): string'
+    );
 
     // ── @mixin generic substitution scaffolding ─────────────────────────
     $mixinBuilder = new ScaffoldingMixinBuilder();

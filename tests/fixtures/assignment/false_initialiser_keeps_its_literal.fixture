@@ -1,0 +1,25 @@
+// test: a `false` initialiser stays `false` so a truthiness check can subtract it
+// feature: hover
+// `$time = false` used to widen to `bool` at the assignment, and `bool`
+// survives a truthiness check (`true` is truthy), so the guarded body kept
+// carrying a `bool` half that the parsed timestamp had already ruled out.
+// expect: int
+// expect_absent: bool
+---
+<?php
+
+function parseWhen(string $raw): int|false
+{
+    return 0;
+}
+
+function formatWhen(string $raw): void
+{
+    $time = false;
+    if ($raw !== '') {
+        $time = parseWhen($raw);
+    }
+    if ($time) {
+        echo $ti<>me;
+    }
+}

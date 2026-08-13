@@ -1,0 +1,28 @@
+// test: an override's native return type restricts the docblock it inherits
+// feature: hover
+// The implementation has no docblock of its own, so it inherits the
+// interface's union — but its own `: array` rules out the `string` half.
+// expect: array<string, mixed>|list<mixed>
+// expect_absent: |string
+---
+<?php
+
+interface HasPayload
+{
+    /** @return array<string, mixed>|list<mixed>|string */
+    public function payload();
+}
+
+class JsonPayload implements HasPayload
+{
+    public function payload(): array
+    {
+        return [];
+    }
+}
+
+function readPayload(JsonPayload $payload): void
+{
+    $data = $payload->payload();
+    echo $da<>ta;
+}

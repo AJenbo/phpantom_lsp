@@ -743,8 +743,15 @@ fn resolve_rhs_expression_inner<'b>(
                 bytes_to_str(string.raw).to_string(),
             ))]
         }
-        Expression::Literal(Literal::True(_) | Literal::False(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::bool())]
+        // A written `true` / `false` keeps its literal type the way every
+        // other literal does, so a variable seeded with `false` can have
+        // that half subtracted by a later truthiness check instead of
+        // carrying an unfalsifiable `bool`.
+        Expression::Literal(Literal::True(_)) => {
+            vec![ResolvedType::from_type_string(PhpType::true_())]
+        }
+        Expression::Literal(Literal::False(_)) => {
+            vec![ResolvedType::from_type_string(PhpType::false_())]
         }
         Expression::Literal(Literal::Null(_)) => {
             vec![ResolvedType::from_type_string(PhpType::null())]
