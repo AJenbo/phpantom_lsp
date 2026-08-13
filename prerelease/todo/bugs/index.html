@@ -851,17 +851,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b140-interface-phpdoc-is-not-inherited-by-an-implementation-without-its-own-docblock" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B140. Interface phpDoc is not inherited by an implementation without its own docblock
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b141-a-never-conditional-branch-does-not-assert-the-condition" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1078,10 +1067,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b163-residual-int-arithmetic-and-assignment-widenings" class="md-nav__link">
+  <a href="#b163-an-int-assigned-to-a-float-property-is-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B163. Residual <code>int</code> arithmetic and assignment widenings
+        B163. An <code>int</code> assigned to a <code>float</code> property is reported
       </span>
     </span>
   </a>
@@ -1165,17 +1154,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b171-a-subclass-property-tag-loses-to-an-inherited-real-property" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B171. A subclass <code>@property</code> tag loses to an inherited real property
       </span>
     </span>
   </a>
@@ -1706,17 +1684,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b140-interface-phpdoc-is-not-inherited-by-an-implementation-without-its-own-docblock" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B140. Interface phpDoc is not inherited by an implementation without its own docblock
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b141-a-never-conditional-branch-does-not-assert-the-condition" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1933,10 +1900,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b163-residual-int-arithmetic-and-assignment-widenings" class="md-nav__link">
+  <a href="#b163-an-int-assigned-to-a-float-property-is-reported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B163. Residual <code>int</code> arithmetic and assignment widenings
+        B163. An <code>int</code> assigned to a <code>float</code> property is reported
       </span>
     </span>
   </a>
@@ -2020,17 +1987,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b171-a-subclass-property-tag-loses-to-an-inherited-real-property" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B171. A subclass <code>@property</code> tag loses to an inherited real property
       </span>
     </span>
   </a>
@@ -2122,7 +2078,7 @@ is never decided — the whole union of branches is returned instead:</p>
 <p>Undecided type conditions from the sweep: <code>$id is array&lt;mixed&gt;|Arrayable</code>
 (Eloquent <code>find</code>/<code>findOrFail</code>, ~24 sites), <code>$items is EloquentCollection</code>
 / <code>$into is class-string&lt;…&gt;</code> (spatie/laravel-data <code>Data::collect()</code>,
-~22 sites once B140 lands), <code>$callback is null</code> (<code>tap()</code>, which also
+~22 sites), <code>$callback is null</code> (<code>tap()</code>, which also
 leaks the raw template name <code>TValue</code> into the union), and Symfony's
 <code>ContainerInterface::get()</code> (<code>B is 0|1</code> against the omitted argument's
 default <code>1</code>). Two cosmetic side effects to clear with it: a model's
@@ -2134,20 +2090,6 @@ nested conditionals collapse into unions containing an unresolved
 resolved argument type (falling back to the declared default's type
 when the argument is omitted), recursing into nested conditionals, and
 only union the branches when the condition is genuinely undecidable.</p>
-<h3 id="b140-interface-phpdoc-is-not-inherited-by-an-implementation-without-its-own-docblock">B140. Interface phpDoc is not inherited by an implementation without its own docblock<a class="headerlink" href="#b140-interface-phpdoc-is-not-inherited-by-an-implementation-without-its-own-docblock" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Low-Medium</strong></p>
-<p><code>Spatie\LaravelData\Concerns\BaseData::collect()</code> (a trait method) has
-no docblock; the conditional <code>@return</code> lives on the interface
-<code>Spatie\LaravelData\Contracts\BaseData</code> that the <code>Data</code> base class
-implements. PHPStan inherits phpDoc from implemented interfaces when
-the implementation (including one supplied by a trait) has none;
-PHPantom reads only the native signature, so every <code>X::collect(...)</code>
-returns the raw eleven-member union. ~22 sites across three Laravel
-projects, always as <code>array</code>/<code>Collection</code> inputs whose result feeds a
-declared <code>array&lt;X&gt;</code>/<code>Collection&lt;int, X&gt;</code>.</p>
-<p><strong>Fix:</strong> when a method has no own docblock, look it up on the
-interfaces the declaring class (transitively) implements, the same way
-parent-class docblocks are already inherited.</p>
 <h3 id="b141-a-never-conditional-branch-does-not-assert-the-condition">B141. A <code>never</code> conditional branch does not assert the condition<a class="headerlink" href="#b141-a-never-conditional-branch-does-not-assert-the-condition" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */</span>
@@ -2280,10 +2222,9 @@ generic array only for non-constant keys.</p>
 <li><code>$a[$k][] = $v</code> never updates the inner element type: a value
   initialised as <code>[]</code> stays <code>array{}</code> in the outgoing type even
   though every loop iteration appends strings.</li>
-<li>The intermediate empty-array state from
-  <code>if (!isset($a[$k])) { $a[$k] = []; } $a[$k][$id] = $x;</code> survives
-  the loop fix-point, leaving <code>array{}|array&lt;int, string&gt;</code> where
-  PHPStan reports <code>non-empty-array&lt;int, string&gt;</code>.</li>
+<li>A key written on every path through a loop body leaves
+  <code>array&lt;int, string&gt;</code> where PHPStan reports
+  <code>non-empty-array&lt;int, string&gt;</code>.</li>
 <li><code>$a += ['slot' =&gt; $obj]</code> degrades to unconstrained <code>array</code>.</li>
 <li>A constant shape <code>array{item: string, qty: int}</code> fails the subtype
   check against <code>array&lt;string, mixed&gt;</code>, so shaped rows are rejected
@@ -2401,12 +2342,16 @@ nothing here — and a later reassignment (<code>$x = []; … $x = narrow();</co
 is also overridden by the annotation. The <code>@var</code> should seed the
 assignment it documents and then submit to normal flow narrowing
 (3 sites).</p>
-<h3 id="b163-residual-int-arithmetic-and-assignment-widenings">B163. Residual <code>int</code> arithmetic and assignment widenings<a class="headerlink" href="#b163-residual-int-arithmetic-and-assignment-widenings" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
-<p>Two leftovers from the shipped arithmetic-precision work:
-<code>($a[$k] ?? 0) + $int</code> widens to <code>int|float</code>, and an <code>int</code> value
+<h3 id="b163-an-int-assigned-to-a-float-property-is-reported">B163. An <code>int</code> assigned to a <code>float</code> property is reported<a class="headerlink" href="#b163-an-int-assigned-to-a-float-property-is-reported" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p>A leftover from the shipped arithmetic-precision work: an <code>int</code> value
 assigned to a <code>float</code>-typed property is reported instead of accepting
-the standard numeric widening.</p>
+the standard numeric widening PHP performs even under
+<code>declare(strict_types=1)</code>.</p>
+<p>No site for this reproduces any more — not in the ten-project sweep,
+and not in the promoted-constructor, static-property, <code>+=</code>,
+<code>@var</code>-only, nullable, and array-element forms. Confirm it still
+happens before working on it.</p>
 <h3 id="b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join">B174. A <code>break</code> that leaves a loop early is missing from the post-loop join<a class="headerlink" href="#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$a = &#39;x&#39;;</span>
@@ -2482,15 +2427,6 @@ the flow-narrowed scope at the include position — the compiled
 virtual PHP already contains the real <code>if</code>, so the walker has the
 narrowing; it is the include-contract check that reads the wrong
 scope.</p>
-<h3 id="b171-a-subclass-property-tag-loses-to-an-inherited-real-property">B171. A subclass <code>@property</code> tag loses to an inherited real property<a class="headerlink" href="#b171-a-subclass-property-tag-loses-to-an-inherited-real-property" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>A model declaring <code>@property string $connection</code> still resolves
-<code>$model-&gt;connection</code> through <code>Illuminate\Database\Eloquent\Model</code>'s
-inherited <code>protected $connection</code> (<code>string|null</code>) and the generic
-attribute fallback (<code>UnitEnum|string|null</code>). A magic read must prefer
-the class's own <code>@property</code> tag over a non-public inherited property.
-1 site, but the shadowing pattern (<code>$connection</code>, <code>$table</code>, <code>$keyType</code>)
-is common on Eloquent models.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b173-classes-shipped-inside-a-dependencys-phar-are-invisible">B173. Classes shipped inside a dependency's phar are invisible<a class="headerlink" href="#b173-classes-shipped-inside-a-dependencys-phar-are-invisible" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
