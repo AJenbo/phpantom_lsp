@@ -940,17 +940,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b145-a-non-literal-string-or-int-write-key-widens-to-intstring" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B145. A non-literal string or int write key widens to <code>int|string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b146-array-builtins-lose-key-and-element-generics" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1016,39 +1005,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B150. Branch-local reassignment and narrowing are wrong at the join point
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b151-negated-compound-guards-with-an-early-exit-narrow-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B151. Negated compound guards with an early exit narrow nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b152-a-ternarys-arms-do-not-receive-the-conditions-narrowing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B152. A ternary's arms do not receive the condition's narrowing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b153-short-circuit-operators-do-not-narrow-their-right-operand" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B153. Short-circuit operators do not narrow their right operand
       </span>
     </span>
   </a>
@@ -1839,17 +1795,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b145-a-non-literal-string-or-int-write-key-widens-to-intstring" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B145. A non-literal string or int write key widens to <code>int|string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b146-array-builtins-lose-key-and-element-generics" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1915,39 +1860,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B150. Branch-local reassignment and narrowing are wrong at the join point
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b151-negated-compound-guards-with-an-early-exit-narrow-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B151. Negated compound guards with an early exit narrow nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b152-a-ternarys-arms-do-not-receive-the-conditions-narrowing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B152. A ternary's arms do not receive the condition's narrowing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b153-short-circuit-operators-do-not-narrow-their-right-operand" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B153. Short-circuit operators do not narrow their right operand
       </span>
     </span>
   </a>
@@ -2325,29 +2237,6 @@ seven projects):</p>
 non-null after the call; add a literal-pattern group-shape analysis
 (port the capture-group walk from PHPStan's <code>RegexArrayShapeMatcher</code>).</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b145-a-non-literal-string-or-int-write-key-widens-to-intstring">B145. A non-literal string or int write key widens to <code>int|string</code><a class="headerlink" href="#b145-a-non-literal-string-or-int-write-key-widens-to-intstring" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @return array&lt;string, string&gt; */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function flags(array $countries): array {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $flags = [];</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    foreach ($countries as $c) { $flags[$c-&gt;value] = $c-&gt;flag(); }</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    return $flags;   // reported array&lt;int|string, string&gt;</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>normalize_array_key</code> (<code>type_engine/variable/resolution.rs</code>, the
-<code>is_string_subtype()</code> arm) widens every non-literal <code>string</code> key to
-<code>int|string</code> on the grounds that a numeric string becomes an int key
-at runtime. PHPStan deliberately keeps <code>string</code> (only <em>literal</em>
-decimal-int strings convert), and every consumer declares
-<code>array&lt;string, T&gt;</code>, so the widening produces a mismatch at ~28 sites
-across six projects — including keys after an explicit <code>(string)</code>
-cast, backed-enum <code>-&gt;value</code> reads, and <code>ReflectionProperty::getName()</code>.
-Int-typed key expressions (<code>$result[++$line]</code>, <code>$products[$item-&gt;id]</code>
-after <code>assert(is_int(...))</code>) equally widen to <code>array-key</code>.</p>
-<p><strong>Fix:</strong> drop the broad-string arm; use the key expression's resolved
-type (string stays <code>string</code>, int stays <code>int</code>), keeping the int
-conversion for literal decimal keys only. Apply the same rule to
-<code>foreach</code> key inference.</p>
 <h3 id="b146-array-builtins-lose-key-and-element-generics">B146. Array builtins lose key and element generics<a class="headerlink" href="#b146-array-builtins-lose-key-and-element-generics" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Effort: Medium</strong></p>
 <p>~20 sites across six projects, all the same underlying gap — the
@@ -2369,11 +2258,11 @@ verbatim instead of substituting the input's generics:</p>
 <p><strong>Fix:</strong> per-function generic signatures in the stub patch layer.</p>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach ($rows as $row) {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">foreach ($rows as $row) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A list literal collapses to <code>array&lt;union-of-values&gt;</code>, so list
 destructuring and constant-offset reads cannot select a slot (6 sites
@@ -2406,9 +2295,9 @@ constant shapes satisfy their generic supertypes.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it">B149. <code>instanceof</code> narrowing extends the union instead of filtering it<a class="headerlink" href="#b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$obj = $container-&gt;get(&#39;config&#39;);       // object|null</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">assert($obj instanceof Configuration);</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">return $obj;                            // reported object|null|Configuration</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$obj = $container-&gt;get(&#39;config&#39;);       // object|null</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">assert($obj instanceof Configuration);</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">return $obj;                            // reported object|null|Configuration</span>
 </code></pre></div>
 <p><code>assert($x instanceof T)</code> (and the <code>if (!$x instanceof T) { throw }</code>
 guard) <em>adds</em> <code>T</code> to the union instead of replacing it (5 sites in
@@ -2436,57 +2325,13 @@ both polarities, for <code>assert()</code> and guard forms alike.</p>
 <p><strong>Fix:</strong> at the merge, each branch contributes its end-state (declared
 type transformed by that branch's assignments/narrowings), and the
 join is the union of branch end-states — nothing more, nothing less.</p>
-<h3 id="b151-negated-compound-guards-with-an-early-exit-narrow-nothing">B151. Negated compound guards with an early exit narrow nothing<a class="headerlink" href="#b151-negated-compound-guards-with-an-early-exit-narrow-nothing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">if (!is_string($payload) || $payload === &#39;&#39;) { continue; }</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$this-&gt;fromPayload($payload);   // reported: got string|array|null</span>
-</code></pre></div>
-<p>The <code>if (!guard1 || !guard2) { exit; }</code> idiom — with <code>return</code>,
-<code>continue</code>, <code>throw</code>, or <code>abort()</code> as the exit — leaves the
-fall-through scope un-narrowed (~10 sites across five projects).
-Single-guard forms fail too: <code>if (!is_resource($h)) { return; }</code>,
-<code>if (!is_array($x)) { $x = [$x]; }</code> (both arms), and <code>!== ''</code>
-producing <code>non-empty-string</code> on the fall-through path. <code>is_array</code> and
-<code>is_resource</code> appear to lack guard support in any position, while
-<code>is_string</code>/<code>is_int</code> work in the plain <code>if</code> form — audit the <code>is_*</code>
-family for coverage while in there.</p>
-<p><strong>Fix:</strong> apply De Morgan over <code>||</code>/<code>&amp;&amp;</code> in a negated condition whose
-branch terminates, narrowing the fall-through with each conjunct; fill
-the <code>is_array</code>/<code>is_resource</code> guard gaps.</p>
-<h3 id="b152-a-ternarys-arms-do-not-receive-the-conditions-narrowing">B152. A ternary's arms do not receive the condition's narrowing<a class="headerlink" href="#b152-a-ternarys-arms-do-not-receive-the-conditions-narrowing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$period = is_string($req) ? $req : &#39;today&#39;;   // reported string|array|null</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$icon   = $tier-&gt;app_icon ? image($tier-&gt;app_icon) : &#39;&#39;;   // reported null|string</span>
-</code></pre></div>
-<p>The condition narrows neither the true arm nor the false arm — the
-raw union flows into both (~14 sites across six projects, the
-second-largest pure-narrowing cluster). The failure is worst in
-argument position: the same ternary in assignment position sometimes
-works, so the machinery exists but is not wired into every expression
-context. <code>$pos === false ? null : $pos</code> keeping <code>false</code> in the else
-arm is the same defect in negative polarity.</p>
-<p><strong>Fix:</strong> run condition type-specification when resolving a ternary
-(both arms, both polarities), independent of the expression's
-syntactic position; <code>?:</code> reuses the subject's truthy/falsy split.</p>
-<h3 id="b153-short-circuit-operators-do-not-narrow-their-right-operand">B153. Short-circuit operators do not narrow their right operand<a class="headerlink" href="#b153-short-circuit-operators-do-not-narrow-their-right-operand" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p>The right operand of <code>&amp;&amp;</code> sees the left operand's positive narrowing
-(<code>is_array($this-&gt;address) &amp;&amp; array_key_exists($k, $this-&gt;address)</code>
-— note the property subject), and the right operand of <code>||</code> sees the
-<em>negative</em> narrowing (<code>$hash === false || $this-&gt;isModified($f, $hash)</code>;
-<code>null === $x || $this-&gt;check($customer, $x)</code>). Neither happens today
-(4 sites). The same condition-scope plumbing should make an
-assignment inside an <code>elseif</code> condition truthy-narrow its variable
-(<code>} elseif ($token = $req-&gt;bearerToken()) {</code>).</p>
-<p><strong>Fix:</strong> evaluate the left operand's type specification into the
-scope used for the right operand, per polarity.</p>
 <h3 id="b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver">B154. A check on a nullsafe chain does not narrow the receiver<a class="headerlink" href="#b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$image = Productimage::where(…)-&gt;first();       // Productimage|null</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">if ($image?-&gt;file_id !== null) {</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    $this-&gt;scheduleDeletion($image-&gt;file_id);</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    $this-&gt;repo-&gt;delete($image);                // reported Productimage|null</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$image = Productimage::where(…)-&gt;first();       // Productimage|null</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">if ($image?-&gt;file_id !== null) {</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    $this-&gt;scheduleDeletion($image-&gt;file_id);</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    $this-&gt;repo-&gt;delete($image);                // reported Productimage|null</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>If <code>$image</code> were null the chain yields <code>null</code> and the comparison
 fails, so inside the branch the receiver is non-null. The same holds
@@ -2498,10 +2343,10 @@ non-nullable RHS. 5 sites in four projects.</p>
 narrow every receiver in the chain to non-null in that branch.</p>
 <h3 id="b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call">B155. A checked call expression is forgotten by the next identical call<a class="headerlink" href="#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">}</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
 </code></pre></div>
 <p>Narrowing is keyed on variables only; a structurally identical
 side-effect-free call repeated inside the guarded scope re-resolves
@@ -2545,11 +2390,11 @@ list's literals (⊆ <code>string</code>), removing <code>null</code>. Requires 
 expression keying for method-call needles. 2 sites.</p>
 <h3 id="b159-an-inline-var-re-pins-the-variable-on-every-read">B159. An inline <code>@var</code> re-pins the variable on every read<a class="headerlink" href="#b159-an-inline-var-re-pins-the-variable-on-every-read" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @var null|list&lt;array{…}&gt; $cached */</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">$cached = Cache::get(self::KEY);</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">if ($cached !== null) {</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported null|list&lt;…&gt;</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @var null|list&lt;array{…}&gt; $cached */</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$cached = Cache::get(self::KEY);</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">if ($cached !== null) {</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported null|list&lt;…&gt;</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A plain <code>!== null</code> guard that works on any ordinary variable does
 nothing here — and a later reassignment (<code>$x = []; … $x = narrow();</code>)
@@ -2564,12 +2409,12 @@ assigned to a <code>float</code>-typed property is reported instead of accepting
 the standard numeric widening.</p>
 <h3 id="b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join">B174. A <code>break</code> that leaves a loop early is missing from the post-loop join<a class="headerlink" href="#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$a = &#39;x&#39;;</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">do {</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    if (rand(0, 1)) { break; }   // leaves with $a === &#39;x&#39;</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">    $a = 1;</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">} while (rand(0, 1));</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">$a;                              // reported 1, should be &#39;x&#39;|1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$a = &#39;x&#39;;</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">do {</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    if (rand(0, 1)) { break; }   // leaves with $a === &#39;x&#39;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    $a = 1;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">} while (rand(0, 1));</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">$a;                              // reported 1, should be &#39;x&#39;|1</span>
 </code></pre></div>
 <p>The state a <code>break</code> carries out of a loop does not reach the post-loop
 merge, so only the paths that ran to the end of the body contribute. The
@@ -2626,9 +2471,9 @@ precise). Model the conditional shapes natively for
 sample sources as genuine.)</p>
 <h3 id="b169-blade-if-narrowing-does-not-reach-included-variables">B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables<a class="headerlink" href="#b169-blade-if-narrowing-does-not-reach-included-variables" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>@if ($product)
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>@endif
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>@if ($product)
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>@endif
 </code></pre></div>
 <p>An inherited variable is checked against the template's <em>declared</em>
 signature type at the <code>@include</code> site, ignoring the enclosing Blade
