@@ -564,6 +564,21 @@ pub fn find_inline_var_docblock(
     extract_var_type_with_name(docblock)
 }
 
+/// Strip the docblock delimiters from a single trimmed source line so the
+/// tag text it carries can be matched.
+///
+/// Each delimiter is optional and removed independently: `/**`, a trailing
+/// `*/`, and the leading `*` of a continuation line.  Stripping them
+/// independently is what makes a tag written on the same line as the
+/// opening `/**` of a *multi-line* docblock readable — chaining
+/// `strip_suffix("*/").unwrap_or(trimmed)` onto the prefix strip would
+/// restore the `/**` whenever the line does not also close the block.
+fn strip_docblock_line_delimiters(trimmed: &str) -> &str {
+    let inner = trimmed.strip_prefix("/**").unwrap_or(trimmed);
+    let inner = inner.strip_suffix("*/").unwrap_or(inner);
+    inner.trim().trim_start_matches('*').trim()
+}
+
 /// Search backward through `content` (up to `before_offset`) for any
 /// `/** @var RawType $var_name */` annotation and return the **raw**
 /// (uncleaned) type string — including generic parameters like `<User>`.
@@ -638,13 +653,7 @@ pub fn find_var_raw_type_in_source(
             continue;
         }
 
-        // Strip docblock delimiters — handles single-line `/** @var … */`.
-        let inner = trimmed
-            .strip_prefix("/**")
-            .unwrap_or(trimmed)
-            .strip_suffix("*/")
-            .unwrap_or(trimmed);
-        let inner = inner.trim().trim_start_matches('*').trim();
+        let inner = strip_docblock_line_delimiters(trimmed);
 
         if let Some(rest) = inner.strip_prefix("@var") {
             let rest = rest.trim_start();
@@ -1073,14 +1082,7 @@ pub fn find_iterable_raw_type_in_source(
 
         // ── Named annotation: line mentions the variable name ───────
         if trimmed.contains(var_name) {
-            // Strip docblock delimiters — handles single-line `/** @var … */`
-            // and multi-line `* @param …` lines.
-            let inner = trimmed
-                .strip_prefix("/**")
-                .unwrap_or(trimmed)
-                .strip_suffix("*/")
-                .unwrap_or(trimmed);
-            let inner = inner.trim().trim_start_matches('*').trim();
+            let inner = strip_docblock_line_delimiters(trimmed);
 
             // Try @var first, then @param.
             let rest = if let Some(r) = inner.strip_prefix("@var") {
@@ -1123,12 +1125,7 @@ pub fn find_iterable_raw_type_in_source(
             if next_trimmed.starts_with(var_name)
                 && next_trimmed[var_name.len()..].trim_start().starts_with('=')
             {
-                let inner = trimmed
-                    .strip_prefix("/**")
-                    .unwrap_or(trimmed)
-                    .strip_suffix("*/")
-                    .unwrap_or(trimmed);
-                let inner = inner.trim().trim_start_matches('*').trim();
+                let inner = strip_docblock_line_delimiters(trimmed);
 
                 if let Some(rest) = inner.strip_prefix("@var") {
                     let rest = rest.trim_start();
@@ -2152,6 +2149,79 @@ mod tests {
             result.as_ref().map(|t| t.to_string()),
             Some("list<Pen>".to_string())
         );
+    }
+
+    #[test]
+    fn iterable_param_found_on_docblock_opening_line() {
+        // The first tag of a multi-line docblock may share the opening
+        // `/**` line.  It must be read just like a continuation line.
+        let src = concat!(
+            "<?php\n",
+            "class Demo {\n",
+            "    /** @param list<Pen> $items\n",
+            "     *  @return void */\n",
+            "    public function demo(array $items): void {\n",
+            "        foreach ($items as $x) {\n",
+            "            // cursor\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        );
+        let cursor = src.find("// cursor").unwrap();
+        let result = find_iterable_raw_type_in_source(src, cursor, "$items");
+        assert_eq!(
+            result.as_ref().map(|t| t.to_string()),
+            Some("list<Pen>".to_string())
+        );
+    }
+
+    #[test]
+    fn iterable_var_found_on_docblock_opening_line() {
+        let src = concat!(
+            "<?php\n",
+            "function demo(): void {\n",
+            "    /** @var list<Pen> $items\n",
+            "     *  a trailing description */\n",
+            "    $items = foo();\n",
+            "    foreach ($items as $x) {\n",
+            "        // cursor\n",
+            "    }\n",
+            "}\n",
+        );
+        let cursor = src.find("// cursor").unwrap();
+        assert_eq!(
+            find_iterable_raw_type_in_source(src, cursor, "$items")
+                .as_ref()
+                .map(|t| t.to_string()),
+            Some("list<Pen>".to_string())
+        );
+        assert_eq!(
+            find_var_raw_type_in_source(src, cursor, "$items")
+                .as_ref()
+                .map(|t| t.to_string()),
+            Some("list<Pen>".to_string())
+        );
+    }
+
+    #[test]
+    fn docblock_line_delimiters_stripped_independently() {
+        assert_eq!(
+            strip_docblock_line_delimiters("/** @param string $a */"),
+            "@param string $a"
+        );
+        assert_eq!(
+            strip_docblock_line_delimiters("/** @param string $a"),
+            "@param string $a"
+        );
+        assert_eq!(
+            strip_docblock_line_delimiters("* @param string $a */"),
+            "@param string $a"
+        );
+        assert_eq!(
+            strip_docblock_line_delimiters("*  @param string $a"),
+            "@param string $a"
+        );
+        assert_eq!(strip_docblock_line_delimiters("*/"), "");
     }
 
     // ── extract_type_assertions (generic types) ─────────────────────

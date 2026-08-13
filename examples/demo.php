@@ -2325,6 +2325,27 @@ class ShapeMethodDemo
 }
 
 
+// ── A Tag on the Docblock's Opening Line ────────────────────────────────────
+
+class OpeningLineTagDemo
+{
+    /**
+     * A docblock may start its first tag on the `/**` line itself instead of
+     * on a continuation line below it. Both spellings say the same thing, so
+     * the tag is read either way and the parameter holds what it declares
+     * rather than falling back to the wider native hint.
+     */
+    public function demo(): void
+    {
+        // Try: hover `$mark` inside `scaffoldingGradeOnOpeningLine()`.
+        var_dump(scaffoldingGradeOnOpeningLine('b'));   // 'a'|'b'|'c', not plain string
+
+        // Try: complete `$tool->` inside `scaffoldingWriteAllOnOpeningLine()`.
+        var_dump(scaffoldingWriteAllOnOpeningLine([new Pen(), new Pen()]));
+    }
+}
+
+
 // ── Named Key Destructuring from Array Shapes ───────────────────────────────
 
 class DestructuringShapeDemo
@@ -7284,6 +7305,28 @@ function takesNumeric(int|float|string $value): void {}
 /** @param 'a'|'b'|'c' $grade */
 function takesGrade(string $grade): void {}
 
+/** @param 'a'|'b'|'c' $mark
+ *  @return 'a'|'b'|'c' */
+function scaffoldingGradeOnOpeningLine(string $mark): string
+{
+    // Try: hover `$mark` — 'a'|'b'|'c', read off the tag the `/**` shares.
+    takesGrade($mark);
+
+    return $mark;
+}
+
+/** @param list<Pen> $tools
+ *  A description sharing its line with the tag above it. */
+function scaffoldingWriteAllOnOpeningLine(array $tools): string
+{
+    $written = '';
+    foreach ($tools as $tool) {
+        $written .= $tool->write();    // Pen, the element type of the declared list
+    }
+
+    return $written;
+}
+
 function takesScalar(int|float|string|bool $value): void {}
 
 /** @return array<int, Pen>|false */
@@ -7605,6 +7648,10 @@ function runDemoAssertions(): void
     assert(in_array(scaffoldingAnyToolDefault(), TOOL_DEFAULTS, true), "the untemplated return really is one of TOOL_DEFAULTS' values");
     assert(scaffoldingToolDefaultFor('ink') === 'black', "a key read inside the body really picks the table's own value");
     assert(array_key_exists(ScaffoldingLimits::anyLimitName(), ScaffoldingLimits::LIMITS), "the declared return really is one of LIMITS' keys");
+
+    // ── A tag on the docblock's opening line ────────────────────────────
+    assert(scaffoldingGradeOnOpeningLine('b') === 'b', "the opening-line @param really is handed one of 'a'|'b'|'c'");
+    assert(scaffoldingWriteAllOnOpeningLine([new Pen(), new Pen()]) === '', 'the opening-line @param really iterates Pens');
 
     // ── Receiver retyped by a call (@psalm-this-out) ─────────────────────
     /** @var ScaffoldingMutableBox<Pen> $selfOutBox */
