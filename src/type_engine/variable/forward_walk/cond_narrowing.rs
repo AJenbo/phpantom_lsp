@@ -2604,70 +2604,110 @@ pub(crate) fn seed_synthetic_key_if_needed(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     // Only seed compound keys (property access or array access).
-    let is_property = key.contains("->");
-    let is_array = key.contains("[\"");
-    if !is_property && !is_array {
+    if !key.contains("->") && !key.contains("[\"") {
         return;
     }
     if scope.contains(key) {
         return;
     }
 
-    if is_property {
-        seed_member_key(key, scope, ctx);
-    } else if is_array {
-        // Array access key: `$a["test"]`.
-        // Extract the base variable and key name.
-        if let Some(bracket_pos) = key.find("[\"") {
-            let base_var = &key[..bracket_pos];
-            let key_name = key[bracket_pos + 2..]
-                .strip_suffix("\"]")
-                .unwrap_or(&key[bracket_pos + 2..]);
-            let base_types = scope.get(base_var);
-            if base_types.is_empty() {
-                return;
-            }
-            // Look up the array key's type.  Prefer a precise shape entry
-            // (`array{class: Foo}`); fall back to the generic element type
-            // (`array<string, Foo>` → `Foo`); and finally to `mixed` for an
-            // untyped array (plain `array`).  Seeding the untyped case is
-            // what lets assertion / class-string narrowing apply to an
-            // array-index subject whose element type is otherwise unknown
-            // (e.g. `assertInstanceOf(X::class, $arr['k'])`).
-            let mut key_results: Vec<ResolvedType> = Vec::new();
-            for rt in base_types {
-                let element_type = rt
-                    .type_string
-                    .extract_shape_key_type(key_name)
-                    .or_else(|| rt.type_string.extract_value_type(false).cloned())
-                    .or_else(|| rt.type_string.is_array_like().then(PhpType::mixed));
-                let Some(element_type) = element_type else {
-                    continue;
-                };
-                let resolved_classes =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                        &element_type,
-                        &ctx.current_class.name,
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    );
-                if resolved_classes.is_empty() {
-                    ResolvedType::extend_unique(
-                        &mut key_results,
-                        vec![ResolvedType::from_type_string(element_type)],
-                    );
-                } else {
-                    ResolvedType::extend_unique(
-                        &mut key_results,
-                        ResolvedType::from_classes_with_hint(resolved_classes, element_type),
-                    );
-                }
-            }
-            if !key_results.is_empty() {
-                scope.set(key, key_results);
-            }
+    let types = resolve_synthetic_key_type(key, scope, ctx);
+    scope.set(key, types);
+}
+
+/// Resolve what a synthetic scope key promises, reading the scope but not
+/// writing to it.
+///
+/// Dispatches on the key's *trailing* segment, because that is the access
+/// that produces the key's type: `$a->items["0"]` is an array access whose
+/// base is a property path, while `$a["0"]->items` is a property access
+/// whose base is an array access.  Testing for `->` anywhere in the key
+/// would route the former down the member path, which splits at the last
+/// `->` and would look up a member literally named `items["0"]` — a name no
+/// class declares, so a model with a magic `__get` answers it with `mixed`
+/// and that bogus `mixed` becomes the authoritative type for the key.
+fn resolve_synthetic_key_type(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    if key.ends_with("\"]") {
+        resolve_array_key_type(key, scope, ctx)
+    } else if key.contains("->") {
+        resolve_member_key_type(key, scope, ctx)
+    } else {
+        scope.get(key).to_vec()
+    }
+}
+
+/// Resolve the element type an array-access key promises (`$a["k"]`,
+/// `$a->items["0"]`, `$a["x"]["y"]`).
+fn resolve_array_key_type(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    // Split off the *last* bracket segment so a nested access resolves its
+    // base (`$a["x"]` of `$a["x"]["y"]`) through the same dispatcher.
+    let Some(bracket_pos) = key.rfind("[\"") else {
+        return Vec::new();
+    };
+    let base_var = &key[..bracket_pos];
+    let key_name = key[bracket_pos + 2..]
+        .strip_suffix("\"]")
+        .unwrap_or(&key[bracket_pos + 2..]);
+
+    // Only the leading variable of a path is ever assigned in the scope, so
+    // a compound base has to be resolved the same way this key is.  Each
+    // step drops one segment, so the recursion is bounded by the number of
+    // segments in the key.
+    let resolved_base;
+    let base_types: &[ResolvedType] = match scope.get(base_var) {
+        [] if base_var.contains("->") || base_var.ends_with("\"]") => {
+            resolved_base = resolve_synthetic_key_type(base_var, scope, ctx);
+            &resolved_base
+        }
+        from_scope => from_scope,
+    };
+    if base_types.is_empty() {
+        return Vec::new();
+    }
+    // Look up the array key's type.  Prefer a precise shape entry
+    // (`array{class: Foo}`); fall back to the generic element type
+    // (`array<string, Foo>` → `Foo`); and finally to `mixed` for an
+    // untyped array (plain `array`).  Seeding the untyped case is
+    // what lets assertion / class-string narrowing apply to an
+    // array-index subject whose element type is otherwise unknown
+    // (e.g. `assertInstanceOf(X::class, $arr['k'])`).
+    let mut key_results: Vec<ResolvedType> = Vec::new();
+    for rt in base_types {
+        let element_type = rt
+            .type_string
+            .extract_shape_key_type(key_name)
+            .or_else(|| rt.type_string.extract_value_type(false).cloned())
+            .or_else(|| rt.type_string.is_array_like().then(PhpType::mixed));
+        let Some(element_type) = element_type else {
+            continue;
+        };
+        let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &element_type,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        if resolved_classes.is_empty() {
+            ResolvedType::extend_unique(
+                &mut key_results,
+                vec![ResolvedType::from_type_string(element_type)],
+            );
+        } else {
+            ResolvedType::extend_unique(
+                &mut key_results,
+                ResolvedType::from_classes_with_hint(resolved_classes, element_type),
+            );
         }
     }
+    key_results
 }
 
 /// Seed property/array-access subject keys that appear as arguments to a
@@ -2824,14 +2864,6 @@ pub(crate) fn seed_property_keys_into_scope(
     }
 }
 
-/// Seed one member key — `$var->prop` (possibly chained like `$a->b->c`)
-/// or `$var->method()` for an argument-less call — with the type its
-/// declaration promises.
-fn seed_member_key(key: &str, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
-    let types = resolve_member_key_type(key, scope, ctx);
-    scope.set(key, types);
-}
-
 /// Resolve what a member key's declaration promises, reading the scope
 /// but not writing to it.
 fn resolve_member_key_type(
@@ -2851,13 +2883,14 @@ fn resolve_member_key_type(
 
     // Resolve the object part's type from scope.  Only the leading
     // variable of a path is ever assigned there, so a deeper path
-    // (`$this->holder` in `$this->holder->service`) has to be resolved
-    // the same way this key is.  Each step drops one segment, so the
-    // recursion is bounded by the number of `->` in the key.
+    // (`$this->holder` in `$this->holder->service`, or `$rows["0"]` in
+    // `$rows["0"]->name`) has to be resolved the same way this key is.
+    // Each step drops one segment, so the recursion is bounded by the
+    // number of segments in the key.
     let resolved_prefix;
     let obj_types: &[ResolvedType] = match scope.get(obj_var) {
-        [] if obj_var.contains("->") => {
-            resolved_prefix = resolve_member_key_type(obj_var, scope, ctx);
+        [] if obj_var.contains("->") || obj_var.ends_with("\"]") => {
+            resolved_prefix = resolve_synthetic_key_type(obj_var, scope, ctx);
             &resolved_prefix
         }
         from_scope => from_scope,

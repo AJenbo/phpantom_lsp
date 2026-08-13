@@ -12357,3 +12357,235 @@ async fn standalone_var_docblock_survives_line_comment_and_sibling_blocks() {
         messages
     );
 }
+
+#[test]
+fn array_index_on_a_property_path_is_not_looked_up_as_a_member_name() {
+    // A guard on `$obj->items[0]` seeds the forward walker's scope under the
+    // key `$obj->items["0"]`.  That key's trailing segment is an array
+    // access, so its type is the collection's element type.  Routing it down
+    // the member path instead splits at the last `->` and looks up a member
+    // literally named `items["0"]`, which a magic `__get` answers with
+    // `mixed` — and the walker's scope is authoritative, so the bogus `mixed`
+    // then defeats every later read of the same expression.
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Item.php",
+                r#"<?php
+namespace App;
+
+class Item {
+    public string $name;
+}
+"#,
+            ),
+            (
+                "src/ItemCollection.php",
+                r#"<?php
+namespace App;
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class ItemCollection implements \ArrayAccess {}
+"#,
+            ),
+            (
+                "src/Bag.php",
+                r#"<?php
+namespace App;
+
+class Bag {
+    /** @var ItemCollection<int, Item> */
+    public ItemCollection $items;
+
+    public function __get(string $name): mixed { return null; }
+}
+"#,
+            ),
+        ],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = r#"<?php
+use App\Bag;
+
+class Service {
+    /** @param Bag[] $bags */
+    public function guarded(array $bags): void {
+        foreach ($bags as $bag) {
+            if (!$bag->items[0] || !$bag->items[0]->name) {
+                continue;
+            }
+
+            echo $bag->items[0]->name;
+        }
+    }
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    backend.update_ast(uri, text);
+    // Go through the full slow-diagnostic pass, not the single collector:
+    // it is what activates the forward walker's diagnostic scope cache, and
+    // the defect lives in what that pre-pass records.
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        messages.is_empty(),
+        "a guarded array index on a property path must keep the element type, got: {:?}",
+        messages
+    );
+}
+
+#[test]
+fn guarded_relation_collection_index_resolves_through_relation_hops() {
+    // The Eloquent shape of the same defect: `$sub->translations[0]` guarded
+    // by a `||` chain.  An Eloquent model answers any unknown property, so
+    // the bogus `translations["0"]` member lookup resolves rather than
+    // failing, poisoning the key for the reads that follow.
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/", "Illuminate\\": "illuminate/" } } }"#,
+        &[
+            (
+                "illuminate/Database/Eloquent/Model.php",
+                r#"<?php
+namespace Illuminate\Database\Eloquent;
+
+class Model {
+    public function __get(string $key): mixed { return null; }
+}
+"#,
+            ),
+            (
+                "illuminate/Database/Eloquent/Relations/HasMany.php",
+                r#"<?php
+namespace Illuminate\Database\Eloquent\Relations;
+
+/**
+ * @template TRelatedModel
+ * @template TDeclaringModel
+ */
+class HasMany {}
+"#,
+            ),
+            (
+                "illuminate/Database/Eloquent/Relations/BelongsTo.php",
+                r#"<?php
+namespace Illuminate\Database\Eloquent\Relations;
+
+/**
+ * @template TRelatedModel
+ * @template TDeclaringModel
+ */
+class BelongsTo {}
+"#,
+            ),
+            (
+                "illuminate/Database/Eloquent/Collection.php",
+                r#"<?php
+namespace Illuminate\Database\Eloquent;
+
+/**
+ * @template TKey of array-key
+ * @template TModel
+ */
+class Collection implements \ArrayAccess {}
+"#,
+            ),
+            (
+                "src/CategoryTranslation.php",
+                r#"<?php
+namespace App;
+
+use Illuminate\Database\Eloquent\Model;
+
+class CategoryTranslation extends Model {
+    public string $name;
+}
+"#,
+            ),
+            (
+                "src/Category.php",
+                r#"<?php
+namespace App;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Category extends Model {
+    /** @return HasMany<CategoryTranslation, $this> */
+    public function translations(): HasMany { return $this->hasMany(CategoryTranslation::class); }
+}
+"#,
+            ),
+            (
+                "src/Subcategory.php",
+                r#"<?php
+namespace App;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class Subcategory extends Model {
+    /** @return BelongsTo<Category, $this> */
+    public function category(): BelongsTo { return $this->belongsTo(Category::class); }
+
+    /** @return HasMany<CategoryTranslation, $this> */
+    public function translations(): HasMany { return $this->hasMany(CategoryTranslation::class); }
+}
+"#,
+            ),
+        ],
+    );
+
+    let uri = "file:///consumer.php";
+    let text = r#"<?php
+use App\Subcategory;
+
+class Export {
+    public function map(Subcategory $subcategory): string {
+        if (
+            !$subcategory->category
+            || !$subcategory->translations[0]
+            || !$subcategory->translations[0]->name
+            || !$subcategory->category->translations[0]
+            || !$subcategory->category->translations[0]->name
+        ) {
+            return '';
+        }
+
+        return $subcategory->translations[0]->name
+            . $subcategory->category->translations[0]->name;
+    }
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    backend.update_ast(uri, text);
+    // Go through the full slow-diagnostic pass, not the single collector:
+    // it is what activates the forward walker's diagnostic scope cache, and
+    // the defect lives in what that pre-pass records.
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        messages.is_empty(),
+        "guarded relation-collection indexes must resolve across relation hops, got: {:?}",
+        messages
+    );
+}
