@@ -840,10 +840,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b139-conditional-return-types-are-not-evaluated-against-argument-types" class="md-nav__link">
+  <a href="#b175-a-parameter-default-written-selfconst-reads-as-the-call-sites-class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B139. Conditional return types are not evaluated against argument <em>types</em>
+        B175. A parameter default written <code>self::CONST</code> reads as the call site's class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b176-a-template-bound-through-a-union-param-never-binds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B176. A <code>@template</code> bound through a union <code>@param</code> never binds
       </span>
     </span>
   </a>
@@ -1673,10 +1684,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b139-conditional-return-types-are-not-evaluated-against-argument-types" class="md-nav__link">
+  <a href="#b175-a-parameter-default-written-selfconst-reads-as-the-call-sites-class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B139. Conditional return types are not evaluated against argument <em>types</em>
+        B175. A parameter default written <code>self::CONST</code> reads as the call site's class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b176-a-template-bound-through-a-union-param-never-binds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B176. A <code>@template</code> bound through a union <code>@param</code> never binds
       </span>
     </span>
   </a>
@@ -2064,52 +2086,66 @@ diagnostics across ten projects, ~330 of them false positives). Site
 counts refer to that sweep; the git-ignored triage log has the full
 per-project inventory. Entries filed later say where they came from.</p>
 <h2 id="conditional-and-argument-dependent-return-types">Conditional and argument-dependent return types<a class="headerlink" href="#conditional-and-argument-dependent-return-types" title="Permanent link">&para;</a></h2>
-<h3 id="b139-conditional-return-types-are-not-evaluated-against-argument-types">B139. Conditional return types are not evaluated against argument <em>types</em><a class="headerlink" href="#b139-conditional-return-types-are-not-evaluated-against-argument-types" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p>The engine evaluates <code>@return ($flag is true ? A : B)</code> when the
-argument is a literal value (and falls back to the parameter default
-when it is omitted), but a condition keyed on the argument's <em>type</em>
-is never decided — the whole union of branches is returned instead:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @return ($id is array&lt;mixed&gt; ? Collection&lt;int, TModel&gt; : TModel|null) */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">public function find($id, $columns = [&#39;*&#39;]) {}</span>
+<h3 id="b175-a-parameter-default-written-selfconst-reads-as-the-call-sites-class">B175. A parameter default written <code>self::CONST</code> reads as the call site's class<a class="headerlink" href="#b175-a-parameter-default-written-selfconst-reads-as-the-call-sites-class" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p>An omitted argument takes its parameter's declared default, and a
+condition keyed on that parameter is decided against it. When the
+default is written <code>self::SOME_CONST</code>, the <code>self</code> is resolved against
+the class the <em>call</em> sits in rather than the class that declares the
+method, so the constant is not found and the condition is left
+undecided:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @return ($id is class-string&lt;C&gt; ? (B is 0|1 ? C|object : C|object|null) : …) */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">public function get(string $id, int $invalidBehavior = self::EXCEPTION_ON_INVALID_REFERENCE): ?object;</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$order = Order::find(7);   // reported Collection&lt;int, Order&gt;|Order|null</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$service = $container-&gt;get(Service::class);   // reported Service|object|null</span>
 </code></pre></div>
-<p>Undecided type conditions from the sweep: <code>$id is array&lt;mixed&gt;|Arrayable</code>
-(Eloquent <code>find</code>/<code>findOrFail</code>, ~24 sites), <code>$items is EloquentCollection</code>
-/ <code>$into is class-string&lt;…&gt;</code> (spatie/laravel-data <code>Data::collect()</code>,
-~22 sites), <code>$callback is null</code> (<code>tap()</code>, which also
-leaks the raw template name <code>TValue</code> into the union), and Symfony's
-<code>ContainerInterface::get()</code> (<code>B is 0|1</code> against the omitted argument's
-default <code>1</code>). Two cosmetic side effects to clear with it: a model's
-custom collection (<code>#[CollectedBy]</code> / <code>$collectionClass</code>) is emitted
-<em>alongside</em> the generic <code>Collection&lt;int, TModel&gt;</code> it stands for, and
-nested conditionals collapse into unions containing an unresolved
-<code>array-key</code> where <code>TKey</code> should have been substituted.</p>
-<p><strong>Fix:</strong> decide <code>is</code> conditions with <code>is_type_compatible</code> on the
-resolved argument type (falling back to the declared default's type
-when the argument is omitted), recursing into nested conditionals, and
-only union the branches when the condition is genuinely undecidable.</p>
-<p>An <code>is null</code> condition is the one kind still decided by argument
-<em>presence</em> rather than argument type: any argument that is not the
-literal <code>null</code> takes the else branch, so <code>getenv($name)</code> and
-<code>$xml-&gt;asXML($path)</code> on a <code>?string</code> commit to a branch the call may not
-take. Route it through the same resolved-type check as the rest.</p>
+<p>Symfony's <code>ContainerInterface::get()</code> is the case that surfaced it: the
+call cannot return <code>null</code> unless the caller asks for that behaviour, so
+every service read carries a <code>null</code> half it never has. Spelling the
+default <code>ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE</code> decides it,
+which is what points at <code>self</code>.</p>
+<p><strong>Fix:</strong> resolve a parameter default's <code>self</code>/<code>static</code>/<code>parent</code> against
+the declaring class before handing the text to the argument-type
+resolver.</p>
+<h3 id="b176-a-template-bound-through-a-union-param-never-binds">B176. A <code>@template</code> bound through a union <code>@param</code> never binds<a class="headerlink" href="#b176-a-template-bound-through-a-union-param-never-binds" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p>A template parameter is bound from the argument whose <code>@param</code> names
+it, but only when the annotation names it plainly (<code>@param T $x</code>),
+inside an array (<code>@param T[] $x</code>), or as one generic wrapper
+(<code>@param array&lt;TKey, TValue&gt; $x</code>). A <em>union</em> of shapes binds nothing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @param Collection&lt;TKey, TValue&gt;|EloquentCollection&lt;TKey, TValue&gt;|array&lt;TKey, TValue&gt; $items</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> * @return array&lt;TKey, TValue&gt;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x"> */</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">function pick($items) {}</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">pick($rows);   // array&lt;int, string&gt; in, reported array&lt;array-key, mixed&gt;</span>
+</code></pre></div>
+<p>Each alternative is a binding site of its own, and the one whose shape
+the argument matches is the one that should bind. spatie's
+<code>Data::collect()</code> is the case that surfaced it: the branch its
+arguments select is right, but its key type falls back to the declared
+<code>array-key</code> bound. A method binds the <em>whole</em> argument type instead,
+which is worse: <code>array&lt;TKey, …&gt;</code> with a <code>list&lt;string&gt;</code> argument reports
+<code>array&lt;array&lt;int, string&gt;, …&gt;</code>.</p>
+<p><strong>Fix:</strong> in <code>classify_template_binding</code>, treat a union <code>@param</code> as the
+set of binding sites it names and match the argument against each,
+binding from the alternative it satisfies.</p>
 <h3 id="b141-a-never-conditional-branch-does-not-assert-the-condition">B141. A <code>never</code> conditional branch does not assert the condition<a class="headerlink" href="#b141-a-never-conditional-branch-does-not-assert-the-condition" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function throw_unless($condition, ...$args) {}</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">$dispatcher = Model::getEventDispatcher();      // Dispatcher|null</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">throw_unless($dispatcher, &#39;Exception&#39;, &#39;…&#39;);</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">Model::setEventDispatcher($dispatcher);         // reported Dispatcher|null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function throw_unless($condition, ...$args) {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$dispatcher = Model::getEventDispatcher();      // Dispatcher|null</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">throw_unless($dispatcher, &#39;Exception&#39;, &#39;…&#39;);</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">Model::setEventDispatcher($dispatcher);         // reported Dispatcher|null</span>
 </code></pre></div>
 <p>When a call's conditional return resolves to <code>never</code> for some subtype
 of an argument, that subtype cannot survive the call; PHPStan derives
 an implicit assertion from it. PHPantom keeps the argument unchanged,
 so every <code>throw_unless</code>/<code>throw_if</code>/<code>abort_unless</code> guard is invisible
 (7 sites in one test file alone).</p>
-<p><strong>Fix:</strong> after B139, when the branch selected by a <em>falsy/truthy
+<p><strong>Fix:</strong> when the branch selected by a <em>falsy/truthy
 subtype</em> of an argument is <code>never</code>, subtract that subtype from the
 argument expression in the following scope — the same subtraction the
 <code>if (!$x) { throw … }</code> form already gets.</p>
@@ -2154,9 +2190,9 @@ instead of requiring a literal constant.</p>
 <p><strong>Impact: High · Effort: Medium</strong></p>
 <p>The single largest false-positive source of the sweep (~40 sites in
 seven projects):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">if (preg_match(&#39;/(?&lt;amount&gt;\d+)(?&lt;unit&gt;\w*)/&#39;, $size, $match)) {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    strtolower($match[&#39;unit&#39;]);   // reported: got null|string</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">if (preg_match(&#39;/(?&lt;amount&gt;\d+)(?&lt;unit&gt;\w*)/&#39;, $size, $match)) {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    strtolower($match[&#39;unit&#39;]);   // reported: got null|string</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">}</span>
 </code></pre></div>
 <p>Three compounding defects:</p>
 <ol>
@@ -2208,11 +2244,11 @@ today, plus <code>array_keys</code>, <code>array_search</code>, <code>key</code>
 <code>array_key_first</code>/<code>last</code>, and <code>array_filter</code>'s falsy strip).</p>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">foreach ($rows as $row) {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach ($rows as $row) {</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A list literal collapses to <code>array&lt;union-of-values&gt;</code>, so list
 destructuring and constant-offset reads cannot select a slot (6 sites
@@ -2244,9 +2280,9 @@ constant shapes satisfy their generic supertypes.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it">B149. <code>instanceof</code> narrowing extends the union instead of filtering it<a class="headerlink" href="#b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$obj = $container-&gt;get(&#39;config&#39;);       // object|null</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">assert($obj instanceof Configuration);</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">return $obj;                            // reported object|null|Configuration</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$obj = $container-&gt;get(&#39;config&#39;);       // object|null</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">assert($obj instanceof Configuration);</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">return $obj;                            // reported object|null|Configuration</span>
 </code></pre></div>
 <p><code>assert($x instanceof T)</code> (and the <code>if (!$x instanceof T) { throw }</code>
 guard) <em>adds</em> <code>T</code> to the union instead of replacing it (5 sites in
@@ -2276,11 +2312,11 @@ type transformed by that branch's assignments/narrowings), and the
 join is the union of branch end-states — nothing more, nothing less.</p>
 <h3 id="b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver">B154. A check on a nullsafe chain does not narrow the receiver<a class="headerlink" href="#b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$image = Productimage::where(…)-&gt;first();       // Productimage|null</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">if ($image?-&gt;file_id !== null) {</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    $this-&gt;scheduleDeletion($image-&gt;file_id);</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    $this-&gt;repo-&gt;delete($image);                // reported Productimage|null</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$image = Productimage::where(…)-&gt;first();       // Productimage|null</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">if ($image?-&gt;file_id !== null) {</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    $this-&gt;scheduleDeletion($image-&gt;file_id);</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    $this-&gt;repo-&gt;delete($image);                // reported Productimage|null</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>If <code>$image</code> were null the chain yields <code>null</code> and the comparison
 fails, so inside the branch the receiver is non-null. The same holds
@@ -2292,10 +2328,10 @@ non-nullable RHS. 5 sites in four projects.</p>
 narrow every receiver in the chain to non-null in that branch.</p>
 <h3 id="b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call">B155. A checked call expression is forgotten by the next identical call<a class="headerlink" href="#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">}</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
 </code></pre></div>
 <p>Narrowing is keyed on variables only; a structurally identical
 side-effect-free call repeated inside the guarded scope re-resolves
@@ -2339,11 +2375,11 @@ list's literals (⊆ <code>string</code>), removing <code>null</code>. Requires 
 expression keying for method-call needles. 2 sites.</p>
 <h3 id="b159-an-inline-var-re-pins-the-variable-on-every-read">B159. An inline <code>@var</code> re-pins the variable on every read<a class="headerlink" href="#b159-an-inline-var-re-pins-the-variable-on-every-read" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @var null|list&lt;array{…}&gt; $cached */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$cached = Cache::get(self::KEY);</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">if ($cached !== null) {</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported null|list&lt;…&gt;</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @var null|list&lt;array{…}&gt; $cached */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">$cached = Cache::get(self::KEY);</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">if ($cached !== null) {</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported null|list&lt;…&gt;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A plain <code>!== null</code> guard that works on any ordinary variable does
 nothing here — and a later reassignment (<code>$x = []; … $x = narrow();</code>)
@@ -2362,12 +2398,12 @@ and not in the promoted-constructor, static-property, <code>+=</code>,
 happens before working on it.</p>
 <h3 id="b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join">B174. A <code>break</code> that leaves a loop early is missing from the post-loop join<a class="headerlink" href="#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$a = &#39;x&#39;;</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">do {</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    if (rand(0, 1)) { break; }   // leaves with $a === &#39;x&#39;</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    $a = 1;</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">} while (rand(0, 1));</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">$a;                              // reported 1, should be &#39;x&#39;|1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$a = &#39;x&#39;;</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">do {</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    if (rand(0, 1)) { break; }   // leaves with $a === &#39;x&#39;</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    $a = 1;</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">} while (rand(0, 1));</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">$a;                              // reported 1, should be &#39;x&#39;|1</span>
 </code></pre></div>
 <p>The state a <code>break</code> carries out of a loop does not reach the post-loop
 merge, so only the paths that ran to the end of the body contribute. The
@@ -2424,9 +2460,9 @@ precise). Model the conditional shapes natively for
 sample sources as genuine.)</p>
 <h3 id="b169-blade-if-narrowing-does-not-reach-included-variables">B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables<a class="headerlink" href="#b169-blade-if-narrowing-does-not-reach-included-variables" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>@if ($product)
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>@endif
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>@if ($product)
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>@endif
 </code></pre></div>
 <p>An inherited variable is checked against the template's <em>declared</em>
 signature type at the <code>@include</code> site, ignoring the enclosing Blade
