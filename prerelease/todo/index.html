@@ -1525,12 +1525,6 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
-<td>T38</td>
-<td><a href="../todo/type-inference/#t38-several-core-builtins-have-a-return-type-that-depends-on-an-arguments-value-or-shape">Several core builtins have a return type that depends on an argument's value or shape</a> (<code>preg_replace</code>/<code>str_replace</code> family, <code>json_encode</code>/<code>json_decode</code>)</td>
-<td>High</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>T20</td>
 <td><a href="../todo/type-inference/#t20-type-narrowing-reconciliation-engine">Type narrowing reconciliation engine</a> (CNF clause algebra, sure/sureNot tracking)</td>
 <td>Medium-High</td>
@@ -1569,6 +1563,12 @@ unlikely to move the needle for most users.</p>
 <tr>
 <td>T30</td>
 <td><a href="../todo/type-inference/#t30-literal-type-collapse-limit">Literal type collapse limit</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>T40</td>
+<td><a href="../todo/type-inference/#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument"><code>pathinfo()</code> returns a shape or a string depending on the flags argument</a></td>
 <td>Low-Medium</td>
 <td>Low</td>
 </tr>
@@ -1654,7 +1654,7 @@ unlikely to move the needle for most users.</p>
 <td>D5</td>
 <td><a href="../todo/diagnostics/#d5-external-tool-diagnostic-suppression-actions">External tool diagnostic suppression actions</a></td>
 <td>Low</td>
-<td>Low</td>
+<td>Low-Medium</td>
 </tr>
 <tr>
 <td>D15</td>
@@ -1679,6 +1679,12 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/bugs/#b99-formatting-a-bladephp-file-has-no-extension-guard">Formatting a <code>.blade.php</code> file has no extension guard</a></td>
 <td>Medium</td>
 <td>Low</td>
+</tr>
+<tr>
+<td>B124</td>
+<td><a href="../todo/bugs/#b124-an-arguments-type-is-read-from-its-source-text-and-several-ordinary-spellings-read-as-nothing">An argument's type is read from its source text, and several ordinary spellings read as nothing</a></td>
+<td>Medium</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td></td>
