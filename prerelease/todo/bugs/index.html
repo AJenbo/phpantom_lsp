@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B126. A guard clause that exits through a <code>never</code> call on a non-variable subject does not terminate the branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B126. A guard clause that exits through a <code>never</code> call on a non-variable subject does not terminate the branch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1349,36 +1277,7 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch">B126. A guard clause that exits through a <code>never</code> call on a non-variable subject does not terminate the branch<a class="headerlink" href="#b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$file = $request-&gt;file(&#39;image&#39;);</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (!$file instanceof UploadedFile) {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    app()-&gt;abort(422);           // Application::abort() is @return never</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">$imageService-&gt;store($article, $file); // still reports UploadedFile|array&lt;UploadedFile&gt;|null</span>
-</code></pre></div>
-<p>The guard body's only statement is a call to a <code>never</code>-returning method, so
-the branch cannot fall through and the code after the <code>if</code> sees only the
-narrowed type. <code>expression_is_never_call</code>
-(<code>src/type_engine/types/narrowing/guards.rs</code>) recognises this, but only when
-the receiver is a variable: <code>receiver_class_names</code> returns nothing for any
-other subject expression, and its own doc comment records the reason ("a
-property chain, a call result, is left unresolved rather than re-entering
-expression resolution from a control-flow predicate"). So <code>$app-&gt;abort()</code>
-terminates the branch while <code>app()-&gt;abort()</code> and <code>(new App())-&gt;abort()</code> do
-not, and the pre-guard union survives the merge.</p>
-<p>Rewriting the same guard as <code>$app = app(); $app-&gt;abort(422);</code> works today,
-which isolates the gap to the receiver expression rather than to <code>never</code>
-detection or to the conditional return type on Laravel's <code>app()</code> helper.</p>
-<p>The fix has to resolve the receiver without re-entering the type engine from
-a control-flow predicate in a way that can recurse (the predicate runs
-inside the forward walker that would be asked to resolve the call). A cached
-or snapshot-based resolution of the receiver expression is the likely shape.</p>
-<p><strong>Impact:</strong> 13 of the 141 <code>type_mismatch_*</code> diagnostics in
-<code>projects/luxplus-backoffice</code> (measured 2026-08-13, after the B125 fix) are
-this shape, all of them <code>app()-&gt;abort(4xx)</code> guard clauses over
-<code>Request::file()</code>.</p>
+<p>No outstanding items.</p>
 
 
 
