@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786595177099,
+  "lastUpdate": 1786596822622,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20297,6 +20297,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "eeafc088f8da82d18b0f6c8084aad6027ec0888d",
+          "message": "An `instanceof` check rules out the array half of a union, not just the\nother class",
+          "timestamp": "2026-08-13T06:37:22+02:00",
+          "tree_id": "008c6e12a8c6040bfd6d4ba856c864dfbcc48829",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/eeafc088f8da82d18b0f6c8084aad6027ec0888d"
+        },
+        "date": 1786596816259,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.4,
             "unit": "MiB"
           }
         ]
