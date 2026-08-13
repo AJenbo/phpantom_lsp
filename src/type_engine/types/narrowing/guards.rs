@@ -45,7 +45,9 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
         }
         Expression::Call(Call::Function(func_call)) => {
             let func_name = match func_call.function {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()),
+                Expression::Identifier(ident) => {
+                    bytes_to_str(ident.value()).trim_start_matches('\\')
+                }
                 _ => return None,
             };
             let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
@@ -130,7 +132,9 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
         }
         Expression::Call(Call::Function(func_call)) => {
             let func_name = match func_call.function {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()),
+                Expression::Identifier(ident) => {
+                    bytes_to_str(ident.value()).trim_start_matches('\\')
+                }
                 _ => return None,
             };
             let is_method = match func_name {
@@ -685,7 +689,9 @@ pub(crate) fn try_extract_type_guard(
         }
         Expression::Call(Call::Function(fc)) => {
             let func_name = match &fc.function {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()),
+                Expression::Identifier(ident) => {
+                    bytes_to_str(ident.value()).trim_start_matches('\\')
+                }
                 _ => return None,
             };
             let kind = match func_name {

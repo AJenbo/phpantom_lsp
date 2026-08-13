@@ -124,6 +124,44 @@ async fn test_is_array_narrows_union_keeps_array_branch() {
     );
 }
 
+// ── \is_array narrowing on backslash-prefixed builtin call ──────────────
+
+#[tokio::test]
+async fn test_backslash_prefixed_is_array_narrows_union_keeps_array_branch() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///is_array_fqn.php").unwrap();
+    // Same as `test_is_array_narrows_union_keeps_array_branch`, but the
+    // guard call is written `\is_array($input)` (the style enforced by
+    // PHP-CS-Fixer's `native_function_invocation` rule).
+    let text = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public function doFoo(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    /**\n",
+        "     * @param string|array<int, Foo>|Foo $input\n",
+        "     */\n",
+        "    public function handle(string|array|Foo $input): void {\n",
+        "        if (\\is_array($input)) {\n",
+        "            foreach ($input as $item) {\n",
+        "                $item->\n",
+        "            }\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 11, 23).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"doFoo"),
+        "After \\is_array() narrowing, foreach element should be Foo; got: {:?}",
+        methods
+    );
+}
+
 // ── is_array inverse narrows to non-array members ───────────────────────
 
 #[tokio::test]

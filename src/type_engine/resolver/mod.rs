@@ -735,7 +735,12 @@ fn resolve_target_classes_expr_inner(
                         class_loader,
                     )
                 {
-                    return resolved.into_iter().map(ResolvedType::from_arc).collect();
+                    return resolved_array_access_type_to_resolved(
+                        resolved,
+                        current_class,
+                        all_classes,
+                        class_loader,
+                    );
                 }
                 // Neither the substituted hint nor the raw return type had
                 // array-shape / generic / iterable annotations covering the
@@ -855,7 +860,12 @@ fn resolve_target_classes_expr_inner(
                     class_loader,
                 )
             {
-                return resolved.into_iter().map(ResolvedType::from_arc).collect();
+                return resolved_array_access_type_to_resolved(
+                    resolved,
+                    current_class,
+                    all_classes,
+                    class_loader,
+                );
             }
             // Segment walk failed — the base type does not have
             // array-shape, generic, or iterable annotations that
@@ -883,6 +893,36 @@ fn resolve_target_classes_expr_inner(
                 .into_iter()
                 .collect()
         }
+    }
+}
+
+/// Package a segment-walked array access type as `ResolvedType`s.
+///
+/// The walk in [`crate::completion::source::helpers::try_chained_array_access_with_candidates`]
+/// answers with whatever type the bracket access resolves to — a class,
+/// a scalar (`array{message: string}['message']` → `string`), or
+/// anything else. When it names classes, those carry the full type
+/// string as a hint; when it doesn't (a scalar, or a shape/generic type
+/// with no matching class), the type string alone is preserved so
+/// downstream consumers (hover, hint-based hover fallbacks, template
+/// binding) still see it rather than nothing at all.
+fn resolved_array_access_type_to_resolved(
+    resolved: PhpType,
+    current_class: Option<&ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Vec<ResolvedType> {
+    let current_class_name = current_class.map(|c| c.name.as_str()).unwrap_or("");
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &resolved,
+        current_class_name,
+        all_classes,
+        class_loader,
+    );
+    if classes.is_empty() {
+        vec![ResolvedType::from_type_string(resolved)]
+    } else {
+        ResolvedType::from_classes_with_hint(classes, resolved)
     }
 }
 

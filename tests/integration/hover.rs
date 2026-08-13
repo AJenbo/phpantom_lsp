@@ -14135,3 +14135,60 @@ function take(Box $box): void {
         "an unbounded `TValue` should erase to mixed, got: {text}"
     );
 }
+
+#[test]
+fn probe_array_shape_scalar_element_arg() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///probe_array_shape_arg.php";
+    let content = r#"<?php
+/** @param array{message: string} $data */
+function report(array $data): void {
+    $out = str_replace('a', 'b', $data['message']);
+    $out;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 4, 6).expect("hover $out");
+    panic!("hover text: {}", hover_text(&hover));
+}
+
+#[test]
+fn probe_global_constant_arg() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///probe_constant_arg.php";
+    let content = r#"<?php
+function probe(): void {
+    $version = preg_replace('/-.*/', '', PHP_VERSION);
+    $version;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $version");
+    panic!("hover text: {}", hover_text(&hover));
+}
+
+#[test]
+fn probe_elvis_operator_arg() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///probe_elvis_arg.php";
+    let content = r#"<?php
+function probe(?string $body): void {
+    $trimmed = preg_replace('/\\s+/', ' ', $body ?: '');
+    $trimmed;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $trimmed");
+    panic!("hover text: {}", hover_text(&hover));
+}
+
+#[test]
+fn probe_concat_operator_arg() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///probe_concat_arg.php";
+    let content = r#"<?php
+function probe(string $a, string $b): void {
+    $out = str_replace('a', 'b', $a . $b);
+    $out;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $out");
+    panic!("hover text: {}", hover_text(&hover));
+}
