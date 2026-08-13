@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786590586686,
+  "lastUpdate": 1786591787296,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20161,6 +20161,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a0de679aea5ed9bf9edfe4b852da57806f3104a3",
+          "message": "Improve str_replace and json_encode return types",
+          "timestamp": "2026-08-13T05:11:19+02:00",
+          "tree_id": "a63c16d39b096a82d933725696bc9d1fe1807aa1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a0de679aea5ed9bf9edfe4b852da57806f3104a3"
+        },
+        "date": 1786591782147,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.2,
             "unit": "MiB"
           }
         ]
