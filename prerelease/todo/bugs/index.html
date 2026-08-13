@@ -828,10 +828,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b125-a-class-narrowed-by-instanceof-keeps-an-array-alternative-from-before-the-check" class="md-nav__link">
+  <a href="#b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B125. A class narrowed by <code>instanceof</code> keeps an array alternative from before the check
+        B126. A guard clause that exits through a <code>never</code> call on a non-variable subject does not terminate the branch
       </span>
     </span>
   </a>
@@ -1306,10 +1306,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b125-a-class-narrowed-by-instanceof-keeps-an-array-alternative-from-before-the-check" class="md-nav__link">
+  <a href="#b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B125. A class narrowed by <code>instanceof</code> keeps an array alternative from before the check
+        B126. A guard clause that exits through a <code>never</code> call on a non-variable subject does not terminate the branch
       </span>
     </span>
   </a>
@@ -1349,53 +1349,36 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b125-a-class-narrowed-by-instanceof-keeps-an-array-alternative-from-before-the-check">B125. A class narrowed by <code>instanceof</code> keeps an array alternative from before the check<a class="headerlink" href="#b125-a-class-narrowed-by-instanceof-keeps-an-array-alternative-from-before-the-check" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$file = $request-&gt;file(&#39;image&#39;); // Illuminate\Http\UploadedFile|array&lt;UploadedFile&gt;|null</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">if (!$file instanceof UploadedFile) {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    throw new RuntimeException(&#39;missing&#39;);</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">$imageService-&gt;store($article, $file, $adminUser-&gt;id); // still reports UploadedFile|array&lt;UploadedFile&gt;|null</span>
+<h3 id="b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch">B126. A guard clause that exits through a <code>never</code> call on a non-variable subject does not terminate the branch<a class="headerlink" href="#b126-a-guard-clause-that-exits-through-a-never-call-on-a-non-variable-subject-does-not-terminate-the-branch" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$file = $request-&gt;file(&#39;image&#39;);</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (!$file instanceof UploadedFile) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    app()-&gt;abort(422);           // Application::abort() is @return never</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">$imageService-&gt;store($article, $file); // still reports UploadedFile|array&lt;UploadedFile&gt;|null</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$cover = $request-&gt;file(self::FORM_KEY_COVER);</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if ($cover instanceof UploadedFile) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $coverValidator-&gt;validate($cover); // still reports UploadedFile|array&lt;UploadedFile&gt;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>Both the guard-clause form (<code>if (!$x instanceof Y) { throw/return; }</code>) and the
-plain then-branch form (<code>if ($x instanceof Y) { ...use $x... }</code>) leave a
-non-class union member — here <code>array&lt;UploadedFile&gt;</code> from
-<code>Illuminate\Http\Request::file()</code>'s own conditional return type — sitting
-alongside the narrowed class at the use site, even though the <code>instanceof</code>
-check has already proven the value cannot be an array. <code>null</code> is stripped
-correctly in most of these paths (several call sites in
-<code>type_engine/variable/forward_walk/cond_narrowing.rs</code> explicitly
-<code>retain(|rt| !rt.type_string.is_null())</code> after narrowing), but nothing
-strips other non-class alternatives such as a generic <code>array&lt;T&gt;</code>. The same
-shape reproduces for a locally-declared class as the narrowed target, not
-just <code>UploadedFile</code> (e.g. <code>App\Entity\Charity|array&lt;string, string&gt;</code> in
-<code>vytrvalec-server</code>), so it is not Laravel- or <code>UploadedFile</code>-specific.</p>
-<p><code>ResolvedType::apply_narrowing</code> (<code>src/types/resolved_type.rs</code>) is one
-confirmed contributor: its cleanup after a definite class narrowing only
-drops entries that are <code>mixed</code> (<code>results.retain(|rt| !(rt.class_info.is_none()
-&amp;&amp; rt.type_string.is_mixed()))</code>), leaving any other non-class entry (array,
-scalar, shape) untouched regardless of whether the narrowing was definite.
-Tracing which exact call site in <code>cond_narrowing.rs</code> this diagnostic's value
-actually passed through was not completed in this triage session — the
-single-instanceof branch read during investigation (around
-<code>apply_condition_narrowing</code>, line ~403-627) filters by <code>class_info</code> in a way
-that looks like it should already exclude non-class entries, so either a
-different, not-yet-located call site is responsible, or something after
-narrowing (a branch merge, or the diagnostic's own re-resolution at the call
-site) re-widens the type. Needs a debugger/fixture-test trace to pin the
-exact site before fixing.</p>
-<p><strong>Impact:</strong> at least 38 of the 121 <code>type_mismatch_argument</code> diagnostics in
-<code>projects/luxplus-backoffice</code> (measured 2026-08-13 on commit <code>a0de679a</code>) are
-this exact <code>UploadedFile|array&lt;UploadedFile&gt;(|null)</code> shape, all following a
-correct <code>instanceof</code> guard in the source; one more instance in
-<code>projects/vytrvalec-server</code> uses a different class.</p>
+<p>The guard body's only statement is a call to a <code>never</code>-returning method, so
+the branch cannot fall through and the code after the <code>if</code> sees only the
+narrowed type. <code>expression_is_never_call</code>
+(<code>src/type_engine/types/narrowing/guards.rs</code>) recognises this, but only when
+the receiver is a variable: <code>receiver_class_names</code> returns nothing for any
+other subject expression, and its own doc comment records the reason ("a
+property chain, a call result, is left unresolved rather than re-entering
+expression resolution from a control-flow predicate"). So <code>$app-&gt;abort()</code>
+terminates the branch while <code>app()-&gt;abort()</code> and <code>(new App())-&gt;abort()</code> do
+not, and the pre-guard union survives the merge.</p>
+<p>Rewriting the same guard as <code>$app = app(); $app-&gt;abort(422);</code> works today,
+which isolates the gap to the receiver expression rather than to <code>never</code>
+detection or to the conditional return type on Laravel's <code>app()</code> helper.</p>
+<p>The fix has to resolve the receiver without re-entering the type engine from
+a control-flow predicate in a way that can recurse (the predicate runs
+inside the forward walker that would be asked to resolve the call). A cached
+or snapshot-based resolution of the receiver expression is the likely shape.</p>
+<p><strong>Impact:</strong> 13 of the 141 <code>type_mismatch_*</code> diagnostics in
+<code>projects/luxplus-backoffice</code> (measured 2026-08-13, after the B125 fix) are
+this shape, all of them <code>app()-&gt;abort(4xx)</code> guard clauses over
+<code>Request::file()</code>.</p>
 
 
 
