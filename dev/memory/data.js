@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786586921899,
+  "lastUpdate": 1786587629309,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20059,6 +20059,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dea901e1c653526643cf730e686994a89529a501",
+          "message": "An omitted argument reads a constant table under the key its own default\nnames",
+          "timestamp": "2026-08-13T04:03:56+02:00",
+          "tree_id": "2e00962e3f4df513a724578cf16b6750e9bc0ecc",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/dea901e1c653526643cf730e686994a89529a501"
+        },
+        "date": 1786587624292,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.7,
             "unit": "MiB"
           }
         ]
