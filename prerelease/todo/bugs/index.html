@@ -2090,6 +2090,11 @@ nested conditionals collapse into unions containing an unresolved
 resolved argument type (falling back to the declared default's type
 when the argument is omitted), recursing into nested conditionals, and
 only union the branches when the condition is genuinely undecidable.</p>
+<p>An <code>is null</code> condition is the one kind still decided by argument
+<em>presence</em> rather than argument type: any argument that is not the
+literal <code>null</code> takes the else branch, so <code>getenv($name)</code> and
+<code>$xml-&gt;asXML($path)</code> on a <code>?string</code> commit to a branch the call may not
+take. Route it through the same resolved-type check as the rest.</p>
 <h3 id="b141-a-never-conditional-branch-does-not-assert-the-condition">B141. A <code>never</code> conditional branch does not assert the condition<a class="headerlink" href="#b141-a-never-conditional-branch-does-not-assert-the-condition" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */</span>
@@ -2109,32 +2114,26 @@ subtype</em> of an argument is <code>never</code>, subtract that subtype from th
 argument expression in the following scope — the same subtraction the
 <code>if (!$x) { throw … }</code> form already gets.</p>
 <h3 id="b142-builtins-with-argument-dependent-return-types-round-two">B142. Builtins with argument-dependent return types, round two<a class="headerlink" href="#b142-builtins-with-argument-dependent-return-types-round-two" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p>The T38 work covered the replace family and <code>json_encode</code>. The sweep
-surfaced the next tier, ~34 sites:</p>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p>The T38 work covered the replace family and <code>json_encode</code>; the
+conditional-signature round covered <code>pathinfo</code>, <code>print_r</code>, <code>hrtime</code>,
+<code>microtime</code>, <code>getenv</code>, <code>mb_convert_encoding</code>, <code>abs</code> and
+<code>SimpleXMLElement::asXML()</code>/<code>saveXML()</code>. What is left needs the
+<em>element</em> type of an array argument rather than the argument's own
+category, which the conditional evaluator cannot express (<code>array&lt;int&gt;</code>
+and <code>array&lt;string&gt;</code> both read as "array"):</p>
 <ul>
-<li><code>pathinfo($p, PATHINFO_FILENAME)</code> returns <code>string</code> for any flags
-  other than <code>PATHINFO_ALL</code>; the shaped array (whose <code>dirname</code>/
-  <code>extension</code> keys are <em>optional</em>) only applies to the 1-arg form.
-  18 sites, the single biggest builtin offender.</li>
-<li><code>print_r($v, true)</code> returns <code>string</code>, not <code>string|true</code>.</li>
-<li><code>hrtime(true)</code> returns <code>int|float</code>, never <code>array{int, int}|false</code>.</li>
-<li><code>microtime()</code> honours <code>#[TypeContract(true: 'float', false: 'string')]</code>
-  on its parameter — the attribute is currently ignored.</li>
-<li><code>getenv('NAME')</code> returns <code>string|false</code>; only the 0-arg variant
-  returns <code>array&lt;string, string&gt;</code> (arity-keyed functionMap variant).</li>
-<li><code>mb_convert_encoding(string $s, …)</code> returns <code>string</code>; the <code>array</code>
-  branch only applies to an array subject.</li>
-<li><code>abs(int)</code> is <code>int</code>, <code>abs(float)</code> is <code>float</code> — not <code>int|float</code>.</li>
-<li><code>array_sum(array&lt;int&gt;)</code> is <code>int</code> (<code>array_product</code> likewise).</li>
-<li><code>SimpleXMLElement::saveXML()</code>/<code>asXML()</code> return <code>string|false</code> when
-  <code>$filename</code> is null, <code>bool</code> otherwise — never a bare <code>string|bool</code>
-  that <code>assertNotFalse</code> cannot split.</li>
-<li><code>ReflectionClass&lt;T&gt;::newInstance()</code>/<code>newInstanceArgs()</code>/
-  <code>newInstanceWithoutConstructor()</code> return <code>T</code>, not <code>?object</code>.</li>
+<li><code>array_sum(array&lt;int&gt;)</code> is <code>int</code> (<code>array_product</code> likewise). 2 sites.</li>
 </ul>
-<p><strong>Fix:</strong> stub patches / conditional signatures per function, same
-mechanism as T38.</p>
+<p><strong>Fix:</strong> a per-function rule in
+<code>type_engine/variable/array_func_rules.rs</code>, which already has the
+argument's raw type at hand. Blocked behind the same
+<code>resolve_arg_raw_type</code> gap as <a href="#b146-array-builtins-lose-key-and-element-generics">B146</a>.</p>
+<p><code>ReflectionClass&lt;T&gt;::newInstance()</code>/<code>newInstanceArgs()</code>/
+<code>newInstanceWithoutConstructor()</code> were listed here too but do not
+reproduce: all three substitute <code>T</code> when the receiver carries a type
+argument, and <code>object</code> is the honest answer for a bare
+<code>ReflectionClass</code>.</p>
 <h3 id="b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing">B143. Conditional-return arguments written as expressions still read as nothing<a class="headerlink" href="#b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>The successor to B124. The replace-family conditional keys on
@@ -2197,7 +2196,16 @@ verbatim instead of substituting the input's generics:</p>
   <code>array&lt;string, non-falsy-string&gt;</code>).</li>
 <li><code>array_flip(array&lt;K, V&gt;)</code> → <code>array&lt;V, K&gt;</code>.</li>
 </ul>
-<p><strong>Fix:</strong> per-function generic signatures in the stub patch layer.</p>
+<p><strong>Fix:</strong> the rules themselves are not the gap — <code>array_func_rules.rs</code>
+already computes <code>array_values(array&lt;string, int&gt;) → array&lt;string, int&gt;</code>
+correctly, and <code>array_flip</code> resolves through the stub's own <code>@template</code>.
+The gap is that on the forward-walker path <code>resolve_arg_raw_type</code>
+returns <code>None</code> for a docblock-typed parameter, so the rule never fires
+and the stub's bare <code>array</code> wins; only the text-driven call resolver
+reaches it. Fix that first, then add the per-function rules above
+(<code>array_values</code> → <code>list&lt;V&gt;</code> rather than the input type it preserves
+today, plus <code>array_keys</code>, <code>array_search</code>, <code>key</code>,
+<code>array_key_first</code>/<code>last</code>, and <code>array_filter</code>'s falsy strip).</p>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
