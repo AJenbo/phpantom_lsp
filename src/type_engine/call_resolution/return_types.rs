@@ -1959,6 +1959,141 @@ pub(super) fn resolve_cast_type(text: &str) -> Option<PhpType> {
     Some(PhpType::named(atom(name)))
 }
 
+/// The type an operator expression produces, for the operators whose
+/// answer can be read from the source text without a full parse.
+///
+/// Concatenation (`$a . $b`) always yields `string`, whatever its operands
+/// are. The elvis operator (`$body ?: ''`) yields the union of both sides —
+/// resolved recursively through [`Backend::resolve_arg_text_to_type`], the
+/// same way assigning the expression to a variable first would resolve
+/// through the AST-based `resolve_conditional_chain`.
+///
+/// A full three-part ternary (`$a ? $b : $c`) and arithmetic operators
+/// (`+`, `-`, `*`, …) are deliberately left unanswered here: arithmetic's
+/// result depends on whether its operands are int or float (and `+` alone
+/// can mean array union), which the source text can't decide without
+/// resolving both operands' concrete types.
+pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    if contains_top_level_concat(text) {
+        return Some(PhpType::named(atom("string")));
+    }
+    if let Some((left, right)) = split_top_level_elvis(text) {
+        let left_ty = Backend::resolve_arg_text_to_type(left, ctx);
+        let right_ty = Backend::resolve_arg_text_to_type(right, ctx);
+        return match (left_ty, right_ty) {
+            (Some(l), Some(r)) if l == r => Some(l),
+            (Some(l), Some(r)) => Some(PhpType::union(vec![l, r])),
+            (Some(l), None) => Some(l),
+            (None, Some(r)) => Some(r),
+            (None, None) => None,
+        };
+    }
+    None
+}
+
+/// Whether `text` contains a concatenation (`.`) outside quotes, parens,
+/// brackets, and `->`/`?->` chain links.
+///
+/// A pure numeric literal (`3.14`) is already answered by
+/// [`resolve_literal_type`] before this runs, so any `.` reaching this scan
+/// belongs to a genuine concatenation rather than a decimal point.
+fn contains_top_level_concat(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut depth: u32 = 0;
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' | b'"' => {
+                quote = Some(b);
+                i += 1;
+            }
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'?' if bytes[i..].starts_with(b"?->") => i += 3,
+            b'-' if bytes[i..].starts_with(b"->") => i += 2,
+            b'.' if depth == 0 => {
+                // `...` (spread/variadic) is not concatenation.
+                if bytes[i..].starts_with(b"...") {
+                    i += 3;
+                } else {
+                    return true;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    false
+}
+
+/// Split `text` at a top-level elvis operator (`?:`), respecting quotes,
+/// parens/brackets, and the nullsafe `?->` operator (which is not this).
+///
+/// Returns the trimmed left and right operand texts, or `None` when no
+/// top-level `?:` is found — including a full ternary (`$a ? $b : $c`),
+/// which is left to the caller's other paths.
+fn split_top_level_elvis(text: &str) -> Option<(&str, &str)> {
+    let bytes = text.as_bytes();
+    let mut depth: u32 = 0;
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' | b'"' => {
+                quote = Some(b);
+                i += 1;
+            }
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'?' if depth == 0 && !bytes[i..].starts_with(b"?->") => {
+                let after = text[i + 1..].trim_start();
+                if let Some(rest) = after.strip_prefix(':') {
+                    return Some((text[..i].trim_end(), rest.trim_start()));
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
 /// Whether `operand` is one expression rather than several joined by an
 /// operator.
 ///

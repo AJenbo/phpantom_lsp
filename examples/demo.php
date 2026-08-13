@@ -1152,6 +1152,20 @@ class ConditionalReturnDemo
         $swappedAll = str_replace('a', 'b', ['banana', 'apple']);
         strtoupper($swappedAll[0]);               // array subject → array<array-key, string>
 
+        // The subject is read the same way spelled other ways too: an
+        // array-shape element, a global constant, and an elvis expression
+        // all rule out the array branch instead of leaving it undecided.
+        /** @var array{message: string} $shapeData */
+        $shapeData = ['message' => 'banana'];
+        $fromShape = str_replace('a', 'b', $shapeData['message']);
+        strtoupper($fromShape);                   // array-shape element subject → string
+        $fromConst = str_replace('.', '-', PHP_VERSION);
+        strtoupper($fromConst);                    // global constant subject → string
+        /** @var ?string $maybeBody */
+        $maybeBody = null;
+        $fromElvis = str_replace('a', 'b', $maybeBody ?: 'banana');
+        strtoupper($fromElvis);                    // elvis-operator subject → string
+
         // `preg_replace()` keeps its `null` error branch for a string
         // subject, where PCRE really can fail, and drops it for an array.
         $masked = preg_replace('/\d/', '*', 'a1b2') ?? '';
@@ -8309,6 +8323,15 @@ function runDemoAssertions(): void
     // ── Subject-keyed conditional return type (the replace family) ───────
     assert(str_replace('a', 'b', 'banana') === 'bbnbnb', 'a string subject replaces into a string');
     assert(str_replace('a', 'b', ['banana', 'apple']) === ['bbnbnb', 'bpple'], 'an array subject replaces into an array');
+
+    // ── Other ordinary subject spellings (the replace family) ────────────
+    /** @var array{message: string} $shapeData */
+    $shapeData = ['message' => 'banana'];
+    assert(str_replace('a', 'b', $shapeData['message']) === 'bbnbnb', 'an array-shape element subject replaces into a string');
+    assert(is_string(str_replace('.', '-', PHP_VERSION)), 'a global constant subject replaces into a string');
+    $maybeBody = null;
+    assert(str_replace('a', 'b', $maybeBody ?: 'banana') === 'bbnbnb', 'an elvis-operator subject replaces into a string');
+
     assert(preg_replace('/\d/', '*', 'a1b2') === 'a*b*', 'a string subject is replaced into a string');
     assert(preg_replace('/\d/', '*', ['a1', 'b2']) === ['a*', 'b*'], 'an array subject is replaced into an array');
     assert(substr_replace('banana', 'x', 0, 1) === 'xanana', 'a string subject is spliced into a string');

@@ -14136,10 +14136,16 @@ function take(Box $box): void {
     );
 }
 
+/// A `str_replace` subject read from an array-shape element
+/// (`$data['message']`) decides the replace-family conditional the same
+/// way a plain string variable does: the array branch is ruled out
+/// because `resolve_arg_text_to_type` now reads the element's type
+/// (`string`) instead of coming back with nothing for a scalar shape
+/// value.
 #[test]
-fn probe_array_shape_scalar_element_arg() {
+fn hover_replace_subject_from_array_shape_element() {
     let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///probe_array_shape_arg.php";
+    let uri = "file:///replace_subject_array_shape.php";
     let content = r#"<?php
 /** @param array{message: string} $data */
 function report(array $data): void {
@@ -14147,48 +14153,69 @@ function report(array $data): void {
     $out;
 }
 "#;
-    let hover = hover_at(&backend, uri, content, 4, 6).expect("hover $out");
-    panic!("hover text: {}", hover_text(&hover));
+    let out = hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $out")).to_string();
+    assert!(
+        out.contains("string") && !out.contains("array"),
+        "an array-shape scalar element rules out the array branch: {out}"
+    );
 }
 
+/// A global constant (`PHP_VERSION`) decides the replace-family
+/// conditional: its value is read through the constant loader and
+/// inferred as `string`, rather than leaving the subject unresolved.
 #[test]
-fn probe_global_constant_arg() {
+fn hover_replace_subject_from_global_constant() {
     let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///probe_constant_arg.php";
+    let uri = "file:///replace_subject_constant.php";
     let content = r#"<?php
 function probe(): void {
-    $version = preg_replace('/-.*/', '', PHP_VERSION);
+    $version = str_replace('-', '.', PHP_VERSION);
     $version;
 }
 "#;
-    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $version");
-    panic!("hover text: {}", hover_text(&hover));
+    let version =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $version")).to_string();
+    assert!(
+        version.contains("string") && !version.contains("array"),
+        "a global constant subject rules out the array branch: {version}"
+    );
 }
 
+/// An elvis-operator subject (`$body ?: ''`) is read as the union of both
+/// sides rather than nothing, so it too rules out the array branch.
 #[test]
-fn probe_elvis_operator_arg() {
+fn hover_replace_subject_from_elvis_operator() {
     let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///probe_elvis_arg.php";
+    let uri = "file:///replace_subject_elvis.php";
     let content = r#"<?php
 function probe(?string $body): void {
-    $trimmed = preg_replace('/\\s+/', ' ', $body ?: '');
+    $trimmed = str_replace('a', 'b', $body ?: '');
     $trimmed;
 }
 "#;
-    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $trimmed");
-    panic!("hover text: {}", hover_text(&hover));
+    let trimmed =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $trimmed")).to_string();
+    assert!(
+        trimmed.contains("string") && !trimmed.contains("array"),
+        "an elvis-operator subject rules out the array branch: {trimmed}"
+    );
 }
 
+/// A concatenation subject (`$a . $b`) is always `string`, which rules out
+/// the array branch regardless of what `$a`/`$b` resolve to.
 #[test]
-fn probe_concat_operator_arg() {
+fn hover_replace_subject_from_concatenation() {
     let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///probe_concat_arg.php";
+    let uri = "file:///replace_subject_concat.php";
     let content = r#"<?php
 function probe(string $a, string $b): void {
     $out = str_replace('a', 'b', $a . $b);
     $out;
 }
 "#;
-    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $out");
-    panic!("hover text: {}", hover_text(&hover));
+    let out = hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $out")).to_string();
+    assert!(
+        out.contains("string") && !out.contains("array") && !out.contains("null"),
+        "a concatenation subject is always a plain string: {out}"
+    );
 }

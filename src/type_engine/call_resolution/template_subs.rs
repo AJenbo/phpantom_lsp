@@ -16,7 +16,8 @@ use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 
 use super::return_types::{
     resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
-    resolve_expression_to_type, resolve_literal_type, resolve_static_access_type,
+    resolve_expression_to_type, resolve_literal_type, resolve_operator_type,
+    resolve_static_access_type,
 };
 
 impl Backend {
@@ -734,6 +735,34 @@ impl Backend {
             return class_named.map(|n| PhpType::class_string(Some(n)));
         }
 
+        // Global constant access: `PHP_VERSION`, `PHP_EOL`, etc.
+        //
+        // A bare identifier that isn't a keyword, a `::class`/enum/const
+        // access (handled above and below), or any other special form is a
+        // global constant reference.  Consult the constant loader (derived
+        // from the attached `Backend`, the same source `VarResolutionCtx`
+        // draws from) and infer the type from its value, mirroring the
+        // `Expression::ConstantAccess` branch the AST-based RHS resolver
+        // already has for a plain `$x = PHP_EOL;` assignment.
+        if !trimmed.is_empty()
+            && !trimmed.starts_with('$')
+            && !trimmed.contains("::")
+            && !trimmed.contains("->")
+            && !trimmed.contains('(')
+            && !trimmed.contains('[')
+            && trimmed
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+            && !is_self_or_static(trimmed)
+            && !trimmed.eq_ignore_ascii_case("parent")
+            && let Some(backend) = ctx.backend
+            && let Some(Some(value)) = backend.constant_loader()(trimmed)
+            && let Some(ty) =
+                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(&value)
+        {
+            return Some(ty);
+        }
+
         // When the expression contains a `->` chain (e.g.
         // `Country::DK->value`, `new Decimal($x)->toFixed(2)`),
         // skip the static-access and new-expression shortcuts —
@@ -784,6 +813,15 @@ impl Backend {
             && trimmed.contains("->")
             && let Some(ty) = resolve_chain_declared_return(trimmed, ctx)
         {
+            return Some(ty);
+        }
+
+        // Operators whose result is decided from their operands rather
+        // than from source-text shape alone (`$a . $b`, `$body ?: ''`).
+        // Checked before the general fallback because `SubjectExpr::parse`
+        // has no notion of these operators and would otherwise misread the
+        // whole expression as a single bare variable or class name.
+        if let Some(ty) = resolve_operator_type(trimmed, ctx) {
             return Some(ty);
         }
 
