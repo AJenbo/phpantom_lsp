@@ -828,17 +828,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b99-formatting-a-bladephp-file-has-no-extension-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B99. Formatting a <code>.blade.php</code> file has no extension guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b124-an-arguments-type-is-read-from-its-source-text-and-several-ordinary-spellings-read-as-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1317,17 +1306,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#b99-formatting-a-bladephp-file-has-no-extension-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B99. Formatting a <code>.blade.php</code> file has no extension guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b124-an-arguments-type-is-read-from-its-source-text-and-several-ordinary-spellings-read-as-nothing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1371,20 +1349,6 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b99-formatting-a-bladephp-file-has-no-extension-guard">B99. Formatting a <code>.blade.php</code> file has no extension guard<a class="headerlink" href="#b99-formatting-a-bladephp-file-has-no-extension-guard" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p><code>textDocument/formatting</code> (<code>src/server.rs</code>/<code>src/formatting.rs</code>) hands a
-document straight to the Pint/php-cs-fixer/phpcbf/mago pipeline with no
-check on the file extension. <a href="../blade/#bl16-blade-aware-formatting"><code>docs/todo/blade.md</code></a>
-plans real Blade-aware formatting (BL16) as future work and describes an
-interim safety measure — explicitly disabling formatting on <code>.blade.php</code>
-files until then — but that interim guard was never added. Running
-"Format Document" on a <code>.blade.php</code> file today sends raw Blade markup
-(directives, <code>{{ }}</code> echoes, component tags) through a PHP formatter,
-which will most likely error out or, worse, silently produce nonsense
-edits, rather than being a no-op.</p>
-<p><strong>Fix:</strong> add an extension check in the formatting handler that returns no
-edits for <code>.blade.php</code> documents, ahead of BL16's real implementation.</p>
 <h3 id="b124-an-arguments-type-is-read-from-its-source-text-and-several-ordinary-spellings-read-as-nothing">B124. An argument's type is read from its source text, and several ordinary spellings read as nothing<a class="headerlink" href="#b124-an-arguments-type-is-read-from-its-source-text-and-several-ordinary-spellings-read-as-nothing" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param array{message: string} $data */</span>

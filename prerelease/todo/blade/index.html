@@ -1999,9 +1999,6 @@ has no fixed relationship to the original directive/HTML structure —
 there is no path today that safely reformats the original Blade
 markup.</p>
 <ul>
-<li>Short term: explicitly disable <code>textDocument/formatting</code> for
-  <code>.blade.php</code> (return no edits) rather than risk corrupting the file
-  with virtual-PHP-shaped edits translated through the source map.</li>
 <li>Medium term: extend <code>formatting.rs</code>'s existing external-tool
   resolution (currently php-cs-fixer/Pint/phpcbf via Composer
   <code>require-dev</code>) to also detect a project-installed <code>blade-formatter</code>
