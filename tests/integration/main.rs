@@ -121,6 +121,7 @@ mod diagnostics_blade_call_site;
 mod diagnostics_blade_signature;
 mod diagnostics_compound_narrowing;
 mod diagnostics_deprecated;
+mod diagnostics_docblock_native_mismatch;
 mod diagnostics_enum_errors;
 mod diagnostics_implementation_errors;
 mod diagnostics_incompatible_override;

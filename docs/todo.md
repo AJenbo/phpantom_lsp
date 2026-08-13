@@ -101,8 +101,8 @@ unlikely to move the needle for most users.
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Low         |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
+| D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B96 | [A docblock `@param` type narrower than its native nullable type hint is not flagged](todo/bugs.md#b96-a-docblock-param-type-narrower-than-its-native-nullable-type-hint-is-not-flagged) | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

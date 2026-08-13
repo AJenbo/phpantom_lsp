@@ -257,3 +257,40 @@ branch cannot be typed must still produce no diagnostic, because it
 now resolves to `mixed` rather than to the surviving literal.
 
 
+
+---
+
+## D17. `docblock_native_mismatch` only judges nullability
+
+**Impact: Low · Effort: Medium**
+
+```php
+/** @param int $name */
+function greet(?string $name): void {}   // not flagged: int is not string at all
+
+/** @param Foo $value */
+function take(?Foo $value): void {}      // not flagged: `Foo` may be nullable
+```
+
+`src/diagnostics/docblock_native_mismatch.rs` compares a documented type
+against its native hint on one axis only: whether the annotation denies a
+`null` the signature accepts. Two shapes are therefore still silent.
+
+The first is a documented type that is not a subtype of the native hint at
+all (`@param int` on a `?string`, `@return array` on a `: string`). That is
+the check PHPStan's `IncompatiblePhpDocTypeRule` performs, and the one the
+existing `is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
+already has the machinery for.
+
+The second is a bare class-like name, which `nullability_is_decidable` steps
+around on purpose: `Foo` may be a `@template` parameter or an imported
+`@psalm-type` alias that resolves to a nullable type, and the diagnostic has
+no resolution step that would tell those apart from a class named `Foo`.
+Resolving the name (against the declaration's own `@template` list, the
+enclosing class's, and the file's `@psalm-type`/`@psalm-import-type` tags)
+would let the nullability check cover the class-name case as well.
+
+**Fix:** Resolve the documented type's names before comparing, then run the
+comparison through `is_type_compatible` rather than the nullability test
+alone. Both halves want the same measurement, so they are one change rather
+than two.

@@ -215,6 +215,7 @@ pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
 pub(crate) mod cross_file;
 mod deprecated;
+mod docblock_native_mismatch;
 mod enum_errors;
 mod external;
 pub(crate) mod helpers;
@@ -271,8 +272,9 @@ impl Backend {
     }
 
     /// Collect Phase 1 (fast) diagnostics: syntax errors, unused
-    /// imports/variables, and namespace/class-name mismatches.  These
-    /// are cheap — no type resolution.
+    /// imports/variables, namespace/class-name mismatches, and
+    /// docblock/native type-hint contradictions.  These are cheap — no type
+    /// resolution.
     pub(crate) fn collect_fast_diagnostics(
         &self,
         uri_str: &str,
@@ -284,6 +286,7 @@ impl Backend {
         self.collect_unused_variable_diagnostics(uri_str, content, out);
         self.collect_namespace_mismatch_diagnostics(uri_str, content, out);
         self.collect_class_name_mismatch_diagnostics(uri_str, content, out);
+        self.collect_docblock_native_mismatch_diagnostics(uri_str, content, out);
     }
 
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,

@@ -4084,6 +4084,68 @@ class ReadonlyWriteDemo
 }
 
 
+// ── Diagnostic: Docblock Contradicts the Type Hint ──────────────────────────
+// A `@param` or `@return` tag refines the native declaration; it must not
+// disagree with it.  When the signature admits `null` and the tag does not,
+// the two describe different sets of values: a caller reading the signature
+// may legally pass `null`, and the callee has been promised it never receives
+// one.  A tag that keeps the `null` while narrowing the rest is the annotation
+// doing its job and is left alone, and so is a name PHPantom cannot settle,
+// since a `@template` parameter or an imported type alias may itself be
+// nullable.
+
+class DocblockNativeMismatchDemo
+{
+    private ?string $path = null;
+
+    /**
+     * @param string $name
+     */
+    // Warning — `string` denies the null that `?string` accepts:
+    public function greet(?string $name): void
+    {
+        echo $name;
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    // Warning — an array type reads the same way:
+    public function takesItems(?array $items): void
+    {
+        echo count($items ?? []);
+    }
+
+    /**
+     * @return string
+     */
+    // Warning — on the return type this time:
+    public function getPath(): ?string
+    {
+        return $this->path;
+    }
+
+    /**
+     * @param list<int>|null $items
+     * @return non-empty-string|null
+     */
+    // No diagnostic — both tags narrow the type and keep the null:
+    public function narrowedButStillNullable(?array $items): ?string
+    {
+        return $items === null ? null : 'ok';
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    // No diagnostic — nothing in the signature admits null to begin with:
+    public function requiresItems(array $items): void
+    {
+        echo count($items);
+    }
+}
+
+
 // ── Implement Missing Methods (Code Action) ─────────────────────────────────
 // Uncomment the class below, place the cursor inside it, and trigger
 // "Quick Fix" or "Code Action" to see "Implement 3 missing methods".
