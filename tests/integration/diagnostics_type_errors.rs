@@ -8788,6 +8788,102 @@ takesConfig(['host' => 'localhost', ...['port' => 3306]]);
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+// ─── List order ─────────────────────────────────────────────────────────────
+
+/// `array_is_list()` is `false` for a literal whose keys are written out
+/// of order, so it does not hold a `list`, however well its values fit.
+#[test]
+fn a_literal_with_reversed_keys_does_not_satisfy_a_list() {
+    let php = r#"<?php
+/** @param list{string, string} $pair */
+function takesPair(array $pair): void {}
+
+/** @param list<string> $items */
+function takesItems(array $items): void {}
+
+takesPair([1 => 'x', 0 => 'y']);
+takesItems([1 => 'x', 0 => 'y']);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("keys are not in list order")),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[0].contains("expects list{string, string}"),
+        "the parameter is reported as the list shape it was written as, got {messages:?}"
+    );
+}
+
+/// A literal whose keys are gapped or named is no more a list than a
+/// reversed one is.
+#[test]
+fn a_literal_with_gapped_or_named_keys_does_not_satisfy_a_list() {
+    let php = r#"<?php
+/** @param list<string> $items */
+function takesItems(array $items): void {}
+
+takesItems([0 => 'x', 2 => 'y']);
+takesItems(['first' => 'x', 'second' => 'y']);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+/// Keys written out in list order hold a list, and so does a literal
+/// written without keys at all.
+#[test]
+fn a_literal_whose_keys_are_in_list_order_satisfies_a_list() {
+    let php = r#"<?php
+/** @param list{string, string} $pair */
+function takesPair(array $pair): void {}
+
+/** @param list<string> $items */
+function takesItems(array $items): void {}
+
+takesPair([0 => 'x', 1 => 'y']);
+takesPair(['x', 'y']);
+takesItems([0 => 'x', 1 => 'y']);
+takesItems(['x', 'y']);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// An `array{…}` shape makes no promise about the order of its keys, so
+/// the same literal satisfies it.
+#[test]
+fn reversed_keys_still_satisfy_an_array_shape() {
+    let php = r#"<?php
+/** @param array{string, string} $pair */
+function takesPair(array $pair): void {}
+
+takesPair([1 => 'x', 0 => 'y']);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A shape inferred from a variable lists the keys we saw assigned in the
+/// order we saw them, which is not the order the value's keys are in.
+#[test]
+fn list_order_stays_silent_for_a_shape_that_did_not_come_from_a_literal() {
+    let php = r#"<?php
+/** @param list<string> $items */
+function takesItems(array $items): void {}
+
+$items = [];
+$items[1] = 'x';
+$items[0] = 'y';
+takesItems($items);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 // ─── Short ternary ──────────────────────────────────────────────────────────
 
 /// `$x ?: $default` yields `$x` only where `$x` was truthy, so the falsy

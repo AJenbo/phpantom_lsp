@@ -78,6 +78,45 @@ pub(crate) fn missing_required_shape_keys(arg_type: &PhpType, param_type: &PhpTy
         .collect()
 }
 
+/// Whether the parameter demands a list: an array whose keys run
+/// `0, 1, 2, …` in that order, which is what `array_is_list()` answers
+/// `true` for.
+fn requires_list(param_type: &PhpType) -> bool {
+    if param_type.is_list_shape() {
+        return true;
+    }
+    match param_type.kind() {
+        TypeKind::Nullable(inner) => requires_list(inner),
+        TypeKind::Named(name) => is_list_name(name),
+        TypeKind::Generic(generic) => is_list_name(&generic.name),
+        _ => false,
+    }
+}
+
+fn is_list_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("list") || name.eq_ignore_ascii_case("non-empty-list")
+}
+
+/// Whether an array shape holds keys a list cannot have, so it cannot
+/// satisfy `param_type`.
+///
+/// Only meaningful for a shape that enumerates every key the value has:
+/// a shape built by watching assignments lists the keys we happened to
+/// see, in the order we saw them, which says nothing about the order the
+/// value's keys are really in.  The caller decides which it has.
+pub(crate) fn shape_breaks_list_order(arg_type: &PhpType, param_type: &PhpType) -> bool {
+    if !requires_list(param_type) {
+        return false;
+    }
+    let TypeKind::ArrayShape(entries) = arg_type.kind() else {
+        return false;
+    };
+    shape_keys(entries)
+        .iter()
+        .enumerate()
+        .any(|(index, key)| key.parse::<usize>() != Ok(index))
+}
+
 /// The key each shape entry stands for, filling in the sequential index
 /// PHP assigns an entry written without one: `array{a: int, string}`
 /// holds a `0` exactly as `array{a: int, 0: string}` does, so the two

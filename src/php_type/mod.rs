@@ -71,15 +71,21 @@ pub struct PhpType(Arc<TypeKind>);
 
 impl PhpType {
     /// The interned node this handle points at, with any
-    /// [`Benevolent`](TypeKind::Benevolent) marker seen through.
+    /// [`Benevolent`](TypeKind::Benevolent) or
+    /// [`ListShape`](TypeKind::ListShape) marker seen through.
     ///
-    /// Leniency is a note about where a type came from, not a shape, so it
-    /// must not change how the type is matched on. Use
+    /// Leniency is a note about where a type came from, and list-ness is an
+    /// extra promise about a shape's keys; neither is a shape of its own, so
+    /// neither may change how the type is matched on. Use
     /// [`raw_kind`](PhpType::raw_kind) to see the marker.
+    ///
+    /// The two markers never wrap each other — one only ever tags a union or
+    /// nullable, the other only ever tags an array shape — so one hop is
+    /// always enough to reach the node itself.
     #[inline]
     pub fn kind(&self) -> &TypeKind {
         match &*self.0 {
-            TypeKind::Benevolent(inner) => &inner.0,
+            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => &inner.0,
             kind => kind,
         }
     }
@@ -310,6 +316,18 @@ pub enum TypeKind {
     /// transform that does not simply loses the leniency, which shows up
     /// as the `|false` diagnostic coming back, never as a wrong type.
     Benevolent(PhpType),
+
+    /// `list{…}` / `non-empty-list{…}`: the inner [`ArrayShape`] with the
+    /// extra promise that its keys are `0, 1, 2, …` in that order, which is
+    /// what `array_is_list()` answers `true` for.
+    ///
+    /// Invisible in the same way [`Benevolent`](TypeKind::Benevolent) is:
+    /// [`PhpType::kind`] and [`Deref`] see through to the shape, so every
+    /// `match ty.kind()` keeps treating it as the `array{…}` it also is, and
+    /// only [`PhpType::is_list_shape`] asks about the ordering promise.
+    ///
+    /// [`ArrayShape`]: TypeKind::ArrayShape
+    ListShape(PhpType),
 }
 
 /// Payload of [`TypeKind::Generic`].
@@ -706,6 +724,25 @@ impl PhpType {
     /// Array shape (`array{…}`).
     pub fn array_shape(entries: Vec<ShapeEntry>) -> PhpType {
         TypeKind::ArrayShape(entries.into()).into()
+    }
+
+    /// List shape (`list{…}`): an array shape that also promises its keys
+    /// are `0, 1, 2, …` in order.
+    pub fn list_shape(entries: Vec<ShapeEntry>) -> PhpType {
+        TypeKind::ListShape(PhpType::array_shape(entries)).into()
+    }
+
+    /// Tag `inner` as a list shape, if it is a shape at all.
+    ///
+    /// A transform that rebuilds an array shape uses this to carry the
+    /// ordering promise across; anything else is returned untagged, which
+    /// keeps the marker directly above the shape node the way
+    /// [`kind`](PhpType::kind) assumes.
+    pub(crate) fn as_list_shape(inner: PhpType) -> PhpType {
+        if !matches!(inner.raw_kind(), TypeKind::ArrayShape(_)) {
+            return inner;
+        }
+        TypeKind::ListShape(inner).into()
     }
 
     /// Object shape (`object{…}`).
@@ -1528,7 +1565,7 @@ impl PhpType {
     /// - `?T` → `?NativeT`
     pub fn to_native_hint(&self) -> Option<String> {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) => inner.to_native_hint(),
+            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => inner.to_native_hint(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| n.to_string())
             }
@@ -1587,7 +1624,9 @@ impl PhpType {
     /// avoiding a parse round-trip.
     pub fn to_native_hint_typed(&self) -> Option<PhpType> {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) => inner.to_native_hint_typed(),
+            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
+                inner.to_native_hint_typed()
+            }
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
@@ -1994,6 +2033,13 @@ impl PhpType {
             TypeKind::Nullable(inner) => inner.is_array_shape(),
             _ => false,
         }
+    }
+
+    /// Return `true` if this type is a list shape (`list{…}`), which an
+    /// `array{…}` written with the same entries is not: only the former
+    /// requires the keys to run `0, 1, 2, …` in order.
+    pub fn is_list_shape(&self) -> bool {
+        matches!(self.raw_kind(), TypeKind::ListShape(_))
     }
 
     /// Return `true` if this type is an object shape (`object{…}`).
@@ -2405,7 +2451,7 @@ impl PhpType {
     /// parse→check round-trip when the caller already has a `PhpType`.
     pub fn is_informative(&self) -> bool {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) => inner.is_informative(),
+            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => inner.is_informative(),
             TypeKind::Generic(..) => true,
             TypeKind::ArrayShape(..) | TypeKind::ObjectShape(..) => true,
             TypeKind::Array(..) => true,
@@ -2465,7 +2511,9 @@ impl PhpType {
             return false;
         }
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) => inner.references_any_template_param(template_params),
+            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
+                inner.references_any_template_param(template_params)
+            }
             TypeKind::Named(name) => template_params.iter().any(|p| p == name),
             TypeKind::Nullable(inner) => inner.references_any_template_param(template_params),
             TypeKind::Union(members) | TypeKind::Intersection(members) => members

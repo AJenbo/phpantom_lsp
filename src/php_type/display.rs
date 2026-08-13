@@ -12,6 +12,12 @@ impl fmt::Display for PhpType {
             // The leniency marker is a note about where the type came from,
             // not something a developer reading `string|false` should see.
             TypeKind::Benevolent(inner) => write!(f, "{inner}"),
+            // The ordering promise is part of the type the developer wrote,
+            // so it is spelled back the same way.
+            TypeKind::ListShape(inner) => match inner.kind() {
+                TypeKind::ArrayShape(entries) => write_shape(f, "list", entries),
+                _ => write!(f, "{inner}"),
+            },
             TypeKind::Named(s) => write!(f, "{s}"),
             TypeKind::StaticType(bound) => write!(f, "static({bound})"),
             TypeKind::ThisType(bound) => write!(f, "$this({bound})"),
@@ -65,27 +71,9 @@ impl fmt::Display for PhpType {
                 }
             }
 
-            TypeKind::ArrayShape(entries) => {
-                write!(f, "array{{")?;
-                for (i, entry) in entries.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{entry}")?;
-                }
-                write!(f, "}}")
-            }
+            TypeKind::ArrayShape(entries) => write_shape(f, "array", entries),
 
-            TypeKind::ObjectShape(entries) => {
-                write!(f, "object{{")?;
-                for (i, entry) in entries.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{entry}")?;
-                }
-                write!(f, "}}")
-            }
+            TypeKind::ObjectShape(entries) => write_shape(f, "object", entries),
 
             TypeKind::Callable(c) => {
                 let kind = &c.kind;
@@ -141,6 +129,18 @@ impl fmt::Display for PhpType {
             TypeKind::Raw(s) => write!(f, "{s}"),
         }
     }
+}
+
+/// Write `base{entry, entry, …}`, the form every shape type shares.
+fn write_shape(f: &mut fmt::Formatter<'_>, base: &str, entries: &[ShapeEntry]) -> fmt::Result {
+    write!(f, "{base}{{")?;
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{entry}")?;
+    }
+    write!(f, "}}")
 }
 
 impl fmt::Display for ShapeEntry {

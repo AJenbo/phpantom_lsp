@@ -12,7 +12,7 @@
 pub(super) mod compatibility;
 
 pub(super) use compatibility::is_type_compatible;
-use compatibility::missing_required_shape_keys;
+use compatibility::{missing_required_shape_keys, shape_breaks_list_order};
 
 use std::collections::{HashMap, HashSet};
 
@@ -658,7 +658,14 @@ impl Backend {
                     Vec::new()
                 };
 
+                // Same reasoning for the keys a `list` demands: only a
+                // literal that spells every key out proves the value's keys
+                // are in an order `array_is_list()` would reject.
+                let breaks_list_order = resolved_arg.enumerates_all_keys
+                    && shape_breaks_list_order(arg_type, effective_param_type);
+
                 if missing_keys.is_empty()
+                    && !breaks_list_order
                     && is_type_compatible(
                         arg_type,
                         effective_param_type,
@@ -803,6 +810,12 @@ impl Backend {
                             .collect::<Vec<_>>()
                             .join(", "),
                     ));
+                }
+                // The two types printed above can look interchangeable when
+                // the only thing separating them is the order of the keys,
+                // so say that that is the complaint.
+                if breaks_list_order {
+                    message.push_str(" (keys are not in list order)");
                 }
                 // Name the specific member(s) that broke a partially
                 // compatible union, rather than leaving the developer to

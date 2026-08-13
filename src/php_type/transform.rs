@@ -56,6 +56,7 @@ impl PhpType {
     pub fn resolve_names(&self, resolver: &dyn Fn(&str) -> String) -> PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => PhpType::benevolent(inner.resolve_names(resolver)),
+            TypeKind::ListShape(inner) => PhpType::as_list_shape(inner.resolve_names(resolver)),
             TypeKind::Named(s) => {
                 if is_keyword_type(s) {
                     PhpType::named(*s)
@@ -178,6 +179,7 @@ impl PhpType {
     pub fn shorten(&self) -> PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => PhpType::benevolent(inner.shorten()),
+            TypeKind::ListShape(inner) => PhpType::as_list_shape(inner.shorten()),
             TypeKind::Named(s) => PhpType::named(atom(Self::short_name_of(s))),
 
             TypeKind::Nullable(inner) => PhpType::nullable(inner.shorten()),
@@ -315,6 +317,9 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => {
                 PhpType::benevolent(inner.resolve_self_refs_bounded(class_name, parent_class))
+            }
+            TypeKind::ListShape(inner) => {
+                PhpType::as_list_shape(inner.resolve_self_refs_bounded(class_name, parent_class))
             }
             TypeKind::Named(s) if is_self_ref_name(s) || s.eq_ignore_ascii_case("parent") => {
                 if s.eq_ignore_ascii_case("static") {
@@ -470,6 +475,9 @@ impl PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(inner.replace_bare_keyword(keyword, class_name));
         }
+        if let TypeKind::ListShape(inner) = self.raw_kind() {
+            return PhpType::as_list_shape(inner.replace_bare_keyword(keyword, class_name));
+        }
         match self.kind() {
             TypeKind::Named(s) if s.eq_ignore_ascii_case(keyword) => {
                 PhpType::named(atom(class_name))
@@ -581,6 +589,9 @@ impl PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(recurse(inner));
         }
+        if let TypeKind::ListShape(inner) = self.raw_kind() {
+            return PhpType::as_list_shape(recurse(inner));
+        }
         match self.kind() {
             TypeKind::Conditional(c) => {
                 let mut members: Vec<PhpType> = Vec::new();
@@ -671,6 +682,9 @@ impl PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(recurse(inner));
         }
+        if let TypeKind::ListShape(inner) = self.raw_kind() {
+            return PhpType::as_list_shape(recurse(inner));
+        }
         match self.kind() {
             TypeKind::KeyOf(_) => PhpType::named(atom("array-key")),
             TypeKind::ValueOf(_) | TypeKind::IndexAccess(..) => PhpType::mixed(),
@@ -735,7 +749,9 @@ impl PhpType {
     /// `pred`.
     fn contains_name_matching(&self, pred: &dyn Fn(&str) -> bool) -> bool {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) => inner.contains_name_matching(pred),
+            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
+                inner.contains_name_matching(pred)
+            }
             TypeKind::Named(s) => pred(s),
             TypeKind::Nullable(inner) => inner.contains_name_matching(pred),
             TypeKind::Union(types) | TypeKind::Intersection(types) => {
@@ -825,6 +841,9 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => {
                 PhpType::benevolent(inner.replace_self_inner(replacement, lsb))
+            }
+            TypeKind::ListShape(inner) => {
+                PhpType::as_list_shape(inner.replace_self_inner(replacement, lsb))
             }
             TypeKind::Named(s) if self.is_self_ref() => {
                 let Some(bound) = lsb.bound_over(replacement) else {
@@ -988,6 +1007,7 @@ impl PhpType {
         }
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => PhpType::benevolent(inner.substitute(subs)),
+            TypeKind::ListShape(inner) => PhpType::as_list_shape(inner.substitute(subs)),
             TypeKind::Named(s) => {
                 if let Some(replacement) = subs.get(s.as_str()) {
                     replacement.clone()
@@ -1199,7 +1219,9 @@ impl PhpType {
     /// Recursive helper for [`extract_class_names`].
     fn collect_class_names(&self, names: &mut Vec<String>) {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) => inner.collect_class_names(names),
+            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
+                inner.collect_class_names(names)
+            }
             TypeKind::Named(s) => {
                 if !is_keyword_type(s) && !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
                     names.push(s.to_string());

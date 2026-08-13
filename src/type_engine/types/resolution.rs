@@ -158,16 +158,18 @@ fn type_hint_to_classes_typed_depth(
     }
 
     match ty.kind() {
-        // ── Leniency marker → unwrap inner ─────────────────────────
-        // Unreachable via `kind()`, which sees through the marker, but the
-        // arm keeps this match exhaustive over the type language.
-        TypeKind::Benevolent(inner) => type_hint_to_classes_typed_depth(
-            inner,
-            owning_class_name,
-            all_classes,
-            class_loader,
-            depth,
-        ),
+        // ── Leniency / list-shape markers → unwrap inner ───────────
+        // Unreachable via `kind()`, which sees through both markers, but the
+        // arms keep this match exhaustive over the type language.
+        TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
+            type_hint_to_classes_typed_depth(
+                inner,
+                owning_class_name,
+                all_classes,
+                class_loader,
+                depth,
+            )
+        }
         // ── Nullable → unwrap inner ────────────────────────────────
         TypeKind::Nullable(inner) => type_hint_to_classes_typed_depth(
             inner,

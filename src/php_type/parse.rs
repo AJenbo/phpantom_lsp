@@ -359,9 +359,10 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
             match s.kind {
                 cst::ShapeTypeKind::Array
                 | cst::ShapeTypeKind::NonEmptyArray
-                | cst::ShapeTypeKind::AssociativeArray
-                | cst::ShapeTypeKind::List
-                | cst::ShapeTypeKind::NonEmptyList => PhpType::array_shape(entries),
+                | cst::ShapeTypeKind::AssociativeArray => PhpType::array_shape(entries),
+                cst::ShapeTypeKind::List | cst::ShapeTypeKind::NonEmptyList => {
+                    PhpType::list_shape(entries)
+                }
             }
         }
 

@@ -3985,6 +3985,15 @@ class TypeErrorDemo
             $config['port'] = 3306;
         }
         $this->requiresConfig($config);
+
+        // Type error — a `list` holds keys `0, 1, 2, …` in that order,
+        // which is what `array_is_list()` answers `true` for, and keys
+        // written the other way round are kept the way they are written:
+        $this->requiresPair([1 => 'right', 0 => 'left']);
+
+        // No diagnostic — both spellings of the same list:
+        $this->requiresPair(['left', 'right']);
+        $this->requiresPair([0 => 'left', 1 => 'right']);
     }
 
     private function requiresInt(int $value): void {}
@@ -4002,6 +4011,8 @@ class TypeErrorDemo
     private function requiresUserMatcher(callable $matcher): void {}
     /** @param array{host: string, port: int, timeout?: int} $config */
     private function requiresConfig(array $config): void {}
+    /** @param list{string, string} $pair */
+    private function requiresPair(array $pair): void {}
     private function useDefaultPort(): bool
     {
         return true;
@@ -7648,6 +7659,11 @@ function runDemoAssertions(): void
     assert(in_array(scaffoldingAnyToolDefault(), TOOL_DEFAULTS, true), "the untemplated return really is one of TOOL_DEFAULTS' values");
     assert(scaffoldingToolDefaultFor('ink') === 'black', "a key read inside the body really picks the table's own value");
     assert(array_key_exists(ScaffoldingLimits::anyLimitName(), ScaffoldingLimits::LIMITS), "the declared return really is one of LIMITS' keys");
+
+    // ── List order ──────────────────────────────────────────────────────
+    assert(array_is_list(['left', 'right']), 'a literal written without keys really is a list');
+    assert(array_is_list([0 => 'left', 1 => 'right']), 'keys written in order really are a list');
+    assert(!array_is_list([1 => 'right', 0 => 'left']), 'keys written the other way round really are not a list');
 
     // ── A tag on the docblock's opening line ────────────────────────────
     assert(scaffoldingGradeOnOpeningLine('b') === 'b', "the opening-line @param really is handed one of 'a'|'b'|'c'");

@@ -11,29 +11,6 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B95. A reversed-key array literal is accepted where a `list{...}` shape is required
-
-**Impact: Low · Effort: Medium**
-
-```php
-/** @param list{string, string} $list */
-function takesTwoList(array $list): void {}
-
-takesTwoList([1 => 'x', 0 => 'y']); // not flagged; array_is_list() is false for this literal
-```
-
-`[1 => 'x', 0 => 'y']` is not a list at runtime (`array_is_list()` returns
-`false` — the keys appear out of order), so it should not satisfy a
-`list{string, string}` parameter, but PHPantom accepts it silently. Only
-Qodana flags this in `php-typing-conformance`'s corpus; PHPStan and Mago
-accept it too (per that corpus's own reference to
-[phpstan/phpstan#14939](https://github.com/phpstan/phpstan/discussions/14939)),
-so this is a narrow edge case rather than a widely-expected behaviour.
-
-**Fix:** not investigated. When validating a literal array argument against a
-`list{...}` shape, check the literal's keys are in list order (`0, 1, 2, …`)
-in addition to checking each value's type.
-
 ### B96. A docblock `@param` type narrower than its native nullable type hint is not flagged
 
 **Impact: Low · Effort: Medium**
