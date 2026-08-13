@@ -1603,6 +1603,14 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri.to_string();
+
+        // Blade markup isn't PHP; running it through the PHP formatting
+        // pipeline errors out or produces nonsense edits. Real Blade-aware
+        // formatting is tracked separately (docs/todo/blade.md).
+        if self.is_blade_file(&uri) {
+            return Ok(None);
+        }
+
         let config = self.config();
 
         // Read Composer metadata for require-dev detection and bin-dir.

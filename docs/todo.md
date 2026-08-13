@@ -97,7 +97,6 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 | D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B99 | [Formatting a `.blade.php` file has no extension guard](todo/bugs.md#b99-formatting-a-bladephp-file-has-no-extension-guard)                                                 | Medium      | Low         |
 | B124 | [An argument's type is read from its source text, and several ordinary spellings read as nothing](todo/bugs.md#b124-an-arguments-type-is-read-from-its-source-text-and-several-ordinary-spellings-read-as-nothing) | Medium      | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |

@@ -243,9 +243,6 @@ has no fixed relationship to the original directive/HTML structure —
 there is no path today that safely reformats the original Blade
 markup.
 
-- Short term: explicitly disable `textDocument/formatting` for
-  `.blade.php` (return no edits) rather than risk corrupting the file
-  with virtual-PHP-shaped edits translated through the source map.
 - Medium term: extend `formatting.rs`'s existing external-tool
   resolution (currently php-cs-fixer/Pint/phpcbf via Composer
   `require-dev`) to also detect a project-installed `blade-formatter`
