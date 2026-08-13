@@ -299,40 +299,48 @@ impl Backend {
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
-            let (subject_text, member_name, is_static, is_method_call, is_docblock_ref) =
-                match &span.kind {
-                    SymbolKind::MemberAccess {
+            let (
+                subject_text,
+                member_name,
+                is_static,
+                is_method_call,
+                is_docblock_ref,
+                is_nullsafe,
+            ) = match &span.kind {
+                SymbolKind::MemberAccess {
+                    subject_text,
+                    member_name,
+                    is_static,
+                    is_method_call,
+                    is_docblock_reference,
+                    is_array_callable,
+                    is_nullsafe,
+                } => {
+                    // A `[Class::class, 'method']` / `[$obj, 'method']`
+                    // array literal is only a callable when it flows into
+                    // a callable-typed context (a callable parameter,
+                    // `is_callable`, or a direct invocation).  Without
+                    // type-flow analysis we cannot tell such an array
+                    // apart from a plain data pair like
+                    // `return [[Foo::class, 'name'], ...]`, so we do not
+                    // validate its second element as a method.  The span
+                    // still drives navigation, hover, and semantic tokens,
+                    // which only surface information when the member
+                    // actually resolves.
+                    if *is_array_callable {
+                        continue;
+                    }
+                    (
                         subject_text,
                         member_name,
-                        is_static,
-                        is_method_call,
-                        is_docblock_reference,
-                        is_array_callable,
-                    } => {
-                        // A `[Class::class, 'method']` / `[$obj, 'method']`
-                        // array literal is only a callable when it flows into
-                        // a callable-typed context (a callable parameter,
-                        // `is_callable`, or a direct invocation).  Without
-                        // type-flow analysis we cannot tell such an array
-                        // apart from a plain data pair like
-                        // `return [[Foo::class, 'name'], ...]`, so we do not
-                        // validate its second element as a method.  The span
-                        // still drives navigation, hover, and semantic tokens,
-                        // which only surface information when the member
-                        // actually resolves.
-                        if *is_array_callable {
-                            continue;
-                        }
-                        (
-                            subject_text,
-                            member_name,
-                            *is_static,
-                            *is_method_call,
-                            *is_docblock_reference,
-                        )
-                    }
-                    _ => continue,
-                };
+                        *is_static,
+                        *is_method_call,
+                        *is_docblock_reference,
+                        *is_nullsafe,
+                    )
+                }
+                _ => continue,
+            };
             let subject_text = subject_text.as_str(content);
 
             // ── Skip the magic `::class` constant ───────────────────
@@ -494,6 +502,12 @@ impl Backend {
 
             // ── Emit diagnostics based on the cached outcome ────────────
             match outcome {
+                // `?->` short-circuits to `null` without touching the
+                // member when its subject is `null` — it never crashes,
+                // unlike every other scalar this arm flags for `->`.
+                SubjectOutcome::Scalar(ref scalar) if is_nullsafe && scalar.is_null() => {
+                    continue;
+                }
                 SubjectOutcome::Scalar(ref scalar) => {
                     let range = match self.offset_range_to_lsp_range(
                         uri,

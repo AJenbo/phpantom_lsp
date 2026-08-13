@@ -10202,6 +10202,29 @@ function test(?Machine $m): void {
     );
 }
 
+/// `$s?->foo` on a variable narrowed to exactly `null` must not be
+/// flagged: `?->` short-circuits to `null` without touching the member,
+/// unlike plain `->` which the scalar_member_access diagnostic exists to
+/// catch.
+#[test]
+fn no_scalar_member_access_on_nullsafe_access_to_null_typed_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(?string $s): void {
+    if ($s === null) {
+        echo $s?->foo;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "should not flag scalar_member_access on $s?->foo when $s is narrowed to null, got: {:?}",
+        diags
+    );
+}
+
 /// `$this->unknownMethod()->next()` inside a class — only
 /// `unknownMethod` should be flagged.
 #[test]

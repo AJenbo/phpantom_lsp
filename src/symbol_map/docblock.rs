@@ -574,6 +574,7 @@ fn emit_covers_reference(
             is_method_call: false,
             is_docblock_reference: true,
             is_array_callable: false,
+            is_nullsafe: false,
         },
         None => SymbolKind::FunctionCall {
             name: crate::atom::atom(member.trim_start_matches('\\')),
@@ -1142,6 +1143,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                     is_method_call: false,
                     is_docblock_reference: true,
                     is_array_callable: false,
+                    is_nullsafe: false,
                 },
             });
         }
@@ -1177,6 +1179,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 is_method_call: false,
                 is_docblock_reference: true,
                 is_array_callable: false,
+                is_nullsafe: false,
             },
         });
     } else {

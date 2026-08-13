@@ -468,6 +468,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
                     is_method_call: true,
                     is_docblock_reference: false,
                     is_array_callable: false,
+                    is_nullsafe: false,
                 },
             });
         }
@@ -484,6 +485,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
                     is_method_call: true,
                     is_docblock_reference: false,
                     is_array_callable: false,
+                    is_nullsafe: false,
                 },
             });
         }
@@ -503,6 +505,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
                 is_method_call: true,
                 is_docblock_reference: false,
                 is_array_callable: false,
+                is_nullsafe: false,
             },
         });
     }
@@ -542,6 +545,7 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
             is_method_call: true,
             is_docblock_reference: false,
             is_array_callable: false,
+            is_nullsafe: false,
         },
     });
 

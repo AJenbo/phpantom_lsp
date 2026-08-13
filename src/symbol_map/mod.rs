@@ -231,6 +231,12 @@ pub(crate) enum SymbolKind {
         /// hover, and semantic tokens still use them because they only
         /// surface information when the member actually resolves.
         is_array_callable: bool,
+        /// `true` when this access used the nullsafe operator (`?->`)
+        /// rather than plain `->`.  A nullsafe access short-circuits to
+        /// `null` without touching the member when its subject is
+        /// `null`, so diagnostics must not flag that one case the way
+        /// they flag a plain `->` on a `null`-typed subject.
+        is_nullsafe: bool,
     },
 
     /// A `$variable` token (usage or definition site).

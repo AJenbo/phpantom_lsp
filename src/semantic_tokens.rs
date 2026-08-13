@@ -315,6 +315,7 @@ impl Backend {
                     subject_text,
                     is_docblock_reference,
                     is_array_callable: _,
+                    is_nullsafe: _,
                 } => {
                     let static_property_syntax = *is_static
                         && content

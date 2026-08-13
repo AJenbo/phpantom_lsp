@@ -360,6 +360,7 @@ fn extract_call<'a>(
                         is_method_call: true,
                         is_docblock_reference: false,
                         is_array_callable: false,
+                        is_nullsafe: false,
                     },
                 });
                 // Laravel: if this is a ->group() call, check for
@@ -421,6 +422,7 @@ fn extract_call<'a>(
                         is_method_call: true,
                         is_docblock_reference: false,
                         is_array_callable: false,
+                        is_nullsafe: false,
                     },
                 });
             }
@@ -461,6 +463,7 @@ fn extract_call<'a>(
                         is_method_call: true,
                         is_docblock_reference: false,
                         is_array_callable: false,
+                        is_nullsafe: false,
                     },
                 });
                 let clean_subject = strip_fqn_prefix(&subject_text);
@@ -800,6 +803,7 @@ pub(super) fn extract_partial_application_expr<'a>(
                         is_method_call: true,
                         is_docblock_reference: false,
                         is_array_callable: false,
+                        is_nullsafe: false,
                     },
                 });
             }
@@ -825,6 +829,7 @@ pub(super) fn extract_partial_application_expr<'a>(
                         is_method_call: true,
                         is_docblock_reference: false,
                         is_array_callable: false,
+                        is_nullsafe: false,
                     },
                 });
             }

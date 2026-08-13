@@ -173,6 +173,7 @@ pub(super) fn try_emit_coverage_attribute_spans(
             is_method_call: false,
             is_docblock_reference: true,
             is_array_callable: false,
+            is_nullsafe: false,
         },
     });
 }

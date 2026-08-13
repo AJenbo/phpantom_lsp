@@ -1121,6 +1121,7 @@ pub(super) fn try_emit_array_callable_span(
             is_method_call: true,
             is_docblock_reference: false,
             is_array_callable: true,
+            is_nullsafe: false,
         },
     });
 }
@@ -1460,6 +1461,7 @@ pub(super) fn laravel_route_scan_expr(
                     is_method_call: true,
                     is_docblock_reference: false,
                     is_array_callable: false,
+                    is_nullsafe: false,
                 },
             });
         }

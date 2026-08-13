@@ -34,6 +34,7 @@ pub(super) fn extract_access_expr<'a>(
                             is_method_call: false,
                             is_docblock_reference: false,
                             is_array_callable: false,
+                            is_nullsafe: false,
                         },
                     });
                 }
@@ -69,6 +70,7 @@ pub(super) fn extract_access_expr<'a>(
                             is_method_call: false,
                             is_docblock_reference: false,
                             is_array_callable: false,
+                            is_nullsafe: true,
                         },
                     });
                 }
@@ -106,6 +108,7 @@ pub(super) fn extract_access_expr<'a>(
                         is_method_call: false,
                         is_docblock_reference: false,
                         is_array_callable: false,
+                        is_nullsafe: false,
                     },
                 });
             }
@@ -135,6 +138,7 @@ pub(super) fn extract_access_expr<'a>(
                             is_method_call: false,
                             is_docblock_reference: false,
                             is_array_callable: false,
+                            is_nullsafe: false,
                         },
                     });
                 }
