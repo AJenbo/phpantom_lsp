@@ -325,6 +325,29 @@ pub(crate) fn build_function_template_subs(
     subs
 }
 
+/// Fill in any function-level `@template` parameter a resolved type still
+/// names, using the bindings the call-site arguments provide.
+///
+/// A conditional return type is evaluated on its own, before the general
+/// substitution path runs, so its winning branch can still carry a bare
+/// template name (`tap()` returns `TValue`). The arguments are only resolved
+/// when the type actually names one, which keeps the common case free.
+pub(crate) fn substitute_function_templates(
+    func_info: &crate::types::FunctionInfo,
+    ty: PhpType,
+    arg_texts: &[String],
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> PhpType {
+    if !ty.references_any_name(&func_info.template_params) {
+        return ty;
+    }
+    let subs = build_function_template_subs(func_info, arg_texts, rctx);
+    if subs.is_empty() {
+        return ty;
+    }
+    ty.substitute(&subs)
+}
+
 /// Resolve a variable argument to its raw type string.
 ///
 /// For `$pens` with `/** @var Pen[] $pens */`, returns `Some("Pen[]")`.
@@ -338,7 +361,10 @@ pub(crate) fn resolve_arg_variable_raw_type(
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let var_name = arg_text.trim();
-    if !var_name.starts_with('$') {
+    // A property chain is read from its base expression below, whatever the
+    // base is spelled as (`$this`, `Labels::MEDICAL`, …); everything after
+    // that looks the argument up as a variable, so it has to be one.
+    if !var_name.starts_with('$') && !var_name.contains("->") {
         return None;
     }
 
@@ -368,6 +394,12 @@ pub(crate) fn resolve_arg_variable_raw_type(
                 }
             }
         }
+    }
+
+    // Past this point every lookup is keyed on a variable name, so a chain
+    // whose property could not be read has nothing left to answer it.
+    if !var_name.starts_with('$') {
+        return None;
     }
 
     // 1. Try docblock annotation (@var).
@@ -981,6 +1013,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 let tpl = crate::type_engine::types::conditional::TemplateContext {
                     defaults: None,
                     params: &func_info.template_params,
+                    bindings: &func_info.template_bindings,
                     arg_type_resolver: Some(&arg_ty_resolver),
                 };
                 crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
@@ -1005,9 +1038,21 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     Some(&arg_ty_resolver),
                 )
             });
-            if let Some(ref ty) = resolved_type {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            if let Some(ty) = resolved_type {
+                // The winning branch can name a function-level `@template`
+                // (`tap()` returns `TValue`), which only the call-site
+                // arguments fill in.
+                let ty = substitute_function_templates(
+                    &func_info,
                     ty,
+                    &crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                        &func_call.argument_list,
+                        content,
+                    ),
+                    &rctx,
+                );
+                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    &ty,
                     current_class_name,
                     all_classes,
                     class_loader,
@@ -1019,7 +1064,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 // `list<string>`, `int`).  Return it as a type-string-only
                 // entry so downstream consumers see the resolved type.
                 return vec![resolved_type_with_lookup(
-                    ty.clone(),
+                    ty,
                     current_class_name,
                     all_classes,
                     class_loader,
@@ -1611,6 +1656,7 @@ pub(super) fn resolve_conditional_return_for_call(
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
         defaults: None,
         params: method.template_params.as_slice(),
+        bindings: method.template_bindings.as_slice(),
         arg_type_resolver,
     };
     let resolved =
@@ -1638,6 +1684,7 @@ pub(super) fn resolve_conditional_return_for_call(
         let tpl2 = crate::type_engine::conditional_resolution::TemplateContext {
             defaults: Some(template_subs),
             params: method.template_params.as_slice(),
+            bindings: method.template_bindings.as_slice(),
             arg_type_resolver,
         };
         crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
@@ -1888,6 +1935,9 @@ pub(super) fn resolve_owner_method_call(
                 defaults: Some(template_subs),
                 params: method_ref
                     .map(|m| m.template_params.as_slice())
+                    .unwrap_or(&[]),
+                bindings: method_ref
+                    .map(|m| m.template_bindings.as_slice())
                     .unwrap_or(&[]),
                 arg_type_resolver: Some(&arg_ty_resolver),
             };

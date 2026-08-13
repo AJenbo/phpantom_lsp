@@ -1311,6 +1311,23 @@ class ConditionalReturnDemo
             strtoupper($unknown);                 // narrowed from mixed to string
         }
 
+        // A conditional keyed on an argument's *type* is decided by what the
+        // call was handed: one id finds one pen, a list of ids finds the
+        // whole drawer, and an argument the engine cannot pin down keeps both
+        // branches rather than committing to one the call may not take.
+        $drawer = new PenDrawer();
+        $onePen = $drawer->find(7);
+        $onePen?->write();                        // int id → Pen|null
+        $manyPens = $drawer->find([7, 8]);
+        $manyPens->first()->write();              // list of ids → TypedCollection<Pen>
+
+        // `is null` follows the argument's type too, so a value that may be
+        // null keeps the branch it would take when it is.
+        $labelled = $drawer->label('lid');
+        strtoupper($labelled);                    // a string label → string
+        $unlabelled = $drawer->label();
+        strtoupper($unlabelled['lid']);           // no label → array<string, string>
+
         // A conditional keyed on an argument's *value* reads the literal at
         // the call site, and the parameter's declared default when the
         // argument is left out, instead of every branch at once.
@@ -5782,6 +5799,28 @@ class StaticPropHolder
     public self $holder;
 }
 
+// PenDrawer — used by ConditionalReturnDemo (conditionals keyed on the type
+// of the argument rather than its value, as Eloquent's `find()` is)
+class PenDrawer
+{
+    /**
+     * @param  int|list<int>  $id
+     * @return ($id is list<int> ? TypedCollection<int, Pen> : Pen|null)
+     */
+    public function find(int|array $id): TypedCollection|Pen|null
+    {
+        return is_array($id) ? new TypedCollection([new Pen()]) : new Pen();
+    }
+
+    /**
+     * @return ($name is null ? array<string, string> : string)
+     */
+    public function label(?string $name = null): array|string
+    {
+        return $name === null ? ['lid' => 'blue'] : 'blue';
+    }
+}
+
 // TreeMapperImpl — used by ConditionalReturnDemo (literal string conditional)
 class TreeMapperImpl
 {
@@ -8617,6 +8656,13 @@ function runDemoAssertions(): void
     $unknown = sessionValue('file');
     assert(is_string($unknown), 'sessionValue("file") returns a mixed value narrowable to string');
     assert(sessionValue() === null, 'sessionValue() with no args returns null');
+
+    // ── Type-keyed conditional return type (PenDrawer) ──────────────────
+    $drawer = new PenDrawer();
+    assert($drawer->find(7) instanceof Pen, 'a single id finds one pen');
+    assert($drawer->find([7, 8])->first() instanceof Pen, 'a list of ids finds a collection of pens');
+    assert(is_string($drawer->label('lid')), 'a named label is a string');
+    assert(is_array($drawer->label()), 'no name asks for every label');
 
     // ── Value-keyed conditional return type (str_word_count) ────────────
     assert(str_word_count('two words') === 2, 'the default $format of 0 counts the words');

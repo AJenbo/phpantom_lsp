@@ -62,7 +62,7 @@ use property_access::resolve_rhs_property_access;
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
 pub(crate) use calls::{
     build_function_template_subs, infer_closure_literal_type, is_array_like_wrapper,
-    resolve_arg_variable_raw_type,
+    resolve_arg_variable_raw_type, substitute_function_templates,
 };
 pub(crate) use instantiation::{
     TemplateBindingMode, classify_template_binding, extract_array_position,

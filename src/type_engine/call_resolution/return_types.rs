@@ -519,6 +519,7 @@ impl Backend {
                                     let tpl = TemplateContext {
                                         defaults: Some(&template_subs),
                                         params: &m.template_params,
+                                        bindings: &m.template_bindings,
                                         arg_type_resolver: Some(&arg_ty_resolver),
                                     };
                                     crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
@@ -902,6 +903,7 @@ impl Backend {
                                 let tpl = TemplateContext {
                                     defaults: None,
                                     params: &func_info.template_params,
+                                    bindings: &func_info.template_bindings,
                                     arg_type_resolver: Some(&arg_ty_resolver),
                                 };
                                 resolve_conditional_with_text_args(
@@ -928,6 +930,18 @@ impl Backend {
                                 )
                             });
                         if let Some(parsed_ty) = resolved_type {
+                            // The winning branch can name a function-level
+                            // `@template` (`tap()` returns `TValue`), which
+                            // only the call-site arguments fill in.
+                            let parsed_ty = crate::type_engine::variable::rhs_resolution::substitute_function_templates(
+                                &func_info,
+                                parsed_ty,
+                                &split_text_args(text_args)
+                                    .into_iter()
+                                    .map(str::to_string)
+                                    .collect::<Vec<String>>(),
+                                ctx,
+                            );
                             let classes: Vec<Arc<ClassInfo>> =
                                 crate::type_engine::type_resolution::type_hint_to_classes_typed(
                                     &parsed_ty,
@@ -1396,6 +1410,7 @@ impl Backend {
                             .collect::<HashMap<String, PhpType>>(),
                     ),
                     params: &method.template_params,
+                    bindings: &method.template_bindings,
                     arg_type_resolver: None,
                 };
                 let resolved_type = if !text_args.is_empty() {

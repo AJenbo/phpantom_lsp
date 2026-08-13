@@ -18,44 +18,64 @@ per-project inventory. Entries filed later say where they came from.
 
 ## Conditional and argument-dependent return types
 
-### B139. Conditional return types are not evaluated against argument *types*
+### B175. A parameter default written `self::CONST` reads as the call site's class
 
-**Impact: High · Effort: Medium**
+**Impact: Low-Medium · Effort: Low-Medium**
 
-The engine evaluates `@return ($flag is true ? A : B)` when the
-argument is a literal value (and falls back to the parameter default
-when it is omitted), but a condition keyed on the argument's *type*
-is never decided — the whole union of branches is returned instead:
+An omitted argument takes its parameter's declared default, and a
+condition keyed on that parameter is decided against it. When the
+default is written `self::SOME_CONST`, the `self` is resolved against
+the class the *call* sits in rather than the class that declares the
+method, so the constant is not found and the condition is left
+undecided:
 
 ```php
-/** @return ($id is array<mixed> ? Collection<int, TModel> : TModel|null) */
-public function find($id, $columns = ['*']) {}
+/** @return ($id is class-string<C> ? (B is 0|1 ? C|object : C|object|null) : …) */
+public function get(string $id, int $invalidBehavior = self::EXCEPTION_ON_INVALID_REFERENCE): ?object;
 
-$order = Order::find(7);   // reported Collection<int, Order>|Order|null
+$service = $container->get(Service::class);   // reported Service|object|null
 ```
 
-Undecided type conditions from the sweep: `$id is array<mixed>|Arrayable`
-(Eloquent `find`/`findOrFail`, ~24 sites), `$items is EloquentCollection`
-/ `$into is class-string<…>` (spatie/laravel-data `Data::collect()`,
-~22 sites), `$callback is null` (`tap()`, which also
-leaks the raw template name `TValue` into the union), and Symfony's
-`ContainerInterface::get()` (`B is 0|1` against the omitted argument's
-default `1`). Two cosmetic side effects to clear with it: a model's
-custom collection (`#[CollectedBy]` / `$collectionClass`) is emitted
-*alongside* the generic `Collection<int, TModel>` it stands for, and
-nested conditionals collapse into unions containing an unresolved
-`array-key` where `TKey` should have been substituted.
+Symfony's `ContainerInterface::get()` is the case that surfaced it: the
+call cannot return `null` unless the caller asks for that behaviour, so
+every service read carries a `null` half it never has. Spelling the
+default `ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE` decides it,
+which is what points at `self`.
 
-**Fix:** decide `is` conditions with `is_type_compatible` on the
-resolved argument type (falling back to the declared default's type
-when the argument is omitted), recursing into nested conditionals, and
-only union the branches when the condition is genuinely undecidable.
+**Fix:** resolve a parameter default's `self`/`static`/`parent` against
+the declaring class before handing the text to the argument-type
+resolver.
 
-An `is null` condition is the one kind still decided by argument
-*presence* rather than argument type: any argument that is not the
-literal `null` takes the else branch, so `getenv($name)` and
-`$xml->asXML($path)` on a `?string` commit to a branch the call may not
-take. Route it through the same resolved-type check as the rest.
+### B176. A `@template` bound through a union `@param` never binds
+
+**Impact: Low-Medium · Effort: Medium**
+
+A template parameter is bound from the argument whose `@param` names
+it, but only when the annotation names it plainly (`@param T $x`),
+inside an array (`@param T[] $x`), or as one generic wrapper
+(`@param array<TKey, TValue> $x`). A *union* of shapes binds nothing:
+
+```php
+/**
+ * @param Collection<TKey, TValue>|EloquentCollection<TKey, TValue>|array<TKey, TValue> $items
+ * @return array<TKey, TValue>
+ */
+function pick($items) {}
+
+pick($rows);   // array<int, string> in, reported array<array-key, mixed>
+```
+
+Each alternative is a binding site of its own, and the one whose shape
+the argument matches is the one that should bind. spatie's
+`Data::collect()` is the case that surfaced it: the branch its
+arguments select is right, but its key type falls back to the declared
+`array-key` bound. A method binds the *whole* argument type instead,
+which is worse: `array<TKey, …>` with a `list<string>` argument reports
+`array<array<int, string>, …>`.
+
+**Fix:** in `classify_template_binding`, treat a union `@param` as the
+set of binding sites it names and match the argument against each,
+binding from the alternative it satisfies.
 
 ### B141. A `never` conditional branch does not assert the condition
 
@@ -76,7 +96,7 @@ an implicit assertion from it. PHPantom keeps the argument unchanged,
 so every `throw_unless`/`throw_if`/`abort_unless` guard is invisible
 (7 sites in one test file alone).
 
-**Fix:** after B139, when the branch selected by a *falsy/truthy
+**Fix:** when the branch selected by a *falsy/truthy
 subtype* of an argument is `never`, subtract that subtype from the
 argument expression in the following scope — the same subtraction the
 `if (!$x) { throw … }` form already gets.

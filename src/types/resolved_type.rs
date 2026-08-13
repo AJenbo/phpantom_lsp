@@ -224,6 +224,34 @@ impl ResolvedType {
             let mut results: Vec<ResolvedType> =
                 classes.into_iter().map(ResolvedType::from_arc).collect();
 
+            // A generic union member (`Collection<int, Order>`) resolves to
+            // the class its base name holds, so it belongs on that class's
+            // entry rather than beside it as a member of its own — otherwise
+            // the value reads as `Collection|Order|Collection<int, Order>`,
+            // naming the same collection twice.
+            let mut attached: Vec<PhpType> = Vec::new();
+            if let TypeKind::Union(members) = type_hint.kind() {
+                for member in members {
+                    if !matches!(member.kind(), TypeKind::Generic(_)) {
+                        continue;
+                    }
+                    let Some(base) = member.base_name() else {
+                        continue;
+                    };
+                    let entry = results.iter_mut().find(|rt| {
+                        !matches!(rt.type_string.kind(), TypeKind::Generic(_))
+                            && rt.class_info.as_ref().is_some_and(|c| {
+                                let fqn = c.fqn().to_string();
+                                fqn == base || crate::util::short_name(&fqn) == base
+                            })
+                    });
+                    if let Some(entry) = entry {
+                        entry.type_string = member.clone();
+                        attached.push(member.clone());
+                    }
+                }
+            }
+
             // When the original type hint is a union or nullable,
             // preserve non-class members (scalars like `int`, `string`,
             // `null`) as explicit `ResolvedType` entries so that type
@@ -251,7 +279,7 @@ impl ResolvedType {
                                     fqn == stripped || crate::util::short_name(fqn) == stripped
                                 })
                             }
-                            _ => true,
+                            _ => !attached.contains(m),
                         }
                     })
                     .cloned()

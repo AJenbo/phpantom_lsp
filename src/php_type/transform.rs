@@ -553,6 +553,18 @@ impl PhpType {
         self.contains_name_matching(&is_self_ref_name)
     }
 
+    /// Check whether this type tree names any of `names`.
+    ///
+    /// Used to tell a type that still carries a `@template` parameter from
+    /// one that is already concrete, so the substitution machinery only runs
+    /// when it has something to do.
+    pub fn references_any_name(&self, names: &[crate::atom::Atom]) -> bool {
+        if names.is_empty() {
+            return false;
+        }
+        self.contains_name_matching(&|name| names.iter().any(|n| n.as_str() == name))
+    }
+
     /// Check whether this type tree contains any relative class-reference
     /// keyword: `self`, `static`, `$this`, or `parent`.
     ///

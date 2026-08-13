@@ -14219,3 +14219,119 @@ function probe(string $a, string $b): void {
         "a concatenation subject is always a plain string: {out}"
     );
 }
+
+/// An Eloquent-style conditional return keyed on the argument's *type*
+/// (`$id is array<mixed>|Arrayable ? Collection<int, TModel> : TModel|null`)
+/// is decided from what the call was handed: a scalar id returns one model,
+/// a list of ids returns the collection, and an argument whose type says
+/// nothing keeps both branches.
+#[test]
+fn hover_conditional_return_decided_by_argument_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///conditional_argument_type.php";
+    let content = r#"<?php
+interface Arrayable {}
+
+/**
+ * @template TKey
+ * @template TValue
+ */
+class Collection implements Arrayable {}
+
+class Model {}
+
+class Order extends Model {}
+
+/**
+ * @template TModel of Model
+ */
+class Builder
+{
+    /**
+     * @param mixed $id
+     * @return ($id is array<mixed>|Arrayable ? Collection<int, TModel> : TModel|null)
+     */
+    public function find($id) {}
+}
+
+function probe(int $id, mixed $anything): void {
+    /** @var Builder<Order> $builder */
+    $builder = new Builder();
+
+    $one = $builder->find($id);
+    $one;
+    $many = $builder->find([1, 2]);
+    $many;
+    $either = $builder->find($anything);
+    $either;
+}
+"#;
+
+    let one = hover_text(&hover_at(&backend, uri, content, 30, 6).expect("hover $one")).to_string();
+    assert!(
+        one.contains("Order") && !one.contains("Collection"),
+        "an int id can only take the model branch: {one}"
+    );
+
+    let many =
+        hover_text(&hover_at(&backend, uri, content, 32, 6).expect("hover $many")).to_string();
+    assert!(
+        many.contains("Collection<int, Order>") && !many.contains("|"),
+        "a list of ids takes the collection branch: {many}"
+    );
+
+    let either =
+        hover_text(&hover_at(&backend, uri, content, 34, 6).expect("hover $either")).to_string();
+    assert!(
+        either.contains("Collection<int, Order>")
+            && either.contains("$either = Order")
+            && either.contains("null"),
+        "an argument of unknown type keeps both branches: {either}"
+    );
+}
+
+/// A conditional branch that names a function-level `@template` is filled in
+/// from the call-site arguments, the same as a plain templated return type:
+/// `tap($order, fn (…) => …)` is an `Order`, not a bare `TValue`.
+#[test]
+fn hover_conditional_branch_substitutes_function_templates() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///conditional_template_branch.php";
+    let content = r#"<?php
+class Order {}
+
+/**
+ * @template TValue
+ */
+class HigherOrderTapProxy {}
+
+/**
+ * @template TValue
+ * @param TValue $value
+ * @param (callable(TValue): mixed)|null $callback
+ * @return ($callback is null ? HigherOrderTapProxy<TValue> : TValue)
+ */
+function tap($value, $callback = null) {}
+
+function probe(): void {
+    $tapped = tap(new Order(), function ($order) {});
+    $tapped;
+    $proxy = tap(new Order());
+    $proxy;
+}
+"#;
+
+    let tapped =
+        hover_text(&hover_at(&backend, uri, content, 18, 6).expect("hover $tapped")).to_string();
+    assert!(
+        tapped.contains("Order") && !tapped.contains("TValue"),
+        "the value branch reports the argument's own type: {tapped}"
+    );
+
+    let proxy =
+        hover_text(&hover_at(&backend, uri, content, 20, 6).expect("hover $proxy")).to_string();
+    assert!(
+        proxy.contains("HigherOrderTapProxy<Order>"),
+        "the proxy branch carries the argument's type too: {proxy}"
+    );
+}

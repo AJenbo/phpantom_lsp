@@ -175,6 +175,7 @@ impl Backend {
                         let tpl = TemplateContext {
                             defaults: Some(&method_subs),
                             params: &result_method.template_params,
+                            bindings: &result_method.template_bindings,
                             arg_type_resolver: Some(&arg_ty_resolver),
                         };
                         let evaluated =
@@ -325,6 +326,7 @@ impl Backend {
                 let tpl = TemplateContext {
                     defaults: Some(&method_subs),
                     params: &result_method.template_params,
+                    bindings: &result_method.template_bindings,
                     arg_type_resolver: Some(&arg_ty_resolver),
                 };
                 let evaluated =

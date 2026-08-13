@@ -41,6 +41,13 @@ pub struct TemplateContext<'a> {
     /// Used to distinguish template parameters (e.g. `T`) from concrete class
     /// names (e.g. `FormFlowTypeInterface`) in `class-string<Bound>` conditions.
     pub params: &'a [crate::atom::Atom],
+    /// Method/function-level `@template` parameter bindings, as
+    /// `(template name, parameter name)` pairs from `@param B $invalidBehavior`.
+    ///
+    /// A condition keyed on a template parameter (`B is 0|1`) is really keyed
+    /// on the argument that binds it, so this is what routes the condition to
+    /// the parameter it decides against.
+    pub bindings: &'a [(crate::atom::Atom, crate::atom::Atom)],
     /// Optional resolver mapping an argument's source text to its resolved
     /// [`PhpType`].
     ///
@@ -62,6 +69,7 @@ impl<'a> TemplateContext<'a> {
         Self {
             defaults: None,
             params,
+            bindings: &[],
             arg_type_resolver: None,
         }
     }
@@ -176,6 +184,17 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             {
                 return Some(resolved);
             }
+
+            // A condition keyed on a `@template` parameter (`B is 0|1`) is
+            // decided by the argument that binds it (`@param B $behavior`).
+            let target = if target.starts_with('$') {
+                target
+            } else {
+                tpl.bindings
+                    .iter()
+                    .find(|(template, _)| template.as_str() == target)
+                    .map_or(target, |(_, param)| param.as_str())
+            };
 
             let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
             let is_variadic = params
@@ -430,38 +449,68 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     tpl,
                 )
             } else if condition.is_null() {
-                // The null (`then`) branch is taken when the argument is
-                // absent (the parameter falls back to its null default) or
-                // when `null` is passed explicitly. This mirrors the AST
-                // path's rule so the same call resolves identically through
-                // the inline-text and AST resolution paths.
-                let arg_is_null = arg_text.is_none_or(|t| {
-                    let t = t.trim();
-                    t.is_empty() || t.eq_ignore_ascii_case("null")
-                });
-                if arg_is_null {
-                    // No argument provided or explicitly null → null branch
-                    resolve_conditional_with_text_args_and_defaults(
-                        then_type,
-                        params,
-                        text_args,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    )
-                } else {
-                    // Argument was provided → not null
-                    resolve_conditional_with_text_args_and_defaults(
-                        else_type,
-                        params,
-                        text_args,
-                        var_resolver,
-                        calling_class_name,
-                        class_loader,
-                        tpl,
-                    )
-                }
+                // The null (`then`) branch is taken when the parameter really
+                // holds null: no argument at all (so it falls back to a null
+                // default), an explicit `null`, or an argument whose resolved
+                // type is null. Any other type takes the else branch, and a
+                // type that may or may not be null (`?string`) leaves both
+                // branches open rather than committing to one the call may
+                // not take.
+                let decided = match arg_text {
+                    None => Some(true),
+                    Some(text) if text.trim().is_empty() => Some(true),
+                    Some(text) => condition_result_from_text(condition, text).or_else(|| {
+                        tpl.arg_type_resolver
+                            .and_then(|resolve| resolve(text))
+                            .and_then(|arg_ty| {
+                                type_condition_result(&arg_ty, condition, class_loader)
+                            })
+                            .or_else(|| {
+                                // With no resolver to consult, an argument that
+                                // is not the literal `null` reads as non-null,
+                                // which is what it usually is.
+                                tpl.arg_type_resolver.is_none().then_some(false)
+                            })
+                    }),
+                };
+                let branch = match decided {
+                    Some(is_null) => {
+                        if is_null ^ *negated {
+                            then_type
+                        } else {
+                            else_type
+                        }
+                    }
+                    // Undecided means a resolver was consulted and could not
+                    // pin the argument down, so the call really may take
+                    // either branch.
+                    None => {
+                        let resolve_branch = |b| {
+                            resolve_conditional_with_text_args_and_defaults(
+                                b,
+                                params,
+                                text_args,
+                                var_resolver,
+                                calling_class_name,
+                                class_loader,
+                                tpl,
+                            )
+                        };
+                        return union_branch_types(
+                            resolve_branch(then_type),
+                            resolve_branch(else_type),
+                        );
+                    }
+                };
+                resolve_conditional_with_text_args_and_defaults(
+                    branch,
+                    params,
+                    text_args,
+                    var_resolver,
+                    calling_class_name,
+                    class_loader,
+                    tpl,
+                )
             } else if matches!(condition.kind(), TypeKind::Literal(_)) {
                 // Value condition (`$format is 0`, `$flags is 15`). A literal
                 // argument settles it outright; anything else is settled by
@@ -553,7 +602,9 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     condition_result_from_text(condition, arg).or_else(|| {
                         tpl.arg_type_resolver
                             .and_then(|resolve| resolve(arg))
-                            .and_then(|arg_ty| type_condition_result(&arg_ty, condition))
+                            .and_then(|arg_ty| {
+                                type_condition_result(&arg_ty, condition, class_loader)
+                            })
                     })
                 });
                 let branch = match decided {
@@ -718,8 +769,15 @@ fn condition_result_from_text(condition: &PhpType, arg_text: &str) -> Option<boo
                 .iter()
                 .map(|member| condition_result_from_text(member, arg_text)),
         ),
-        TypeKind::Literal(expected) => literal_value_from_text(arg_text)
-            .map(|actual| crate::php_type::literals_equal(expected, &actual)),
+        TypeKind::Literal(expected) => match literal_value_from_text(arg_text) {
+            Some(actual) => Some(crate::php_type::literals_equal(expected, &actual)),
+            // A value of another kind entirely cannot be the literal, whatever
+            // it holds: `null` is never `'array'`.
+            None => match (literal_category(expected), form_category(arg_text)) {
+                (lit, Some(form)) if lit != form => Some(false),
+                _ => None,
+            },
+        },
         _ => condition_result_from_form(condition, classify_arg_form(arg_text)),
     }
 }
@@ -738,10 +796,40 @@ fn literal_condition_result(condition: &PhpType, arg_ty: &PhpType) -> Option<boo
                 .iter()
                 .map(|member| literal_condition_result(member, arg_ty)),
         ),
-        TypeKind::Literal(expected) => arg_ty
-            .as_literal()
-            .map(|actual| crate::php_type::literals_equal(expected, actual)),
+        TypeKind::Literal(expected) => match arg_ty.as_literal() {
+            Some(actual) => Some(crate::php_type::literals_equal(expected, actual)),
+            // Even without a literal value, a type from another category
+            // cannot hold one: an `int` argument is never `'array'`.
+            None => match type_category(arg_ty) {
+                Some(category) if category != literal_category(expected) => Some(false),
+                _ => None,
+            },
+        },
         _ => None,
+    }
+}
+
+/// The runtime category a literal value belongs to, in the same vocabulary
+/// [`type_category`] reports.
+fn literal_category(value: &LiteralValue) -> &'static str {
+    match value {
+        LiteralValue::Int(_) => "int",
+        LiteralValue::Float(_) => "float",
+        LiteralValue::String(_) => "string",
+    }
+}
+
+/// The runtime category an argument's source text belongs to, or `None` when
+/// its syntax does not say.
+fn form_category(arg_text: &str) -> Option<&'static str> {
+    match classify_arg_form(arg_text) {
+        ArgForm::StringLit => Some("string"),
+        ArgForm::IntLit => Some("int"),
+        ArgForm::FloatLit => Some("float"),
+        ArgForm::True | ArgForm::False => Some("bool"),
+        ArgForm::Null => Some("null"),
+        ArgForm::ArrayLit => Some("array"),
+        ArgForm::Unknown => None,
     }
 }
 
@@ -862,9 +950,18 @@ fn condition_category(condition: &PhpType) -> Option<&'static str> {
 /// when it cannot be proven either way (`mixed`, an unresolved type, or a
 /// mixed union). The caller uses `None` to fall back to a union of both
 /// branches rather than committing to the wrong one.
-fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> {
+fn type_condition_result(
+    arg_ty: &PhpType,
+    condition: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<bool> {
     if arg_ty.is_mixed() || arg_ty.is_untyped() {
         return None;
+    }
+    // A condition naming a literal value (`$invalidBehavior is 0|1`) compares
+    // values, not types, so it is settled by the argument's own value.
+    if matches!(condition.kind(), TypeKind::Literal(_)) {
+        return literal_condition_result(condition, arg_ty);
     }
     // `is true` / `is false` name one boolean value, so only an argument
     // narrowed to a value of its own settles them: a plain `bool` really may
@@ -881,15 +978,27 @@ fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> 
         return combine_union_results(
             members
                 .iter()
-                .map(|member| type_condition_result(arg_ty, member)),
+                .map(|member| type_condition_result(arg_ty, member, class_loader)),
         );
+    }
+    // A nullable argument is the union of its inner type and `null`, and has
+    // to be judged as one: read whole, `?string` would answer an `is null`
+    // condition as a plain string and commit to a branch the call may not
+    // take.
+    if let TypeKind::Nullable(inner) = arg_ty.kind() {
+        let inner_result = type_condition_result(inner, condition, class_loader);
+        let null_result = type_condition_result(&PhpType::null(), condition, class_loader);
+        return match (inner_result, null_result) {
+            (Some(inner), Some(null)) if inner == null => Some(inner),
+            _ => None,
+        };
     }
     // Argument union: satisfied only when every member matches, refuted only
     // when every member is refuted, otherwise indeterminate.
     if let TypeKind::Union(members) = arg_ty.kind() {
         let results: Vec<Option<bool>> = members
             .iter()
-            .map(|m| type_condition_result(m, condition))
+            .map(|m| type_condition_result(m, condition, class_loader))
             .collect();
         return if results.iter().all(|r| *r == Some(true)) {
             Some(true)
@@ -901,8 +1010,53 @@ fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> 
     }
     match (type_category(arg_ty), condition_category(condition)) {
         (Some(arg_cat), Some(cond_cat)) => Some(arg_cat == cond_cat),
+        // A condition that names no scalar category names a class, which the
+        // class hierarchy decides (`$id is Arrayable`).
+        (Some(arg_cat), None) => class_condition_result(arg_ty, arg_cat, condition, class_loader),
         _ => None,
     }
+}
+
+/// Decide an `is <ClassName>` condition (`$id is Arrayable`, `$items is
+/// Collection<int, T>`) against the argument's resolved type.
+///
+/// Returns `Some(true)` when the argument's type is a subtype of the class the
+/// condition names, `Some(false)` when no value of that type can be an
+/// instance of it, and `None` when the argument's *declared* type is broader
+/// than what it may hold at runtime, so either branch is still reachable.
+fn class_condition_result(
+    arg_ty: &PhpType,
+    arg_category: &str,
+    condition: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<bool> {
+    let cond_name = condition.base_name()?;
+    // A scalar, an array or null is never an instance of a class.
+    if arg_category != "object" {
+        return Some(false);
+    }
+    if crate::class_lookup::is_subtype_of_typed(arg_ty, condition, class_loader) {
+        return Some(true);
+    }
+    // Beyond that the hierarchy has to be readable for the failed check to
+    // mean anything: an unindexed class refutes nothing.
+    let arg_name = arg_ty.base_name()?;
+    let (Some(arg_class), Some(cond_class)) = (class_loader(arg_name), class_loader(cond_name))
+    else {
+        return None;
+    };
+    // The condition names a subtype of the argument's declared type, so the
+    // value handed over may well be one of them.
+    if crate::class_lookup::is_subtype_of_names(cond_name, arg_name, class_loader) {
+        return None;
+    }
+    // Two unrelated classes are mutually exclusive, since PHP gives a class a
+    // single parent chain. An unrelated *interface* is not: a subclass of the
+    // argument's class may implement it, which only a final class rules out.
+    if cond_class.kind == crate::types::ClassLikeKind::Interface && !arg_class.is_final {
+        return None;
+    }
+    Some(false)
 }
 
 /// Union two optional branch types produced by an undecidable conditional,
@@ -1411,6 +1565,7 @@ pub(crate) fn extract_class_string_from_expr(expr: &Expression<'_>) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ClassLikeKind;
 
     /// A single required parameter with the given name (including `$`).
     fn param(name: &str) -> ParameterInfo {
@@ -1513,6 +1668,7 @@ mod tests {
         let tpl = TemplateContext {
             defaults: None,
             params: &[],
+            bindings: &[],
             arg_type_resolver: Some(&resolver),
         };
         resolve_conditional_with_text_args_and_defaults(
@@ -1593,6 +1749,7 @@ mod tests {
             let tpl = TemplateContext {
                 defaults: None,
                 params: &[],
+                bindings: &[],
                 arg_type_resolver: Some(&resolver),
             };
             resolve_conditional_with_text_args_and_defaults(
@@ -1745,6 +1902,7 @@ mod tests {
         let tpl = TemplateContext {
             defaults: None,
             params: &[],
+            bindings: &[],
             arg_type_resolver: Some(&resolver),
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
@@ -1776,6 +1934,7 @@ mod tests {
             let tpl = TemplateContext {
                 defaults: None,
                 params: &[],
+                bindings: &[],
                 arg_type_resolver: Some(&resolver),
             };
             let resolved = resolve_conditional_with_text_args_and_defaults(
@@ -1802,6 +1961,7 @@ mod tests {
         let tpl = TemplateContext {
             defaults: None,
             params: &[],
+            bindings: &[],
             arg_type_resolver: Some(&resolver),
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
@@ -1830,6 +1990,7 @@ mod tests {
         let tpl = TemplateContext {
             defaults: None,
             params: &[],
+            bindings: &[],
             arg_type_resolver: Some(&resolver),
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
@@ -1914,6 +2075,7 @@ mod tests {
         let tpl = TemplateContext {
             defaults: Some(&defaults),
             params: &[crate::atom::atom("T")],
+            bindings: &[],
             arg_type_resolver: Some(&resolver),
         };
         let evaluated = evaluate_nested_conditionals_text(
@@ -1930,5 +2092,173 @@ mod tests {
             "residual conditional left in {evaluated}"
         );
         assert_eq!(evaluated.to_string(), "Collection<string|null, V>");
+    }
+
+    /// A loader answering for an Eloquent-shaped hierarchy: `Collection`
+    /// implements `Arrayable`, `Order` extends `Model`, and nothing else
+    /// relates to anything.
+    fn eloquent_loader(name: &str) -> Option<Arc<ClassInfo>> {
+        let class = |name: &str, parent: Option<&str>, interfaces: &[&str], kind| ClassInfo {
+            name: atom(name),
+            parent_class: parent.map(atom),
+            interfaces: interfaces.iter().map(|i| atom(i)).collect(),
+            kind,
+            ..ClassInfo::default()
+        };
+        let info = match name.trim_start_matches('\\') {
+            "Collection" => class("Collection", None, &["Arrayable"], ClassLikeKind::Class),
+            "Arrayable" => class("Arrayable", None, &[], ClassLikeKind::Interface),
+            "Model" => class("Model", None, &[], ClassLikeKind::Class),
+            "Order" => class("Order", Some("Model"), &[], ClassLikeKind::Class),
+            _ => return None,
+        };
+        Some(Arc::new(info))
+    }
+
+    /// Resolve an Eloquent `find`-shaped conditional against an argument of
+    /// the given resolved type.
+    fn resolve_find(arg_type: Option<PhpType>) -> Option<String> {
+        let cond = PhpType::parse("($id is array<mixed>|Arrayable ? Collection : Order|null)");
+        let params = [param("$id")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &eloquent_loader;
+        let resolver = |_: &str| arg_type.clone();
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[],
+            bindings: &[],
+            arg_type_resolver: Some(&resolver),
+        };
+        resolve_conditional_with_text_args_and_defaults(
+            &cond, &params, "$id", None, None, loader, &tpl,
+        )
+        .map(|t| t.to_string())
+    }
+
+    /// A condition naming a class is decided by the class hierarchy: a scalar
+    /// can never satisfy it, and a class that implements the named interface
+    /// always does.
+    #[test]
+    fn class_condition_is_decided_by_the_resolved_argument_type() {
+        assert_eq!(
+            resolve_find(Some(PhpType::int())).as_deref(),
+            Some("Order|null")
+        );
+        assert_eq!(
+            resolve_find(Some(PhpType::named(atom("Collection")))).as_deref(),
+            Some("Collection")
+        );
+        // A class that does not implement the interface still leaves both
+        // branches open: a subclass of it may implement it.
+        assert_eq!(
+            resolve_find(Some(PhpType::named(atom("Order")))).as_deref(),
+            Some("Collection|Order|null")
+        );
+        // An argument whose type says nothing leaves both branches open.
+        assert_eq!(
+            resolve_find(Some(PhpType::mixed())).as_deref(),
+            Some("Collection|Order|null")
+        );
+    }
+
+    /// Resolve a `tap`-shaped `is null` conditional against an argument of the
+    /// given resolved type.
+    fn resolve_is_null(text_args: &str, arg_type: Option<PhpType>) -> Option<String> {
+        let cond = PhpType::parse("($callback is null ? Proxy : Value)");
+        let params = [param_with_default("$callback", "null")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let resolver = |_: &str| arg_type.clone();
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[],
+            bindings: &[],
+            arg_type_resolver: Some(&resolver),
+        };
+        resolve_conditional_with_text_args_and_defaults(
+            &cond, &params, text_args, None, None, loader, &tpl,
+        )
+        .map(|t| t.to_string())
+    }
+
+    /// An `is null` condition follows the argument's type rather than its mere
+    /// presence, so an argument that may be null leaves both branches open.
+    #[test]
+    fn is_null_condition_follows_the_resolved_argument_type() {
+        assert_eq!(resolve_is_null("", None).as_deref(), Some("Proxy"));
+        assert_eq!(resolve_is_null("null", None).as_deref(), Some("Proxy"));
+        assert_eq!(
+            resolve_is_null("$callback", Some(PhpType::named(atom("Closure")))).as_deref(),
+            Some("Value")
+        );
+        assert_eq!(
+            resolve_is_null("$name", Some(PhpType::nullable(PhpType::string()))).as_deref(),
+            Some("Proxy|Value")
+        );
+    }
+
+    /// `is not null` takes the branch its negation names, rather than reading
+    /// as the un-negated condition.
+    #[test]
+    fn negated_null_condition_swaps_its_branches() {
+        let cond = PhpType::parse("($callback is not null ? Value : Proxy)");
+        let params = [param_with_default("$callback", "null")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let tpl = TemplateContext::with_params(&[]);
+        let resolve = |text_args: &str| {
+            resolve_conditional_with_text_args_and_defaults(
+                &cond, &params, text_args, None, None, loader, &tpl,
+            )
+            .map(|t| t.to_string())
+        };
+        assert_eq!(resolve("null").as_deref(), Some("Proxy"));
+        assert_eq!(resolve("$fn").as_deref(), Some("Value"));
+    }
+
+    /// A value condition is refuted by an argument of another kind entirely:
+    /// `null` is not the string `'array'`, so spatie's `Data::collect()` picks
+    /// its collection branch rather than unioning every branch it has.
+    #[test]
+    fn value_condition_is_refuted_by_another_kind_of_argument() {
+        let cond = PhpType::parse("($into is 'array' ? array<Data> : Collection)");
+        let params = [param("$items"), param_with_default("$into", "null")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let resolver = |_: &str| Some(PhpType::null());
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[],
+            bindings: &[],
+            arg_type_resolver: Some(&resolver),
+        };
+        let resolve = |text_args: &str| {
+            resolve_conditional_with_text_args_and_defaults(
+                &cond, &params, text_args, None, None, loader, &tpl,
+            )
+            .map(|t| t.to_string())
+        };
+        assert_eq!(resolve("$rows").as_deref(), Some("Collection"));
+        assert_eq!(resolve("$rows, 'array'").as_deref(), Some("array<Data>"));
+    }
+
+    /// A condition keyed on a `@template` parameter is decided against the
+    /// argument that binds it, not against the first parameter.
+    #[test]
+    fn template_subject_is_decided_through_its_parameter_binding() {
+        let cond = PhpType::parse("(B is true ? Sync : Async)");
+        let params = [param("$id"), param_with_default("$wait", "true")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let bindings = [(atom("B"), atom("$wait"))];
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[atom("B")],
+            bindings: &bindings,
+            arg_type_resolver: None,
+        };
+        let resolve = |text_args: &str| {
+            resolve_conditional_with_text_args_and_defaults(
+                &cond, &params, text_args, None, None, loader, &tpl,
+            )
+            .map(|t| t.to_string())
+        };
+        assert_eq!(resolve("$id").as_deref(), Some("Sync"));
+        assert_eq!(resolve("$id, false").as_deref(), Some("Async"));
     }
 }
