@@ -9742,3 +9742,136 @@ function test(mixed $value): void {
         "the failure branch is what is reported, got {messages:?}"
     );
 }
+
+// ─── instanceof narrowing drops the non-class union members ─────────────────
+
+/// A conditional return type resolves to a single entry whose class is
+/// the object member and whose type string is the whole union, so an
+/// `instanceof` guard has to narrow the type string too — otherwise the
+/// array member is still judged against the parameter at the call site.
+#[test]
+fn instanceof_guard_clause_drops_the_array_member_of_a_union_return_type() {
+    let php = r#"<?php
+class UploadedFile {}
+
+class Request {
+    /** @return UploadedFile|array<UploadedFile>|null */
+    public function file(string $key) {}
+}
+
+class ImageService {
+    public function store(UploadedFile $file): void {}
+}
+
+function upload(Request $request, ImageService $images): void {
+    $file = $request->file('image');
+    if (!$file instanceof UploadedFile) {
+        throw new RuntimeException('missing');
+    }
+    $images->store($file);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The same union, narrowed by a plain then-branch rather than a guard
+/// clause.  This one reaches the scope through a different narrowing
+/// path, so it needs its own coverage.
+#[test]
+fn instanceof_then_branch_drops_the_array_member_of_a_union_return_type() {
+    let php = r#"<?php
+class UploadedFile {}
+
+class Request {
+    /** @return UploadedFile|array<UploadedFile> */
+    public function file(string $key) {}
+}
+
+class ImageService {
+    public function store(UploadedFile $file): void {}
+}
+
+function upload(Request $request, ImageService $images): void {
+    $file = $request->file('image');
+    if ($file instanceof UploadedFile) {
+        $images->store($file);
+    }
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A declared union splits into one entry per member, which the same
+/// narrowing has to reduce to the checked class.
+#[test]
+fn instanceof_guard_clause_drops_the_array_member_of_a_declared_union() {
+    let php = r#"<?php
+class UploadedFile {}
+
+class ImageService {
+    public function store(UploadedFile $file): void {}
+}
+
+function upload(UploadedFile|array|null $file, ImageService $images): void {
+    if (!$file instanceof UploadedFile) {
+        throw new RuntimeException('missing');
+    }
+    $images->store($file);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+#[test]
+fn instanceof_then_branch_drops_the_array_member_of_a_declared_union() {
+    let php = r#"<?php
+class UploadedFile {}
+
+class ImageService {
+    public function store(UploadedFile $file): void {}
+}
+
+function upload(UploadedFile|array|null $file, ImageService $images): void {
+    if ($file instanceof UploadedFile) {
+        $images->store($file);
+    }
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Narrowing must not overreach: an exclusion (`!$x instanceof Y` in
+/// the branch it guards) rules out only that class, so the array member
+/// of the union has to survive.
+#[test]
+fn negated_instanceof_keeps_the_array_member_of_a_union_return_type() {
+    let php = r#"<?php
+class UploadedFile {}
+
+class Request {
+    /** @return UploadedFile|array<UploadedFile> */
+    public function file(string $key) {}
+}
+
+class ImageService {
+    public function store(UploadedFile $file): void {}
+}
+
+function upload(Request $request, ImageService $images): void {
+    $file = $request->file('image');
+    if (!$file instanceof UploadedFile) {
+        $images->store($file);
+    }
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("array<UploadedFile>"),
+        "the array member is what remains, got {messages:?}"
+    );
+}

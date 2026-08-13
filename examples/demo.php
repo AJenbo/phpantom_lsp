@@ -279,6 +279,13 @@ class TypeNarrowingDemo
             $specimen->peel();                    // negated instanceof
         }
 
+        // An instanceof check rules out the array and null alternatives
+        // too, not just the other class in the union.
+        $picked = pickRockOrRocks(true);          // Rock|array<Rock>|null
+        if ($picked instanceof Rock) {
+            crushOneRock($picked);                // narrowed to Rock
+        }
+
         $unknown = getUnknownValue();
         if (is_a($unknown, Rock::class)) {
             $unknown->crush();                    // is_a() narrowing
@@ -318,6 +325,17 @@ class TypeNarrowingDemo
             return;
         }
         $held->peel();                            // narrowed to Banana after the guard
+    }
+
+    public function guardClause(): void
+    {
+        // Guard-clause form of the same union: after the throw, only the
+        // class survives — the array and null alternatives are gone.
+        $picked = pickRockOrRocks(true);          // Rock|array<Rock>|null
+        if (!$picked instanceof Rock) {
+            throw new \RuntimeException('expected one rock');
+        }
+        crushOneRock($picked);                    // narrowed to Rock
     }
 }
 
@@ -7429,6 +7447,22 @@ function pickRockOrBanana(): Rock|Banana
     return new Rock();
 }
 
+/**
+ * A union that mixes a class with an array of that class, the shape a
+ * conditional return type produces (`$key is null ? Rock[] : Rock`).
+ *
+ * @return Rock|array<Rock>|null
+ */
+function pickRockOrRocks(bool $one)
+{
+    return $one ? new Rock() : [new Rock()];
+}
+
+function crushOneRock(Rock $rock): string
+{
+    return $rock->crush();
+}
+
 function pickTag(): TextTag|NumberTag
 {
     return new TextTag();
@@ -8010,6 +8044,13 @@ function runDemoAssertions(): void
         assert($specimen instanceof Banana, 'Not Rock must be Banana');
         assert(method_exists($specimen, 'peel'), 'Banana must have peel()');
     }
+
+    // ── Type narrowing: instanceof over a class|array|null union ────────
+    $onlyRock = pickRockOrRocks(true);
+    assert($onlyRock instanceof Rock, 'the true branch really hands back a single Rock');
+    assert(crushOneRock($onlyRock) === 'smash!', 'the narrowed value really is what crushOneRock() accepts');
+    assert(is_array(pickRockOrRocks(false)), 'the false branch really is the array alternative instanceof rules out');
+    (new TypeNarrowingDemo())->guardClause();
 
     // ── Type narrowing: inline && ───────────────────────────────────────
     $sample = pickRockOrBanana();

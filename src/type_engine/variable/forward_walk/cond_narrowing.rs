@@ -584,9 +584,20 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     .collect();
 
                 // Try filtering: keep existing entries whose class is
-                // in the narrowed set.  Strip null from the type_string
-                // because a successful instanceof check guarantees the
-                // value is non-null (e.g. `?Foo` → `Foo`).
+                // in the narrowed set.  A kept entry's own type_string
+                // may still be the whole pre-check union (a conditional
+                // return type resolves to one entry naming a class and
+                // listing an array alternative beside it), so restrict
+                // it to the narrowed classes as well.  Strip null on
+                // top because a successful instanceof check guarantees
+                // the value is non-null (e.g. `?Foo` → `Foo`).
+                let survives = |name: &str| {
+                    narrowed.iter().any(|rt| {
+                        rt.class_info
+                            .as_ref()
+                            .is_some_and(|c| c.name == name || c.fqn() == name)
+                    })
+                };
                 let filtered: Vec<ResolvedType> = existing
                     .iter()
                     .filter(|rt| {
@@ -595,14 +606,12 @@ pub(crate) fn apply_condition_narrowing<'b>(
                             .is_some_and(|c| narrowed_fqns.contains(&c.fqn().to_string()))
                     })
                     .map(|rt| {
+                        let mut rt = rt.clone();
+                        rt.restrict_type_string_to_classes(&survives);
                         if let Some(non_null) = rt.type_string.non_null_type() {
-                            ResolvedType {
-                                type_string: non_null,
-                                class_info: rt.class_info.clone(),
-                            }
-                        } else {
-                            rt.clone()
+                            rt.type_string = non_null;
                         }
+                        rt
                     })
                     .collect();
 

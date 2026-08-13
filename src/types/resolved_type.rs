@@ -75,6 +75,21 @@ impl ResolvedType {
         }
     }
 
+    /// Drop the `type_string` union alternatives that a definite
+    /// narrowing to the classes `survives` accepts has ruled out.
+    ///
+    /// One entry's `type_string` can carry a whole union while its
+    /// `class_info` names a single class — a conditional return type
+    /// such as `UploadedFile|array<UploadedFile>|null` resolves that
+    /// way.  Narrowing that works on the `class_info` layer therefore
+    /// leaves the ruled-out members in place unless it comes back
+    /// through here.
+    pub(crate) fn restrict_type_string_to_classes(&mut self, survives: &impl Fn(&str) -> bool) {
+        if let Some(restricted) = restrict_union_to_classes(&self.type_string, survives) {
+            self.type_string = restricted;
+        }
+    }
+
     /// Replace the type string and clear `class_info` when the new type
     /// no longer matches the original class.
     pub(crate) fn replace_type(&mut self, new_type: PhpType) {
@@ -323,6 +338,24 @@ impl ResolvedType {
             None => true,
         });
 
+        // A definite narrowing proves the value is an instance of one
+        // of the surviving classes, so every alternative that is not
+        // one of them is ruled out.  A surviving entry can still carry
+        // such an alternative out of reach of the `class_info` layer
+        // `f` operates on: one conditional return type resolves to a
+        // single entry whose `type_string` is the whole union
+        // (`UploadedFile|array<UploadedFile>|null`) while its
+        // `class_info` names only `UploadedFile`.  Left in place, the
+        // array member keeps reaching consumers that read
+        // `type_string`, so an argument check after an `instanceof`
+        // guard still judges the parameter against it.
+        if definite && !classes.is_empty() {
+            let survives = |name: &str| classes.iter().any(|c| c.name == name || c.fqn() == name);
+            for rt in results.iter_mut() {
+                rt.restrict_type_string_to_classes(&survives);
+            }
+        }
+
         // Add entries that narrowing introduced (e.g. instanceof
         // narrows to a new class that wasn't in the original set).
         let mut added_new = false;
@@ -467,4 +500,48 @@ impl ResolvedType {
             }
         }
     }
+}
+
+/// Restrict a union `type_string` to the members naming a class that
+/// `survives` accepts, dropping the alternatives a definite class
+/// narrowing has ruled out.
+///
+/// Returns `None` when there is nothing to restrict: a type that is not
+/// a union, one whose members all survive, and one where no member
+/// names a surviving class (an `instanceof` against a class the union
+/// never mentioned narrows to an intersection, which the callers model
+/// separately).
+fn restrict_union_to_classes(ty: &PhpType, survives: &impl Fn(&str) -> bool) -> Option<PhpType> {
+    // `?Foo` carries the null alternative in the wrapper rather than as
+    // a union member, so unwrapping it is itself a restriction.
+    if let TypeKind::Nullable(inner) = ty.kind() {
+        return Some(restrict_union_to_classes(inner, survives).unwrap_or_else(|| inner.clone()));
+    }
+    let TypeKind::Union(members) = ty.kind() else {
+        return None;
+    };
+    let kept: Vec<PhpType> = members
+        .iter()
+        .filter(|m| union_member_names_class(m, survives))
+        .cloned()
+        .collect();
+    if kept.is_empty() || kept.len() == members.len() {
+        return None;
+    }
+    // `PhpType::union` does not normalise, so a lone survivor has to be
+    // unwrapped here rather than left as a one-member union.
+    match kept.len() {
+        1 => kept.into_iter().next(),
+        _ => Some(PhpType::union(kept)),
+    }
+}
+
+/// Report whether a union member describes one of the surviving
+/// classes.  An intersection member counts when any of its parts does:
+/// `Foo&Countable` is still a `Foo`.
+fn union_member_names_class(member: &PhpType, survives: &impl Fn(&str) -> bool) -> bool {
+    if let TypeKind::Intersection(parts) = member.kind() {
+        return parts.iter().any(|p| union_member_names_class(p, survives));
+    }
+    member.base_name().is_some_and(survives)
 }

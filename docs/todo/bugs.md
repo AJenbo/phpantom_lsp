@@ -11,58 +11,41 @@ Each entry below carries an **Impact · Effort** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-### B125. A class narrowed by `instanceof` keeps an array alternative from before the check
+### B126. A guard clause that exits through a `never` call on a non-variable subject does not terminate the branch
 
-**Impact: High · Effort: Medium**
+**Impact: Medium · Effort: Medium**
 
 ```php
-$file = $request->file('image'); // Illuminate\Http\UploadedFile|array<UploadedFile>|null
-
+$file = $request->file('image');
 if (!$file instanceof UploadedFile) {
-    throw new RuntimeException('missing');
+    app()->abort(422);           // Application::abort() is @return never
 }
 
-$imageService->store($article, $file, $adminUser->id); // still reports UploadedFile|array<UploadedFile>|null
+$imageService->store($article, $file); // still reports UploadedFile|array<UploadedFile>|null
 ```
 
-```php
-$cover = $request->file(self::FORM_KEY_COVER);
-if ($cover instanceof UploadedFile) {
-    $coverValidator->validate($cover); // still reports UploadedFile|array<UploadedFile>
-}
-```
+The guard body's only statement is a call to a `never`-returning method, so
+the branch cannot fall through and the code after the `if` sees only the
+narrowed type. `expression_is_never_call`
+(`src/type_engine/types/narrowing/guards.rs`) recognises this, but only when
+the receiver is a variable: `receiver_class_names` returns nothing for any
+other subject expression, and its own doc comment records the reason ("a
+property chain, a call result, is left unresolved rather than re-entering
+expression resolution from a control-flow predicate"). So `$app->abort()`
+terminates the branch while `app()->abort()` and `(new App())->abort()` do
+not, and the pre-guard union survives the merge.
 
-Both the guard-clause form (`if (!$x instanceof Y) { throw/return; }`) and the
-plain then-branch form (`if ($x instanceof Y) { ...use $x... }`) leave a
-non-class union member — here `array<UploadedFile>` from
-`Illuminate\Http\Request::file()`'s own conditional return type — sitting
-alongside the narrowed class at the use site, even though the `instanceof`
-check has already proven the value cannot be an array. `null` is stripped
-correctly in most of these paths (several call sites in
-`type_engine/variable/forward_walk/cond_narrowing.rs` explicitly
-`retain(|rt| !rt.type_string.is_null())` after narrowing), but nothing
-strips other non-class alternatives such as a generic `array<T>`. The same
-shape reproduces for a locally-declared class as the narrowed target, not
-just `UploadedFile` (e.g. `App\Entity\Charity|array<string, string>` in
-`vytrvalec-server`), so it is not Laravel- or `UploadedFile`-specific.
+Rewriting the same guard as `$app = app(); $app->abort(422);` works today,
+which isolates the gap to the receiver expression rather than to `never`
+detection or to the conditional return type on Laravel's `app()` helper.
 
-`ResolvedType::apply_narrowing` (`src/types/resolved_type.rs`) is one
-confirmed contributor: its cleanup after a definite class narrowing only
-drops entries that are `mixed` (`results.retain(|rt| !(rt.class_info.is_none()
-&& rt.type_string.is_mixed()))`), leaving any other non-class entry (array,
-scalar, shape) untouched regardless of whether the narrowing was definite.
-Tracing which exact call site in `cond_narrowing.rs` this diagnostic's value
-actually passed through was not completed in this triage session — the
-single-instanceof branch read during investigation (around
-`apply_condition_narrowing`, line ~403-627) filters by `class_info` in a way
-that looks like it should already exclude non-class entries, so either a
-different, not-yet-located call site is responsible, or something after
-narrowing (a branch merge, or the diagnostic's own re-resolution at the call
-site) re-widens the type. Needs a debugger/fixture-test trace to pin the
-exact site before fixing.
+The fix has to resolve the receiver without re-entering the type engine from
+a control-flow predicate in a way that can recurse (the predicate runs
+inside the forward walker that would be asked to resolve the call). A cached
+or snapshot-based resolution of the receiver expression is the likely shape.
 
-**Impact:** at least 38 of the 121 `type_mismatch_argument` diagnostics in
-`projects/luxplus-backoffice` (measured 2026-08-13 on commit `a0de679a`) are
-this exact `UploadedFile|array<UploadedFile>(|null)` shape, all following a
-correct `instanceof` guard in the source; one more instance in
-`projects/vytrvalec-server` uses a different class.
+**Impact:** 13 of the 141 `type_mismatch_*` diagnostics in
+`projects/luxplus-backoffice` (measured 2026-08-13, after the B125 fix) are
+this shape, all of them `app()->abort(4xx)` guard clauses over
+`Request::file()`.
+
