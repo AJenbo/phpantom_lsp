@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786596822622,
+  "lastUpdate": 1786599015720,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20331,6 +20331,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "aea3557f8b7443ce8a4e9a5359b213b5807f6912",
+          "message": "A guard that exits by calling a `never` method ends the branch whatever\nthe call is written on",
+          "timestamp": "2026-08-13T07:13:23+02:00",
+          "tree_id": "f76854c36f360914f39708521518d714a66f916d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/aea3557f8b7443ce8a4e9a5359b213b5807f6912"
+        },
+        "date": 1786599009031,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.9,
             "unit": "MiB"
           }
         ]
