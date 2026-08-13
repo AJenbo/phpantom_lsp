@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,70 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b95-a-reversed-key-array-literal-is-accepted-where-a-list-shape-is-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B95. A reversed-key array literal is accepted where a <code>list{...}</code> shape is required
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b96-a-docblock-param-type-narrower-than-its-native-nullable-type-hint-is-not-flagged" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B96. A docblock <code>@param</code> type narrower than its native nullable type hint is not flagged
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b97-constantt-reads-as-the-whole-table-when-t-comes-from-a-parameters-default-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B97. <code>CONSTANT[T]</code> reads as the whole table when <code>T</code> comes from a parameter's default value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B98. Array-index access into a relation collection loses its element type across a multi-hop relation chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1315,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1331,58 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b95-a-reversed-key-array-literal-is-accepted-where-a-list-shape-is-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B95. A reversed-key array literal is accepted where a <code>list{...}</code> shape is required
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b96-a-docblock-param-type-narrower-than-its-native-nullable-type-hint-is-not-flagged" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B96. A docblock <code>@param</code> type narrower than its native nullable type hint is not flagged
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b97-constantt-reads-as-the-whole-table-when-t-comes-from-a-parameters-default-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B97. <code>CONSTANT[T]</code> reads as the whole table when <code>T</code> comes from a parameter's default value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B98. Array-index access into a relation collection loses its element type across a multi-hop relation chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1277,7 +1415,106 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<p>No outstanding items.</p>
+<h3 id="b95-a-reversed-key-array-literal-is-accepted-where-a-list-shape-is-required">B95. A reversed-key array literal is accepted where a <code>list{...}</code> shape is required<a class="headerlink" href="#b95-a-reversed-key-array-literal-is-accepted-where-a-list-shape-is-required" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param list{string, string} $list */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function takesTwoList(array $list): void {}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">takesTwoList([1 =&gt; &#39;x&#39;, 0 =&gt; &#39;y&#39;]); // not flagged; array_is_list() is false for this literal</span>
+</code></pre></div>
+<p><code>[1 =&gt; 'x', 0 =&gt; 'y']</code> is not a list at runtime (<code>array_is_list()</code> returns
+<code>false</code> — the keys appear out of order), so it should not satisfy a
+<code>list{string, string}</code> parameter, but PHPantom accepts it silently. Only
+Qodana flags this in <code>php-typing-conformance</code>'s corpus; PHPStan and Mago
+accept it too (per that corpus's own reference to
+<a href="https://github.com/phpstan/phpstan/discussions/14939">phpstan/phpstan#14939</a>),
+so this is a narrow edge case rather than a widely-expected behaviour.</p>
+<p><strong>Fix:</strong> not investigated. When validating a literal array argument against a
+<code>list{...}</code> shape, check the literal's keys are in list order (<code>0, 1, 2, …</code>)
+in addition to checking each value's type.</p>
+<h3 id="b96-a-docblock-param-type-narrower-than-its-native-nullable-type-hint-is-not-flagged">B96. A docblock <code>@param</code> type narrower than its native nullable type hint is not flagged<a class="headerlink" href="#b96-a-docblock-param-type-narrower-than-its-native-nullable-type-hint-is-not-flagged" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @param string $name</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> */</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">function greet(?string $name): void {}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">/**</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x"> * @param list&lt;int&gt; $items</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x"> */</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">function takesItems(?array $items): void {}</span>
+</code></pre></div>
+<p>The native type hint (<code>?string</code>, <code>?array</code>) is nullable, but the docblock says
+a narrower type (<code>string</code>, <code>list&lt;int&gt;</code>) that does not admit <code>null</code> — a caller
+following the native signature can pass <code>null</code> and violate the docblock's own
+contract. PHPantom has no diagnostic for a docblock parameter/return type
+that is narrower than the native type hint it annotates, for either a scalar
+or an array type. Only Qodana flags either case in
+<code>php-typing-conformance</code>'s corpus.</p>
+<p><strong>Fix:</strong> not investigated; would need a new check (there is no existing
+"docblock narrower than native hint" diagnostic to extend) comparing each
+documented parameter/return type against its native type hint for
+compatibility, most likely reusing the existing type-compatibility check
+rather than a new one.</p>
+<h3 id="b97-constantt-reads-as-the-whole-table-when-t-comes-from-a-parameters-default-value">B97. <code>CONSTANT[T]</code> reads as the whole table when <code>T</code> comes from a parameter's default value<a class="headerlink" href="#b97-constantt-reads-as-the-whole-table-when-t-comes-from-a-parameters-default-value" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">const ID_TABLE = [&#39;immutable&#39; =&gt; 1, &#39;mutable&#39; =&gt; &#39;two&#39;];</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">/**</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x"> * @template T of key-of&lt;ID_TABLE&gt;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x"> * @param T $type</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x"> * @return ID_TABLE[T]</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x"> */</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">function lookUp(string $type = &#39;immutable&#39;): int|string {</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    return ID_TABLE[$type];</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">takesInt(lookUp(&#39;immutable&#39;)); // passes: correctly reads as int</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">takesInt(lookUp());            // reported: got 1|&#39;two&#39; — should also read as int</span>
+</code></pre></div>
+<p>Per-key resolution of <code>CONSTANT[T]</code> (a template bound to <code>key-of&lt;CONSTANT&gt;</code>)
+now works correctly when the call site passes the key as an explicit literal
+argument, but falls back to the whole table's value union specifically when
+the caller omits the argument and the template binds from the parameter's
+<em>default</em> value instead. The default value (<code>'immutable'</code>) is known at
+the declaration site the same way an explicit argument is known at the call
+site, so <code>lookUp()</code> should resolve identically to <code>lookUp('immutable')</code>.</p>
+<p><strong>Fix:</strong> wherever the explicit-argument case resolves <code>T</code> to the literal
+passed at the call site, apply the same resolution when the argument is
+omitted and a literal default value is available.</p>
+<h3 id="b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain">B98. Array-index access into a relation collection loses its element type across a multi-hop relation chain<a class="headerlink" href="#b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// $product-&gt;subcategories: HasMany&lt;Subcategory, $this&gt;</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">foreach ($product-&gt;subcategories as $subcategory) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    // $subcategory-&gt;category: BelongsTo&lt;Category, $this&gt;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    // Category::$translations: HasMany&lt;CategoryTranslation, $this&gt;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    if (!$subcategory-&gt;category-&gt;translations[0]) {</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">        continue;</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    }</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    echo $subcategory-&gt;category-&gt;translations[0]-&gt;name; // unresolved_member_access</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>A single-hop relation collection index (<code>$model-&gt;children[0]-&gt;name</code>) resolves
+fine: <code>build_property_type()</code> in
+<code>src/virtual_members/laravel/relationships.rs</code> types the property as
+<code>Collection&lt;Related&gt;</code>, and <code>extract_value_type()</code> in <code>src/php_type/mod.rs</code>
+correctly reads the generic's element type on indexing. But when the
+collection property is reached through a chain of two or more relation hops
+(<code>$subcategory-&gt;category-&gt;translations[0]</code>, where both <code>category</code> and
+<code>translations</code> are themselves relation-backed virtual properties), indexing
+the final collection reports <code>Cannot verify property 'name' — type of
+'...' could not be resolved</code> instead of resolving to the related model.
+Reproduced in <code>projects/luxplus-shared/src/core/Exports/ProductExport.php</code>
+(7 occurrences across lines 51-68, all on the same chained pattern; the
+<code>foreach</code> loop variable itself, <code>$subcategory</code>, resolves correctly, so the
+loss happens specifically at the second relation hop plus array index, not at
+the <code>foreach</code> element type).</p>
+<p><strong>Fix:</strong> not investigated. Likely the resolver used for
+<code>$obj-&gt;relationA-&gt;relationB[N]</code> (property access chained off a relation
+property, then indexed) does not re-run the same relation virtual-property
+synthesis on the intermediate <code>relationA</code> result before resolving
+<code>relationB</code>, unlike the single-hop case. Bisect against a minimal
+<code>$a-&gt;one-&gt;many[0]</code> repro to confirm where the type is dropped.</p>
 
 
 
