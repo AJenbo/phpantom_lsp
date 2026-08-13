@@ -1030,17 +1030,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#a44-sort-use-statements" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A44. Sort <code>use</code> statements
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#a45-simplify-with-elvis-operator" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1834,17 +1823,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#a44-sort-use-statements" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A44. Sort <code>use</code> statements
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#a45-simplify-with-elvis-operator" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2251,35 +2229,6 @@ this as a transformer.</p>
   update it to match.</li>
 </ul>
 <p><strong>Code action kind:</strong> <code>quickfix</code>.</p>
-<hr />
-<h3 id="a44-sort-use-statements">A44. Sort <code>use</code> statements<a class="headerlink" href="#a44-sort-use-statements" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
-<p>Re-sort a file's existing <code>use</code> imports alphabetically, the way
-PhpStorm's "Optimize Imports" and Phpactor's import sorter do. PHPantom
-already sorts <em>new</em> candidates when offering an import (<code>import_class.rs</code>),
-and <code>analyze_use_block</code> (<code>src/completion/use_edit.rs</code>) already parses the
-existing block's entries, but nothing re-orders the block once it exists,
-so a file edited by hand or merged from two branches keeps whatever order
-it ended up in.</p>
-<ul>
-<li>Sort within each of the three PHP import kinds separately (plain
-  <code>use</code>, <code>use function</code>, <code>use const</code>); do not interleave them.</li>
-<li>Sort case-insensitively by the imported name, not by the alias — <code>use
-  Zebra\Foo as Aardvark;</code> sorts under <code>Zebra\Foo</code>, matching how a reader
-  scans the block for a namespace, not an alias.</li>
-<li>A blank line inside the block marks a group boundary a developer put
-  there on purpose (e.g. separating vendor imports from app imports);
-  sort within each group rather than collapsing the block into one.</li>
-<li>A <code>use Foo\{Bar, Baz};</code> group-use statement sorts as one entry, keyed
-  on <code>Foo</code>; do not expand it into separate statements.</li>
-<li>A comment attached to one <code>use</code> line (leading or trailing) must move
-  with it, not get orphaned by the reorder.</li>
-<li>Offer as a code action over the <code>use</code> block (<code>source.organizeImports</code>
-  kind), not as an always-on formatter step — a developer who groups
-  imports by hand for readability should not have that undone on every
-  save.</li>
-</ul>
-<p><strong>Code action kind:</strong> <code>source.organizeImports</code>.</p>
 <hr />
 <h3 id="a45-simplify-with-elvis-operator">A45. Simplify with <code>?:</code> (Elvis operator)<a class="headerlink" href="#a45-simplify-with-elvis-operator" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>

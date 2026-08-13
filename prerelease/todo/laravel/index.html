@@ -1190,10 +1190,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l41-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
+  <a href="#l47-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L41. Morph aliases in <code>*_type</code> column comparisons
+        L47. Morph aliases in <code>*_type</code> column comparisons
       </span>
     </span>
   </a>
@@ -1894,10 +1894,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l41-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
+  <a href="#l47-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L41. Morph aliases in <code>*_type</code> column comparisons
+        L47. Morph aliases in <code>*_type</code> column comparisons
       </span>
     </span>
   </a>
@@ -2245,7 +2245,7 @@ within the same impact tier.</p>
 </tr>
 <tr>
 <td>Narrowing a <code>MorphTo</code> relation to concrete models</td>
-<td><code>$comment-&gt;commentable</code> resolves to the generic <code>Illuminate\Database\Eloquent\Model</code>, which is what the relation declares. The morph map (now indexed, see L41/L42) is global rather than per-relation, so the only type it could supply is a union of <em>every</em> mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with <code>@return MorphTo&lt;Post\|Video, $this&gt;</code> where the target set is actually known.</td>
+<td><code>$comment-&gt;commentable</code> resolves to the generic <code>Illuminate\Database\Eloquent\Model</code>, which is what the relation declares. The morph map (now indexed, see L47/L42) is global rather than per-relation, so the only type it could supply is a union of <em>every</em> mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with <code>@return MorphTo&lt;Post\|Video, $this&gt;</code> where the target set is actually known.</td>
 </tr>
 </tbody>
 </table>
@@ -2594,7 +2594,7 @@ purposes just the <code>id</code> type is the main gap.</p>
 <p>Alternatively, if the stubs for these traits include <code>@property</code>
 tags or a typed <code>$id</code> override, the PHPDoc provider may handle it
 automatically once the traits are loaded.</p>
-<h4 id="l41-morph-aliases-in-_type-column-comparisons">L41. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l41-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
+<h4 id="l47-morph-aliases-in-_type-column-comparisons">L47. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l47-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p>The morph-map index (<code>virtual_members/laravel/morph_map.rs</code>) recognizes
 alias strings in the positions Eloquent resolves through the map by
@@ -2776,30 +2776,29 @@ choosing not to ship.</p>
 <h4 id="l22-broaden-recognized-call-sites-for-laravel-string-keys">L22. Broaden recognized call sites for Laravel string keys<a class="headerlink" href="#l22-broaden-recognized-call-sites-for-laravel-string-keys" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: High · Effort: Low-Medium</strong></p>
 <p>Detection breadth multiplies everything else in this section: the
-symbol-map spans feed go-to-definition and references today and L14–L16
-tomorrow. Our current detection is much narrower than the Laravel LSP's
-pattern set. Gaps by kind:</p>
+symbol-map spans already feed go-to-definition, references, hover, and
+diagnostics for every call site we recognize. <code>to_route()</code> (as a route
+name), <code>Lang::has()</code>, and the typed config accessors (<code>Config::string()</code>,
+<code>integer()</code>, <code>boolean()</code>, <code>float()</code>, <code>array()</code>, <code>collection()</code>, <code>set()</code>,
+<code>prepend()</code>, <code>push()</code>, and the <code>#[Config]</code> attribute) are recognized via
+<code>is_config_repository_method</code>. Remaining gaps by kind:</p>
 <ul>
-<li><strong>Route names</strong> — we detect only the bare <code>route()</code> function. Add:
-  <code>to_route()</code>, <code>signedRoute()</code>, <code>temporarySignedRoute()</code>,
+<li><strong>Route names</strong> — <code>signedRoute()</code>, <code>temporarySignedRoute()</code>,
   <code>redirectToRoute()</code>; the same methods on the <code>Redirect</code>, <code>URL</code>, and
   <code>Response</code> facades and on <code>redirect()</code>/<code>url()</code> helper chains
   (<code>redirect()-&gt;route('x')</code>); <code>Route::is()</code> and <code>$request-&gt;routeIs()</code>
-  (glob-aware, see L14); and the <code>#[RedirectToRoute]</code> attribute.</li>
+  (glob-aware); and the <code>#[RedirectToRoute]</code> attribute.</li>
 <li><strong>View names</strong> — add <code>MailMessage::view()</code>/<code>markdown()</code>, which is a
   notification's mail message rather than a mailable or the view
   factory, and the mailable <code>#[Content]</code> attribute (<code>view</code>/<code>markdown</code>
   arguments, named or positional).</li>
-<li><strong>Translation keys</strong> — add <code>Lang::has()</code>/<code>hasForLocale()</code>. (<code>@lang</code>
+<li><strong>Translation keys</strong> — add <code>Lang::hasForLocale()</code>. (<code>@lang</code>
   and other Blade directives arrive via the Blade preprocessor;
   see <code>blade.md</code>.)</li>
-<li><strong>Config keys</strong> — add the typed accessors <code>Config::string()</code>,
-  <code>integer()</code>, <code>boolean()</code>, <code>float()</code>, <code>array()</code>, plus <code>getMany()</code>
-  (array argument), <code>prepend()</code>, <code>push()</code>, and the <code>#[Config]</code> container
-  attribute. Audit <code>is_config_repository_method</code> against this list.</li>
+<li><strong>Config keys</strong> — add <code>getMany()</code> (array argument).</li>
 <li><strong>Env vars</strong> — add <code>Env::get()</code>, and index env keys as proper
   <code>LaravelStringKey</code> spans instead of the current definition-only
-  ad-hoc fallback, so references (and later completion/diagnostics)
+  ad-hoc fallback, so references (and completion/diagnostics)
   work uniformly.</li>
 <li><strong>Container alias strings</strong> — <code>app('cache')</code> already resolves to the
   concrete class for member completion via the alias tables; wire
@@ -2810,13 +2809,12 @@ pattern set. Gaps by kind:</p>
 <h4 id="l24-translation-depth-json-lang-files-locales-placeholders">L24. Translation depth: JSON lang files, locales, placeholders<a class="headerlink" href="#l24-translation-depth-json-lang-files-locales-placeholders" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <p>Statically recoverable translation features the Laravel LSP has and we
-lack entirely:</p>
+still partially lack:</p>
 <ul>
 <li><strong>JSON lang files.</strong> <code>lang/{locale}.json</code> (the "translation string as
-  key" style) is not scanned at all — today's go-to-definition and
-  references miss those keys, and L14/L15 would inherit the hole.
-  Highest priority of this item: it is a correctness gap in a shipped
-  feature, not just a missing endpoint.</li>
+  key" style) now completes and resolves go-to-definition, but the
+  definition always lands on the top of the file rather than the key's
+  actual line, and find-references does not cover JSON keys at all.</li>
 <li><strong>Locale argument completion.</strong> The <code>$locale</code> parameter of <code>__()</code>,
   <code>trans()</code>, <code>trans_choice()</code>, <code>Lang::get()/choice()/hasForLocale()</code>
   (positional or named) completes from the locale set derived from
@@ -2824,17 +2822,19 @@ lack entirely:</p>
 <li><strong>Placeholder parameter completion.</strong> The <code>:name</code> placeholders parsed
   from the translation value complete as keys of the replacement array
   (<code>__('welcome', ['name' =&gt; …])</code>).</li>
-<li><strong>Multi-locale hover.</strong> When L16 lands, show the value per locale
-  (with a link to each file), not just the default locale.</li>
+<li><strong>Multi-locale hover.</strong> Hover already shows a translation key's value
+  for the resolved locale; show the value per locale (with a link to
+  each file) instead of just the one.</li>
 </ul>
 <h4 id="l25-storage-disk-name-strings">L25. Storage disk name strings<a class="headerlink" href="#l25-storage-disk-name-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p><code>Storage::disk('...')</code>, <code>Storage::fake()</code>, <code>persistentFake()</code>,
-<code>forgetDisk()</code>, and the <code>#[Storage]</code> container attribute name a disk
-declared under <code>filesystems.disks.*</code>. The config scanner already parses
-<code>config/*.php</code>; expose the children of <code>filesystems.disks</code> as the
-candidate set for completion, go-to-definition (jump to the disk's entry
-in <code>config/filesystems.php</code>), and an unknown-disk diagnostic.</p>
+<p><code>Storage::disk('...')</code> and the <code>#[Storage]</code> container attribute already
+complete against <code>filesystems.disks.*</code>, navigate to the disk's entry in
+<code>config/filesystems.php</code>, and flag an unknown disk. <code>Storage::fake()</code>,
+<code>persistentFake()</code>, and <code>forgetDisk()</code> still name a disk with none of
+that: their return type is patched to <code>FilesystemAdapter</code>, but the
+disk-name argument itself gets no completion, go-to-definition, or
+diagnostic.</p>
 <h4 id="l27-legacy-controllermethod-action-strings">L27. Legacy <code>Controller@method</code> action strings<a class="headerlink" href="#l27-legacy-controllermethod-action-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Effort: Low</strong></p>
 <p>We already complete and resolve the modern <code>[Controller::class,
@@ -2856,24 +2856,14 @@ The Laravel LSP boots the app to learn the base paths and only links
 arguments that resolve to an existing <em>file</em>; convention gives us the
 same statically, and we can also handle directories.</p>
 <h4 id="l29-livewire-and-volt-component-names">L29. Livewire and Volt component names<a class="headerlink" href="#l29-livewire-and-volt-component-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium (Livewire projects only) · Effort: Medium</strong></p>
-<p>The Laravel LSP resolves Livewire components by booting the app and
-instantiating every component. The static equivalents:</p>
-<ul>
-<li><strong>Component index by convention:</strong> class components under
-  <code>app/Livewire/</code> (<code>App\Livewire\FooBar</code> ↔ <code>foo-bar</code>, nested
-  <code>admin.foo-bar</code>), plus view-based Volt / Livewire v4 single-file
-  components under the views tree.</li>
-<li><strong>PHP-side triggers:</strong> <code>Volt::route('/path', 'component')</code> (arg 1)
-  and <code>Route::livewire()</code> — completion, go-to, unknown-component
-  diagnostic.</li>
-<li><strong>Blade-side (<code>&lt;livewire:foo-bar&gt;</code> tags):</strong> belongs to the Blade
-  project (<code>blade.md</code>) but should consume the same component index.
-  Hover showing the component's public properties falls out of our
-  existing <code>ClassInfo</code> once the class resolves — richer than the
-  Laravel LSP's reflection dump, and with no risk of running component
-  constructors.</li>
-</ul>
+<p><strong>Impact: Low (Livewire projects only) · Effort: Low</strong></p>
+<p>The component index (class components under <code>app/Livewire/</code>, nested
+names, and view-based Volt / Livewire v4 single-file components), the
+<code>&lt;livewire:foo-bar&gt;</code> tag resolution on the Blade side, and hover on a
+Livewire component's public properties via <code>$this</code> in its view are all
+implemented. The remaining gap is the PHP-side triggers: <code>Volt::route(
+'/path', 'component')</code> (arg 1) and <code>Route::livewire()</code> get no
+completion, go-to-definition, or unknown-component diagnostic.</p>
 <h4 id="l30-eloquent-attribute-array-key-completion">L30. Eloquent attribute-array key completion<a class="headerlink" href="#l30-eloquent-attribute-array-key-completion" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
 <p>Our Eloquent string completion covers where-style column arguments and
@@ -2903,18 +2893,19 @@ moving the Blade file — defer that one until the rest is in place.</p>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
 <p>L25 (storage disks) is one instance of a general pattern: a method
 argument names an entry under a known config subtree, and the config
-scanner already parses those files. Generalize the L25 machinery into
+scanner already parses those files. Auth guards (<code>auth('...')</code>,
+<code>Auth::guard()</code>, <code>-&gt;middleware('auth:web')</code>), cache stores
+(<code>Cache::store()</code>), log channels (<code>Log::channel()</code>), and storage disks
+(L25) already complete against their config subtree — but all of them
+route through the generic <code>LaravelStringKind::Config</code> kind rather than
+a dedicated one, so they get completion plus the shared config
+diagnostics/go-to-definition and nothing family-specific (a "cache
+store" hovers with the same generic wording as any other config key).
+<code>Log::stack()</code> (array values) isn't recognized at all. Generalize into
 a declarative table of <code>(trigger context, config path)</code> pairs so each
 new family is one table row, and cover the rest of the family in one
 pass:</p>
 <ul>
-<li><strong>Log channels</strong> — <code>Log::channel()</code>, <code>Log::stack()</code> (array values)
-  → <code>logging.channels.*</code>.</li>
-<li><strong>Cache stores</strong> — <code>Cache::store()</code> → <code>cache.stores.*</code>.</li>
-<li><strong>Auth guards</strong> — <code>auth('...')</code>, <code>Auth::guard()</code>, <code>-&gt;middleware('auth:web')</code>
-  parameter → <code>auth.guards.*</code> (the guard→model resolver already parses
-  this subtree; reuse its data for completion/diagnostics on the name
-  itself).</li>
 <li><strong>Database connections</strong> — <code>DB::connection()</code>, <code>-&gt;connection()</code> /
   <code>$connection</code> on models and jobs → <code>database.connections.*</code>.</li>
 <li><strong>Queue connections and queues</strong> — <code>Queue::connection()</code>,
@@ -2931,37 +2922,36 @@ pass:</p>
 </ul>
 <p>Each family gets the full string-kind treatment for free once wired
 as a <code>LaravelStringKey</code>: completion, go-to-definition (jump to the
-config entry), hover (L16), diagnostics (L14), and references.</p>
+config entry), hover, diagnostics, and references.</p>
 <h4 id="l36-container-binding-registrations-from-service-providers">L36. Container binding registrations from service providers<a class="headerlink" href="#l36-container-binding-registrations-from-service-providers" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p><code>app('cache')</code> resolves through the framework's core alias table
-today, but a binding the application (or an installed package)
-registers itself — <code>$this-&gt;app-&gt;bind('payments', StripeGateway::class)</code>,
-<code>singleton()</code>, <code>scoped()</code>, <code>instance()</code>, or the provider's <code>$bindings</code>
-/ <code>$singletons</code> arrays — is invisible. These registrations are literal
-facts in provider source, recoverable exactly the way the macro
-scanner already recovers <code>Str::macro()</code> from app and package
-providers.</p>
-<p>Scan <code>register()</code>/<code>boot()</code> of service providers (app + installed
-packages, path-repository modules included) for literal
-<code>(string name, target)</code> pairs where the target is a <code>::class</code>
-reference or a closure with a usable return type. Merge into the
-existing alias table so <code>app('payments')-&gt;charge()</code> resolves members;
-give the string go-to-definition (the registration site) and hover.
-Skip anything non-literal — dynamic and conditional registrations stay
-out of scope (see the table at the top), and no diagnostic fires on
-unknown names since the set is inherently open.</p>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><code>$this-&gt;app-&gt;bind('payments', StripeGateway::class)</code>, <code>bindIf()</code>,
+<code>singleton()</code>, <code>singletonIf()</code>, <code>scoped()</code>, <code>scopedIf()</code>, <code>instance()</code>,
+and <code>alias()</code> calls in <code>register()</code>/<code>boot()</code> of app and package service
+providers are already scanned for literal <code>(string name, target)</code> pairs
+and merged into the alias table, so <code>app('payments')-&gt;charge()</code>
+resolves members, and the string gets go-to-definition (the
+registration site) and hover. Binding precedence follows what the
+container would actually end up holding: an application's registration
+replaces a framework default, and a subclass provider's replaces its
+parent's.</p>
+<p>The remaining gap is the declarative form: a provider's <code>$bindings</code> /
+<code>$singletons</code> array properties (<code>protected array $bindings =
+['payments' =&gt; StripeGateway::class];</code>) are not read at all, so a
+package that registers that way instead of calling
+<code>bind()</code>/<code>singleton()</code> in <code>register()</code> stays invisible.</p>
 <p>Interface targets follow the declared-types philosophy unchanged: a
 binding <code>bind(Gateway::class, StripeGateway::class)</code> does <strong>not</strong>
 retype <code>app(Gateway::class)</code> to the concrete — the contract is the
 interface.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
-<p>The reverse of L14: keys that are <em>declared</em> but never referenced. The
-references machinery already finds all usages of a view name or
-translation key; inverting it over the declaration sets yields unused
-views (no <code>view()</code>/<code>@include</code>/<code>@extends</code>/mailable reference anywhere)
-and unused translation keys. Surface as an opt-in workspace report
+<p>The reverse of the invalid-key diagnostics: keys that are <em>declared</em>
+but never referenced. The references machinery already finds all
+usages of a view name or translation key; inverting it over the
+declaration sets yields unused views (no
+<code>view()</code>/<code>@include</code>/<code>@extends</code>/mailable reference anywhere) and unused
+translation keys. Surface as an opt-in workspace report
 (CLI <code>analyze</code> flag and/or code lens on the declaration), not as
 always-on diagnostics — dynamic construction (<code>view("emails.$type")</code>)
 makes "unused" inherently a heuristic, so it must read as "no static

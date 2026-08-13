@@ -2734,10 +2734,11 @@ in <code>.phpantom.toml</code> paths can override anything.</p>
 This is the fastest path: no directory scanning needed.</p>
 <p><strong>Packages without a map file.</strong> Most stub packages (wordpress-stubs,
 acf-pro-stubs, etc.) are just directories of <code>.php</code> files. These
-need to be scanned using the byte-level classmap scanner (Phase 1
-of indexing.md) extended with function/constant detection (Phase 2.5
-of indexing.md). The scan produces name-to-path indices just like
-the autoload file scanner.</p>
+need to be scanned using the byte-level classmap/function/constant
+scanner (<code>find_symbols</code> in <code>src/classmap_scanner/lexer.rs</code>, already
+shipped and used for the "no <code>composer.json</code>" full-scan path — see
+indexing.md's Current State). The scan produces name-to-path indices
+just like the autoload file scanner.</p>
 <p><strong>Detection heuristic:</strong> A Composer package is treated as a stub
 package when any of these conditions are true:</p>
 <ul>
@@ -2796,7 +2797,8 @@ embedded stubs:</p>
 <p><strong><code>find_or_load_function</code>:</strong></p>
 <ol>
 <li><code>global_functions</code> (user code + cached results)</li>
-<li><code>autoload_function_index</code> (from Phase 2.5 of indexing.md)</li>
+<li><code>autoload_function_index</code> (already populated by the byte-level
+   scanner described in indexing.md's Current State)</li>
 <li><strong>External stub function index (new).</strong> Same unified index.
    Read the file, parse, cache in <code>global_functions</code>.</li>
 <li><code>stub_function_index</code> (embedded stubs)</li>
@@ -2824,12 +2826,15 @@ in the embedded stubs (e.g. <code>wordpress-stubs</code> redefining <code>wpdb</
 the external package wins. This is the correct behaviour: the
 project-specific definition is more accurate than the generic one.</p>
 <h3 id="effort_1">Effort<a class="headerlink" href="#effort_1" title="Permanent link">&para;</a></h3>
-<p>Medium. The scanning infrastructure depends on Phase 2.5 of
-indexing.md (byte-level function/constant scanner). The resolution
-changes are straightforward (one new phase in each lookup chain).
-The <code>PhpStormStubsMap.php</code> parser for project-level phpstorm-stubs
-is already written in <code>build.rs</code> and just needs to be available at
-runtime.</p>
+<p>Medium. The scanning infrastructure this needs (byte-level
+class/function/constant scanning) already shipped as part of
+indexing.md's full-scan path, so this item is no longer blocked on
+it — it only needs to be pointed at stub directories and to populate
+the three new indices above instead of the project's own symbol
+tables. The resolution changes are straightforward (one new phase in
+each lookup chain). The <code>PhpStormStubsMap.php</code> parser for
+project-level phpstorm-stubs is already written in <code>build.rs</code> and
+just needs to be available at runtime.</p>
 <hr />
 <h2 id="e3-ide-provided-and-phpantomtoml-stub-paths">E3. IDE-provided and <code>.phpantom.toml</code> stub paths<a class="headerlink" href="#e3-ide-provided-and-phpantomtoml-stub-paths" title="Permanent link">&para;</a></h2>
 <p><strong>Goal:</strong> Support stub directories provided by IDE extensions (via
@@ -3019,7 +3024,7 @@ embedded stubs, built-in symbols would be invisible.</p>
 <td>E2</td>
 <td>Project-level stubs as a type resolution source</td>
 <td>Medium</td>
-<td>indexing.md (byte-level function/constant scanner)</td>
+<td>None (byte-level scanner already shipped)</td>
 </tr>
 <tr>
 <td>E3</td>
@@ -3043,8 +3048,9 @@ embedded stubs, built-in symbols would be invisible.</p>
 </table>
 <p>E1 can be done immediately and independently. It provides
 immediate value (GTD on <code>array_map</code>, <code>PDO</code>, <code>Iterator</code>, etc.) with
-minimal code. E2-E4 build on the scanner infrastructure from
-indexing.md and on each other.</p>
+minimal code. E2-E4 build on the byte-level scanning infrastructure
+already shipped for the project's own symbol discovery (see
+indexing.md's Current State) and on each other.</p>
 <p>The priority order (<code>.phpantom.toml</code> &gt; Composer &gt; IDE &gt; embedded)
 ensures the user's explicit choices always win. Most users never
 touch <code>.phpantom.toml</code> and get stubs through Composer (automatic) or

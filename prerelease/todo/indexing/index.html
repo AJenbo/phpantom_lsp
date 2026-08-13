@@ -1096,56 +1096,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x3-completion-item-detail-on-demand" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X3. Completion item detail on demand
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X3. Completion item detail on demand">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#current-limitation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Current limitation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#approach-whats-already-discovered" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Approach: "what's already discovered"
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#future-speculative-background-parsing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Future: speculative background parsing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x6-disk-cache-evaluate-later" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1722,56 +1672,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x3-completion-item-detail-on-demand" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X3. Completion item detail on demand
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X3. Completion item detail on demand">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#current-limitation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Current limitation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#approach-whats-already-discovered" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Approach: "what's already discovered"
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#future-speculative-background-parsing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Future: speculative background parsing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x6-disk-cache-evaluate-later" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2061,8 +1961,8 @@ faster repeat queries and simpler code.</p>
 <code>scan_workspace_fallback_full</code>) now uses a two-phase approach:
 directory walks collect file paths first (single-threaded), then files
 are read and scanned in parallel batches via <code>std::thread::scope</code>.
-Three parallel helpers in <code>classmap_scanner.rs</code> cover the three scan
-modes: <code>scan_files_parallel_classes</code> (plain classmap),
+Three parallel helpers in <code>classmap_scanner/discovery.rs</code> cover the
+three scan modes: <code>scan_files_parallel_classes</code> (plain classmap),
 <code>scan_files_parallel_psr4</code> (PSR-4 with FQN filtering), and
 <code>scan_files_parallel_full</code> (classes + functions + constants). Small
 batches (≤ 4 files) skip threading overhead.</p>
@@ -2071,18 +1971,29 @@ batches (≤ 4 files) skip threading overhead.</p>
 single-quoted strings, double-quoted strings, and heredocs/nowdocs
 instead of scanning byte-by-byte. This reduces per-file scanning time
 for files with large docblocks or string literals.</p>
+<p><code>read_for_scan</code> (<code>classmap_scanner/mod.rs</code>) now reads file bytes
+adaptively: files at or above 256 KiB are memory-mapped so the OS page
+cache is shared without a heap copy, and smaller files (the vast
+majority of source files) are read directly into a heap buffer, since
+mapping a small file costs more in page-fault and lock overhead than
+copying it. This closed the gap identified in earlier profiling, where
+mapping every file regardless of size held a process-wide lock that
+serialized concurrent readers.</p>
 <h3 id="remaining-work">Remaining work<a class="headerlink" href="#remaining-work" title="Permanent link">&para;</a></h3>
 <p>The following are deferred to a later sprint:</p>
 <ul>
 <li><strong>Priority-aware scheduling.</strong> Interactive requests (completion,
   hover, go-to-definition) should preempt batch work. Currently all
   threads run at equal priority.</li>
-<li><strong>Parallel classmap scanning in <code>find_implementors</code>.</strong> Phase 3 of
-  <code>find_implementors</code> reads and parses many classmap files
-  sequentially. Parallelizing this requires care because it
-  interleaves reads and writes through <code>class_loader</code> callbacks.</li>
-<li><strong><code>memmap2</code> for file reads.</strong> Avoids copying file contents into
-  userspace when the OS page cache already has them.</li>
+<li><strong>Parallel classmap scanning in <code>find_implementors</code>.</strong> Once the
+  workspace index is ready (the default <code>"full"</code> strategy after
+  startup), <code>find_implementors</code> answers entirely from the <code>gti_index</code>
+  reverse-inheritance index and never reaches the sequential classmap
+  scan below. Phase 3 (reading and parsing classmap files one at a
+  time) only still runs for <code>"composer"</code>/<code>"self"</code>/<code>"none"</code> strategies,
+  or for a request that arrives before the background index finishes.
+  Parallelizing it requires care because it interleaves reads and
+  writes through <code>class_loader</code> callbacks.</li>
 <li><strong>Parallel autoload file scanning.</strong> The <code>scan_autoload_files</code> work
   queue is inherently sequential due to <code>require_once</code> chain
   following, but the initial batch of files could be processed in
@@ -2103,32 +2014,6 @@ completion is a minor subset of what users actually trigger. This
 means classmap generation can run at normal priority without blocking
 the user. They can start writing code immediately while the classmap
 builds in the background.</p>
-<hr />
-<h2 id="x3-completion-item-detail-on-demand">X3. Completion item detail on demand<a class="headerlink" href="#x3-completion-item-detail-on-demand" title="Permanent link">&para;</a></h2>
-<p><strong>Goal:</strong> Show type signatures, docblock descriptions, and
-deprecation info in completion item hover without parsing every
-possible class up front.</p>
-<h3 id="current-limitation">Current limitation<a class="headerlink" href="#current-limitation" title="Permanent link">&para;</a></h3>
-<p>When completion shows <code>SomeClass::doThing()</code>, hovering over that item
-in the completion menu shows nothing because we haven't parsed
-<code>SomeClass</code>'s file yet. Parsing it on demand would be fine for one
-item, but the editor may request resolve for dozens of items as the
-user scrolls.</p>
-<h3 id="approach-whats-already-discovered">Approach: "what's already discovered"<a class="headerlink" href="#approach-whats-already-discovered" title="Permanent link">&para;</a></h3>
-<p>Use <code>completionItem/resolve</code> to populate <code>detail</code> and
-<code>documentation</code> fields. If the class is already in the uri_classes_index (parsed
-during a prior resolution), return the full signature and docblock.
-If not, return just the item label with no extra detail.</p>
-<p>In <code>"full"</code> mode, everything is already parsed, so every completion
-item gets rich hover for free. In <code>"composer"</code> / <code>"self"</code> mode, items
-that happen to have been resolved earlier in the session get rich
-detail; others don't. This is a graceful degradation that never blocks
-the completion response.</p>
-<h3 id="future-speculative-background-parsing">Future: speculative background parsing<a class="headerlink" href="#future-speculative-background-parsing" title="Permanent link">&para;</a></h3>
-<p>When a completion list is generated, queue the unresolved classes for
-background parsing at low priority. If the user lingers on the
-completion menu, resolved items will progressively gain detail. This
-is a nice-to-have, not a requirement.</p>
 <hr />
 <h2 id="x6-disk-cache-evaluate-later">X6. Disk cache (evaluate later)<a class="headerlink" href="#x6-disk-cache-evaluate-later" title="Permanent link">&para;</a></h2>
 <p><strong>Goal:</strong> Persist the full index to disk so that restarts don't
@@ -2259,9 +2144,9 @@ PHP-associated extensions to the server (via <code>initializationOptions</code>,
 or by responding to <code>workspace/configuration</code> the way Intelephense's
 middleware merges VS Code's native <code>files.exclude</code> /
 <code>files.associations</code> into the server config). The directory walkers in
-<code>classmap_scanner.rs</code> and <code>util.rs</code> consult the exclude globs before
-descending, and treat the extra associated extensions as PHP when
-collecting candidate files.</p>
+<code>classmap_scanner/discovery.rs</code> and <code>util.rs</code> consult the exclude
+globs before descending, and treat the extra associated extensions as
+PHP when collecting candidate files.</p>
 <h3 id="editor-agnostic-note">Editor-agnostic note<a class="headerlink" href="#editor-agnostic-note" title="Permanent link">&para;</a></h3>
 <p>Excludes and associations are editor concepts. Keep the server's
 interface generic (a list of globs and a list of extensions) so any

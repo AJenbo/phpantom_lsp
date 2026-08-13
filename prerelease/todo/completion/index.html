@@ -932,17 +932,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c9-lazy-documentation-via-completionitemresolve" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C9. Lazy documentation via <code>completionItem/resolve</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1482,17 +1471,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#c9-lazy-documentation-via-completionitemresolve" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        C9. Lazy documentation via <code>completionItem/resolve</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1953,41 +1931,6 @@ candidate file.</p>
    into <code>ClassItemCtx</code> so it's available during sort-text construction.</p>
 </li>
 </ol>
-<h2 id="c9-lazy-documentation-via-completionitemresolve">C9. Lazy documentation via <code>completionItem/resolve</code><a class="headerlink" href="#c9-lazy-documentation-via-completionitemresolve" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Class-name completions currently populate <code>detail</code> eagerly for all
-candidates. For large result sets (up to 300 items), this is wasteful
-because the user only inspects a handful of items. Implementing the
-LSP <code>completionItem/resolve</code> callback would let the server defer
-expensive lookups (docblock extraction, constructor signature
-formatting, stub source parsing) until the user actually highlights an
-item in the completion menu.</p>
-<p>This becomes more impactful if the result-set cap is lowered (currently
-300). Even at a smaller cap, avoiding upfront work for every candidate
-improves perceived latency on keystroke.</p>
-<p><strong>Implementation:</strong></p>
-<ol>
-<li>
-<p><strong>Add a <code>completionItem/resolve</code> handler</strong> in <code>server.rs</code> that
-   accepts a <code>CompletionItem</code>, reads its <code>data</code> field (containing an
-   FQN or index key), and populates <code>detail</code>, <code>documentation</code>, and
-   any other deferred fields.</p>
-</li>
-<li>
-<p><strong>Register <code>resolveProvider: true</code></strong> in the server capabilities
-   returned during <code>initialize</code>.</p>
-</li>
-<li>
-<p><strong>Store a lookup key in <code>data</code></strong> — for class-name completions, the
-   FQN is sufficient. For member completions, store the class FQN plus
-   member name and kind.</p>
-</li>
-<li>
-<p><strong>Move expensive fields</strong> — stop setting <code>documentation</code> (and
-   optionally <code>detail</code>) eagerly in <code>build_item</code> and
-   <code>build_completion_items</code>. Set <code>data</code> instead.</p>
-</li>
-</ol>
 <h2 id="c10-deprecation-markers-on-class-name-completions-from-all-sources">C10. Deprecation markers on class-name completions from all sources<a class="headerlink" href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low</strong></p>
 <p>Same-namespace classes (source tier 2) already carry deprecation info
@@ -2005,16 +1948,20 @@ show with a strikethrough in the completion menu across all sources,
 not just same-namespace ones.</p>
 <h2 id="c11-smarter-member-ordering-after-">C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code><a class="headerlink" href="#c11-smarter-member-ordering-after-" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: needs planning</strong></p>
-<p>Today, members are sorted alphabetically after <code>-&gt;</code> and <code>::</code>. This is
-predictable but not always helpful. Large classes (Laravel Eloquent
+<p>Members after <code>-&gt;</code> and <code>::</code> are now sorted by kind (constants and
+<code>::class</code> first, then properties, then methods, with implemented magic
+methods pushed below regular methods so <code>__invoke</code>/<code>__toString</code>/etc.
+don't sit at the top of the method list from their leading
+underscores), and alphabetically within each group
+(<code>src/completion/builder.rs</code>, <code>kind_sort_tier</code> / <code>magic_sort_tier</code>).
+That's still not always helpful: large classes (Laravel Eloquent
 models, Symfony form builders, PHPUnit test cases) can have hundreds of
-members, and the methods the user most likely wants are buried
+members, and the method the user most likely wants is buried
 alphabetically among inherited helpers.</p>
 <p>This is a longer-term goal that needs design work before implementation.
-Possible ranking signals to explore:</p>
+Possible ranking signals still to explore, on top of the kind/magic
+tiering already in place:</p>
 <ul>
-<li><strong>Member kind</strong>: methods before properties before constants (methods
-  are the most common completion target after <code>-&gt;</code>)</li>
 <li><strong>Visibility</strong>: public members above protected when accessed from
   outside the class hierarchy</li>
 <li><strong>Declaration origin</strong>: own members above inherited, inherited above
@@ -2027,9 +1974,9 @@ Possible ranking signals to explore:</p>
   class-name completion</li>
 </ul>
 <p>The right combination of these signals (and their relative weights)
-needs experimentation. A first step could be sorting by kind and
-declaration origin, which requires no new data and is straightforward
-to implement.</p>
+needs experimentation. A next step could be adding declaration origin
+on top of the existing kind tiering, which requires no new data and is
+straightforward to implement.</p>
 
 
 

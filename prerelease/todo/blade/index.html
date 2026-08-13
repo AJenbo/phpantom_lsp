@@ -1855,12 +1855,15 @@ dependency.</p>
 <hr />
 <h2 id="bl11-custom-directive-discovery">BL11. Custom directive discovery<a class="headerlink" href="#bl11-custom-directive-discovery" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p><code>Blade::directive('datetime', …)</code>, <code>Blade::if('env', …)</code>, and
-component namespace registrations (<code>Blade::componentNamespace()</code>,
-<code>Blade::anonymousComponentPath()</code>) in app and package service
-providers declare project-specific directives. Scan literal
-registrations — the same provider-scanning shape as the macro
-scanner — so that:</p>
+<p><code>Blade::directive('datetime', …)</code> and <code>Blade::if('env', …)</code>
+registrations in app and package service providers declare
+project-specific directives. (Component namespace/path registrations —
+<code>Blade::componentNamespace()</code>, <code>Blade::anonymousComponentPath()</code>,
+<code>Blade::anonymousComponentNamespace()</code> — are already scanned into
+<code>ProviderResources</code> and extend the discovery index; see
+<code>src/virtual_members/laravel/provider_resources.rs</code>. What remains is the
+directive-registration half.) Scan literal directive registrations too
+— the same provider-scanning shape as the macro scanner — so that:</p>
 <ul>
 <li>known custom directives stop degrading to comments in the
   preprocessor and instead map to expression-preserving PHP (their
@@ -1868,8 +1871,7 @@ scanner — so that:</p>
 <li><code>Blade::if('admin')</code> synthesizes the full family (<code>@admin</code>,
   <code>@elseadmin</code>, <code>@endadmin</code>, <code>@unlessadmin</code>);</li>
 <li>directive name completion (<code>DIRECTIVE_COMPLETIONS</code> in
-  <code>src/blade/directives.rs</code>) includes them;</li>
-<li>registered component namespaces/paths extend the discovery index.</li>
+  <code>src/blade/directives.rs</code>) includes them.</li>
 </ul>
 <hr />
 <h2 id="bl1-blade-aware-code-actions">BL1. Blade-aware code actions<a class="headerlink" href="#bl1-blade-aware-code-actions" title="Permanent link">&para;</a></h2>

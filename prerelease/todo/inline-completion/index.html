@@ -2489,7 +2489,7 @@ of class types:</p>
 <p>Trigger: User types <code>try</code> or is inside a <code>try</code> block that has no
 <code>catch</code> yet.</p>
 <p>The engine uses the existing throws analysis pipeline
-(<code>source/throws_analysis.rs</code>) to detect what exceptions the code
+(<code>completion/source/throws_analysis/</code>) to detect what exceptions the code
 inside the try block can throw:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">try {</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $this-&gt;repository-&gt;save($entity);</span>

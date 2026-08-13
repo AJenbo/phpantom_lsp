@@ -2614,6 +2614,9 @@ anything in mago's own workspace starts depending on <code>mago-hir</code>, or
 its crates.io reverse-dependency count moves off zero, that flips the
 one trigger that carries real evidence and this becomes worth another
 look.</p>
+<p><strong>Re-checked at mago 1.46.0 (2026-08-13): unchanged.</strong> <code>mago-hir</code> still
+has zero reverse dependencies on crates.io, and docs.rs coverage is
+still around 1%. Still parked.</p>
 <p><strong>Before committing to a full migration, prototype first:</strong> feed
 <code>symbol_map</code> extraction (or <code>ClassInfo</code> construction) for a single
 file from <code>IR</code> behind a flag, on a branch, and compare output against
@@ -2923,12 +2926,6 @@ the same request cycle.</p>
 <code>type_engine/variable/resolution.rs</code>, the <code>walk_top_level_for_globals</code>
 call. A per-request cache (similar to the chain resolution cache in
 <code>type_engine/resolver/context.rs</code>) would eliminate the redundant walks.</p>
-<hr />
-<h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
-<p>Most remaining depth-cap issues were addressed by eager class
-population and the iterative resolution pipeline. The forward walker
-loop iteration was addressed by the assignment-depth-bounded strategy.
-The items below are independent fixes that do not depend on either.</p>
 
 
 
