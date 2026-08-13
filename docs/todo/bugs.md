@@ -40,35 +40,3 @@ or an array type. Only Qodana flags either case in
 documented parameter/return type against its native type hint for
 compatibility, most likely reusing the existing type-compatibility check
 rather than a new one.
-
-### B97. `CONSTANT[T]` reads as the whole table when `T` comes from a parameter's default value
-
-**Impact: Low-Medium · Effort: Medium**
-
-```php
-const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
-
-/**
- * @template T of key-of<ID_TABLE>
- * @param T $type
- * @return ID_TABLE[T]
- */
-function lookUp(string $type = 'immutable'): int|string {
-    return ID_TABLE[$type];
-}
-
-takesInt(lookUp('immutable')); // passes: correctly reads as int
-takesInt(lookUp());            // reported: got 1|'two' — should also read as int
-```
-
-Per-key resolution of `CONSTANT[T]` (a template bound to `key-of<CONSTANT>`)
-now works correctly when the call site passes the key as an explicit literal
-argument, but falls back to the whole table's value union specifically when
-the caller omits the argument and the template binds from the parameter's
-*default* value instead. The default value (`'immutable'`) is known at
-the declaration site the same way an explicit argument is known at the call
-site, so `lookUp()` should resolve identically to `lookUp('immutable')`.
-
-**Fix:** wherever the explicit-argument case resolves `T` to the literal
-passed at the call site, apply the same resolution when the argument is
-omitted and a literal default value is available.

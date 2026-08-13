@@ -965,6 +965,11 @@ class ConstantTableLookupDemo
         $ink = scaffoldingToolDefault('ink');      // TOOL_DEFAULTS['ink'] → 'black'
         var_dump(strtoupper($ink));
 
+        // An omitted argument binds the template from the parameter's own
+        // default, which is as known here as a key written at the call site.
+        $fallback = scaffoldingDefaultToolSetting();  // TOOL_DEFAULTS['ink'] → 'black'
+        var_dump(strtoupper($fallback));
+
         // The class-constant spelling reads the same way.
         $retries = ScaffoldingLimits::lookUp('retries');
         var_dump($retries + 1);                    // LIMITS['retries'] → 3
@@ -3150,7 +3155,7 @@ class TypeHintGtdDemo
      * @return GtdResult                           Ctrl+Click GtdResult
      * @throws GtdNotFoundException                Ctrl+Click GtdNotFoundException
      */
-    public function docblockTypes($items) { return $items; }
+    public function docblockTypes($items) { return new GtdResult(); }
 
     /**
      * Callable types in docblocks. Ctrl+Click on any class name inside the
@@ -6691,6 +6696,16 @@ function scaffoldingToolDefault(string $setting): int|string
     return TOOL_DEFAULTS[$setting];
 }
 
+/**
+ * @template T of key-of<TOOL_DEFAULTS>
+ * @param T $setting
+ * @return TOOL_DEFAULTS[T]
+ */
+function scaffoldingDefaultToolSetting(string $setting = 'ink'): int|string
+{
+    return TOOL_DEFAULTS[$setting];
+}
+
 /** @param key-of<TOOL_DEFAULTS> $setting */
 function scaffoldingToolSettingName(string $setting): string
 {
@@ -7653,6 +7668,7 @@ function runDemoAssertions(): void
     // ── Constant table read through a type operator ─────────────────────
     assert(scaffoldingToolDefault('width') === 2, "TOOL_DEFAULTS['width'] really is the int 2");
     assert(scaffoldingToolDefault('ink') === 'black', "TOOL_DEFAULTS['ink'] really is the string 'black'");
+    assert(scaffoldingDefaultToolSetting() === 'black', "an omitted argument really reads the entry its default names");
     assert(ScaffoldingLimits::lookUp('retries') === 3, "LIMITS['retries'] really is the int 3");
     assert(ScaffoldingLimits::lookUp('label') === 'off', "LIMITS['label'] really is the string 'off'");
     assert(scaffoldingToolSettingName('ink') === 'ink', "'ink' really is one of TOOL_DEFAULTS' keys");

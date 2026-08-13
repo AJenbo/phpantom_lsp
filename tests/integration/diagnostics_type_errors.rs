@@ -8317,6 +8317,79 @@ takesInt(lookUp('mutable'));
     assert!(messages[0].contains("'two'"), "{messages:?}");
 }
 
+/// An omitted argument binds its template from the parameter's default
+/// value, so `lookUp()` reads `CONST[T]` for the default key exactly as
+/// `lookUp('immutable')` does.
+#[test]
+fn index_access_over_a_constant_resolves_from_a_parameter_default() {
+    let php = r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+/**
+ * @template T of key-of<ID_TABLE>
+ * @param T $type
+ * @return ID_TABLE[T]
+ */
+function lookUp(string $type = 'immutable'): int|string { return ID_TABLE[$type]; }
+
+/**
+ * @template T of key-of<ID_TABLE>
+ * @param T $type
+ * @return ID_TABLE[T]
+ */
+function lookUpString(string $type = 'mutable'): int|string { return ID_TABLE[$type]; }
+
+function takesInt(int $id): void {}
+function takesString(string $id): void {}
+
+takesInt(lookUp());
+takesString(lookUpString());
+takesInt(lookUpString());
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'two'"), "{messages:?}");
+}
+
+/// The same, for a method whose omitted argument defaults to a table key.
+#[test]
+fn index_access_over_a_constant_resolves_from_a_method_parameter_default() {
+    let php = r#"<?php
+namespace App;
+
+class Ids {
+    const TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+    /**
+     * @template T of key-of<Ids::TABLE>
+     * @param T $type
+     * @return Ids::TABLE[T]
+     */
+    public function lookUp(string $type = 'immutable') { return self::TABLE[$type]; }
+
+    /**
+     * @template T of key-of<Ids::TABLE>
+     * @param T $type
+     * @return Ids::TABLE[T]
+     */
+    public function lookUpString(string $type = 'mutable') { return self::TABLE[$type]; }
+}
+
+function takesInt(int $id): void {}
+function takesString(string $id): void {}
+
+$ids = new Ids();
+takesInt($ids->lookUp());
+takesString($ids->lookUpString());
+takesInt($ids->lookUpString());
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'two'"), "{messages:?}");
+}
+
 /// The same, for a class constant operand.
 #[test]
 fn index_access_over_a_class_constant_resolves_per_templated_key() {

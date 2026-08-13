@@ -82,6 +82,8 @@ impl Backend {
                 .and_then(|p| p.type_hint.as_ref());
             let binding_mode = classify_template_binding(tpl_name, param_hint);
 
+            let tpl_bound = method.template_param_bounds.get(&atom(tpl_name));
+
             let arg_text = match bound.get(param_idx).and_then(|o| o.as_deref()) {
                 Some(text) => text,
                 None => {
@@ -89,30 +91,41 @@ impl Backend {
                         .parameters
                         .get(param_idx)
                         .and_then(|p| p.default_value.as_deref());
-                    match &binding_mode {
-                        TemplateBindingMode::ClassStringInner => match default_value {
-                            Some(d) if !subs.contains_key(tpl_name.as_str()) => d,
-                            None => continue,
+                    // A template bounded by a type operator resolves
+                    // against the one literal it binds to, and an omitted
+                    // argument has such a literal whenever the parameter
+                    // declares a scalar default — known at the declaration
+                    // site exactly as an explicit argument is known at the
+                    // call site.
+                    match default_value {
+                        Some(d)
+                            if !subs.contains_key(tpl_name.as_str())
+                                && type_operator_bound_literal(tpl_bound, d).is_some() =>
+                        {
+                            d
+                        }
+                        _ => match &binding_mode {
+                            TemplateBindingMode::ClassStringInner => match default_value {
+                                Some(d) if !subs.contains_key(tpl_name.as_str()) => d,
+                                None => continue,
+                                _ => continue,
+                            },
+                            TemplateBindingMode::Direct => match default_value {
+                                Some(d)
+                                    if !subs.contains_key(tpl_name.as_str())
+                                        && (d == "null" || d.ends_with("::class")) =>
+                                {
+                                    d
+                                }
+                                _ => continue,
+                            },
                             _ => continue,
                         },
-                        TemplateBindingMode::Direct => match default_value {
-                            Some(d)
-                                if !subs.contains_key(tpl_name.as_str())
-                                    && (d == "null" || d.ends_with("::class")) =>
-                            {
-                                d
-                            }
-                            _ => continue,
-                        },
-                        _ => continue,
                     }
                 }
             };
 
-            if let Some(literal) = type_operator_bound_literal(
-                method.template_param_bounds.get(&atom(tpl_name)),
-                arg_text,
-            ) {
+            if let Some(literal) = type_operator_bound_literal(tpl_bound, arg_text) {
                 crate::type_engine::variable::rhs_resolution::insert_or_union(
                     &mut subs,
                     tpl_name.to_string(),

@@ -86,27 +86,42 @@ pub(crate) fn build_function_template_subs(
             .parameters
             .get(param_idx)
             .and_then(|p| p.default_value.as_deref());
+        let tpl_bound = func_info
+            .template_param_bounds
+            .get(&crate::atom::atom(tpl_name));
         let arg_text: &str = match provided_arg {
             Some(text) => text,
-            None => match &binding_mode {
-                TemplateBindingMode::ClassStringInner => match default_value {
-                    Some(d) => d,
-                    None => continue,
-                },
-                TemplateBindingMode::Direct => match default_value {
-                    Some(d) if d.ends_with("::class") => d,
+            // A template bounded by a type operator resolves against the
+            // one literal it binds to, and an omitted argument has such a
+            // literal whenever the parameter declares a scalar default —
+            // known at the declaration site exactly as an explicit
+            // argument is known at the call site.
+            None => match default_value {
+                Some(d)
+                    if crate::type_engine::call_resolution::type_operator_bound_literal(
+                        tpl_bound, d,
+                    )
+                    .is_some() =>
+                {
+                    d
+                }
+                _ => match &binding_mode {
+                    TemplateBindingMode::ClassStringInner => match default_value {
+                        Some(d) => d,
+                        None => continue,
+                    },
+                    TemplateBindingMode::Direct => match default_value {
+                        Some(d) if d.ends_with("::class") => d,
+                        _ => continue,
+                    },
                     _ => continue,
                 },
-                _ => continue,
             },
         };
 
-        if let Some(literal) = crate::type_engine::call_resolution::type_operator_bound_literal(
-            func_info
-                .template_param_bounds
-                .get(&crate::atom::atom(tpl_name)),
-            arg_text,
-        ) {
+        if let Some(literal) =
+            crate::type_engine::call_resolution::type_operator_bound_literal(tpl_bound, arg_text)
+        {
             insert_or_union(&mut subs, tpl_name.to_string(), literal);
             continue;
         }

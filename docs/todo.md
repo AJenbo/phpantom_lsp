@@ -102,7 +102,6 @@ unlikely to move the needle for most users.
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B97 | [`CONSTANT[T]` reads as the whole table when `T` comes from a parameter's default value](todo/bugs.md#b97-constantt-reads-as-the-whole-table-when-t-comes-from-a-parameters-default-value) | Low-Medium  | Medium      |
 | B96 | [A docblock `@param` type narrower than its native nullable type hint is not flagged](todo/bugs.md#b96-a-docblock-param-type-narrower-than-its-native-nullable-type-hint-is-not-flagged) | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
