@@ -83,6 +83,22 @@ impl<'a> TemplateContext<'a> {
 /// hold class-string values.
 pub(crate) type VarClassStringResolver<'a> = Option<&'a dyn Fn(&str) -> Vec<String>>;
 
+/// The two distinct classes involved in resolving `self`/`static`/`parent`
+/// during conditional return type resolution.
+///
+/// `calling` is the class enclosing the call expression: what `self::class`
+/// means when it appears in a call-site argument. `declaring` is the class
+/// that declares the method being called: what `self` means in that
+/// method's own source, including a parameter's default value (`=
+/// self::SOME_CONST`) which is written there, not at the call site. These
+/// differ whenever the call sits outside the declaring class, so a single
+/// class name cannot serve both roles.
+#[derive(Clone, Copy, Default)]
+pub struct ConditionalClassContext<'a> {
+    pub calling: Option<&'a str>,
+    pub declaring: Option<&'a str>,
+}
+
 /// Split a call-expression subject into the call body and any textual
 /// arguments.  Handles both `"app()"` → `("app", "")` and
 /// `"app(A::class)"` → `("app", "A::class")`.
@@ -139,7 +155,10 @@ pub(crate) fn resolve_conditional_with_text_args(
         params,
         text_args,
         var_resolver,
-        calling_class_name,
+        ConditionalClassContext {
+            calling: calling_class_name,
+            declaring: None,
+        },
         class_loader,
         tpl,
     )
@@ -156,7 +175,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     params: &[ParameterInfo],
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
-    calling_class_name: Option<&str>,
+    class_ctx: ConditionalClassContext<'_>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
@@ -210,10 +229,19 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
             // An omitted argument takes the parameter's declared default at
             // runtime, so the condition is decided against that default
-            // rather than being left undecidable.
+            // rather than being left undecidable. The default's own
+            // `self`/`static`/`parent` (e.g. `= self::SOME_CONST`) is
+            // written in the method's declaring class, not the call site,
+            // so it is resolved against `class_ctx.declaring` here, before
+            // the text reaches any of the branches below.
+            let default_text_resolved: Option<Cow<'_, str>> = arg_text_owned
+                .is_none()
+                .then(|| param_default_text(params.get(param_idx)))
+                .flatten()
+                .map(|text| resolve_default_self_keyword(text, class_ctx.declaring));
             let arg_text = arg_text_owned
                 .as_deref()
-                .or_else(|| param_default_text(params.get(param_idx)));
+                .or(default_text_resolved.as_deref());
 
             if matches!(condition.kind(), TypeKind::ClassString(_)) {
                 // Extract the bound type from `class-string<Bound>`, if any.
@@ -296,7 +324,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         params,
                         text_args,
                         var_resolver,
-                        calling_class_name,
+                        class_ctx,
                         class_loader,
                         tpl,
                     )
@@ -330,7 +358,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     for arg in args.iter().skip(param_idx) {
                         let trimmed = arg.trim();
                         if let Some(class_name) = extract_class_name_from_text(trimmed) {
-                            let class_name = resolve_self_keyword(&class_name, calling_class_name)
+                            let class_name = resolve_self_keyword(&class_name, class_ctx.calling)
                                 .unwrap_or(class_name);
                             if !class_names.contains(&class_name) {
                                 class_names.push(class_name);
@@ -376,7 +404,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         params,
                         text_args,
                         var_resolver,
-                        calling_class_name,
+                        class_ctx,
                         class_loader,
                         tpl,
                     );
@@ -390,7 +418,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 });
                 if let Some(class_name) = class_name {
                     let class_name =
-                        resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
+                        resolve_self_keyword(&class_name, class_ctx.calling).unwrap_or(class_name);
                     let resolved = crate::util::resolve_name_via_loader(&class_name, class_loader);
 
                     // When a bound exists, verify the class is a subtype
@@ -444,7 +472,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     params,
                     text_args,
                     var_resolver,
-                    calling_class_name,
+                    class_ctx,
                     class_loader,
                     tpl,
                 )
@@ -491,7 +519,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                 params,
                                 text_args,
                                 var_resolver,
-                                calling_class_name,
+                                class_ctx,
                                 class_loader,
                                 tpl,
                             )
@@ -507,7 +535,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     params,
                     text_args,
                     var_resolver,
-                    calling_class_name,
+                    class_ctx,
                     class_loader,
                     tpl,
                 )
@@ -544,7 +572,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                 params,
                                 text_args,
                                 var_resolver,
-                                calling_class_name,
+                                class_ctx,
                                 class_loader,
                                 tpl,
                             )
@@ -561,7 +589,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     params,
                     text_args,
                     var_resolver,
-                    calling_class_name,
+                    class_ctx,
                     class_loader,
                     tpl,
                 )
@@ -577,7 +605,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             cond_const,
                             arg_class.trim(),
                             arg_const.trim(),
-                            calling_class_name,
+                            class_ctx.calling,
                         )
                     });
                 let take_then = matched ^ *negated;
@@ -586,7 +614,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     params,
                     text_args,
                     var_resolver,
-                    calling_class_name,
+                    class_ctx,
                     class_loader,
                     tpl,
                 )
@@ -632,7 +660,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                     params,
                                     text_args,
                                     var_resolver,
-                                    calling_class_name,
+                                    class_ctx,
                                     class_loader,
                                     tpl,
                                 )
@@ -650,7 +678,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     params,
                     text_args,
                     var_resolver,
-                    calling_class_name,
+                    class_ctx,
                     class_loader,
                     tpl,
                 )
@@ -1110,7 +1138,7 @@ pub fn evaluate_nested_conditionals_text(
     params: &[ParameterInfo],
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
-    calling_class_name: Option<&str>,
+    class_ctx: ConditionalClassContext<'_>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     tpl: &TemplateContext<'_>,
 ) -> PhpType {
@@ -1120,7 +1148,7 @@ pub fn evaluate_nested_conditionals_text(
             params,
             text_args,
             var_resolver,
-            calling_class_name,
+            class_ctx,
             class_loader,
             tpl,
         )
@@ -1132,7 +1160,7 @@ pub fn evaluate_nested_conditionals_text(
                 params,
                 text_args,
                 var_resolver,
-                calling_class_name,
+                class_ctx,
                 class_loader,
                 tpl,
             )
@@ -1245,6 +1273,25 @@ fn resolve_self_keyword(name: &str, calling_class_name: Option<&str>) -> Option<
     match name {
         "self" | "static" | "parent" => calling_class_name.map(|n| n.to_string()),
         _ => None,
+    }
+}
+
+/// Rewrite a leading `self::`/`static::`/`parent::` in a parameter default's
+/// source text to `declaring_class_name`.
+///
+/// A default like `self::EXCEPTION_ON_INVALID_REFERENCE` is written inside
+/// the method that declares the parameter, so `self` names that class, not
+/// whichever class the omitted argument is read back against downstream.
+fn resolve_default_self_keyword<'a>(
+    text: &'a str,
+    declaring_class_name: Option<&str>,
+) -> Cow<'a, str> {
+    let Some((class_part, rest)) = text.trim().split_once("::") else {
+        return Cow::Borrowed(text);
+    };
+    match resolve_self_keyword(class_part.trim(), declaring_class_name) {
+        Some(resolved) => Cow::Owned(format!("{resolved}::{rest}")),
+        None => Cow::Borrowed(text),
     }
 }
 
@@ -1601,7 +1648,13 @@ mod tests {
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
         let tpl = TemplateContext::with_params(&[]);
         resolve_conditional_with_text_args_and_defaults(
-            &cond, &params, text_args, None, None, loader, &tpl,
+            &cond,
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
         )
         .map(|t| t.to_string())
     }
@@ -1672,7 +1725,13 @@ mod tests {
             arg_type_resolver: Some(&resolver),
         };
         resolve_conditional_with_text_args_and_defaults(
-            &cond, &params, text_args, None, None, loader, &tpl,
+            &cond,
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
         )
         .map(|t| t.to_string())
     }
@@ -1702,6 +1761,48 @@ mod tests {
         );
     }
 
+    /// A parameter default written `self::SOME_CONST` (mirroring
+    /// `ContainerInterface::get()`'s `$invalidBehavior`) is written inside
+    /// the method that declares it, so its `self` must resolve against that
+    /// declaring class, not whichever unrelated class the call happens to
+    /// sit in — otherwise the constant is never found and the condition is
+    /// left undecided.
+    #[test]
+    fn omitted_default_self_const_resolves_against_declaring_class() {
+        let cond = PhpType::parse("($mode is 1 ? Found : Found|null)");
+        let params = [
+            param("$id"),
+            param_with_default("$mode", "self::EXCEPTION_ON_INVALID_REFERENCE"),
+        ];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let resolver = |t: &str| match t.trim() {
+            "ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE" => Some(PhpType::literal_int("1")),
+            _ => None,
+        };
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[],
+            bindings: &[],
+            arg_type_resolver: Some(&resolver),
+        };
+        // The call sits in an unrelated class; only the declaring class
+        // resolves the default's `self` to the constant the resolver knows.
+        let resolved = resolve_conditional_with_text_args_and_defaults(
+            &cond,
+            &params,
+            "Service::class",
+            None,
+            ConditionalClassContext {
+                calling: Some("App\\Controller"),
+                declaring: Some("ContainerInterface"),
+            },
+            loader,
+            &tpl,
+        )
+        .map(|t| t.to_string());
+        assert_eq!(resolved.as_deref(), Some("Found"));
+    }
+
     /// `is true` and `is false` name one boolean value each, so the two
     /// literals pick different branches instead of both reading as `is bool`.
     #[test]
@@ -1715,7 +1816,7 @@ mod tests {
                 &params,
                 text_args,
                 None,
-                None,
+                ConditionalClassContext::default(),
                 loader,
                 &tpl,
             )
@@ -1757,7 +1858,7 @@ mod tests {
                 &params,
                 "$flag",
                 None,
-                None,
+                ConditionalClassContext::default(),
                 loader,
                 &tpl,
             )
@@ -1805,7 +1906,13 @@ mod tests {
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
         let tpl = TemplateContext::with_params(&[]);
         resolve_conditional_with_text_args_and_defaults(
-            &cond, &params, text_args, None, None, loader, &tpl,
+            &cond,
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
         )
         .map(|t| t.to_string())
     }
@@ -1878,7 +1985,13 @@ mod tests {
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
         let tpl = TemplateContext::with_params(&[]);
         let resolved = resolve_conditional_with_text_args_and_defaults(
-            &cond, &params, "'field'", None, None, loader, &tpl,
+            &cond,
+            &params,
+            "'field'",
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
         )
         .map(|t| t.to_string());
         assert_eq!(resolved.as_deref(), Some("array-key"));
@@ -1910,7 +2023,7 @@ mod tests {
             &params,
             "$obj->toHtml()",
             None,
-            None,
+            ConditionalClassContext::default(),
             loader,
             &tpl,
         )
@@ -1938,7 +2051,13 @@ mod tests {
                 arg_type_resolver: Some(&resolver),
             };
             let resolved = resolve_conditional_with_text_args_and_defaults(
-                &cond, &params, "$value", None, None, loader, &tpl,
+                &cond,
+                &params,
+                "$value",
+                None,
+                ConditionalClassContext::default(),
+                loader,
+                &tpl,
             );
             assert_eq!(
                 resolved.as_ref().map(ToString::to_string).as_deref(),
@@ -1969,7 +2088,7 @@ mod tests {
             &params,
             "$obj->magic->toHtml()",
             None,
-            None,
+            ConditionalClassContext::default(),
             loader,
             &tpl,
         )
@@ -1998,7 +2117,7 @@ mod tests {
             &params,
             "fn($x) => $x->value",
             None,
-            None,
+            ConditionalClassContext::default(),
             loader,
             &tpl,
         )
@@ -2019,7 +2138,7 @@ mod tests {
             &params,
             "$obj->toHtml()",
             None,
-            None,
+            ConditionalClassContext::default(),
             loader,
             &tpl,
         )
@@ -2037,8 +2156,15 @@ mod tests {
         let params = [param("$key")];
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
         let tpl = TemplateContext::with_params(&[]);
-        let evaluated =
-            evaluate_nested_conditionals_text(&ty, &params, "'field'", None, None, loader, &tpl);
+        let evaluated = evaluate_nested_conditionals_text(
+            &ty,
+            &params,
+            "'field'",
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
+        );
         assert!(!evaluated.contains_conditional());
         assert_eq!(evaluated.to_string(), "Collection<array-key, Value>");
     }
@@ -2083,7 +2209,7 @@ mod tests {
             &params,
             "fn($x) => $x->value",
             None,
-            None,
+            ConditionalClassContext::default(),
             loader,
             &tpl,
         );
@@ -2129,7 +2255,13 @@ mod tests {
             arg_type_resolver: Some(&resolver),
         };
         resolve_conditional_with_text_args_and_defaults(
-            &cond, &params, "$id", None, None, loader, &tpl,
+            &cond,
+            &params,
+            "$id",
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
         )
         .map(|t| t.to_string())
     }
@@ -2174,7 +2306,13 @@ mod tests {
             arg_type_resolver: Some(&resolver),
         };
         resolve_conditional_with_text_args_and_defaults(
-            &cond, &params, text_args, None, None, loader, &tpl,
+            &cond,
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
         )
         .map(|t| t.to_string())
     }
@@ -2205,7 +2343,13 @@ mod tests {
         let tpl = TemplateContext::with_params(&[]);
         let resolve = |text_args: &str| {
             resolve_conditional_with_text_args_and_defaults(
-                &cond, &params, text_args, None, None, loader, &tpl,
+                &cond,
+                &params,
+                text_args,
+                None,
+                ConditionalClassContext::default(),
+                loader,
+                &tpl,
             )
             .map(|t| t.to_string())
         };
@@ -2230,7 +2374,13 @@ mod tests {
         };
         let resolve = |text_args: &str| {
             resolve_conditional_with_text_args_and_defaults(
-                &cond, &params, text_args, None, None, loader, &tpl,
+                &cond,
+                &params,
+                text_args,
+                None,
+                ConditionalClassContext::default(),
+                loader,
+                &tpl,
             )
             .map(|t| t.to_string())
         };
@@ -2254,7 +2404,13 @@ mod tests {
         };
         let resolve = |text_args: &str| {
             resolve_conditional_with_text_args_and_defaults(
-                &cond, &params, text_args, None, None, loader, &tpl,
+                &cond,
+                &params,
+                text_args,
+                None,
+                ConditionalClassContext::default(),
+                loader,
+                &tpl,
             )
             .map(|t| t.to_string())
         };

@@ -184,7 +184,10 @@ impl Backend {
                                 &result_method.parameters,
                                 at,
                                 None,
-                                rctx.current_class.map(|c| c.name.as_str()),
+                                crate::type_engine::types::conditional::ConditionalClassContext {
+                                    calling: rctx.current_class.map(|c| c.name.as_str()),
+                                    declaring: Some(effective.fqn().as_str()),
+                                },
                                 rctx.class_loader,
                                 &tpl,
                             );
@@ -335,7 +338,10 @@ impl Backend {
                         &result_method.parameters,
                         at,
                         None,
-                        rctx.current_class.map(|c| c.name.as_str()),
+                        crate::type_engine::types::conditional::ConditionalClassContext {
+                            calling: rctx.current_class.map(|c| c.name.as_str()),
+                            declaring: Some(merged.fqn().as_str()),
+                        },
                         rctx.class_loader,
                         &tpl,
                     );

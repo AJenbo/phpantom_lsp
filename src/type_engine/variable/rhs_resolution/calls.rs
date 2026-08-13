@@ -1021,7 +1021,10 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     &func_info.parameters,
                     &text_args,
                     Some(&var_resolver),
-                    Some(current_class_name),
+                    crate::type_engine::conditional_resolution::ConditionalClassContext {
+                        calling: Some(current_class_name),
+                        declaring: None,
+                    },
                     class_loader,
                     &tpl,
                 )
@@ -1645,6 +1648,7 @@ pub(super) fn resolve_conditional_return_for_call(
     text_args: &str,
     var_resolver: crate::type_engine::conditional_resolution::VarClassStringResolver<'_>,
     calling_class_name: &str,
+    declaring_class_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     template_subs: &HashMap<String, PhpType>,
     arg_type_resolver: crate::type_engine::conditional_resolution::ArgTypeResolver<'_>,
@@ -1653,6 +1657,10 @@ pub(super) fn resolve_conditional_return_for_call(
     let method = method_ref?;
     let cond = method.conditional_return.as_ref()?;
     let params = method.parameters.as_slice();
+    let class_ctx = crate::type_engine::conditional_resolution::ConditionalClassContext {
+        calling: Some(calling_class_name),
+        declaring: Some(declaring_class_name),
+    };
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
         defaults: None,
         params: method.template_params.as_slice(),
@@ -1665,7 +1673,7 @@ pub(super) fn resolve_conditional_return_for_call(
             params,
             text_args,
             var_resolver,
-            Some(calling_class_name),
+            class_ctx,
             class_loader,
             &tpl,
         )?;
@@ -1692,7 +1700,7 @@ pub(super) fn resolve_conditional_return_for_call(
             params,
             text_args,
             var_resolver,
-            Some(calling_class_name),
+            class_ctx,
             class_loader,
             &tpl2,
         )
@@ -1916,6 +1924,7 @@ pub(super) fn resolve_owner_method_call(
         &text_args,
         Some(&var_resolver),
         current_class_name,
+        owner.fqn().as_str(),
         ctx.class_loader,
         template_subs,
         Some(&arg_ty_resolver),
@@ -1946,7 +1955,10 @@ pub(super) fn resolve_owner_method_call(
                 params,
                 &text_args,
                 Some(&var_resolver),
-                Some(current_class_name),
+                crate::type_engine::conditional_resolution::ConditionalClassContext {
+                    calling: Some(current_class_name),
+                    declaring: Some(owner.fqn().as_str()),
+                },
                 ctx.class_loader,
                 &tpl,
             )

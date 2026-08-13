@@ -18,34 +18,6 @@ per-project inventory. Entries filed later say where they came from.
 
 ## Conditional and argument-dependent return types
 
-### B175. A parameter default written `self::CONST` reads as the call site's class
-
-**Impact: Low-Medium · Effort: Low-Medium**
-
-An omitted argument takes its parameter's declared default, and a
-condition keyed on that parameter is decided against it. When the
-default is written `self::SOME_CONST`, the `self` is resolved against
-the class the *call* sits in rather than the class that declares the
-method, so the constant is not found and the condition is left
-undecided:
-
-```php
-/** @return ($id is class-string<C> ? (B is 0|1 ? C|object : C|object|null) : …) */
-public function get(string $id, int $invalidBehavior = self::EXCEPTION_ON_INVALID_REFERENCE): ?object;
-
-$service = $container->get(Service::class);   // reported Service|object|null
-```
-
-Symfony's `ContainerInterface::get()` is the case that surfaced it: the
-call cannot return `null` unless the caller asks for that behaviour, so
-every service read carries a `null` half it never has. Spelling the
-default `ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE` decides it,
-which is what points at `self`.
-
-**Fix:** resolve a parameter default's `self`/`static`/`parent` against
-the declaring class before handing the text to the argument-type
-resolver.
-
 ### B176. A `@template` bound through a union `@param` never binds
 
 **Impact: Low-Medium · Effort: Medium**

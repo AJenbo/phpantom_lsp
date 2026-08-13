@@ -527,7 +527,10 @@ impl Backend {
                                         &m.parameters,
                                         text_args,
                                         Some(&var_resolver),
-                                        ctx.current_class.map(|c| c.name.as_str()),
+                                        crate::type_engine::conditional_resolution::ConditionalClassContext {
+                                            calling: ctx.current_class.map(|c| c.name.as_str()),
+                                            declaring: Some(merged.fqn().as_str()),
+                                        },
                                         ctx.class_loader,
                                         &tpl,
                                     )
@@ -1419,7 +1422,10 @@ impl Backend {
                         &method.parameters,
                         text_args,
                         var_resolver,
-                        mr_ctx.calling_class_name,
+                        crate::type_engine::conditional_resolution::ConditionalClassContext {
+                            calling: mr_ctx.calling_class_name,
+                            declaring: Some(class_info.fqn().as_str()),
+                        },
                         mr_ctx.class_loader,
                         &tpl,
                     )

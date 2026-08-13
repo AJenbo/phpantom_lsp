@@ -43,7 +43,6 @@ within the same impact tier.
 | B156 | [`assert()` still misses some provable conditions](todo/bugs.md#b156-assert-still-misses-some-provable-conditions)                                         | Medium      | Medium      |
 | B159 | [An inline `@var` re-pins the variable on every read](todo/bugs.md#b159-an-inline-var-re-pins-the-variable-on-every-read)                                  | Medium      | Medium      |
 | B174 | [A `break` that leaves a loop early is missing from the post-loop join](todo/bugs.md#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join) | Medium      | Medium      |
-| B175 | [A parameter default written `self::CONST` reads as the call site's class](todo/bugs.md#b175-a-parameter-default-written-selfconst-reads-as-the-call-sites-class) | Low-Medium  | Low-Medium  |
 | B142 | [Builtins with argument-dependent return types, round two](todo/bugs.md#b142-builtins-with-argument-dependent-return-types-round-two) (depends on B146) | Low-Medium  | Medium      |
 | B176 | [A `@template` bound through a union `@param` never binds](todo/bugs.md#b176-a-template-bound-through-a-union-param-never-binds)                          | Low-Medium  | Medium      |
 | B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
