@@ -3715,6 +3715,25 @@ class RemoveUnusedImportDemo
 }
 
 
+// ── Code Action: Sort Use Statements ────────────────────────────────────────
+// The two imports below are out of alphabetical order. Place cursor on either
+// one and press Ctrl+. → "Sort use statements" reorders them so `ArrayObject`
+// comes before `SplStack`.
+
+use SplStack;
+use ArrayObject;
+
+class SortUseStatementsDemo
+{
+    public function demo(): void
+    {
+        $stack = new SplStack();
+        $wrapped = new ArrayObject([1, 2, 3]);
+        $stack->push($wrapped);
+    }
+}
+
+
 // ── Diagnostic: Unknown Member Access ───────────────────────────────────────
 // When PHPantom resolves the subject type but the member does not exist after
 // full resolution (inheritance, traits, virtual members), a yellow "Method

@@ -91,50 +91,6 @@ developer arrive before vendor matches, even within a single phase.
 
 ---
 
-## F3. Incremental text sync
-
-**Impact: Low-Medium · Effort: Medium**
-
-PHPantom uses `TextDocumentSyncKind::FULL`, meaning every
-`textDocument/didChange` notification sends the entire file content.
-Switching to `TextDocumentSyncKind::INCREMENTAL` means the client sends
-only the changed range (line/column start, line/column end, replacement
-text), reducing IPC bandwidth for large files.
-
-The practical benefit is bounded: Mago requires a full re-parse of the
-file regardless of how the change was received, so the saving is purely
-in the data transferred over the IPC channel. For files under ~1000
-lines this is negligible. For very large files (5000+ lines, common in
-legacy PHP), sending 200KB on every keystroke can become noticeable.
-
-**Implementation:**
-
-1. **Change the capability** — set `text_document_sync` to
-   `TextDocumentSyncKind::INCREMENTAL` in `ServerCapabilities`.
-
-2. **Apply diffs** — in the `did_change` handler, apply each
-   `TextDocumentContentChangeEvent` to the stored file content string.
-   The events contain a `range` (start/end position) and `text`
-   (replacement). Convert positions to byte offsets and splice.
-
-3. **Re-parse** — after applying all change events, re-parse the full
-   file with Mago as today. No incremental parsing needed initially.
-
-**Relationship with partial result streaming (F2):** These two features
-address different performance axes. Incremental text sync reduces the
-cost of _inbound_ data (client to server per keystroke). Partial result
-streaming (F2) reduces the _perceived latency_ of _outbound_ results
-(server to client for large result sets). They are independent and can
-be implemented in either order, but if both are planned, incremental
-text sync is lower priority because full-file sync is rarely the
-bottleneck in practice. Partial result streaming has a more immediate
-user-visible impact for go-to-implementation, find references, and
-workspace symbols on large codebases.
-
----
-
-
-
 ## F5. Call hierarchy
 
 **Impact: Medium · Effort: Medium**
@@ -463,36 +419,29 @@ This is a pure text-based operation — no AST needed. Register `}` as
 an additional `on_type_formatting_trigger_character` alongside the
 existing `\n`.
 
-## F17. Class move with reference update
+## F17. Wire class move to `workspace/willRenameFiles`
 
-**Impact: Medium · Effort: Medium-High**
+**Impact: Medium · Effort: Medium**
 
-Move a class file to a new location and update all references across
-the project (namespace declaration, `use` statements, FQN references).
-PHPantom currently supports file rename on class rename but not the
-full move-with-reference-update workflow.
+Renaming a class's FQN via `textDocument/rename` already moves the file
+and rewrites references across the project: renaming a class's
+declaration accepts the full FQCN so it can move between namespaces in
+one step, and renaming a namespace segment rewrites every affected
+`namespace` declaration, `use` statement, and FQN reference while
+moving the PSR-4 directories to match (see `build_class_move_edit` in
+`src/rename/class.rs` and `build_namespace_rename_edit` in
+`src/rename/namespace.rs`). What's still missing is the editor-triggered
+path: when the user renames or moves a PHP file in the editor's file
+tree (rather than through the LSP rename command), nothing updates the
+file's `namespace` declaration or the workspace's `use` imports.
 
-The operation needs to:
-
-1. Accept a source file and a destination path.
-2. Compute the new namespace from the destination path using the
-   PSR-4 autoload map.
-3. Update the namespace declaration in the moved file.
-4. Find all references to the class across the project (use
-   statements, FQN occurrences, docblock type strings).
-5. Rewrite each reference to use the new FQN, or update the `use`
-   statement and leave short names unchanged.
-
-Once the core move operation exists, also wire it to
-`workspace/willRenameFiles` (declared via server capabilities
-`workspace.fileOperations.willRename`): when the user renames or
-moves a PHP file in the editor's file tree, return a `WorkspaceEdit`
-that updates the namespace declaration and all `use` imports across
-the workspace. This is the same machinery as steps 2-5, just
-triggered by the editor instead of a code action. The companion
-`workspace/willCreateFiles` can then insert a PSR-4-derived
-`namespace` + class stub into newly created files (overlaps with
-F18's namespace computation).
+Wire the existing move logic to `workspace/willRenameFiles` (declared
+via server capabilities `workspace.fileOperations.willRename`): on a
+file-tree rename/move, recompute the namespace from the destination
+path using the PSR-4 autoload map, and reuse the same reference-rewrite
+machinery to produce the `WorkspaceEdit`. The companion
+`workspace/willCreateFiles` can then insert a PSR-4-derived `namespace`
++ class stub into newly created files.
 
 **References:**
 - Phpactor: `MoveClass` refactoring in the class-mover package.
@@ -500,28 +449,6 @@ F18's namespace computation).
   `src/backend/handlers/workspace.rs` in its own repo (updates `use`
   imports workspace-wide on file rename) and their `willCreateFiles`
   PSR-4 stub insertion.
-
-## F18. Fix namespace/class name from PSR-4
-
-**Impact: Medium · Effort: Low**
-
-When a class's namespace or name does not match its file path per
-PSR-4 mapping, offer a code action (or command) to fix the namespace
-and/or class name. The inverse direction (rename file on class rename)
-is already supported.
-
-The code action should:
-
-1. Resolve the expected namespace and class name from the file path
-   using the PSR-4 autoload map in `composer.json`.
-2. If the current namespace differs, offer "Fix namespace to
-   `App\Models\Foo`".
-3. If the class name differs from the filename, offer "Fix class name
-   to `Foo`".
-
-**References:**
-- Phpactor: `FixNamespaceClassName` code action.
-
 
 ---
 

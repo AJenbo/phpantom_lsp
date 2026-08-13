@@ -234,7 +234,7 @@ Trigger: User types `try` or is inside a `try` block that has no
 `catch` yet.
 
 The engine uses the existing throws analysis pipeline
-(`source/throws_analysis.rs`) to detect what exceptions the code
+(`completion/source/throws_analysis/`) to detect what exceptions the code
 inside the try block can throw:
 
 ```php

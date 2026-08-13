@@ -15,75 +15,6 @@ within the same impact tier.
 
 ---
 
-## T2. File system watching for vendor and project changes
-**Impact: Medium-High · Effort: Medium**
-
-PHPantom loads Composer artifacts (classmap, PSR-4 mappings, autoload
-files) once during `initialized` and caches them for the session. If
-the user runs `composer update`, `composer require`, or `composer remove`
-while the editor is open, the cached data goes stale. The user gets
-completions and go-to-definition based on the old package versions
-until they restart the editor.
-
-### What to watch
-
-| Path | Trigger | Action |
-|---|---|---|
-| `vendor/composer/autoload_classmap.php` | Changed | Reload classmap |
-| `vendor/composer/autoload_psr4.php` | Changed | Reload PSR-4 mappings |
-| `vendor/composer/autoload_files.php` | Changed | Re-scan autoload files for global functions/constants |
-| `composer.json` | Changed | Reload project PSR-4 prefixes, re-check vendor dir |
-| `composer.lock` | Changed | Good secondary signal that packages changed |
-
-All three `autoload_*.php` files are rewritten atomically by Composer
-on every `install`, `update`, `require`, `remove`, and `dump-autoload`.
-Watching these is sufficient to catch any package change.
-
-### Implementation options
-
-1. **LSP `workspace/didChangeWatchedFiles`** — register file watchers
-   via `client/registerCapability` during `initialized`. The editor
-   handles the OS-level watching and sends notifications. This is the
-   cleanest approach and works cross-platform. Register glob patterns
-   for the vendor Composer files and `composer.json`.
-
-2. **Server-side `notify` crate** — use the `notify` Rust crate to
-   watch the file system directly. More control but adds a dependency
-   and duplicates what the editor already provides.
-
-Option 1 is preferred. The LSP spec's `DidChangeWatchedFilesRegistrationOptions`
-supports glob patterns like `**/vendor/composer/autoload_*.php`.
-
-### Reload strategy
-
-- On change notification, re-run the same parsing logic from
-  `initialized` for the affected artifact.
-- Invalidate `fqn_uri_index` entries that came from vendor files (their
-  parsed AST may have changed).
-- Clear and re-populate `fqn_uri_index` from the new `autoload_classmap.php`.
-- Log the reload to the output panel so the user knows it happened.
-- Debounce rapid changes (Composer writes multiple files in sequence)
-  with a short delay (e.g. 500ms) to avoid redundant reloads.
-
-### `textDocument/didSave` handler
-
-PHPantom does not currently implement `textDocument/didSave`. This
-means changes to files that are not open in the editor (e.g. files
-saved by a script, a git checkout, or another tool) are invisible
-until the file is opened. This is standard behaviour for most LSPs,
-but it matters for the file-watching story: even after
-`workspace/didChangeWatchedFiles` is wired up for Composer artifacts,
-changes to user PHP files made outside the editor (e.g. code
-generation, `artisan make:model`) will not be picked up until the
-file is opened.
-
-When file system watching is implemented, consider also registering
-a `didSave` handler (or a broad `*.php` watcher) to trigger a
-targeted single-file rescan for files in PSR-4 directories, matching
-the plan described in [indexing.md Phase 2](indexing.md).
-
----
-
 ## T3. Property hooks (PHP 8.4)
 **Impact: Medium · Effort: Medium**
 
@@ -327,10 +258,14 @@ algebraic framework that PHPStan and Psalm use. Key gaps:
 3. No truthy/falsey distinction. `if ($x)` (truthy) vs
    `if ($x === true)` (strict true) should produce different
    narrowings. PHPStan uses a 4-state bitmask context.
-4. No assertion propagation from `@phpstan-assert` /
-   `@psalm-assert` annotations on called functions. PHPantom parses
-   these assertions but doesn't apply them as type narrowings at
-   call sites.
+
+`@phpstan-assert`/`@psalm-assert` annotations on called functions are
+now applied as narrowings at call sites (`extract_call_assertions` and
+`CallAssertionInfo` in `type_engine/types/narrowing/assertions.rs`,
+consulted from `type_engine/types/narrowing/guards.rs` and
+`type_engine/variable/forward_walk/cond_narrowing.rs`), so that gap
+from the original list is closed. It is still ad hoc rather than
+going through a unified `reconcile` dispatch, so items 1-3 remain.
 
 **Design:** create a
 `fn reconcile(existing: PhpType, assertion: Assertion, negated: bool) -> PhpType`
@@ -387,103 +322,6 @@ raw strings.
 
 ---
 
-## T24. `stdClass` dynamic property access
-**Impact: Low-Medium · Effort: Low**
-
-`stdClass` is PHP's generic dynamic-property container. Accessing any
-property on a value known to be `stdClass` (or narrowed to `object`
-via `is_object()`) should not produce `unresolved_member_access`
-diagnostics, because `stdClass` permits arbitrary properties by
-design.
-
-**Partially resolved.** Three changes landed:
-
-1. `filter_type_by_guard` now narrows `mixed` → the canonical type
-   for each guard kind (e.g. `is_object()` → `object`) instead of
-   filtering `mixed` to empty.
-2. `resolve_subject_outcome_variable` returns a synthetic
-   `Resolved(stdClass)` when the resolved type is `object` or
-   `stdClass`, so the existing `check_member_on_resolved_classes`
-   suppression kicks in.
-3. `try_apply_type_guard_narrowing` decomposes compound `&&`
-   conditions so `if (is_object($x) && $x->prop)` narrows in both
-   the condition RHS and the if-body. `apply_and_lhs_narrowing` also
-   handles `is_object()` in `&&` inline narrowing.
-
-This fixed `Order:646,647` (`json_decode` → `mixed` → `is_object`
-guard → property access).
-
-## T25. Call-site template argument inference for callable parameters
-
-**Impact: Medium · Effort: Medium — partially done**
-
-When a function has a `@template T` and a parameter typed
-`callable(T): T`, the closure inlay hint system cannot resolve `T`
-to a concrete type because it reads the callable signature literally.
-For example:
-
-```php
-/**
- * @template T
- * @param array<T> $items
- * @param callable(T): T $fn
- * @return array<T>
- */
-function transform(array $items, callable $fn): array { ... }
-
-transform([1, 2, 3], fn($x) => $x * 2);
-//                      ^ no hint — $x is T, not int
-```
-
-To show `int` for `$x`, the hint system needs to:
-
-1. Resolve other arguments at the call site to infer `T = int` from
-   `array<T>` matched against `[1, 2, 3]` (which is `array<int>`).
-2. Substitute `T → int` in the callable's parameter and return types.
-3. Pass the substituted `callable(int): int` to the hint emitter.
-
-**Step 1 (done):** `emit_closure_hints` in `inlay_hints.rs` now
-accepts the `call_sites` slice, finds the matching `CallSite` for
-each `UntypedClosureSite`, extracts the full argument text from
-content, and passes it to `resolve_callable_target_with_args`
-instead of the no-args `resolve_callable_target`. This wires the
-existing `build_function_template_subs` / `build_method_template_subs`
-machinery into the inlay hint path. Integration tests document the
-desired behaviour.
-
-**Step 2 (done):** The `CallSite` matching logic works correctly
-for offset comparison. The actual issue was that
-`build_function_template_subs` did not handle array literal
-arguments (e.g. `[1, 2, 3]`) for `GenericWrapper` binding mode.
-The `GenericWrapper("array", 0)` arm only resolved `$variable`
-arguments via `resolve_arg_variable_raw_type`, skipping literals.
-Fixed by adding array-literal element inference in the
-`GenericWrapper` arm of `build_function_template_subs`, so
-`each([1, 2, 3], fn($x) => ...)` now infers `T = int` and shows
-the correct type hint for `$x`.
-
-**Still missing: the type engine itself, not just the hint.** Steps 1
-and 2 wired the substitution into the inlay hint path only. Hover,
-completion and diagnostics resolve a closure parameter through the
-forward walker, which never consults the enclosing call's
-`callable(T)` annotation, so the parameter stays untyped there:
-
-```php
-/** @var list<Foo> $rows */
-each($rows, fn ($x) => $x->name);   // $x has no type on hover
-array_map(fn ($case) => $case[0]->name, $rows);
-```
-
-The binding belongs in the shared pipeline (a closure literal passed
-as an argument should seed its parameters from the callable parameter
-type the call site substitutes), so every consumer benefits rather
-than inlay hints alone.
-
-**References:**
-- PHPStan: `GenericFunctionsReturnTypeExtension`, argument-based
-  template inference in `FunctionCallNode`.
-- Mago: `resolve_template_arguments` in the type checker.
-
 ## T26. Globbed constant unions (`Foo::BAR_*`)
 
 **Impact: Low · Effort: Low**
@@ -514,44 +352,6 @@ it should:
 **References:**
 - PHPStan: `ConstantWildcardType` / constant enum resolution.
 - Phpactor: `GlobbedConstantUnionType`.
-
----
-
-## T27. Per-expression type caching during forward walk
-
-**Impact: Medium-High · Effort: Medium**
-
-The forward walker re-resolves the same expressions repeatedly during
-a single analysis pass. For example, in `$a->foo()->bar()->baz()`,
-resolving `baz()` requires re-resolving `$a->foo()->bar()`, which
-re-resolves `$a->foo()`, which re-resolves `$a`. This creates
-exponential work on chained expressions.
-
-**Fix:** Cache resolved types per AST span (or node identity) for the
-duration of a single forward-walk pass. When a sub-expression has
-already been resolved, return the cached result in O(1). The cache is
-invalidated entirely when the file changes (since spans change).
-
-Psalm's `NodeTypeProvider` implements exactly this pattern: a simple
-`setType(node, type)` / `getType(node)` interface keyed by AST node
-identity. Types are cached for one analysis pass, not persisted. Only
-expressions, names, and return statements get cached (not all nodes).
-
-**Design:**
-
-1. Add a `HashMap<TextRange, PhpType>` (or `FxHashMap`) to the forward
-   walker's state, scoped to the current walk invocation.
-2. Before resolving any expression, check the cache by span.
-3. After resolving, store the result.
-4. Clear the cache when starting a new file or when the file content
-   changes.
-
-This eliminates the exponential re-resolution that causes performance
-issues on deeply chained expressions (P20 class of problems).
-
-**References:**
-- Psalm: `NodeTypeProvider` interface (`Psalm\NodeTypeProvider`)
-- Mago: per-node type caching via `spl_object_id` equivalent
 
 ---
 
@@ -696,8 +496,7 @@ Found in the 2026-07 analyze triage: ~10 pdepend errors
 `PHPParserVersion81Test.php:1191,1480`) destructure tuples out of
 `array_map` results built this way. PHPStan infers the shape from
 the return statements; without it the destructured elements are
-unresolved. Depends on nothing else in this file; complements the
-call-site inference work in T25.
+unresolved. Depends on nothing else in this file.
 
 **References:**
 - PHPStan: closure return type inference in

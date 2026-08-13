@@ -267,40 +267,6 @@ candidate file.
 3. **Pass the current file path** through `ClassCompletionParams` and
    into `ClassItemCtx` so it's available during sort-text construction.
 
-## C9. Lazy documentation via `completionItem/resolve`
-
-**Impact: Medium · Effort: Medium**
-
-Class-name completions currently populate `detail` eagerly for all
-candidates. For large result sets (up to 300 items), this is wasteful
-because the user only inspects a handful of items. Implementing the
-LSP `completionItem/resolve` callback would let the server defer
-expensive lookups (docblock extraction, constructor signature
-formatting, stub source parsing) until the user actually highlights an
-item in the completion menu.
-
-This becomes more impactful if the result-set cap is lowered (currently
-300). Even at a smaller cap, avoiding upfront work for every candidate
-improves perceived latency on keystroke.
-
-**Implementation:**
-
-1. **Add a `completionItem/resolve` handler** in `server.rs` that
-   accepts a `CompletionItem`, reads its `data` field (containing an
-   FQN or index key), and populates `detail`, `documentation`, and
-   any other deferred fields.
-
-2. **Register `resolveProvider: true`** in the server capabilities
-   returned during `initialize`.
-
-3. **Store a lookup key in `data`** — for class-name completions, the
-   FQN is sufficient. For member completions, store the class FQN plus
-   member name and kind.
-
-4. **Move expensive fields** — stop setting `documentation` (and
-   optionally `detail`) eagerly in `build_item` and
-   `build_completion_items`. Set `data` instead.
-
 ## C10. Deprecation markers on class-name completions from all sources
 
 **Impact: Low · Effort: Low**
@@ -325,17 +291,21 @@ not just same-namespace ones.
 
 **Impact: Medium · Effort: needs planning**
 
-Today, members are sorted alphabetically after `->` and `::`. This is
-predictable but not always helpful. Large classes (Laravel Eloquent
+Members after `->` and `::` are now sorted by kind (constants and
+`::class` first, then properties, then methods, with implemented magic
+methods pushed below regular methods so `__invoke`/`__toString`/etc.
+don't sit at the top of the method list from their leading
+underscores), and alphabetically within each group
+(`src/completion/builder.rs`, `kind_sort_tier` / `magic_sort_tier`).
+That's still not always helpful: large classes (Laravel Eloquent
 models, Symfony form builders, PHPUnit test cases) can have hundreds of
-members, and the methods the user most likely wants are buried
+members, and the method the user most likely wants is buried
 alphabetically among inherited helpers.
 
 This is a longer-term goal that needs design work before implementation.
-Possible ranking signals to explore:
+Possible ranking signals still to explore, on top of the kind/magic
+tiering already in place:
 
-- **Member kind**: methods before properties before constants (methods
-  are the most common completion target after `->`)
 - **Visibility**: public members above protected when accessed from
   outside the class hierarchy
 - **Declaration origin**: own members above inherited, inherited above
@@ -348,6 +318,6 @@ Possible ranking signals to explore:
   class-name completion
 
 The right combination of these signals (and their relative weights)
-needs experimentation. A first step could be sorting by kind and
-declaration origin, which requires no new data and is straightforward
-to implement.
+needs experimentation. A next step could be adding declaration origin
+on top of the existing kind tiering, which requires no new data and is
+straightforward to implement.

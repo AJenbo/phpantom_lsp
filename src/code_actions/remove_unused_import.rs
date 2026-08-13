@@ -175,7 +175,7 @@ impl Backend {
 /// Returns `true` when the line starts with `use ` (after optional
 /// whitespace) and is NOT inside a class/trait body (where `use` means
 /// a trait import, not a namespace import).
-fn cursor_on_use_import_line(content: &str, line: u32) -> bool {
+pub(crate) fn cursor_on_use_import_line(content: &str, line: u32) -> bool {
     let lines: Vec<&str> = content.lines().collect();
     let idx = line as usize;
     if idx >= lines.len() {

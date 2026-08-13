@@ -286,10 +286,11 @@ This is the fastest path: no directory scanning needed.
 
 **Packages without a map file.** Most stub packages (wordpress-stubs,
 acf-pro-stubs, etc.) are just directories of `.php` files. These
-need to be scanned using the byte-level classmap scanner (Phase 1
-of indexing.md) extended with function/constant detection (Phase 2.5
-of indexing.md). The scan produces name-to-path indices just like
-the autoload file scanner.
+need to be scanned using the byte-level classmap/function/constant
+scanner (`find_symbols` in `src/classmap_scanner/lexer.rs`, already
+shipped and used for the "no `composer.json`" full-scan path — see
+indexing.md's Current State). The scan produces name-to-path indices
+just like the autoload file scanner.
 
 **Detection heuristic:** A Composer package is treated as a stub
 package when any of these conditions are true:
@@ -334,7 +335,8 @@ embedded stubs:
 **`find_or_load_function`:**
 
 1. `global_functions` (user code + cached results)
-2. `autoload_function_index` (from Phase 2.5 of indexing.md)
+2. `autoload_function_index` (already populated by the byte-level
+   scanner described in indexing.md's Current State)
 3. **External stub function index (new).** Same unified index.
    Read the file, parse, cache in `global_functions`.
 4. `stub_function_index` (embedded stubs)
@@ -368,12 +370,15 @@ project-specific definition is more accurate than the generic one.
 
 ### Effort
 
-Medium. The scanning infrastructure depends on Phase 2.5 of
-indexing.md (byte-level function/constant scanner). The resolution
-changes are straightforward (one new phase in each lookup chain).
-The `PhpStormStubsMap.php` parser for project-level phpstorm-stubs
-is already written in `build.rs` and just needs to be available at
-runtime.
+Medium. The scanning infrastructure this needs (byte-level
+class/function/constant scanning) already shipped as part of
+indexing.md's full-scan path, so this item is no longer blocked on
+it — it only needs to be pointed at stub directories and to populate
+the three new indices above instead of the project's own symbol
+tables. The resolution changes are straightforward (one new phase in
+each lookup chain). The `PhpStormStubsMap.php` parser for
+project-level phpstorm-stubs is already written in `build.rs` and
+just needs to be available at runtime.
 
 ---
 
@@ -588,15 +593,16 @@ embedded stubs, built-in symbols would be invisible.
 | #   | Goal                                                      | Effort | Dependencies                                       |
 | --- | --------------------------------------------------------- | ------ | -------------------------------------------------- |
 | E1  | GTD for built-in symbols via project-level phpstorm-stubs | Low    | None                                               |
-| E2  | Project-level stubs as a type resolution source           | Medium | indexing.md (byte-level function/constant scanner) |
+| E2  | Project-level stubs as a type resolution source           | Medium | None (byte-level scanner already shipped)          |
 | E3  | IDE-provided and `.phpantom.toml` stub paths              | Low    | E2                                                 |
 | E4  | Ship SPL overlay stubs, let external stubs override       | Low    | E2                                                 |
 | E7  | Stub-based framework patches (replace Rust patch system)  | Medium | E2 or E3                                           |
 
 E1 can be done immediately and independently. It provides
 immediate value (GTD on `array_map`, `PDO`, `Iterator`, etc.) with
-minimal code. E2-E4 build on the scanner infrastructure from
-indexing.md and on each other.
+minimal code. E2-E4 build on the byte-level scanning infrastructure
+already shipped for the project's own symbol discovery (see
+indexing.md's Current State) and on each other.
 
 The priority order (`.phpantom.toml` > Composer > IDE > embedded)
 ensures the user's explicit choices always win. Most users never

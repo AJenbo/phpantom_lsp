@@ -29,15 +29,17 @@ PHPantom assigns diagnostic severity based on runtime consequences:
 
 PHPantom's own inline suppression (`// @phpantom-ignore code`) has
 shipped. PHPStan suppression is also implemented ("Ignore PHPStan
-error" / "Remove unnecessary @phpstan-ignore"). What remains is
-wiring up suppression actions for additional external tool proxies:
+error" / "Remove unnecessary @phpstan-ignore"). The PHPCS proxy itself
+has also shipped (`src/diagnostics/external/phpcs.rs`, `[phpcs]` config
+section), but nothing wires up a suppression action for it yet. What
+remains is wiring up suppression actions for additional external tool
+proxies:
 
 - PHPCS: `// phpcs:ignore [Sniff.Name]` or `// phpcs:disable` /
-  `// phpcs:enable` blocks.
-- PHPMD (3.0): `#[SuppressWarnings(RuleName::class)]` as a PHP attribute.
-
-Each tool needs its diagnostic proxy before its suppression action
-can be wired up (D10 for PHPMD; PHPCS proxy is not yet filed).
+  `// phpcs:enable` blocks. The proxy exists; only the suppression
+  action is missing.
+- PHPMD (3.0): `#[SuppressWarnings(RuleName::class)]` as a PHP
+  attribute. Blocked on the proxy itself (D10).
 
 ---
 
@@ -115,94 +117,30 @@ with `command`, `timeout`, and tool-specific options mirroring the
 
 ---
 
-## D13. Unify diagnostic subject resolution with completion/hover
-
-`unknown_members.rs` has two secondary resolvers that run their own
-independent type resolution when `resolve_target_classes_expr` returns
-empty:
-
-- `resolve_scalar_subject_type` (~130 lines) re-resolves variables,
-  property chains, and call expressions to detect scalar types.
-- `resolve_unresolvable_class_subject` (~80 lines) re-resolves
-  variables and call expressions to detect class names that can't be
-  loaded.
-
-Both duplicate logic from `resolver.rs` and
-`variable/resolution.rs` but can diverge, producing diagnostics for
-types that completion and hover cannot see (or vice versa).
-
-### Goal
-
-The diagnostic path should use the same resolution result that
-completion and hover use. All three consumers should see identical
-outcomes for the same subject text at the same cursor position.
-
-### Approach
-
-Extend the shared resolver's return type (or add a secondary result)
-to carry scalar type information and unresolvable class names
-alongside the resolved `ClassInfo` list. The diagnostic collector
-would then inspect this enriched result instead of running its own
-resolution. This eliminates the secondary resolvers entirely.
-
-### Files
-
-- `src/diagnostics/unknown_members.rs` — remove
-  `resolve_scalar_subject_type` and `resolve_unresolvable_class_subject`
-- `src/type_engine/resolver/` — enrich the resolution result
-
----
-
 ## D14. Tighten argument type mismatch diagnostic (Phase 2)
 
-**Impact: High · Effort: Medium**
+**Impact: Medium · Effort: Low**
 
-`is_type_compatible` in `src/diagnostics/type_errors.rs` silences
-several cases that are genuine bugs at runtime. Phase 1 was
-intentionally permissive to avoid false positives while the engine
-matured; Phase 2 tightens the remaining gaps. PHPStan and Psalm
-already flag most of these.
+`is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
+still silences two cases that are genuine bugs at runtime. Two other
+gaps this item used to track — the any-member union threshold and the
+reverse-hierarchy (supertype-to-subtype) acceptance — have since been
+tightened (see "A partially-compatible union argument is now reported"
+and the class-hierarchy comment noting the downcast direction "is now
+reported" in the changelog).
 
-### 1. Nullable arg → non-nullable param (lines 264–271)
+### 1. Nullable arg → non-nullable param
 
 Currently silenced with a MAYBE comment ("developer may have guarded
 against null"). This is the #1 source of runtime `TypeError` in
 PHP 8+. Both PHPStan and Psalm flag it. Should be reported at least
 as **Warning** severity, since the null path may be unguarded.
 
-### 2. `void` as argument (lines 94–96)
+### 2. `void` as argument
 
 Currently silenced conservatively. Passing the return value of a
 `void` function is always a bug — PHP 8 returns `null` but the call
 site clearly misunderstands the API. Should be **Error** severity.
-
-### 3. Union any-member-compatible threshold (lines 189–213)
-
-Currently: if ANY single member of an arg union is compatible with
-the param, the entire union passes. Combined with the other
-permissive rules above, this creates cascading permissiveness (e.g.
-`null|BadType` passes a `string` param because `null` is not
-checked, then `BadType` is the "any" member that gets skipped).
-Consider requiring all non-null members to be compatible, or at
-least flagging when a majority of members are incompatible.
-
-### 5. Reverse hierarchy acceptance (Direction 2)
-
-Currently: when the arg type is a *supertype* of the param type
-(e.g. `CarbonInterface` passed to `Carbon`), the diagnostic is
-silenced for all non-final classes because "the value *might* be
-the narrower type at runtime." This means the diagnostic can only
-catch type errors between completely unrelated classes, which
-severely limits its value. Passing `Animal` where `Dog` is expected
-is silently accepted.
-
-This is the single largest gap in the diagnostic. Tightening it
-requires control-flow analysis (instanceof guards, assert calls) to
-know whether the broader type was actually narrowed before the call
-site. Without CFA, the false positive rate would be high. Consider
-reporting at **Warning** severity with a message like "argument type
-`Animal` is broader than expected `Dog`; verify the value was
-narrowed before this call."
 
 ---
 

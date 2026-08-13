@@ -28,7 +28,7 @@ within the same impact tier.
 | Facade → concrete resolution via booting | Requires booting (`getFacadeRoot()`). When `getFacadeAccessor()` returns a `::class` reference, static resolution is possible without booting. See "Facade completion" section below. |
 | Contract → concrete resolution | Fully out of scope, including core framework contracts. Calling a concrete-only method on a contract-typed value is unsound per the declared types — the diagnostic is intended, exactly as `fn (A $a) => $a->bMethod()` is not a false positive just because `B extends A` at every call site. Where the *framework's own* docblock is needlessly wide, fix the docblock upstream or via stub patches. |
 | Manager → driver resolution | Requires instantiating the manager at runtime. |
-| Narrowing a `MorphTo` relation to concrete models | `$comment->commentable` resolves to the generic `Illuminate\Database\Eloquent\Model`, which is what the relation declares. The morph map (now indexed, see L41/L42) is global rather than per-relation, so the only type it could supply is a union of *every* mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with `@return MorphTo<Post\|Video, $this>` where the target set is actually known. |
+| Narrowing a `MorphTo` relation to concrete models | `$comment->commentable` resolves to the generic `Illuminate\Database\Eloquent\Model`, which is what the relation declares. The morph map (now indexed, see L47/L42) is global rather than per-relation, so the only type it could supply is a union of *every* mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with `@return MorphTo<Post\|Video, $this>` where the target set is actually known. |
 
 ---
 
@@ -360,7 +360,7 @@ Alternatively, if the stubs for these traits include `@property`
 tags or a typed `$id` override, the PHPDoc provider may handle it
 automatically once the traits are loaded.
 
-#### L41. Morph aliases in `*_type` column comparisons
+#### L47. Morph aliases in `*_type` column comparisons
 
 **Impact: Low-Medium · Effort: Medium**
 
@@ -574,30 +574,29 @@ choosing not to ship.
 **Impact: High · Effort: Low-Medium**
 
 Detection breadth multiplies everything else in this section: the
-symbol-map spans feed go-to-definition and references today and L14–L16
-tomorrow. Our current detection is much narrower than the Laravel LSP's
-pattern set. Gaps by kind:
+symbol-map spans already feed go-to-definition, references, hover, and
+diagnostics for every call site we recognize. `to_route()` (as a route
+name), `Lang::has()`, and the typed config accessors (`Config::string()`,
+`integer()`, `boolean()`, `float()`, `array()`, `collection()`, `set()`,
+`prepend()`, `push()`, and the `#[Config]` attribute) are recognized via
+`is_config_repository_method`. Remaining gaps by kind:
 
-- **Route names** — we detect only the bare `route()` function. Add:
-  `to_route()`, `signedRoute()`, `temporarySignedRoute()`,
+- **Route names** — `signedRoute()`, `temporarySignedRoute()`,
   `redirectToRoute()`; the same methods on the `Redirect`, `URL`, and
   `Response` facades and on `redirect()`/`url()` helper chains
   (`redirect()->route('x')`); `Route::is()` and `$request->routeIs()`
-  (glob-aware, see L14); and the `#[RedirectToRoute]` attribute.
+  (glob-aware); and the `#[RedirectToRoute]` attribute.
 - **View names** — add `MailMessage::view()`/`markdown()`, which is a
   notification's mail message rather than a mailable or the view
   factory, and the mailable `#[Content]` attribute (`view`/`markdown`
   arguments, named or positional).
-- **Translation keys** — add `Lang::has()`/`hasForLocale()`. (`@lang`
+- **Translation keys** — add `Lang::hasForLocale()`. (`@lang`
   and other Blade directives arrive via the Blade preprocessor;
   see `blade.md`.)
-- **Config keys** — add the typed accessors `Config::string()`,
-  `integer()`, `boolean()`, `float()`, `array()`, plus `getMany()`
-  (array argument), `prepend()`, `push()`, and the `#[Config]` container
-  attribute. Audit `is_config_repository_method` against this list.
+- **Config keys** — add `getMany()` (array argument).
 - **Env vars** — add `Env::get()`, and index env keys as proper
   `LaravelStringKey` spans instead of the current definition-only
-  ad-hoc fallback, so references (and later completion/diagnostics)
+  ad-hoc fallback, so references (and completion/diagnostics)
   work uniformly.
 - **Container alias strings** — `app('cache')` already resolves to the
   concrete class for member completion via the alias tables; wire
@@ -610,13 +609,12 @@ pattern set. Gaps by kind:
 **Impact: Medium-High · Effort: Medium**
 
 Statically recoverable translation features the Laravel LSP has and we
-lack entirely:
+still partially lack:
 
 - **JSON lang files.** `lang/{locale}.json` (the "translation string as
-  key" style) is not scanned at all — today's go-to-definition and
-  references miss those keys, and L14/L15 would inherit the hole.
-  Highest priority of this item: it is a correctness gap in a shipped
-  feature, not just a missing endpoint.
+  key" style) now completes and resolves go-to-definition, but the
+  definition always lands on the top of the file rather than the key's
+  actual line, and find-references does not cover JSON keys at all.
 - **Locale argument completion.** The `$locale` parameter of `__()`,
   `trans()`, `trans_choice()`, `Lang::get()/choice()/hasForLocale()`
   (positional or named) completes from the locale set derived from
@@ -624,19 +622,21 @@ lack entirely:
 - **Placeholder parameter completion.** The `:name` placeholders parsed
   from the translation value complete as keys of the replacement array
   (`__('welcome', ['name' => …])`).
-- **Multi-locale hover.** When L16 lands, show the value per locale
-  (with a link to each file), not just the default locale.
+- **Multi-locale hover.** Hover already shows a translation key's value
+  for the resolved locale; show the value per locale (with a link to
+  each file) instead of just the one.
 
 #### L25. Storage disk name strings
 
 **Impact: Low-Medium · Effort: Low**
 
-`Storage::disk('...')`, `Storage::fake()`, `persistentFake()`,
-`forgetDisk()`, and the `#[Storage]` container attribute name a disk
-declared under `filesystems.disks.*`. The config scanner already parses
-`config/*.php`; expose the children of `filesystems.disks` as the
-candidate set for completion, go-to-definition (jump to the disk's entry
-in `config/filesystems.php`), and an unknown-disk diagnostic.
+`Storage::disk('...')` and the `#[Storage]` container attribute already
+complete against `filesystems.disks.*`, navigate to the disk's entry in
+`config/filesystems.php`, and flag an unknown disk. `Storage::fake()`,
+`persistentFake()`, and `forgetDisk()` still name a disk with none of
+that: their return type is patched to `FilesystemAdapter`, but the
+disk-name argument itself gets no completion, go-to-definition, or
+diagnostic.
 
 #### L27. Legacy `Controller@method` action strings
 
@@ -666,24 +666,15 @@ same statically, and we can also handle directories.
 
 #### L29. Livewire and Volt component names
 
-**Impact: Low-Medium (Livewire projects only) · Effort: Medium**
+**Impact: Low (Livewire projects only) · Effort: Low**
 
-The Laravel LSP resolves Livewire components by booting the app and
-instantiating every component. The static equivalents:
-
-- **Component index by convention:** class components under
-  `app/Livewire/` (`App\Livewire\FooBar` ↔ `foo-bar`, nested
-  `admin.foo-bar`), plus view-based Volt / Livewire v4 single-file
-  components under the views tree.
-- **PHP-side triggers:** `Volt::route('/path', 'component')` (arg 1)
-  and `Route::livewire()` — completion, go-to, unknown-component
-  diagnostic.
-- **Blade-side (`<livewire:foo-bar>` tags):** belongs to the Blade
-  project (`blade.md`) but should consume the same component index.
-  Hover showing the component's public properties falls out of our
-  existing `ClassInfo` once the class resolves — richer than the
-  Laravel LSP's reflection dump, and with no risk of running component
-  constructors.
+The component index (class components under `app/Livewire/`, nested
+names, and view-based Volt / Livewire v4 single-file components), the
+`<livewire:foo-bar>` tag resolution on the Blade side, and hover on a
+Livewire component's public properties via `$this` in its view are all
+implemented. The remaining gap is the PHP-side triggers: `Volt::route(
+'/path', 'component')` (arg 1) and `Route::livewire()` get no
+completion, go-to-definition, or unknown-component diagnostic.
 
 #### L30. Eloquent attribute-array key completion
 
@@ -722,18 +713,19 @@ moving the Blade file — defer that one until the rest is in place.
 
 L25 (storage disks) is one instance of a general pattern: a method
 argument names an entry under a known config subtree, and the config
-scanner already parses those files. Generalize the L25 machinery into
+scanner already parses those files. Auth guards (`auth('...')`,
+`Auth::guard()`, `->middleware('auth:web')`), cache stores
+(`Cache::store()`), log channels (`Log::channel()`), and storage disks
+(L25) already complete against their config subtree — but all of them
+route through the generic `LaravelStringKind::Config` kind rather than
+a dedicated one, so they get completion plus the shared config
+diagnostics/go-to-definition and nothing family-specific (a "cache
+store" hovers with the same generic wording as any other config key).
+`Log::stack()` (array values) isn't recognized at all. Generalize into
 a declarative table of `(trigger context, config path)` pairs so each
 new family is one table row, and cover the rest of the family in one
 pass:
 
-- **Log channels** — `Log::channel()`, `Log::stack()` (array values)
-  → `logging.channels.*`.
-- **Cache stores** — `Cache::store()` → `cache.stores.*`.
-- **Auth guards** — `auth('...')`, `Auth::guard()`, `->middleware('auth:web')`
-  parameter → `auth.guards.*` (the guard→model resolver already parses
-  this subtree; reuse its data for completion/diagnostics on the name
-  itself).
 - **Database connections** — `DB::connection()`, `->connection()` /
   `$connection` on models and jobs → `database.connections.*`.
 - **Queue connections and queues** — `Queue::connection()`,
@@ -750,30 +742,28 @@ pass:
 
 Each family gets the full string-kind treatment for free once wired
 as a `LaravelStringKey`: completion, go-to-definition (jump to the
-config entry), hover (L16), diagnostics (L14), and references.
+config entry), hover, diagnostics, and references.
 
 #### L36. Container binding registrations from service providers
 
-**Impact: Medium · Effort: Medium**
+**Impact: Low · Effort: Low**
 
-`app('cache')` resolves through the framework's core alias table
-today, but a binding the application (or an installed package)
-registers itself — `$this->app->bind('payments', StripeGateway::class)`,
-`singleton()`, `scoped()`, `instance()`, or the provider's `$bindings`
-/ `$singletons` arrays — is invisible. These registrations are literal
-facts in provider source, recoverable exactly the way the macro
-scanner already recovers `Str::macro()` from app and package
-providers.
+`$this->app->bind('payments', StripeGateway::class)`, `bindIf()`,
+`singleton()`, `singletonIf()`, `scoped()`, `scopedIf()`, `instance()`,
+and `alias()` calls in `register()`/`boot()` of app and package service
+providers are already scanned for literal `(string name, target)` pairs
+and merged into the alias table, so `app('payments')->charge()`
+resolves members, and the string gets go-to-definition (the
+registration site) and hover. Binding precedence follows what the
+container would actually end up holding: an application's registration
+replaces a framework default, and a subclass provider's replaces its
+parent's.
 
-Scan `register()`/`boot()` of service providers (app + installed
-packages, path-repository modules included) for literal
-`(string name, target)` pairs where the target is a `::class`
-reference or a closure with a usable return type. Merge into the
-existing alias table so `app('payments')->charge()` resolves members;
-give the string go-to-definition (the registration site) and hover.
-Skip anything non-literal — dynamic and conditional registrations stay
-out of scope (see the table at the top), and no diagnostic fires on
-unknown names since the set is inherently open.
+The remaining gap is the declarative form: a provider's `$bindings` /
+`$singletons` array properties (`protected array $bindings =
+['payments' => StripeGateway::class];`) are not read at all, so a
+package that registers that way instead of calling
+`bind()`/`singleton()` in `register()` stays invisible.
 
 Interface targets follow the declared-types philosophy unchanged: a
 binding `bind(Gateway::class, StripeGateway::class)` does **not**
@@ -784,11 +774,12 @@ interface.
 
 **Impact: Low · Effort: Medium**
 
-The reverse of L14: keys that are *declared* but never referenced. The
-references machinery already finds all usages of a view name or
-translation key; inverting it over the declaration sets yields unused
-views (no `view()`/`@include`/`@extends`/mailable reference anywhere)
-and unused translation keys. Surface as an opt-in workspace report
+The reverse of the invalid-key diagnostics: keys that are *declared*
+but never referenced. The references machinery already finds all
+usages of a view name or translation key; inverting it over the
+declaration sets yields unused views (no
+`view()`/`@include`/`@extends`/mailable reference anywhere) and unused
+translation keys. Surface as an opt-in workspace report
 (CLI `analyze` flag and/or code lens on the declaration), not as
 always-on diagnostics — dynamic construction (`view("emails.$type")`)
 makes "unused" inherently a heuristic, so it must read as "no static

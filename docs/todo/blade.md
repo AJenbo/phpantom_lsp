@@ -74,12 +74,15 @@ dependency.
 
 **Impact: Medium · Effort: Low-Medium**
 
-`Blade::directive('datetime', …)`, `Blade::if('env', …)`, and
-component namespace registrations (`Blade::componentNamespace()`,
-`Blade::anonymousComponentPath()`) in app and package service
-providers declare project-specific directives. Scan literal
-registrations — the same provider-scanning shape as the macro
-scanner — so that:
+`Blade::directive('datetime', …)` and `Blade::if('env', …)`
+registrations in app and package service providers declare
+project-specific directives. (Component namespace/path registrations —
+`Blade::componentNamespace()`, `Blade::anonymousComponentPath()`,
+`Blade::anonymousComponentNamespace()` — are already scanned into
+`ProviderResources` and extend the discovery index; see
+`src/virtual_members/laravel/provider_resources.rs`. What remains is the
+directive-registration half.) Scan literal directive registrations too
+— the same provider-scanning shape as the macro scanner — so that:
 
 - known custom directives stop degrading to comments in the
   preprocessor and instead map to expression-preserving PHP (their
@@ -87,8 +90,7 @@ scanner — so that:
 - `Blade::if('admin')` synthesizes the full family (`@admin`,
   `@elseadmin`, `@endadmin`, `@unlessadmin`);
 - directive name completion (`DIRECTIVE_COMPLETIONS` in
-  `src/blade/directives.rs`) includes them;
-- registered component namespaces/paths extend the discovery index.
+  `src/blade/directives.rs`) includes them.
 
 ---
 

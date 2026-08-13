@@ -595,6 +595,10 @@ its crates.io reverse-dependency count moves off zero, that flips the
 one trigger that carries real evidence and this becomes worth another
 look.
 
+**Re-checked at mago 1.46.0 (2026-08-13): unchanged.** `mago-hir` still
+has zero reverse dependencies on crates.io, and docs.rs coverage is
+still around 1%. Still parked.
+
 **Before committing to a full migration, prototype first:** feed
 `symbol_map` extraction (or `ClassInfo` construction) for a single
 file from `IR` behind a flag, on a branch, and compare output against
@@ -929,12 +933,3 @@ the same request cycle.
 `type_engine/variable/resolution.rs`, the `walk_top_level_for_globals`
 call. A per-request cache (similar to the chain resolution cache in
 `type_engine/resolver/context.rs`) would eliminate the redundant walks.
-
----
-
-# Remaining anti-pattern fixes
-
-Most remaining depth-cap issues were addressed by eager class
-population and the iterative resolution pipeline. The forward walker
-loop iteration was addressed by the assignment-depth-bounded strategy.
-The items below are independent fixes that do not depend on either.

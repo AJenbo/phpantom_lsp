@@ -21,29 +21,43 @@ tools.
 
 ### FX1. `deprecated` — Replace deprecated symbol usage
 
-**Prerequisite:** The existing `replace_deprecated` code action.
+**Prerequisite:** The existing `replace_deprecated` code action
+(`src/code_actions/replace_deprecated.rs`), already implemented and
+shipped as an LSP quickfix.
 
-When a symbol is marked `@deprecated` and the deprecation message
-contains a replacement hint (e.g. "use Foo::newMethod() instead"),
-automatically apply the replacement. Only apply when the replacement
-can be mechanically determined from the deprecation message.
+When a symbol carries a `#[Deprecated(replacement: "...")]` attribute
+(the phpstorm-stubs convention, using `%parametersList%`,
+`%parameter0%`, `%class%` template placeholders), automatically apply
+the replacement. The action already does this mechanically from the
+structured attribute, not from free-text message parsing; the
+remaining work is wiring it into `fix.rs`'s `NATIVE_RULES` the same
+way `unused_import` is wired.
 
 ### FX2. `unused_variable` — Remove unused variables
 
-**Prerequisite:** D4 (Unused variable diagnostic, Sprint 5).
-
-Remove assignments to variables that are never read. Skip variables
-with side effects in the RHS (method calls, function calls). When the
-RHS is pure (literal, property access, simple expression), remove the
-entire statement.
+The unused-variable diagnostic already ships
+(`src/diagnostics/unused_variables.rs`), so this rule's diagnostic
+prerequisite is satisfied. There is no code action yet to remove the
+assignment, so this rule needs both a code action and CLI wiring:
+remove assignments to variables that are never read, skipping
+variables with side effects in the RHS (method calls, function calls).
+When the RHS is pure (literal, property access, simple expression),
+remove the entire statement.
 
 ### FX7. `add_return_type` — Generate `@return` docblocks from function bodies
 
-Wire up the existing "Generate PHPDoc" code action's return-type
-inference to the fix CLI. When a function or method has a native
-`array` return type (or no return type at all) and the body contains
-enough information to infer a specific element type, add a `@return`
-tag with the inferred type (e.g. `@return list<Butterfly>`).
+The return-type inference this needs already exists and is shared by
+two other consumers: the docblock-generation completion item (typing
+`/**` above a function) and the "Update docblock to match signature"
+quickfix's enrichment of an existing `@return` tag
+(`enrichment_return_type` in
+`src/code_actions/phpstan/fix_return_type/inference.rs`). Neither of
+those triggers fires for a function that has no docblock at all, so
+this rule still needs a new trigger path (a code action, or a
+dedicated fix-CLI pass) that adds a fresh `@return` tag when a
+function or method has a native `array` return type (or no return
+type at all) and the body contains enough information to infer a
+specific element type, e.g. `@return list<Butterfly>`.
 
 This lets teams that want to reach PHPStan level 6 (require return
 type declarations) run a single command and get specific, useful
@@ -61,19 +75,27 @@ They are gated behind `--with-phpstan`.
 
 **Backlog ID:** H10
 
-Parse the unused type from PHPStan's message, find the return type
-(native or `@return`), remove the unused member from the union or
-intersection, and rewrite. If removing the type leaves a single-member
-union, simplify.
+The underlying logic already ships as the "Remove unused return type"
+LSP quickfix (`src/code_actions/phpstan/remove_unused_return_type.rs`,
+matching PHPStan identifier `return.unusedType`): it parses the unused
+type from PHPStan's message, finds the return type (native or
+`@return`), removes the unused member from the union or intersection,
+and simplifies a resulting single-member union. What remains for this
+rule is exclusively CLI wiring: invoking the quickfix's resolve
+function headlessly from `fix.rs` against diagnostics collected via
+`--with-phpstan`.
 
 ### FX4. `phpstan.missingType.iterableValue` — Add `@return` with iterable type
 
 **Backlog ID:** H17
 
-When PHPStan reports that a return type has no value type specified in
-an iterable type (e.g. `array`), add a `@return array<mixed>` docblock
-tag. The simple approach silences the error while being explicit. A
-future enhancement could infer element types from `return` statements.
+The underlying logic already ships as the "Add `@return` type" LSP
+quickfix (`src/code_actions/phpstan/add_iterable_type.rs`, matching
+PHPStan identifier `missingType.iterableValue`): it infers the element
+type from `return` statements (array literals, variable types, `new
+ClassName()` expressions) and falls back to `<mixed>` only when
+inference cannot determine a concrete type. What remains for this rule
+is exclusively CLI wiring, same as FX3.
 
 ### FX5. `phpstan.property.unused` / `phpstan.method.unused` — Remove unused member
 
@@ -109,17 +131,31 @@ analyze the entire project first).
 
 ### PHPStan integration
 
-When `--with-phpstan` is enabled:
+The CLI already accepts `--with-phpstan` (`src/main.rs`, `src/fix.rs`),
+but today it only relaxes rule validation; no PHPStan process is ever
+run from `fix.rs`. The batch-invocation and JSON-parsing pieces this
+needs already exist elsewhere and just need to be called from the fix
+pipeline:
 
 1. Run PHPStan on all target files (or the entire project if no path
-   filter is given) in a single batch invocation.
+   filter is given) in a single batch invocation. `run_phpstan_workspace`
+   in `src/phpstan.rs` already does this (used today by the LSP's
+   workspace-wide external-tool diagnostic proxy).
 2. Parse the JSON output to collect diagnostics per file.
-3. Match diagnostics to registered PHPStan rules.
-4. For each matched diagnostic, compute and apply the code action edit.
+   `run_phpstan_workspace` already returns a `HashMap<PathBuf,
+   Vec<Diagnostic>>` with each `Diagnostic.code` set to the PHPStan
+   identifier (e.g. `return.unusedType`).
+3. Match diagnostics to registered PHPStan rules by prefixing the
+   diagnostic code with `phpstan.` and comparing to the requested
+   rule strings.
+4. For each matched diagnostic, invoke the corresponding code action's
+   resolve function headlessly and apply the resulting edit. This part
+   is unwritten: the existing PHPStan quickfixes
+   (`src/code_actions/phpstan/`) are wired for the LSP code-action
+   protocol, not for headless batch invocation from `fix.rs`.
 
 To maximize efficiency, PHPStan runs once for all files rather than
-per-file. The diagnostic-to-rule matching uses the PHPStan identifier
-(e.g. `return.unusedType`) with the `phpstan.` prefix.
+per-file.
 
 ### Dry-run mode
 

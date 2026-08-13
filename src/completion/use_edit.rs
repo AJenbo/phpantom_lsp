@@ -123,7 +123,7 @@ impl UseBlockInfo {
     /// Determine which group a sort key belongs to.
     ///
     /// Group ordering: class (0) < const (1) < function (2).
-    fn key_group(key: &str) -> u8 {
+    pub(crate) fn key_group(key: &str) -> u8 {
         if key.starts_with("function ") {
             2
         } else if key.starts_with("const ") {

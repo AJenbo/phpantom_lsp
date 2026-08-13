@@ -10,6 +10,10 @@
 //! - **Remove unused import** — when the cursor is on (or a diagnostic
 //!   overlaps with) an unused `use` statement, offer to remove it.
 //!   Also offers a bulk "Remove all unused imports" action.
+//! - **Sort use statements** — when the cursor is on a `use` import
+//!   line and the block isn't already sorted, offer to re-sort it
+//!   alphabetically within each blank-line-separated group and import
+//!   kind (plain `use` / `use function` / `use const`).
 //! - **Implement missing methods** — when the cursor is inside a
 //!   concrete class that extends an abstract class or implements an
 //!   interface with unimplemented methods, offer to generate stubs.
@@ -101,10 +105,11 @@ mod naming;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
-pub(crate) use remove_unused_import::build_line_deletion_edit;
+pub(crate) use remove_unused_import::{build_line_deletion_edit, cursor_on_use_import_line};
 mod replace_deprecated;
 mod replace_fqcn;
 mod simplify_null;
+mod sort_use_statements;
 mod update_docblock;
 
 use std::collections::HashMap;
@@ -266,6 +271,9 @@ impl Backend {
 
         // ── Remove unused imports ───────────────────────────────────────
         self.collect_remove_unused_import_actions(uri, content, params, &mut actions);
+
+        // ── Sort use statements ─────────────────────────────────────────
+        self.collect_sort_use_statements_action(uri, content, params, &mut actions);
 
         // ── Implement missing methods ───────────────────────────────────
         self.collect_implement_methods_actions(uri, content, params, &mut actions);

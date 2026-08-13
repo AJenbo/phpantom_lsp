@@ -146,8 +146,8 @@ faster repeat queries and simpler code.
 `scan_workspace_fallback_full`) now uses a two-phase approach:
 directory walks collect file paths first (single-threaded), then files
 are read and scanned in parallel batches via `std::thread::scope`.
-Three parallel helpers in `classmap_scanner.rs` cover the three scan
-modes: `scan_files_parallel_classes` (plain classmap),
+Three parallel helpers in `classmap_scanner/discovery.rs` cover the
+three scan modes: `scan_files_parallel_classes` (plain classmap),
 `scan_files_parallel_psr4` (PSR-4 with FQN filtering), and
 `scan_files_parallel_full` (classes + functions + constants). Small
 batches (≤ 4 files) skip threading overhead.
@@ -158,6 +158,15 @@ single-quoted strings, double-quoted strings, and heredocs/nowdocs
 instead of scanning byte-by-byte. This reduces per-file scanning time
 for files with large docblocks or string literals.
 
+`read_for_scan` (`classmap_scanner/mod.rs`) now reads file bytes
+adaptively: files at or above 256 KiB are memory-mapped so the OS page
+cache is shared without a heap copy, and smaller files (the vast
+majority of source files) are read directly into a heap buffer, since
+mapping a small file costs more in page-fault and lock overhead than
+copying it. This closed the gap identified in earlier profiling, where
+mapping every file regardless of size held a process-wide lock that
+serialized concurrent readers.
+
 ### Remaining work
 
 The following are deferred to a later sprint:
@@ -165,12 +174,15 @@ The following are deferred to a later sprint:
 - **Priority-aware scheduling.** Interactive requests (completion,
   hover, go-to-definition) should preempt batch work. Currently all
   threads run at equal priority.
-- **Parallel classmap scanning in `find_implementors`.** Phase 3 of
-  `find_implementors` reads and parses many classmap files
-  sequentially. Parallelizing this requires care because it
-  interleaves reads and writes through `class_loader` callbacks.
-- **`memmap2` for file reads.** Avoids copying file contents into
-  userspace when the OS page cache already has them.
+- **Parallel classmap scanning in `find_implementors`.** Once the
+  workspace index is ready (the default `"full"` strategy after
+  startup), `find_implementors` answers entirely from the `gti_index`
+  reverse-inheritance index and never reaches the sequential classmap
+  scan below. Phase 3 (reading and parsing classmap files one at a
+  time) only still runs for `"composer"`/`"self"`/`"none"` strategies,
+  or for a request that arrives before the background index finishes.
+  Parallelizing it requires care because it interleaves reads and
+  writes through `class_loader` callbacks.
 - **Parallel autoload file scanning.** The `scan_autoload_files` work
   queue is inherently sequential due to `require_once` chain
   following, but the initial batch of files could be processed in
@@ -194,42 +206,6 @@ completion is a minor subset of what users actually trigger. This
 means classmap generation can run at normal priority without blocking
 the user. They can start writing code immediately while the classmap
 builds in the background.
-
----
-
-## X3. Completion item detail on demand
-
-**Goal:** Show type signatures, docblock descriptions, and
-deprecation info in completion item hover without parsing every
-possible class up front.
-
-### Current limitation
-
-When completion shows `SomeClass::doThing()`, hovering over that item
-in the completion menu shows nothing because we haven't parsed
-`SomeClass`'s file yet. Parsing it on demand would be fine for one
-item, but the editor may request resolve for dozens of items as the
-user scrolls.
-
-### Approach: "what's already discovered"
-
-Use `completionItem/resolve` to populate `detail` and
-`documentation` fields. If the class is already in the uri_classes_index (parsed
-during a prior resolution), return the full signature and docblock.
-If not, return just the item label with no extra detail.
-
-In `"full"` mode, everything is already parsed, so every completion
-item gets rich hover for free. In `"composer"` / `"self"` mode, items
-that happen to have been resolved earlier in the session get rich
-detail; others don't. This is a graceful degradation that never blocks
-the completion response.
-
-### Future: speculative background parsing
-
-When a completion list is generated, queue the unresolved classes for
-background parsing at low priority. If the user lingers on the
-completion menu, resolved items will progressively gain detail. This
-is a nice-to-have, not a requirement.
 
 ---
 
@@ -377,9 +353,9 @@ PHP-associated extensions to the server (via `initializationOptions`,
 or by responding to `workspace/configuration` the way Intelephense's
 middleware merges VS Code's native `files.exclude` /
 `files.associations` into the server config). The directory walkers in
-`classmap_scanner.rs` and `util.rs` consult the exclude globs before
-descending, and treat the extra associated extensions as PHP when
-collecting candidate files.
+`classmap_scanner/discovery.rs` and `util.rs` consult the exclude
+globs before descending, and treat the extra associated extensions as
+PHP when collecting candidate files.
 
 ### Editor-agnostic note
 

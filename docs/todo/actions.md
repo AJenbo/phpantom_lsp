@@ -402,39 +402,6 @@ this as a transformer.
 
 ---
 
-### A44. Sort `use` statements
-
-**Impact: Low-Medium · Effort: Low-Medium**
-
-Re-sort a file's existing `use` imports alphabetically, the way
-PhpStorm's "Optimize Imports" and Phpactor's import sorter do. PHPantom
-already sorts *new* candidates when offering an import (`import_class.rs`),
-and `analyze_use_block` (`src/completion/use_edit.rs`) already parses the
-existing block's entries, but nothing re-orders the block once it exists,
-so a file edited by hand or merged from two branches keeps whatever order
-it ended up in.
-
-- Sort within each of the three PHP import kinds separately (plain
-  `use`, `use function`, `use const`); do not interleave them.
-- Sort case-insensitively by the imported name, not by the alias — `use
-  Zebra\Foo as Aardvark;` sorts under `Zebra\Foo`, matching how a reader
-  scans the block for a namespace, not an alias.
-- A blank line inside the block marks a group boundary a developer put
-  there on purpose (e.g. separating vendor imports from app imports);
-  sort within each group rather than collapsing the block into one.
-- A `use Foo\{Bar, Baz};` group-use statement sorts as one entry, keyed
-  on `Foo`; do not expand it into separate statements.
-- A comment attached to one `use` line (leading or trailing) must move
-  with it, not get orphaned by the reorder.
-- Offer as a code action over the `use` block (`source.organizeImports`
-  kind), not as an always-on formatter step — a developer who groups
-  imports by hand for readability should not have that undone on every
-  save.
-
-**Code action kind:** `source.organizeImports`.
-
----
-
 ### A45. Simplify with `?:` (Elvis operator)
 
 **Impact: Low-Medium · Effort: Low**

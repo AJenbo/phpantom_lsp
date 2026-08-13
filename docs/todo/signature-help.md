@@ -20,50 +20,6 @@ within the same impact tier.
 
 ---
 
-## S1. Attribute constructor signature help
-**Impact: Medium · Effort: Medium**
-
-Signature help should fire inside attribute argument lists:
-
-```php
-#[Route('/users', methods: ['GET'])]
-//      ^ signature help here showing Route::__construct params
-```
-
-#### Current state
-
-Attributes are parsed by Mago as `Attribute` AST nodes with an
-`ArgumentList`, but no `CallSite` is emitted for them because they
-are not function calls. The signature help detection path only looks
-for function/method call expressions.
-
-#### Implementation
-
-1. **Emit synthetic `CallSite` for attributes** — in
-   `symbol_map/extraction.rs`, when walking an `Attribute` node that
-   has an argument list, emit a `CallSite` whose target is the
-   attribute class's `__construct` method. The attribute name resolves
-   through the use-map like any class reference.
-
-2. **Resolve the constructor** — in `resolve_callable`, when the
-   target is an attribute class, look up its `__construct` method.
-   Most attributes have a simple constructor with named parameters
-   (PHP 8.0+), so named argument awareness (S4) would pair well.
-
-3. **Label prefix** — use the attribute short name (e.g. `Route`)
-   as the signature label, not `__construct`.
-
-#### Tests
-
-- Integration test: `#[Route('/path', ` → assert signature help
-  shows `Route::__construct` parameters.
-- Integration test: `#[Deprecated(reason: ` → assert
-  `active_parameter` points to the `$reason` parameter.
-- Stub attributes like `#[Override]` (no constructor args) should
-  return an empty signature or no signature.
-
----
-
 ## S2. Closure / arrow function parameter signature help
 **Impact: Medium · Effort: Medium**
 
@@ -194,6 +150,6 @@ neither signature help nor hover fires inside their parentheses. The phpstorm-st
 don't define them either since they are keywords, not functions.
 
 Supporting them requires emitting synthetic `CallSite` entries from the
-statement-level extraction in `symbol_map.rs` and adding hardcoded parameter
-metadata (e.g. `unset(mixed ...$vars): void`) in `resolve_callable`. Hover would
-need a similar hardcoded lookup.
+statement-level extraction in `symbol_map/extraction/statements.rs` and adding
+hardcoded parameter metadata (e.g. `unset(mixed ...$vars): void`) in
+`resolve_callable`. Hover would need a similar hardcoded lookup.
