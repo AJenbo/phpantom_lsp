@@ -12589,3 +12589,65 @@ class Export {
         messages
     );
 }
+
+// ─── Class-strings reached through a bare namespace import ──────────────────
+
+/// `Support\Pen::class` behind a bare `use App\Support;` names the same
+/// class as `\App\Support\Pen::class` does.  Whichever way it is written,
+/// the class-string has to carry the FQCN: the factory that receives it
+/// resolves the name from wherever *it* lives, which has no import for a
+/// class the class-string travelled in from.
+#[test]
+fn a_class_string_via_a_namespace_import_keeps_its_fqcn_through_a_factory() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/", "Consumer\\": "consumer/" } } }"#,
+        &[(
+            "src/Support/Pen.php",
+            r#"<?php
+namespace App\Support;
+
+class Pen {
+    public function write(): string { return 'ink'; }
+}
+"#,
+        )],
+    );
+
+    // The consumer namespace has a `Pen` of its own, so a class-string
+    // that kept only the short name resolves to the wrong class here.
+    let uri = Url::from_file_path(dir.path().join("consumer/Factory.php"))
+        .unwrap()
+        .to_string();
+    let uri = uri.as_str();
+    let text = r#"<?php
+namespace Consumer;
+
+use App\Support;
+
+class Pen {}
+
+class Factory
+{
+    /**
+     * @template TObj of object
+     * @param class-string<TObj> $class
+     * @return TObj
+     */
+    public function make(string $class): object { return new $class(); }
+
+    public function demo(): void
+    {
+        $viaImport = Support\Pen::class;
+        $this->make($viaImport)->write();
+
+        $viaFqcn = \App\Support\Pen::class;
+        $this->make($viaFqcn)->write();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "write() is declared on App\\Support\\Pen, got: {diags:?}"
+    );
+}

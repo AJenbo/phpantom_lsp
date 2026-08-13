@@ -494,10 +494,7 @@ impl Backend {
                 TemplateBindingMode::CallableParamType(position) => {
                     // `@param Closure(T): void $cb` — extract the closure's
                     // parameter type annotation at the given position.
-                    if let Some(param_type) =
-                        crate::completion::source::helpers::extract_closure_param_type_from_text(
-                            arg_text, position,
-                        )
+                    if let Some(param_type) = bind_callable_param_template(arg_text, position, ctx)
                     {
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
@@ -865,6 +862,12 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
+            // A `: ReturnType` annotation is raw source text, so its class
+            // names are still spelled as the file writes them (`Support\Pen`
+            // behind a `use App\Support;`).  A template bound from it is
+            // compared against types that arrived fully qualified, so the
+            // spelling has to be canonicalised before it is bound.
+            .map(|ty| crate::util::resolve_php_type_names(&ty, ctx.class_loader))
             .or_else(|| {
                 crate::completion::source::helpers::infer_generator_type_from_closure_yields(
                     arg_text,
@@ -944,6 +947,10 @@ impl Backend {
         let param_types: HashMap<String, Vec<ResolvedType>> = typed_params
             .into_iter()
             .map(|(name, ty)| {
+                // The parameter hint is raw source text, so it carries the
+                // file's own spelling of the class name; canonicalise it so
+                // the seeded type matches one resolved any other way.
+                let ty = crate::util::resolve_php_type_names(&ty, ctx.class_loader);
                 let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     &ty,
                     owning_class_name,
@@ -1393,6 +1400,28 @@ fn literal_array_key_text(key_text: &str) -> Option<String> {
 /// TValue>` each name it at a position inside a larger shape.  The inferred
 /// type is matched against that shape so each template binds to its own
 /// part rather than to the whole return type.
+/// Bind a template parameter that a `@param Closure(T): void` hint names in
+/// the callback's *parameter* list, reading the type off the closure
+/// argument's own annotation at `position`.
+///
+/// The annotation is raw source text, so it carries the file's spelling of
+/// the class rather than its FQCN (`Support\Pen` behind a `use App\Support;`).
+/// A template bound from it is compared against — and unioned with — types
+/// that arrived fully qualified, so the spelling is canonicalised here.
+pub(crate) fn bind_callable_param_template(
+    arg_text: &str,
+    position: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let param_type = crate::completion::source::helpers::extract_closure_param_type_from_text(
+        arg_text, position,
+    )?;
+    Some(crate::util::resolve_php_type_names(
+        &param_type,
+        ctx.class_loader,
+    ))
+}
+
 pub(crate) fn bind_callable_return_template(
     arg_text: &str,
     param_hint: Option<&PhpType>,

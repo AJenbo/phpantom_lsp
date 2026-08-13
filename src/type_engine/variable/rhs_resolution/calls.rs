@@ -168,8 +168,8 @@ pub(crate) fn build_function_template_subs(
                 // `@param Closure(T): void $cb` — extract the closure's
                 // parameter type annotation at the given position.
                 if let Some(param_type) =
-                    crate::completion::source::helpers::extract_closure_param_type_from_text(
-                        arg_text, position,
+                    crate::type_engine::call_resolution::bind_callable_param_template(
+                        arg_text, position, rctx,
                     )
                 {
                     insert_or_union(&mut subs, tpl_name.to_string(), param_type);

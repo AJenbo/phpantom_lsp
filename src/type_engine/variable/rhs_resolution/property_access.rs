@@ -107,8 +107,17 @@ pub(super) fn resolve_rhs_property_access(
             // consumers (array element inference, `??` fallbacks, and
             // `class-string<object>` parameters) keep the concrete class.
             if const_name.as_deref() == Some("class") {
+                // The identifier is spelled as the source writes it, which
+                // for a name reached through a namespace import
+                // (`Support\Pen` behind `use App\Support;`) is neither the
+                // FQCN nor resolvable on its own once the class-string
+                // leaves this file's context.  Prefer the resolved class.
+                let named = match target_classes.first() {
+                    Some(cls) => PhpType::named(cls.fqn()),
+                    None => PhpType::named(atom(resolved_name)),
+                };
                 return vec![ResolvedType::from_type_string(PhpType::class_string(Some(
-                    PhpType::named(atom(resolved_name)),
+                    named,
                 )))];
             }
 

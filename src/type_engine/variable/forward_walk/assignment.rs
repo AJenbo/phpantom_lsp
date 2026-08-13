@@ -1754,14 +1754,20 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
             let resolved_name = name.strip_prefix('\\').unwrap_or(&name);
             // Resolve the class so we can store a proper ResolvedType
             // with class_info.  This allows `new $var` to work.
-            let class_string_type =
-                PhpType::class_string(Some(PhpType::named(atom(resolved_name))));
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &PhpType::named(atom(resolved_name)),
                 &ctx.current_class.name,
                 ctx.all_classes,
                 ctx.class_loader,
             );
+            // The identifier is spelled as the source writes it, which for a
+            // name reached through a namespace import (`Support\Pen` behind
+            // `use App\Support;`) is neither the FQCN nor resolvable once the
+            // class-string is read somewhere else.  Prefer the resolved class.
+            let class_string_type = PhpType::class_string(Some(match classes.first() {
+                Some(cls) => PhpType::named(cls.fqn()),
+                None => PhpType::named(atom(resolved_name)),
+            }));
             if !classes.is_empty() {
                 return ResolvedType::from_classes_with_hint(classes, class_string_type);
             }

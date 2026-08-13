@@ -136,8 +136,12 @@ fn try_acquire_var_guard(
 /// Build a [`VarClassStringResolver`] closure from a [`VarResolutionCtx`].
 ///
 /// The returned closure resolves a variable name (e.g. `"$requestType"`)
-/// to the class names it holds as class-string values by delegating to
+/// to the fully-qualified names of the classes it holds as class-string
+/// values by delegating to
 /// [`resolve_class_string_targets`](super::class_string_resolution::resolve_class_string_targets).
+/// The names are qualified because the caller reads them in whatever file
+/// the call site lives in, which may have no import for a class the
+/// class-string travelled in from.
 pub(in crate::type_engine) fn build_var_resolver_from_ctx<'a>(
     ctx: &'a VarResolutionCtx<'a>,
 ) -> impl Fn(&str) -> Vec<String> + 'a {
@@ -152,7 +156,7 @@ pub(in crate::type_engine) fn build_var_resolver_from_ctx<'a>(
             ctx.backend,
         )
         .iter()
-        .map(|c| c.name.to_string())
+        .map(|c| c.fqn().to_string())
         .collect()
     }
 }

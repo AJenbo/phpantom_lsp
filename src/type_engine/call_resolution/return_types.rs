@@ -61,7 +61,8 @@ pub(crate) struct MethodReturnCtx<'a> {
 /// Build a [`VarClassStringResolver`] closure from a [`ResolutionCtx`].
 ///
 /// The returned closure resolves a variable name (e.g. `"$requestType"`)
-/// to the class names it holds as class-string values by delegating to
+/// to the fully-qualified names of the classes it holds as class-string
+/// values by delegating to
 /// [`resolve_class_string_targets`](crate::type_engine::variable::class_string_resolution::resolve_class_string_targets).
 pub(super) fn build_var_resolver<'a>(
     ctx: &'a ResolutionCtx<'a>,
@@ -78,7 +79,7 @@ pub(super) fn build_var_resolver<'a>(
                 ctx.backend,
             )
             .iter()
-            .map(|c| c.name.to_string())
+            .map(|c| c.fqn().to_string())
             .collect()
         } else {
             vec![]
@@ -1247,7 +1248,9 @@ impl Backend {
                                     {
                                         // Extract the element type from array-like types
                                         // so we bind T to the element, not the whole array.
-                                        if let Some(elem_type) = resolved_type.extract_value_type(false) {
+                                        if let Some(elem_type) =
+                                            resolved_type.extract_value_type(false)
+                                        {
                                             crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
                                         } else {
                                             crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
@@ -1255,7 +1258,9 @@ impl Backend {
                                     }
                                 }
                                 TemplateBindingMode::CallableReturnType => {
-                                    if let Some(bound) = super::bind_callable_return_template(arg_text, param_hint, tpl_name, ctx) {
+                                    if let Some(bound) = super::bind_callable_return_template(
+                                        arg_text, param_hint, tpl_name, ctx,
+                                    ) {
                                         crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), bound);
                                     }
                                 }
@@ -1271,9 +1276,7 @@ impl Backend {
                                 }
                                 TemplateBindingMode::CallableParamType(position) => {
                                     if let Some(param_type) =
-                                        crate::completion::source::helpers::extract_closure_param_type_from_text(
-                                            arg_text, position,
-                                        )
+                                        super::bind_callable_param_template(arg_text, position, ctx)
                                     {
                                         crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), param_type);
                                     }

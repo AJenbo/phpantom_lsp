@@ -707,6 +707,17 @@ impl Backend {
                                 param.type_hint = Some(resolved);
                             }
                         }
+                        // `@param-closure-this` names a class the same way
+                        // the rest of the docblock does, so it is resolved
+                        // against the declaring file's imports here.  The
+                        // call site, which is where the closure's `$this` is
+                        // read, has no access to this file's use-map.
+                        if let Some(ref this_type) = param.closure_this_type {
+                            let resolved = this_type.resolve_names(&resolver);
+                            if resolved != *this_type {
+                                param.closure_this_type = Some(resolved);
+                            }
+                        }
                     }
                     // Resolve exception class names in @throws tags.
                     for throw in &mut func.throws {
@@ -1630,6 +1641,17 @@ impl Backend {
                         let resolved = hint.resolve_names(method_resolver);
                         if resolved != *hint {
                             param.type_hint = Some(resolved);
+                        }
+                    }
+                    // `@param-closure-this` names a class the same way the
+                    // rest of the docblock does, so it is resolved against
+                    // the declaring file's imports here.  The call site,
+                    // which is where the closure's `$this` is read, has no
+                    // access to this file's use-map.
+                    if let Some(ref this_type) = param.closure_this_type {
+                        let resolved = this_type.resolve_names(method_resolver);
+                        if resolved != *this_type {
+                            param.closure_this_type = Some(resolved);
                         }
                     }
                 }

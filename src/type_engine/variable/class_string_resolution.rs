@@ -21,6 +21,26 @@ use crate::util::short_name;
 use crate::type_engine::conditional_resolution::extract_class_string_from_expr;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 
+/// Resolve the class a `::class` literal names, after `self`/`static`/
+/// `parent` have already been substituted, and append it to `results`.
+///
+/// A same-file class is preferred for a bare name, since that is the one
+/// the file means and it is already loaded.  A *qualified* name spells
+/// where the class lives, so it goes straight to the loader: matching it
+/// against a same-file class by short name alone would pick a namespace
+/// mate that merely shares the last segment (`Consumer\Pen` standing in
+/// for `App\Support\Pen`).
+fn push_class_string_target(name: &str, ctx: &VarResolutionCtx<'_>, results: &mut Vec<ClassInfo>) {
+    let local = (!name.contains('\\'))
+        .then(|| ctx.all_classes.iter().find(|c| c.name == short_name(name)))
+        .flatten();
+    if let Some(cls) = local {
+        ClassInfo::push_unique(results, ClassInfo::clone(cls));
+    } else if let Some(cls) = (ctx.class_loader)(name) {
+        ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));
+    }
+}
+
 /// Resolve a `$variable` that holds a class-string (e.g. `$cls = User::class`)
 /// to the referenced class(es).
 ///
@@ -214,12 +234,7 @@ fn walk_class_string_assignments<'b>(
                             } else {
                                 cn
                             };
-                            let lookup = short_name(&resolved_name);
-                            if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == lookup) {
-                                ClassInfo::push_unique(results, ClassInfo::clone(cls));
-                            } else if let Some(cls) = (ctx.class_loader)(&resolved_name) {
-                                ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));
-                            }
+                            push_class_string_target(&resolved_name, ctx, results);
                         }
                     }
                 }
@@ -334,12 +349,7 @@ fn check_class_string_assignment(
             } else {
                 name
             };
-        let lookup = short_name(&resolved_name);
-        if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == lookup) {
-            ClassInfo::push_unique(results, ClassInfo::clone(cls));
-        } else if let Some(cls) = (ctx.class_loader)(&resolved_name) {
-            ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));
-        }
+        push_class_string_target(&resolved_name, ctx, results);
     }
 }
 

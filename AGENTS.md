@@ -92,21 +92,71 @@ full set of CI checks, testing conventions, and code style rules.
   just rot; git history is the record of what moved where.
   All files must end with a newline.
 
-## Working on examples/demo.php
+## Working on examples/php/
 
 The [CONTRIBUTING guide](docs/CONTRIBUTING.md) has the CI checklist; the
 notes here are the agent-specific pitfalls when editing the demo files.
 
-Add working examples to `examples/demo.php` that demonstrate a new
-feature — it is the user-facing playground people open to verify
-PHPantom works. Include comments showing what resolves to what, and run
-`php -l examples/demo.php` afterward.
+`examples/php/` is the user-facing playground people open to verify
+PHPantom works on plain PHP (no framework). It is a standalone project
+with no external dependencies — `autoload.php` is a list of hardcoded
+`require_once` lines, not a `composer.json` — split into:
+
+- **One demo file per LSP feature area** (all in namespace `Demo`):
+  `completion.php`, `diagnostics.php`, `definition.php`,
+  `code_actions.php`, `hover.php`, `signature_help.php`,
+  `inlay_hints.php`, `code_lens.php`, `semantic_tokens.php`. These hold
+  the demo classes themselves, including top-level "Try:" comments and
+  simple top-level expressions users can trigger completion on directly,
+  plus classes whose _methods_ contain completion triggers (e.g.
+  `$item->` inside a foreach). Users open a method and trigger completion
+  inside its body. A new demo goes in the file for the feature it
+  demonstrates; `completion.php` is where type inference of every kind
+  belongs, which is why it dwarfs the others. Do not split it further
+  into per-topic files without asking the maintainer first.
+- **`scaffolding/scaffolding.php`** (namespace `Demo\Scaffolding`) — all
+  supporting class, interface, trait, enum, function, and constant
+  definitions that the demo files depend on. Users scroll past this
+  file; it exists so the demo files stay focused on the features being
+  demonstrated.
+- **`scaffolding/assertions.php`** (namespace `Demo`) — runtime
+  assertions that verify the type claims made in the demo files'
+  comments against real PHP behaviour, all in one `runDemoAssertions()`
+  function. It lives under `scaffolding/`, not next to the demo files,
+  so it isn't mistaken for one.
+
+No demo file inherits from a class in another demo file, so
+`autoload.php` requires them in plain alphabetical order after the
+scaffolding. Keep it that way: a cross-file `extends`/`implements`
+between two demo files makes the require order load-bearing again.
+A demo that names a class from another demo file in a *comment* should
+say which file it lives in.
+
+Every demo file imports the whole scaffolding namespace with a single
+`use Demo\Scaffolding;` rather than one `use` per class, and references
+scaffolding members as `Scaffolding\Pen`, `Scaffolding\makePen()`, etc.
+— this is what actually exercises cross-namespace resolution, so don't
+add per-class `use Demo\Scaffolding\Pen;` imports back in. A few
+exceptions keep individual `use` imports alongside the namespace
+import: `UserProfile as Profile` (aliasing needs a class-level `use`),
+and the function a bare `@covers ::name` tag resolves through the
+file's own `use` table even though the code never spells its name
+directly — it has a comment explaining why. If a demo hits a case where a `Scaffolding\Foo`-qualified
+name doesn't resolve the same as `Foo` would behind a per-class `use`,
+that's a known engine gap (see `docs/todo/bugs.md`), not a mistake in
+the demo.
+
+Add working examples to the matching demo file that demonstrate a new
+feature. Include comments showing what resolves to what, and run
+`find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l`
+afterward.
 
 **Runtime assertions.** For every new demo that makes a type claim
 (return types, narrowing, generics, chaining), add matching `assert()`
-calls to `runDemoAssertions()` at the bottom of the Demo namespace.
+calls to `runDemoAssertions()` in `scaffolding/assertions.php`.
 Scaffolding stubs must actually return what their docblocks promise so
-assertions pass. Run: `php -d zend.assertions=1 examples/demo.php`
+assertions pass.
+Run: `php -d zend.assertions=1 examples/php/scaffolding/assertions.php`
 
 **Hoisting pitfall.** Do NOT add `__toString()` to any scaffolding
 class that is forward-referenced by a demo class via `extends` or
@@ -116,35 +166,34 @@ applies to `interface Foo extends \Stringable`. This is a known PHP
 limitation ([php-src#7873](https://github.com/php/php-src/issues/7873)),
 not a bug that will be fixed.
 
-**`examples/demo.php` has three sections — put new content in the right one:**
+Never add class/function definitions to a demo file that exist purely to
+support another demo — those belong in `scaffolding/scaffolding.php`.
+Never add demo classes or top-level "Try:" comments to
+`scaffolding/scaffolding.php` — that file is scaffolding only.
 
-1. **PLAYGROUND** (top of file) — top-level "Try:" comments and simple expressions users can trigger completion on directly. No class definitions here.
-2. **DEMO CLASSES** (middle) — classes whose _methods_ contain completion triggers (e.g. `$item->` inside a foreach). Users open these methods and trigger completion inside the method body.
-3. **SCAFFOLDING** (bottom, after the big `SCAFFOLDING` banner) — all supporting class, interface, trait, enum, and function definitions that the playground and demo classes depend on. Users scroll past this section.
-
-Never add class/function definitions above the scaffolding line unless they are demo classes (section 2). Never add demo classes or playground comments below the scaffolding line.
-
-**Diagnostics check.** After editing `examples/demo.php`, review every
-diagnostic the LSP reports on it. The file intentionally contains a
-fixed set of diagnostics that demo unknown-member, argument-count,
-type-error, and invalid-class-kind features. Any diagnostic that does
-not belong to one of those intentional demo classes is a regression
-introduced by your edit and must be fixed before moving on.
+**Diagnostics check.** After editing a demo file or
+`scaffolding/scaffolding.php`, review every diagnostic the LSP reports
+on them. The files intentionally contain a fixed set of diagnostics
+that demo unknown-member, argument-count, type-error,
+invalid-class-kind, and unused-import features. Any diagnostic that does not belong to one
+of those intentional demo classes is a regression introduced by your
+edit and must be fixed before moving on.
 
 **Framework-specific demos.** Laravel demos live in `examples/laravel/`
 (a standalone project with `composer.json`, models, config, routes,
 views, and translations). `vendor/` is git-ignored, so run `composer
 install` there before verifying Laravel demos on a fresh clone. Put new
 framework-specific features in the matching `examples/<framework>/`
-project, not in `examples/demo.php`. If a feature affects
-Laravel-specific resolution (Eloquent, config, views, routes,
-translations), also update `examples/laravel/app/Demo.php` and verify
-with `php -l examples/laravel/app/Demo.php`. `examples/laravel/assertions.php`
-is the Laravel equivalent of `runDemoAssertions()`: it boots Eloquent
-with an in-memory SQLite database and uses reflection to verify runtime
-assumptions (scope resolution, method visibility, accessor existence).
-Add a matching assertion there when demo code depends on a specific
-runtime behaviour, and run `php examples/laravel/assertions.php`.
+project, not in `examples/php/`. If a feature affects Laravel-specific
+resolution (Eloquent, config, views, routes, translations), also update
+`examples/laravel/app/Demo.php` and verify with
+`php -l examples/laravel/app/Demo.php`. `examples/laravel/assertions.php`
+is the Laravel equivalent of `examples/php/scaffolding/assertions.php`: it boots
+Eloquent with an in-memory SQLite database and uses reflection to
+verify runtime assumptions (scope resolution, method visibility,
+accessor existence). Add a matching assertion there when demo code
+depends on a specific runtime behaviour, and run
+`php examples/laravel/assertions.php`.
 
 ## Updating docs/todo.md
 

@@ -501,3 +501,32 @@ A project extending PHPStan (`vendor/phpstan/phpstan` ships
 (1 site — a custom extension calling `getConstantStrings()`). Check
 what the package's `bootstrap.php` exposes and whether indexing the
 phar (or its extracted stubs) is feasible.
+
+### B177. A `@property` tag name is highlighted as a method
+
+**Impact: Low · Effort: Low**
+
+The member name in a `@property` tag emits the `method` semantic
+token, while the same name emits `property` everywhere it is used:
+
+```php
+/**
+ * @property string $displayName    <- `displayName` highlights as a method
+ * @method string shout(string $x)  <- correct
+ */
+class Demo
+{
+    public function demo(): string
+    {
+        return $this->displayName;  // highlights as a property, as it should
+    }
+}
+```
+
+Both tags produce a `MemberDeclaration` span, and
+`classify_member_declaration` looks the name up in the enclosing
+class's own members. A tag-declared member is not there, so both fall
+through to the `TT_METHOD` default. Classify the declaration from the
+tag that produced it (or from the resolved virtual members) instead of
+the fallback. `SemanticMagicMemberDemo` in
+`examples/php/semantic_tokens.php` shows the case.

@@ -702,8 +702,19 @@ async fn class_root_offers_interface_and_trait_constants() {
 /// significant byte gets wrong.
 #[tokio::test]
 async fn demo_php_class_root_trigger_works() {
-    let demo = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/demo.php"))
-        .expect("examples/demo.php");
+    // ClassRootCompletionDemo extends/uses scaffolding classes, so the
+    // scaffolding file must be opened in the same backend for its inherited
+    // members to resolve.
+    let scaffolding = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/php/scaffolding/scaffolding.php"
+    ))
+    .expect("examples/php/scaffolding/scaffolding.php");
+    let demo = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/examples/php/completion.php"
+    ))
+    .expect("examples/php/completion.php");
     let anchor = demo
         .find("class ClassRootCompletionDemo")
         .expect("demo class present");
@@ -718,7 +729,54 @@ async fn demo_php_class_root_trigger_works() {
 
     let mut text = demo.clone();
     text.insert_str(close, "    o\n");
-    let items = completion_items(&text, "file:///demo_trigger.php", line, 5).await;
+
+    let backend = create_test_backend();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: Url::parse("file:///scaffolding.php").unwrap(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: scaffolding.clone(),
+            },
+        })
+        .await;
+    let demo_uri = Url::parse("file:///demo_trigger.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: demo_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.clone(),
+            },
+        })
+        .await;
+    let completion_at = |line: u32, character: u32| {
+        let backend = &backend;
+        let uri = demo_uri.clone();
+        async move {
+            let result = backend
+                .completion(CompletionParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri },
+                        position: Position { line, character },
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context: None,
+                })
+                .await
+                .unwrap();
+            match result {
+                Some(CompletionResponse::Array(items)) => items,
+                Some(CompletionResponse::List(list)) => list.items,
+                None => Vec::new(),
+            }
+        }
+    };
+
+    let items = completion_at(line, 5).await;
     let labels = || items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
 
     assert!(
@@ -744,7 +802,7 @@ async fn demo_php_class_root_trigger_works() {
     );
 
     // The second "Try:" line promises the inherited typed constant.
-    let items = completion_items(&text, "file:///demo_trigger.php", line, 5).await;
+    let items = completion_at(line, 5).await;
     let ttl = items
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("ONE_TIME_TTL"))

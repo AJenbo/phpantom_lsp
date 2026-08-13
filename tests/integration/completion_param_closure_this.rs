@@ -530,6 +530,60 @@ async fn test_param_closure_this_cross_file() {
     );
 }
 
+// ─── @param-closure-this resolved against the declaring file ────────────────
+
+/// The tag names its class the way the rest of the declaring file's
+/// docblocks do, so it has to be resolved against *that* file's imports.
+/// The caller never spells the class itself, so its own use table has
+/// nothing to offer and the closure's `$this` would fall back to the
+/// enclosing class.
+#[tokio::test]
+async fn param_closure_this_resolves_against_the_declaring_file_not_the_caller() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[(
+            "src/Support/Router.php",
+            concat!(
+                "<?php\nnamespace App\\Support;\n",
+                "class Router {\n",
+                "    /**\n",
+                "     * @param-closure-this Route $callback\n",
+                "     */\n",
+                "    public function group(\\Closure $callback): void {}\n",
+                "}\n",
+                "class Route {\n",
+                "    public function middleware(string $m): self { return $this; }\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::from_file_path(dir.path().join("src/Group.php")).unwrap();
+
+    // The caller imports only `Router`, and has a `Route`-less namespace
+    // of its own, so a tag resolved from here would find nothing.
+    let src = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Support\\Router;\n",
+        "class Group {\n",
+        "    public function run(): void {\n",
+        "        (new Router())->group(function () {\n",
+        "            $this->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, src, 6, 19).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"middleware"),
+        "Expected 'middleware' from App\\Support\\Route, got: {:?}",
+        names,
+    );
+}
+
 // ─── @param-closure-this second parameter ───────────────────────────────────
 
 /// When @param-closure-this targets the second parameter, only closures

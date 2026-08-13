@@ -67,7 +67,7 @@ Performance measured on a production codebase: 21K PHP files, 1.5M lines of code
 </p>
 
 > [!TIP]
-> **Want to verify?** Open [`examples/demo.php`](examples/demo.php) in your editor and trigger completion at the marked locations. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings.
+> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings.
 
 ## Context-Aware Intelligence
 

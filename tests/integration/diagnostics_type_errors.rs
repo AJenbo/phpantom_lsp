@@ -9875,3 +9875,59 @@ function upload(Request $request, ImageService $images): void {
         "the array member is what remains, got {messages:?}"
     );
 }
+
+// ─── Names reached through a bare namespace import ──────────────────────────
+
+/// A class named through a bare `use App\Support;` (rather than a
+/// per-class import) is the same class as the one a `new` expression
+/// resolves to, so a template bound from both spellings must collapse to
+/// one type rather than union `Support\Pen` with `App\Support\Pen`.
+#[test]
+fn a_qualified_name_via_a_namespace_import_binds_the_same_template_as_its_fqcn() {
+    let backend = create_test_backend();
+
+    let support_uri = "file:///support.php";
+    let support = r#"<?php
+namespace App\Support;
+
+class Pen {}
+class Pencil {}
+"#;
+    backend.update_ast(support_uri, support);
+
+    let uri = "file:///test.php";
+    let php = r#"<?php
+namespace App;
+
+use App\Support;
+
+/** @template TValue */
+class Reducible
+{
+    /**
+     * @template TInitial
+     * @template TReturn
+     *
+     * @param callable(TInitial|TReturn, TValue): TReturn $callback
+     * @param TInitial $initial
+     * @return TReturn
+     */
+    public function reduce(callable $callback, mixed $initial): mixed
+    {
+        return $initial;
+    }
+}
+
+/** @var Reducible<Support\Pencil> $reducible */
+$reducible = new Reducible();
+$reducible->reduce(
+    fn (Support\Pen $carry, Support\Pencil $item): Support\Pen => $carry,
+    new Support\Pen()
+);
+"#;
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    let messages = type_error_messages(&diags);
+    assert!(messages.is_empty(), "got {messages:?}");
+}

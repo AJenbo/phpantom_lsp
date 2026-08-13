@@ -69,8 +69,8 @@ cargo test
 cargo clippy -- -D warnings
 cargo clippy --tests -- -D warnings
 cargo fmt --check
-php -l examples/demo.php
-php -d zend.assertions=1 examples/demo.php
+find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
+php -d zend.assertions=1 examples/php/scaffolding/assertions.php
 php -l examples/laravel/app/Demo.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 ```

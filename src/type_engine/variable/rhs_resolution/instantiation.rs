@@ -612,8 +612,8 @@ pub(super) fn build_constructor_template_subs(
             }
             TemplateBindingMode::CallableParamType(position) => {
                 if let Some(param_type) =
-                    crate::completion::source::helpers::extract_closure_param_type_from_text(
-                        arg_text, position,
+                    crate::type_engine::call_resolution::bind_callable_param_template(
+                        arg_text, position, rctx,
                     )
                 {
                     subs.insert(tpl_name.to_string(), param_type);

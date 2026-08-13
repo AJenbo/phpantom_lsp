@@ -101,8 +101,8 @@ jobs:
         with:
           php-version: "8.4"
           ini-values: zend.assertions=1
-      - run: php -l examples/demo.php
-      - run: php -d zend.assertions=1 examples/demo.php
+      - run: find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: php -d zend.assertions=1 examples/php/scaffolding/assertions.php
       - run: php -l examples/laravel/app/Demo.php
 
   benchmark:
