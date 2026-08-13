@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b138-a-param-on-a-docblocks-opening-line-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B138. A <code>@param</code> on a docblock's opening line is ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b138-a-param-on-a-docblocks-opening-line-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B138. A <code>@param</code> on a docblock's opening line is ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1349,28 +1277,7 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<h3 id="b138-a-param-on-a-docblocks-opening-line-is-ignored">B138. A <code>@param</code> on a docblock's opening line is ignored<a class="headerlink" href="#b138-a-param-on-a-docblocks-opening-line-is-ignored" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param &#39;a&#39;|&#39;b&#39; $key</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> *  @return string */</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">function pick(string $key): string {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    takesInt($key);   // reported as `string`, not as &#39;a&#39;|&#39;b&#39;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    return $key;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>A tag written on the same line as the opening <code>/**</code> of a <em>multi-line</em>
-docblock is not read for parameters. The fully single-line spelling
-(<code>/** @param 'a'|'b' $key */</code>) works, and so does the same tag moved to a
-continuation line, so only the "first tag shares the opening line" shape is
-affected. The parameter falls back to its native hint, which is wider than
-what the docblock declared: narrowing, argument checks, and hover all read
-the wide type, and a <code>@return</code> on the same docblock (which <em>is</em> read) can
-then be reported as incompatible with the body's widened value.</p>
-<p><strong>Fix:</strong> find where the parameter scan decides a docblock's tag lines
-(<code>find_iterable_raw_type_in_source</code> in <code>docblock/tags.rs</code>) and let the text
-following <code>/**</code> count as a tag line, the way the single-line spelling
-already does. The <code>@return</code> path reads it, so the two disagree on where a
-docblock's first line starts.</p>
+<p>No outstanding items.</p>
 
 
 
