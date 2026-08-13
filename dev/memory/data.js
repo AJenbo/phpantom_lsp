@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786577941922,
+  "lastUpdate": 1786579225143,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -19889,6 +19889,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a8db6b7d8380b4c7c9325ae4bdf852c927a60836",
+          "message": "A return type that depends on an argument's value is read from the value\npassed, or from the argument's default when it is left out",
+          "timestamp": "2026-08-13T01:44:12+02:00",
+          "tree_id": "41d966df7b04a8919cc2ae547289b5a373f0e9fb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a8db6b7d8380b4c7c9325ae4bdf852c927a60836"
+        },
+        "date": 1786579219557,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.9,
             "unit": "MiB"
           }
         ]
