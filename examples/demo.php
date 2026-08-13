@@ -1351,6 +1351,34 @@ class ConditionalReturnDemo
         // `false`, so the failure branch cannot happen at this call site.
         $json = json_encode(['ok' => true], JSON_THROW_ON_ERROR);
         strtoupper($json);                        // string, not string|false
+
+        // More builtins whose shape an argument decides. Only the
+        // all-elements form of `pathinfo()` returns the component array;
+        // every other flag asks for one part and gets a string back.
+        $parts = pathinfo('/tmp/report.csv');     // no flag → the component array
+        strtoupper($parts['basename']);
+        $stem = pathinfo('/tmp/report.csv', PATHINFO_FILENAME);
+        strtoupper($stem);                        // one component → string
+
+        // `print_r()` renders to a string only when asked to; otherwise it
+        // prints and reports that it did.
+        $rendered = print_r(['a' => 1], true);
+        strtoupper($rendered);                    // captured → string
+
+        // `microtime()` and `hrtime()` both switch on a boolean flag.
+        $seconds = microtime(true);
+        echo $seconds + 1.0;                      // as-float → float
+        $stamp = microtime();
+        strtoupper($stamp);                       // default → string
+
+        // Naming an environment variable returns its value; only the
+        // no-argument form returns the whole environment.
+        $home = getenv('HOME') ?: '/root';
+        strtoupper($home);                        // named → string|false
+
+        // `abs()` returns the type it was given.
+        $magnitude = abs(-7);
+        echo $magnitude << 1;                     // int argument → int, not int|float
     }
 }
 
@@ -8613,6 +8641,20 @@ function runDemoAssertions(): void
 
     // ── Flag-keyed return type (json_encode + JSON_THROW_ON_ERROR) ───────
     assert(json_encode(['ok' => true], JSON_THROW_ON_ERROR) === '{"ok":true}', 'the flag makes the failure branch a JsonException instead of false');
+
+    // ── More argument-decided builtins ───────────────────────────────────
+    assert(is_array(pathinfo('/tmp/report.csv')), 'the all-elements form returns the component array');
+    assert(pathinfo('/tmp/report.csv', PATHINFO_FILENAME) === 'report', 'a single component comes back as a string');
+    assert(is_string(print_r(['a' => 1], true)), 'print_r renders to a string when asked to');
+    assert(print_r('x') === true, 'print_r reports that it printed otherwise');
+    assert(is_float(microtime(true)), 'microtime(true) is a float');
+    assert(is_string(microtime()), 'microtime() is a string');
+    assert(is_int(hrtime(true)) || is_float(hrtime(true)), 'hrtime(true) is a number');
+    assert(is_array(hrtime()), 'hrtime() is the [seconds, nanoseconds] pair');
+    assert(is_array(getenv()), 'getenv() with no name returns the whole environment');
+    assert(is_string(getenv('PATH')), 'naming a variable returns its value');
+    assert(abs(-7) === 7, 'abs of an int is an int');
+    assert(abs(-7.5) === 7.5, 'abs of a float is a float');
 
     // ── Closure / arrow function return types ───────────────────────────
     $makePenClosure = function(): Pen { return new Pen(); };

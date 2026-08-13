@@ -67,7 +67,15 @@
 //!    both back so `ctype_digit($int)` and
 //!    `define('X', fopen(…))` stop being reported.
 //!
-//! 7. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//! 7. **Argument-decided builtins** -- `pathinfo`, `print_r`, `hrtime`,
+//!    `microtime`, `getenv`, `mb_convert_encoding` and `abs` each return one
+//!    of several shapes depending on an argument, but the stubs can only
+//!    declare the union of all of them. Each gets a conditional return type
+//!    keyed on the deciding parameter, so a call that provably takes one
+//!    branch stops carrying the others. An argument whose value cannot be
+//!    pinned down keeps the union, which is all the call can promise.
+//!
+//! 8. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
 //!    `mktime` and the rest of [`crate::benevolent_builtins`] declare a
 //!    failure branch that idiomatic PHP never checks. Their return type is
 //!    tagged so the diagnostics stop enforcing that branch. Unlike the
@@ -106,7 +114,12 @@
 //!    `@param` is untyped `object|array`.  We bind `TKey`/`TValue` from
 //!    the `$array` argument, matching PHPStan's stubs.
 //!
-//! 7. **Benevolent methods** -- the class-level half of function patch 7,
+//! 7. **`SimpleXMLElement`** -- `asXML()` and `saveXML()` are declared
+//!    `string|bool`, but without a filename they serialise to a string and
+//!    with one they report whether the write succeeded. Each gets a
+//!    conditional return type keyed on `$filename`.
+//!
+//! 8. **Benevolent methods** -- the class-level half of function patch 8,
 //!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
 //!    `DateTime::modify` and `Closure::bind`.
 //!
@@ -138,6 +151,13 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
+        "pathinfo" => patch_pathinfo(func),
+        "print_r" => patch_print_r(func),
+        "hrtime" => patch_hrtime(func),
+        "microtime" => patch_microtime(func),
+        "getenv" => patch_getenv(func),
+        "mb_convert_encoding" => patch_mb_convert_encoding(func),
+        "abs" => patch_abs(func),
         "preg_replace"
         | "preg_replace_callback"
         | "preg_replace_callback_array"
@@ -308,6 +328,157 @@ fn patch_str_word_count(func: &mut FunctionInfo) {
     ));
 }
 
+/// Give `func` a conditional return type keyed on one of its parameters.
+///
+/// Bails out when the stub does not declare that parameter: without it the
+/// conditional would be decided against whichever argument happened to land
+/// in slot 0, which is worse than the declared union.
+fn conditional_on(
+    func: &mut FunctionInfo,
+    param_name: &str,
+    condition: PhpType,
+    then_type: PhpType,
+    else_type: PhpType,
+) {
+    if !func.parameters.iter().any(|p| p.name == param_name) {
+        return;
+    }
+    func.conditional_return = Some(PhpType::conditional(
+        param_name, false, condition, then_type, else_type,
+    ));
+}
+
+/// Patch `pathinfo()` to have a conditional return type keyed on `$flags`.
+///
+/// The stubs declare the flat union `string|array{…}`, but only the
+/// all-elements form returns the array: any other flag asks for one component
+/// and gets a `string` back. `PATHINFO_ALL` is the parameter's declared
+/// default, so the one-argument call takes the array branch through the same
+/// route an explicit `PATHINFO_ALL` does.
+///
+/// `extension` is optional in the shape because a path without a dot has no
+/// extension key at all. Mirrors PHPStan's
+/// `PathinfoFunctionDynamicReturnTypeExtension`.
+fn patch_pathinfo(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$flags",
+        PhpType::literal_int(PATHINFO_ALL.to_string()),
+        PhpType::parse(
+            "array{dirname: string, basename: string, extension?: string, filename: string}",
+        ),
+        PhpType::string(),
+    );
+}
+
+/// `PATHINFO_ALL`, as defined by PHP's `ext/standard/string.h`.
+///
+/// Spelled out rather than read back from the stubs because the conditional is
+/// built when the function is parsed, before any constant lookup is available.
+/// It is part of PHP's stable ABI.
+const PATHINFO_ALL: i64 = 15;
+
+/// Patch `print_r()` to have a conditional return type keyed on `$return`.
+///
+/// The stubs declare `string|bool` (`string|true` from 8.4 on). php-src only
+/// ever returns `true` when it printed, so the `false` half is impossible and
+/// the `string` half only exists for `print_r($v, true)`.
+fn patch_print_r(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$return",
+        PhpType::parse("true"),
+        PhpType::string(),
+        PhpType::parse("true"),
+    );
+}
+
+/// Patch `hrtime()` to have a conditional return type keyed on `$as_number`.
+///
+/// The stubs declare `int[]|int|float|false`, but the two shapes are decided
+/// by the argument: the number form is an `int` (a `float` on 32-bit builds)
+/// and the array form is the `[seconds, nanoseconds]` pair.
+fn patch_hrtime(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$as_number",
+        PhpType::parse("true"),
+        PhpType::union(vec![PhpType::int(), PhpType::float()]),
+        PhpType::parse("array{int, int}|false"),
+    );
+}
+
+/// Patch `microtime()` to have a conditional return type keyed on `$as_float`.
+///
+/// The stubs carry `#[TypeContract(true: "float", false: "string")]` on the
+/// parameter, which says exactly this, but the attribute is not read; the
+/// declared `string|float` union is all that survives.
+fn patch_microtime(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$as_float",
+        PhpType::parse("true"),
+        PhpType::float(),
+        PhpType::string(),
+    );
+}
+
+/// Patch `getenv()` to have a conditional return type keyed on its name
+/// argument.
+///
+/// Only the no-argument form returns the whole environment; naming a variable
+/// returns its value, or `false` when it is not set. The stubs declare the
+/// union of both, so every `getenv('NAME')` carries an impossible array
+/// branch.
+///
+/// The parameter is keyed by position rather than by name: the stubs declare
+/// both the pre-7.1 `$varname` and the current `$name`, and which one is in
+/// play depends on the configured PHP version.
+fn patch_getenv(func: &mut FunctionInfo) {
+    let Some(name_param) = func.parameters.first().map(|p| p.name) else {
+        return;
+    };
+    conditional_on(
+        func,
+        name_param.as_str(),
+        PhpType::null(),
+        PhpType::generic_array(PhpType::string(), PhpType::string()),
+        PhpType::union(vec![PhpType::string(), PhpType::named(atom("false"))]),
+    );
+}
+
+/// Patch `mb_convert_encoding()` to have a conditional return type keyed on
+/// its subject.
+///
+/// Like the replace family, the function answers in the shape it was handed,
+/// but the stubs can only declare `array|string|false`. An array subject is
+/// converted per element, so no error branch survives there.
+fn patch_mb_convert_encoding(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$string",
+        PhpType::array(),
+        PhpType::generic_array(PhpType::named(atom("array-key")), PhpType::string()),
+        PhpType::union(vec![PhpType::string(), PhpType::named(atom("false"))]),
+    );
+}
+
+/// Patch `abs()` to have a conditional return type keyed on `$num`.
+///
+/// `abs()` returns the type it was given; the declared `int|float` union
+/// leaves an `int` argument's result carrying a `float` branch that cannot
+/// happen. An argument that is neither (a numeric string, a `mixed`) leaves
+/// both branches, which is all the call can promise.
+fn patch_abs(func: &mut FunctionInfo) {
+    conditional_on(
+        func,
+        "$num",
+        PhpType::int(),
+        PhpType::int(),
+        PhpType::float(),
+    );
+}
+
 /// Patch a member of the replace family to have a conditional return type
 /// keyed on its subject argument.
 ///
@@ -410,6 +581,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "LimitIterator" => patch_limit_iterator(class),
         "CallbackFilterIterator" => patch_callback_filter_iterator(class),
         "ArrayIterator" => patch_array_iterator(class),
+        "SimpleXMLElement" => patch_simple_xml_element(class),
         _ => {}
     }
     mark_benevolent_methods(class);
@@ -630,6 +802,59 @@ fn patch_array_iterator(class: &mut ClassInfo) {
 
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
     }
+}
+
+/// Give `SimpleXMLElement::asXML()` / `saveXML()` a conditional return type
+/// keyed on `$filename`.
+///
+/// Both are declared `string|bool`: without a filename they return the
+/// document as a string (`false` on error), and with one they write the file
+/// and report whether it worked. The flat union means neither result can be
+/// split, so `assertNotFalse($xml->asXML())` still leaves a `bool` the caller
+/// has to defend against.
+fn patch_simple_xml_element(class: &mut ClassInfo) {
+    let serialised = PhpType::union(vec![PhpType::string(), PhpType::named(atom("false"))]);
+    for method_name in ["asXML", "saveXML"] {
+        patch_method_conditional_return(
+            class,
+            method_name,
+            "$filename",
+            PhpType::conditional(
+                "$filename",
+                false,
+                PhpType::null(),
+                serialised.clone(),
+                PhpType::bool(),
+            ),
+        );
+    }
+}
+
+/// Give a method a conditional return type, provided the stub declares the
+/// parameter the conditional keys on.
+fn patch_method_conditional_return(
+    class: &mut ClassInfo,
+    method_name: &str,
+    param_name: &str,
+    conditional: PhpType,
+) {
+    let Some(idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.as_str() == method_name)
+    else {
+        return;
+    };
+    if !class.methods[idx]
+        .parameters
+        .iter()
+        .any(|p| p.name == param_name)
+    {
+        return;
+    }
+    let mut method = (*class.methods[idx]).clone();
+    method.conditional_return = Some(conditional);
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
 }
 
 /// Shared helper: add `@template TKey, TValue, TIterator` and
@@ -1005,6 +1230,121 @@ mod tests {
             "the constant name is still a string"
         );
         assert_eq!(define.parameters[1].type_hint, Some(PhpType::mixed()));
+    }
+
+    /// Each conditional is keyed on the parameter that really decides the
+    /// return type, so a call that omits the argument is answered by that
+    /// parameter's declared default rather than by argument position.
+    #[test]
+    fn argument_dependent_builtins_get_conditional_returns() {
+        /// A stub's name, its `(parameter, type)` list, and the conditional
+        /// return type the patch is expected to give it.
+        type PatchCase = (
+            &'static str,
+            &'static [(&'static str, &'static str)],
+            &'static str,
+        );
+
+        let cases: &[PatchCase] = &[
+            (
+                "pathinfo",
+                &[("$path", "string"), ("$flags", "int")],
+                "$flags is 15 ? array{dirname: string, basename: string, \
+                 extension?: string, filename: string} : string",
+            ),
+            (
+                "print_r",
+                &[("$value", "mixed"), ("$return", "bool")],
+                "$return is true ? string : true",
+            ),
+            (
+                "hrtime",
+                &[("$as_number", "bool")],
+                "$as_number is true ? int|float : array{int, int}|false",
+            ),
+            (
+                "microtime",
+                &[("$as_float", "bool")],
+                "$as_float is true ? float : string",
+            ),
+            (
+                "getenv",
+                &[("$name", "string"), ("$local_only", "bool")],
+                "$name is null ? array<string, string> : string|false",
+            ),
+            (
+                "mb_convert_encoding",
+                &[("$string", "array|string"), ("$to_encoding", "string")],
+                "$string is array ? array<array-key, string> : string|false",
+            ),
+            ("abs", &[("$num", "int|float")], "$num is int ? int : float"),
+        ];
+
+        for (name, params, expected) in cases {
+            let mut func = empty_function(name);
+            func.parameters = params
+                .iter()
+                .map(|(n, t)| param(n, t))
+                .collect::<Vec<_>>()
+                .into();
+
+            apply_function_stub_patches(&mut func);
+
+            let cond = func
+                .conditional_return
+                .unwrap_or_else(|| panic!("{name} should have a conditional return type"));
+            assert_eq!(cond.to_string(), *expected, "{name}");
+        }
+    }
+
+    /// The pre-7.1 `$varname` spelling is what a call binds to on an older
+    /// configured PHP version, so the conditional follows the first parameter
+    /// rather than a hard-coded name.
+    #[test]
+    fn getenv_keys_on_whichever_name_parameter_the_stub_declares() {
+        let mut func = empty_function("getenv");
+        func.parameters = vec![param("$varname", "string"), param("$local_only", "bool")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(
+            func.conditional_return.map(|c| c.to_string()).as_deref(),
+            Some("$varname is null ? array<string, string> : string|false")
+        );
+    }
+
+    /// A stub that does not declare the parameter the conditional keys on is
+    /// left alone: deciding the branch against whichever argument landed in
+    /// slot 0 is worse than the declared union.
+    #[test]
+    fn a_differently_shaped_stub_keeps_its_declared_return() {
+        let mut func = empty_function("pathinfo");
+        func.parameters = vec![param("$path", "string")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert!(func.conditional_return.is_none());
+    }
+
+    #[test]
+    fn simple_xml_serialisers_get_conditional_returns() {
+        let mut class = empty_class("SimpleXMLElement");
+        for name in ["asXML", "saveXML"] {
+            let mut method = crate::types::MethodInfo::virtual_method(name, Some("string|bool"));
+            method.parameters = vec![param("$filename", "string|null")].into();
+            class.methods.make_mut().push(std::sync::Arc::new(method));
+        }
+
+        apply_class_stub_patches(&mut class);
+
+        for method in class.methods.iter() {
+            assert_eq!(
+                method.conditional_return.as_ref().map(|c| c.to_string()),
+                Some("$filename is null ? string|false : bool".to_string()),
+                "{}",
+                method.name
+            );
+        }
     }
 
     #[test]

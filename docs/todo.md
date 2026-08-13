@@ -28,7 +28,6 @@ within the same impact tier.
 | B167 | [Factory `create()`/`make()` keep the collection half on single-model chains](todo/bugs.md#b167-factory-createmake-keep-the-collection-half-on-single-model-chains) | Medium-High | Low-Medium |
 | B163 | [An `int` assigned to a `float` property is reported](todo/bugs.md#b163-an-int-assigned-to-a-float-property-is-reported)                                  | Low         | Low-Medium  |
 | B139 | [Conditional return types are not evaluated against argument types](todo/bugs.md#b139-conditional-return-types-are-not-evaluated-against-argument-types)   | High        | Medium      |
-| B142 | [Builtins with argument-dependent return types, round two](todo/bugs.md#b142-builtins-with-argument-dependent-return-types-round-two)                      | High        | Medium      |
 | B144 | [`preg_match` `$matches` is nullable and shapeless](todo/bugs.md#b144-preg_match-matches-is-nullable-and-shapeless)                                        | High        | Medium      |
 | B146 | [Array builtins lose key and element generics](todo/bugs.md#b146-array-builtins-lose-key-and-element-generics)                                             | High        | Medium      |
 | B149 | [`instanceof` narrowing extends the union instead of filtering it](todo/bugs.md#b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it)       | High        | Medium      |
@@ -45,6 +44,7 @@ within the same impact tier.
 | B156 | [`assert()` still misses some provable conditions](todo/bugs.md#b156-assert-still-misses-some-provable-conditions)                                         | Medium      | Medium      |
 | B159 | [An inline `@var` re-pins the variable on every read](todo/bugs.md#b159-an-inline-var-re-pins-the-variable-on-every-read)                                  | Medium      | Medium      |
 | B174 | [A `break` that leaves a loop early is missing from the post-loop join](todo/bugs.md#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join) | Medium      | Medium      |
+| B142 | [Builtins with argument-dependent return types, round two](todo/bugs.md#b142-builtins-with-argument-dependent-return-types-round-two) (depends on B146) | Low-Medium  | Medium      |
 | B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
 | B155 | [A checked call expression is forgotten by the next identical call](todo/bugs.md#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call)   | Medium-High | Medium-High |
 | B158 | [Strict `in_array` against a constant list does not narrow the needle](todo/bugs.md#b158-strict-in_array-against-a-constant-list-does-not-narrow-the-needle) (depends on B155) | Low-Medium | Medium |

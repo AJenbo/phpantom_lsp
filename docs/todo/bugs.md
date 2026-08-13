@@ -51,6 +51,12 @@ resolved argument type (falling back to the declared default's type
 when the argument is omitted), recursing into nested conditionals, and
 only union the branches when the condition is genuinely undecidable.
 
+An `is null` condition is the one kind still decided by argument
+*presence* rather than argument type: any argument that is not the
+literal `null` takes the else branch, so `getenv($name)` and
+`$xml->asXML($path)` on a `?string` commit to a branch the call may not
+take. Route it through the same resolved-type check as the rest.
+
 ### B141. A `never` conditional branch does not assert the condition
 
 **Impact: Medium-High · Effort: Medium**
@@ -77,33 +83,28 @@ argument expression in the following scope — the same subtraction the
 
 ### B142. Builtins with argument-dependent return types, round two
 
-**Impact: High · Effort: Medium**
+**Impact: Low-Medium · Effort: Medium**
 
-The T38 work covered the replace family and `json_encode`. The sweep
-surfaced the next tier, ~34 sites:
+The T38 work covered the replace family and `json_encode`; the
+conditional-signature round covered `pathinfo`, `print_r`, `hrtime`,
+`microtime`, `getenv`, `mb_convert_encoding`, `abs` and
+`SimpleXMLElement::asXML()`/`saveXML()`. What is left needs the
+*element* type of an array argument rather than the argument's own
+category, which the conditional evaluator cannot express (`array<int>`
+and `array<string>` both read as "array"):
 
-- `pathinfo($p, PATHINFO_FILENAME)` returns `string` for any flags
-  other than `PATHINFO_ALL`; the shaped array (whose `dirname`/
-  `extension` keys are *optional*) only applies to the 1-arg form.
-  18 sites, the single biggest builtin offender.
-- `print_r($v, true)` returns `string`, not `string|true`.
-- `hrtime(true)` returns `int|float`, never `array{int, int}|false`.
-- `microtime()` honours `#[TypeContract(true: 'float', false: 'string')]`
-  on its parameter — the attribute is currently ignored.
-- `getenv('NAME')` returns `string|false`; only the 0-arg variant
-  returns `array<string, string>` (arity-keyed functionMap variant).
-- `mb_convert_encoding(string $s, …)` returns `string`; the `array`
-  branch only applies to an array subject.
-- `abs(int)` is `int`, `abs(float)` is `float` — not `int|float`.
-- `array_sum(array<int>)` is `int` (`array_product` likewise).
-- `SimpleXMLElement::saveXML()`/`asXML()` return `string|false` when
-  `$filename` is null, `bool` otherwise — never a bare `string|bool`
-  that `assertNotFalse` cannot split.
-- `ReflectionClass<T>::newInstance()`/`newInstanceArgs()`/
-  `newInstanceWithoutConstructor()` return `T`, not `?object`.
+- `array_sum(array<int>)` is `int` (`array_product` likewise). 2 sites.
 
-**Fix:** stub patches / conditional signatures per function, same
-mechanism as T38.
+**Fix:** a per-function rule in
+`type_engine/variable/array_func_rules.rs`, which already has the
+argument's raw type at hand. Blocked behind the same
+`resolve_arg_raw_type` gap as [B146](#b146-array-builtins-lose-key-and-element-generics).
+
+`ReflectionClass<T>::newInstance()`/`newInstanceArgs()`/
+`newInstanceWithoutConstructor()` were listed here too but do not
+reproduce: all three substitute `T` when the receiver carries a type
+argument, and `object` is the honest answer for a bare
+`ReflectionClass`.
 
 ### B143. Conditional-return arguments written as expressions still read as nothing
 
@@ -181,7 +182,16 @@ verbatim instead of substituting the input's generics:
   `array<string, non-falsy-string>`).
 - `array_flip(array<K, V>)` → `array<V, K>`.
 
-**Fix:** per-function generic signatures in the stub patch layer.
+**Fix:** the rules themselves are not the gap — `array_func_rules.rs`
+already computes `array_values(array<string, int>) → array<string, int>`
+correctly, and `array_flip` resolves through the stub's own `@template`.
+The gap is that on the forward-walker path `resolve_arg_raw_type`
+returns `None` for a docblock-typed parameter, so the rule never fires
+and the stub's bare `array` wins; only the text-driven call resolver
+reaches it. Fix that first, then add the per-function rules above
+(`array_values` → `list<V>` rather than the input type it preserves
+today, plus `array_keys`, `array_search`, `key`,
+`array_key_first`/`last`, and `array_filter`'s falsy strip).
 
 ### B147. Array literals are not tuples: slot reads return the union of all elements
 

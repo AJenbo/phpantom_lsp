@@ -12,6 +12,7 @@ pub mod blade_regression;
 mod blade_render_sites;
 mod blade_sections;
 mod blade_shared_vars;
+mod builtin_return_types;
 mod classmap_scanner;
 mod code_action_add_override;
 mod code_action_add_throws;

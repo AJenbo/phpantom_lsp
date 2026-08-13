@@ -21,7 +21,12 @@ impl Backend {
     /// Returns `Some(Some(val))` when the constant exists with a known
     /// value, `Some(None)` when it exists but the value is unknown, and
     /// `None` when the constant was not found at all.
+    ///
+    /// A fully-qualified reference (`\PATHINFO_ALL`, written that way inside a
+    /// namespace to skip the fallback lookup) names the same constant as the
+    /// bare form, so the leading separator is dropped before searching.
     pub(crate) fn lookup_global_constant(&self, name: &str) -> Option<Option<String>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         // Phase 1: already-parsed constants.
         let lookup = self
             .symbols

@@ -463,15 +463,52 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     )
                 }
             } else if matches!(condition.kind(), TypeKind::Literal(_)) {
-                // Value condition (`$format is 0`, `$value is ''`). The
-                // argument decides it only when it is itself a literal; any
-                // other expression leaves the broader else branch.
-                let matched = arg_text
-                    .and_then(|arg| condition_result_from_text(condition, arg))
-                    .unwrap_or(false);
-                let take_then = matched ^ *negated;
+                // Value condition (`$format is 0`, `$flags is 15`). A literal
+                // argument settles it outright; anything else is settled by
+                // the argument's resolved type when that turns out to be a
+                // literal of its own, which is how a named constant
+                // (`pathinfo($p, PATHINFO_FILENAME)`) or a local holding one
+                // decides the branch it really takes.
+                let decided = arg_text.and_then(|arg| {
+                    condition_result_from_text(condition, arg).or_else(|| {
+                        tpl.arg_type_resolver
+                            .and_then(|resolve| resolve(arg))
+                            .and_then(|arg_ty| literal_condition_result(condition, &arg_ty))
+                    })
+                });
+                let branch = match decided {
+                    Some(matched) => {
+                        if matched ^ *negated {
+                            then_type
+                        } else {
+                            else_type
+                        }
+                    }
+                    // Neither the text nor the resolved type pins the value
+                    // down, so the call really may take either branch. Union
+                    // them rather than committing to the else, which would
+                    // report a type the call can't promise.
+                    None if arg_text.is_some() && tpl.arg_type_resolver.is_some() => {
+                        let resolve_branch = |b| {
+                            resolve_conditional_with_text_args_and_defaults(
+                                b,
+                                params,
+                                text_args,
+                                var_resolver,
+                                calling_class_name,
+                                class_loader,
+                                tpl,
+                            )
+                        };
+                        return union_branch_types(
+                            resolve_branch(then_type),
+                            resolve_branch(else_type),
+                        );
+                    }
+                    None => else_type,
+                };
                 resolve_conditional_with_text_args_and_defaults(
-                    if take_then { then_type } else { else_type },
+                    branch,
                     params,
                     text_args,
                     var_resolver,
@@ -604,7 +641,11 @@ enum ArgForm {
     StringLit,
     IntLit,
     FloatLit,
-    BoolLit,
+    /// The two boolean literals are kept apart so a condition naming one of
+    /// them (`$as_number is true`) is decided rather than treated as a plain
+    /// `is bool`.
+    True,
+    False,
     Null,
     ArrayLit,
     /// Any expression whose type cannot be read from its syntax alone
@@ -627,8 +668,11 @@ fn classify_arg_form(arg: &str) -> ArgForm {
     if arg_is_float_literal(t) {
         return ArgForm::FloatLit;
     }
-    if t.eq_ignore_ascii_case("true") || t.eq_ignore_ascii_case("false") {
-        return ArgForm::BoolLit;
+    if t.eq_ignore_ascii_case("true") {
+        return ArgForm::True;
+    }
+    if t.eq_ignore_ascii_case("false") {
+        return ArgForm::False;
     }
     if t.eq_ignore_ascii_case("null") {
         return ArgForm::Null;
@@ -677,6 +721,27 @@ fn condition_result_from_text(condition: &PhpType, arg_text: &str) -> Option<boo
         TypeKind::Literal(expected) => literal_value_from_text(arg_text)
             .map(|actual| crate::php_type::literals_equal(expected, &actual)),
         _ => condition_result_from_form(condition, classify_arg_form(arg_text)),
+    }
+}
+
+/// Decide a value condition (`$flags is 15`) against an argument's *resolved*
+/// type, for the arguments whose source text is not a literal.
+///
+/// A resolved literal settles the comparison both ways: `PATHINFO_FILENAME`
+/// resolves to `8`, which refutes `is 15` as conclusively as the text `8`
+/// would have. Anything broader than a literal (`int`, a union, an unresolved
+/// expression) leaves the condition undecided.
+fn literal_condition_result(condition: &PhpType, arg_ty: &PhpType) -> Option<bool> {
+    match condition.kind() {
+        TypeKind::Union(members) => combine_union_results(
+            members
+                .iter()
+                .map(|member| literal_condition_result(member, arg_ty)),
+        ),
+        TypeKind::Literal(expected) => arg_ty
+            .as_literal()
+            .map(|actual| crate::php_type::literals_equal(expected, actual)),
+        _ => None,
     }
 }
 
@@ -732,7 +797,10 @@ fn scalar_condition_matches_form(condition: &PhpType, form: ArgForm) -> bool {
         ArgForm::StringLit => condition.is_string_type(),
         ArgForm::IntLit => condition.is_int(),
         ArgForm::FloatLit => condition.is_float(),
-        ArgForm::BoolLit => condition.is_bool(),
+        // A boolean literal satisfies `is bool` either way, and the matching
+        // half of `is true` / `is false`.
+        ArgForm::True => condition.is_bool() || condition.is_true(),
+        ArgForm::False => condition.is_bool() || condition.is_false(),
         ArgForm::Null => condition.is_null(),
         ArgForm::ArrayLit => condition.is_array_like(),
         ArgForm::Unknown => false,
@@ -749,7 +817,9 @@ fn type_category(t: &PhpType) -> Option<&'static str> {
         Some("int")
     } else if t.is_float_subtype() {
         Some("float")
-    } else if t.is_bool() {
+    } else if t.is_bool() || t.is_true() || t.is_false() {
+        // `true` and `false` are boolean values, not class names — without
+        // this they fall through to the class-instance case below.
         Some("bool")
     } else if t.is_null() {
         Some("null")
@@ -794,6 +864,15 @@ fn condition_category(condition: &PhpType) -> Option<&'static str> {
 /// branches rather than committing to the wrong one.
 fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> {
     if arg_ty.is_mixed() || arg_ty.is_untyped() {
+        return None;
+    }
+    // `is true` / `is false` name one boolean value, so only an argument
+    // narrowed to a value of its own settles them: a plain `bool` really may
+    // be either.
+    if condition.is_true() || condition.is_false() {
+        if arg_ty.is_true() || arg_ty.is_false() {
+            return Some(condition.is_true() == arg_ty.is_true());
+        }
         return None;
     }
     // Condition union (`array|string`): satisfied when any member matches,
@@ -1408,13 +1487,132 @@ mod tests {
         );
     }
 
-    /// An argument that is not a literal decides nothing, so the conditional
-    /// collapses to its final else branch — every value the call could return.
+    /// An argument that is not a literal decides nothing, and with no resolver
+    /// to fall back on the conditional collapses to its final else branch —
+    /// every value the call could return.
     #[test]
     fn non_literal_argument_leaves_value_condition_undecided() {
         assert_eq!(
             resolve_word_count("$text, $format").as_deref(),
             Some("list<string>|int")
+        );
+    }
+
+    /// Resolve a `pathinfo`-style value conditional with a resolver that
+    /// answers for named constants, returning the resolved type's display
+    /// string.
+    fn resolve_pathinfo(text_args: &str) -> Option<String> {
+        let cond = PhpType::parse("($flags is 15 ? Shape : string)");
+        let params = [param("$path"), param_with_default("$flags", "PATHINFO_ALL")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let resolver = |t: &str| match t.trim() {
+            "PATHINFO_ALL" => Some(PhpType::literal_int("15")),
+            "PATHINFO_FILENAME" => Some(PhpType::literal_int("8")),
+            _ => None,
+        };
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[],
+            arg_type_resolver: Some(&resolver),
+        };
+        resolve_conditional_with_text_args_and_defaults(
+            &cond, &params, text_args, None, None, loader, &tpl,
+        )
+        .map(|t| t.to_string())
+    }
+
+    /// A named constant is not a syntactic literal, but its resolved type is
+    /// one, so it settles a value condition both ways.
+    #[test]
+    fn value_condition_is_decided_by_a_resolved_literal() {
+        assert_eq!(resolve_pathinfo("$path").as_deref(), Some("Shape"));
+        assert_eq!(
+            resolve_pathinfo("$path, PATHINFO_ALL").as_deref(),
+            Some("Shape")
+        );
+        assert_eq!(
+            resolve_pathinfo("$path, PATHINFO_FILENAME").as_deref(),
+            Some("string")
+        );
+    }
+
+    /// An argument whose value cannot be pinned down really may take either
+    /// branch, so both are returned rather than committing to the else.
+    #[test]
+    fn undecidable_value_condition_unions_branches() {
+        assert_eq!(
+            resolve_pathinfo("$path, $flags").as_deref(),
+            Some("Shape|string")
+        );
+    }
+
+    /// `is true` and `is false` name one boolean value each, so the two
+    /// literals pick different branches instead of both reading as `is bool`.
+    #[test]
+    fn boolean_literal_arguments_decide_is_true_conditions() {
+        let params = [param("$value"), param_with_default("$flag", "false")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let tpl = TemplateContext::with_params(&[]);
+        let resolve = |cond: &str, text_args: &str| {
+            resolve_conditional_with_text_args_and_defaults(
+                &PhpType::parse(cond),
+                &params,
+                text_args,
+                None,
+                None,
+                loader,
+                &tpl,
+            )
+            .map(|t| t.to_string())
+        };
+
+        let is_true = "($flag is true ? Then : Else)";
+        assert_eq!(resolve(is_true, "$value, true").as_deref(), Some("Then"));
+        assert_eq!(resolve(is_true, "$value, false").as_deref(), Some("Else"));
+        // The declared default answers for the omitted argument.
+        assert_eq!(resolve(is_true, "$value").as_deref(), Some("Else"));
+
+        let is_false = "($flag is false ? Then : Else)";
+        assert_eq!(resolve(is_false, "$value, false").as_deref(), Some("Then"));
+        assert_eq!(resolve(is_false, "$value, true").as_deref(), Some("Else"));
+
+        // A plain `is bool` is satisfied by either literal.
+        let is_bool = "($flag is bool ? Then : Else)";
+        assert_eq!(resolve(is_bool, "$value, true").as_deref(), Some("Then"));
+        assert_eq!(resolve(is_bool, "$value, false").as_deref(), Some("Then"));
+    }
+
+    /// A resolved `bool` cannot settle `is true`: the argument really may be
+    /// either value. A resolved `true`/`false` can.
+    #[test]
+    fn is_true_condition_needs_a_resolved_boolean_value() {
+        let params = [param("$flag")];
+        let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        let resolve = |resolved: PhpType| {
+            let resolver = |_: &str| Some(resolved.clone());
+            let tpl = TemplateContext {
+                defaults: None,
+                params: &[],
+                arg_type_resolver: Some(&resolver),
+            };
+            resolve_conditional_with_text_args_and_defaults(
+                &PhpType::parse("($flag is true ? Then : Else)"),
+                &params,
+                "$flag",
+                None,
+                None,
+                loader,
+                &tpl,
+            )
+            .map(|t| t.to_string())
+        };
+
+        assert_eq!(resolve(PhpType::parse("true")).as_deref(), Some("Then"));
+        assert_eq!(resolve(PhpType::parse("false")).as_deref(), Some("Else"));
+        assert_eq!(
+            resolve(PhpType::bool()).as_deref(),
+            Some("Then|Else"),
+            "a plain bool leaves both branches open"
         );
     }
 
