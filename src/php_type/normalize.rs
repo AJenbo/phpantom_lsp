@@ -386,6 +386,17 @@ impl PhpType {
 ///
 /// Only scalar value domains take part; see [`is_runtime_scalar_value_domain`].
 pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -> bool {
+    // `array{}` is the empty array, and every array type that does not
+    // demand an entry has it as a member value.  That is real value
+    // containment rather than the variance/coercion kind
+    // [`is_runtime_scalar_value_domain`] rules out, so a branch that only
+    // produced `[]` adds nothing beside a branch that produced an array of
+    // the same family — which is what keeps the `[]` a loop or a by-ref
+    // closure capture starts from out of the joined result.
+    if subtype.is_empty_array_shape() && supertype.accepts_empty_array() {
+        return true;
+    }
+
     if !is_runtime_scalar_value_domain(subtype) || !is_runtime_scalar_value_domain(supertype) {
         return false;
     }

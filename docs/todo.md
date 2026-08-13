@@ -25,10 +25,8 @@ within the same impact tier.
 
 | #    | Item                                                                                                                                                      | Impact      | Effort      |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B140 | [Interface phpDoc is not inherited by an implementation without its own docblock](todo/bugs.md#b140-interface-phpdoc-is-not-inherited-by-an-implementation-without-its-own-docblock) | High | Low-Medium |
 | B167 | [Factory `create()`/`make()` keep the collection half on single-model chains](todo/bugs.md#b167-factory-createmake-keep-the-collection-half-on-single-model-chains) | Medium-High | Low-Medium |
-| B171 | [A subclass `@property` tag loses to an inherited real property](todo/bugs.md#b171-a-subclass-property-tag-loses-to-an-inherited-real-property)            | Medium      | Low-Medium  |
-| B163 | [Residual `int` arithmetic and assignment widenings](todo/bugs.md#b163-residual-int-arithmetic-and-assignment-widenings)                                   | Low-Medium  | Low-Medium  |
+| B163 | [An `int` assigned to a `float` property is reported](todo/bugs.md#b163-an-int-assigned-to-a-float-property-is-reported)                                  | Low         | Low-Medium  |
 | B139 | [Conditional return types are not evaluated against argument types](todo/bugs.md#b139-conditional-return-types-are-not-evaluated-against-argument-types)   | High        | Medium      |
 | B142 | [Builtins with argument-dependent return types, round two](todo/bugs.md#b142-builtins-with-argument-dependent-return-types-round-two)                      | High        | Medium      |
 | B144 | [`preg_match` `$matches` is nullable and shapeless](todo/bugs.md#b144-preg_match-matches-is-nullable-and-shapeless)                                        | High        | Medium      |

@@ -219,6 +219,15 @@ fn index_segment(
         return Some(element);
     }
 
+    // An empty shape has no entry any key could address, so the read is a
+    // guaranteed miss and yields `null`, exactly like an offset read on a
+    // non-array.  Widening to `mixed` instead loses the answer to
+    // `$a[$k] ?? 0` on the `[]` a loop is about to fill, which then makes
+    // every accumulated `+` an `int|float`.
+    if base.is_empty_array_shape() {
+        return Some(PhpType::null());
+    }
+
     // Fallback: when the base type is a plain class name (e.g.
     // `OpeningHours`), resolve the class and check its iterable generics
     // (`@extends`, `@implements`) for the element type. This handles

@@ -488,6 +488,42 @@ pub(crate) fn resolve_class_with_inheritance(
         }
     }
 
+    // Retype an inherited non-public property that the class documents
+    // with a `@property` tag of its own.
+    //
+    // A tag documents a magic read, and PHP only reaches `__get()` when no
+    // *accessible* property of that name exists.  An ancestor's
+    // `protected` / `private` declaration is invisible from outside, so it
+    // is not what the read yields and its type must not describe it — an
+    // Eloquent model declaring `@property string $connection` means
+    // `string`, not `Model::$connection`'s `\UnitEnum|string|null`. The
+    // same shadowing is routine for `$table` and `$keyType`.
+    //
+    // A property the class declares *itself* is a different matter: it is
+    // in scope everywhere the tag is, so it keeps its own type (the tag is
+    // then a contradiction, and the real declaration is the truth).
+    if let Some(doc) = class.doc_members.as_deref() {
+        for (name, type_hint) in &doc.properties {
+            let Some(hint) = type_hint else {
+                continue;
+            };
+            if class.properties.iter().any(|p| p.name == *name) {
+                continue;
+            }
+            // Look the index up immutably so a class with nothing to
+            // retype keeps sharing its property vector.
+            let Some(idx) = merged
+                .properties
+                .iter()
+                .position(|p| p.name == *name && p.visibility != Visibility::Public)
+            else {
+                continue;
+            };
+            let prop = &mut merged.properties.make_mut()[idx];
+            Arc::make_mut(prop).type_hint = Some(hint.clone());
+        }
+    }
+
     // Refine the `value` property on backed enums.  The `BackedEnum`
     // interface declares `public readonly int|string $value`, but each
     // concrete backed enum knows its specific backing type.  Replace

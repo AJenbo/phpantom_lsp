@@ -87,4 +87,47 @@ class Foo
 		// assertType('string', $opt['nullable']);
 	}
 
+
+	/**
+	 * The empty shape has no entry any key could address, so an offset
+	 * read on it is a guaranteed miss.
+	 *
+	 * @param array<string, int> $ints
+	 */
+	public function emptyShapeOffsets(array $ints, string $k, int $n)
+	{
+		$empty = [];
+		assertType('null', $empty['missing']);
+		assertType('0', $empty[$k] ?? 0);
+		assertType('int', ($empty[$k] ?? 0) + $n);
+
+		$totals = [];
+		foreach ($ints as $key => $value) {
+			$totals[$key] = ($totals[$key] ?? 0) + $value;
+		}
+		assertType('array<string, int>', $totals);
+	}
+
+	/**
+	 * `array{}` is the empty array, which every array alternative that
+	 * demands no entry already contains, so it drops out of the join.
+	 *
+	 * @param list<string> $names
+	 */
+	public function emptyShapeAbsorbedByArraySibling(array $names, bool $c)
+	{
+		$collected = [];
+		$append = function (string $name) use (&$collected): void {
+			$collected[] = $name;
+		};
+		assertType('list<string>', $collected);
+		assertType('string', $collected[0]);
+
+		$maybe = [];
+		if ($c) {
+			$maybe = $names;
+		}
+		assertType('list<string>', $maybe);
+	}
+
 }

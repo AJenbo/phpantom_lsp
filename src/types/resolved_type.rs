@@ -525,6 +525,18 @@ impl ResolvedType {
                         _ => members.push(rt.type_string.clone()),
                     }
                 }
+                // The `[]` a variable was initialised to says nothing
+                // beside the array a later write produced: `array{}` is the
+                // empty array, and an array alternative that demands no
+                // entry already contains it. Dropping it is what keeps a
+                // loop accumulator and a by-ref closure capture from
+                // reporting `array{}|list<string>`, whose offset reads then
+                // carry a spurious `null` from the empty half.
+                if members.iter().any(PhpType::is_empty_array_shape)
+                    && members.iter().any(PhpType::accepts_empty_array)
+                {
+                    members.retain(|m| !m.is_empty_array_shape());
+                }
                 PhpType::union(members)
             }
         }

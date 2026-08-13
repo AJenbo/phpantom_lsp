@@ -1445,6 +1445,36 @@ impl PhpType {
         }
     }
 
+    /// Returns `true` for the shape with no entries — `array{}`, the type
+    /// of an `[]` literal.
+    ///
+    /// It is the one array type whose value set is a single value, which
+    /// makes it a member of every array type that does not demand an
+    /// entry, and makes every offset read on it a guaranteed miss.
+    pub fn is_empty_array_shape(&self) -> bool {
+        matches!(self.kind(), TypeKind::ArrayShape(entries) if entries.is_empty())
+    }
+
+    /// Returns `true` when this array type has the empty array among its
+    /// values, so an `array{}` alternative beside it is redundant.
+    ///
+    /// `array`, `array<K, V>`, `list<V>`, `T[]` and `iterable` all do. The
+    /// `non-empty-*` family does not, and neither does a shape: `array{}`
+    /// is the only shape the empty array satisfies, and every other one
+    /// names an entry it lacks.
+    pub fn accepts_empty_array(&self) -> bool {
+        let name = match self.kind() {
+            TypeKind::Array(_) => return true,
+            TypeKind::Named(name) => name,
+            TypeKind::Generic(generic) => &generic.name,
+            _ => return false,
+        };
+        matches!(
+            crate::php_type::keywords::keyword_lowercase(name).as_str(),
+            "array" | "list" | "iterable"
+        )
+    }
+
     /// Returns `true` when this type is exactly the bare, unparameterised
     /// `array` keyword — i.e. `PhpType::named("array")`.
     ///

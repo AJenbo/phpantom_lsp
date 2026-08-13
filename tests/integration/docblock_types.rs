@@ -1515,6 +1515,59 @@ async fn test_real_property_overrides_property_tag() {
     );
 }
 
+/// Test: a `@property` tag beats a *non-public inherited* property of the
+/// same name.  PHP only reaches `__get()` when no accessible property
+/// exists, so an ancestor's `protected` declaration is not what the read
+/// yields and its type must not describe it.  This is the Eloquent
+/// `@property string $connection` / `$table` pattern.
+#[tokio::test]
+async fn test_property_tag_overrides_inherited_non_public_property() {
+    let backend = create_test_backend();
+    let base = backend.parse_php(concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    /** @var \\UnitEnum|string|null */\n",
+        "    protected $connection;\n",
+        "    /** @var string|null */\n",
+        "    public $label;\n",
+        "}\n",
+    ));
+    let child = backend.parse_php(concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property string $connection\n",
+        " * @property string $label\n",
+        " */\n",
+        "class Child extends Base {}\n",
+    ));
+
+    let base = std::sync::Arc::new(base.into_iter().next().unwrap());
+    let loader = move |name: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> {
+        (name == "Base").then(|| std::sync::Arc::clone(&base))
+    };
+    let merged = phpantom_lsp::resolve_class_fully(&child[0], &loader);
+
+    let type_of = |name: &str| {
+        merged
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.type_hint_str())
+    };
+    assert_eq!(
+        type_of("connection").as_deref(),
+        Some("string"),
+        "@property should retype the inherited protected property"
+    );
+    // A public inherited property is reachable without `__get()`, so the
+    // tag documents nothing new and the declaration keeps its own type.
+    assert_eq!(
+        type_of("label").as_deref(),
+        Some("string|null"),
+        "@property must not override an accessible inherited property"
+    );
+}
+
 /// Test: `@property-read` tags are provided lazily via `resolve_class_fully`.
 #[tokio::test]
 async fn test_parse_php_property_read_tag() {

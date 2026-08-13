@@ -37,7 +37,7 @@ $order = Order::find(7);   // reported Collection<int, Order>|Order|null
 Undecided type conditions from the sweep: `$id is array<mixed>|Arrayable`
 (Eloquent `find`/`findOrFail`, ~24 sites), `$items is EloquentCollection`
 / `$into is class-string<…>` (spatie/laravel-data `Data::collect()`,
-~22 sites once B140 lands), `$callback is null` (`tap()`, which also
+~22 sites), `$callback is null` (`tap()`, which also
 leaks the raw template name `TValue` into the union), and Symfony's
 `ContainerInterface::get()` (`B is 0|1` against the omitted argument's
 default `1`). Two cosmetic side effects to clear with it: a model's
@@ -50,24 +50,6 @@ nested conditionals collapse into unions containing an unresolved
 resolved argument type (falling back to the declared default's type
 when the argument is omitted), recursing into nested conditionals, and
 only union the branches when the condition is genuinely undecidable.
-
-### B140. Interface phpDoc is not inherited by an implementation without its own docblock
-
-**Impact: High · Effort: Low-Medium**
-
-`Spatie\LaravelData\Concerns\BaseData::collect()` (a trait method) has
-no docblock; the conditional `@return` lives on the interface
-`Spatie\LaravelData\Contracts\BaseData` that the `Data` base class
-implements. PHPStan inherits phpDoc from implemented interfaces when
-the implementation (including one supplied by a trait) has none;
-PHPantom reads only the native signature, so every `X::collect(...)`
-returns the raw eleven-member union. ~22 sites across three Laravel
-projects, always as `array`/`Collection` inputs whose result feeds a
-declared `array<X>`/`Collection<int, X>`.
-
-**Fix:** when a method has no own docblock, look it up on the
-interfaces the declaring class (transitively) implements, the same way
-parent-class docblocks are already inherited.
 
 ### B141. A `never` conditional branch does not assert the condition
 
@@ -233,10 +215,9 @@ Several forms of the same weakness (~7 sites):
 - `$a[$k][] = $v` never updates the inner element type: a value
   initialised as `[]` stays `array{}` in the outgoing type even
   though every loop iteration appends strings.
-- The intermediate empty-array state from
-  `if (!isset($a[$k])) { $a[$k] = []; } $a[$k][$id] = $x;` survives
-  the loop fix-point, leaving `array{}|array<int, string>` where
-  PHPStan reports `non-empty-array<int, string>`.
+- A key written on every path through a loop body leaves
+  `array<int, string>` where PHPStan reports
+  `non-empty-array<int, string>`.
 - `$a += ['slot' => $obj]` degrades to unconstrained `array`.
 - A constant shape `array{item: string, qty: int}` fails the subtype
   check against `array<string, mixed>`, so shaped rows are rejected
@@ -393,14 +374,19 @@ is also overridden by the annotation. The `@var` should seed the
 assignment it documents and then submit to normal flow narrowing
 (3 sites).
 
-### B163. Residual `int` arithmetic and assignment widenings
+### B163. An `int` assigned to a `float` property is reported
 
-**Impact: Low-Medium · Effort: Low-Medium**
+**Impact: Low · Effort: Low-Medium**
 
-Two leftovers from the shipped arithmetic-precision work:
-`($a[$k] ?? 0) + $int` widens to `int|float`, and an `int` value
+A leftover from the shipped arithmetic-precision work: an `int` value
 assigned to a `float`-typed property is reported instead of accepting
-the standard numeric widening.
+the standard numeric widening PHP performs even under
+`declare(strict_types=1)`.
+
+No site for this reproduces any more — not in the ten-project sweep,
+and not in the promoted-constructor, static-property, `+=`,
+`@var`-only, nullable, and array-element forms. Confirm it still
+happens before working on it.
 
 ### B174. A `break` that leaves a loop early is missing from the post-loop join
 
@@ -500,18 +486,6 @@ the flow-narrowed scope at the include position — the compiled
 virtual PHP already contains the real `if`, so the walker has the
 narrowing; it is the include-contract check that reads the wrong
 scope.
-
-### B171. A subclass `@property` tag loses to an inherited real property
-
-**Impact: Medium · Effort: Low-Medium**
-
-A model declaring `@property string $connection` still resolves
-`$model->connection` through `Illuminate\Database\Eloquent\Model`'s
-inherited `protected $connection` (`string|null`) and the generic
-attribute fallback (`UnitEnum|string|null`). A magic read must prefer
-the class's own `@property` tag over a non-public inherited property.
-1 site, but the shadowing pattern (`$connection`, `$table`, `$keyType`)
-is common on Eloquent models.
 
 ## Miscellaneous
 
