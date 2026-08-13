@@ -2,13 +2,15 @@
 //! class-string and member-existence guards, `in_array` element
 //! narrowing, and guard-clause (early-return) narrowing.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::atom::bytes_to_str;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ResolvedType};
 
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
@@ -281,19 +283,92 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// caller has a scope to consult.  Without it, only `$this` can be
     /// typed as a method-call receiver.
     pub var_types: ScopeVarResolverFn<'a>,
+    /// Resolves a receiver that is not a plain variable, so that
+    /// `app()->abort()` and `$this->aborter->fail()` terminate a branch
+    /// the same way `$app->abort()` does.  See [`ReceiverResolverFn`].
+    pub receiver_resolver: ReceiverResolverFn<'a>,
 }
 
 impl<'a> ExitCtx<'a> {
     /// Build an exit context from a variable-resolution context.
-    pub(in crate::type_engine) fn from_var_ctx(ctx: &'a VarResolutionCtx<'a>) -> Self {
+    ///
+    /// The receiver resolver is supplied separately because the closure
+    /// it wraps has to outlive the context, which a constructor cannot
+    /// arrange for its own caller.
+    pub(in crate::type_engine) fn from_var_ctx(
+        ctx: &'a VarResolutionCtx<'a>,
+        receiver_resolver: ReceiverResolverFn<'a>,
+    ) -> Self {
         Self {
             current_class: ctx.current_class,
             class_loader: ctx.class_loader,
             function_loader: ctx.loaders.function_loader,
             resolved_class_cache: ctx.resolved_class_cache,
             var_types: ctx.scope_var_resolver,
+            receiver_resolver,
         }
     }
+}
+
+/// Resolves a method-call receiver that is not a plain variable (a call
+/// result, a `new` expression, a property chain) to the fully-qualified
+/// names of the classes it can hold.
+///
+/// The consumer supplies this rather than the guard code resolving the
+/// expression itself: each consumer already owns the scope the receiver
+/// has to be read against (the forward walker's in-progress
+/// `ScopeState`, or a `VarResolutionCtx`), and both feed the same shared
+/// expression pipeline.
+pub(in crate::type_engine) type ReceiverResolverFn<'a> =
+    Option<&'a dyn for<'e> Fn(&'e Expression<'e>) -> Vec<String>>;
+
+/// Keep the class-backed entries of a resolution result, as FQNs.
+///
+/// Both consumers build their [`ReceiverResolverFn`] on this, so a
+/// receiver whose type is a union of a class and a scalar contributes
+/// only the class.
+pub(in crate::type_engine) fn class_names_of(types: &[ResolvedType]) -> Vec<String> {
+    types
+        .iter()
+        .filter_map(|rt| rt.class_info.as_ref().map(|ci| ci.fqn().to_string()))
+        .collect()
+}
+
+thread_local! {
+    /// Receiver expressions whose type is currently being resolved on
+    /// this thread, keyed by source span.
+    ///
+    /// Resolving a receiver runs the shared expression pipeline, which
+    /// can walk back into the statement that asked whether the branch
+    /// exits: `$this->aborter->fail()` asks for the type of
+    /// `$this->aborter`, and property narrowing re-reads the guard
+    /// clauses in front of the cursor to answer.  Keying by span breaks
+    /// exactly that cycle and nothing else, since a span identifies one
+    /// expression in one file.
+    static RESOLVING_RECEIVERS: RefCell<HashSet<Span>> = RefCell::new(HashSet::new());
+}
+
+/// RAII guard for [`RESOLVING_RECEIVERS`].
+struct ReceiverGuard {
+    span: Span,
+}
+
+impl Drop for ReceiverGuard {
+    fn drop(&mut self) {
+        RESOLVING_RECEIVERS.with(|set| {
+            set.borrow_mut().remove(&self.span);
+        });
+    }
+}
+
+/// Try to claim `span` for receiver resolution.  Returns `None` when the
+/// same receiver is already being resolved further up the stack.
+fn try_acquire_receiver_guard(span: Span) -> Option<ReceiverGuard> {
+    let inserted = RESOLVING_RECEIVERS.with(|set| set.borrow_mut().insert(span));
+    // Build the guard lazily: `then_some` would construct one even when
+    // the insert failed, and dropping it would release the entry the
+    // frame above owns, letting the cycle right back through.
+    inserted.then(|| ReceiverGuard { span })
 }
 
 /// Check whether an expression is a call to a `never`-returning
@@ -366,23 +441,27 @@ fn member_selector_name<'s>(selector: &ClassLikeMemberSelector<'s>) -> Option<&'
 ///
 /// `$this` comes from the enclosing class; any other variable is read
 /// from the caller's scope when one was supplied.  Anything else (a
-/// property chain, a call result) is left unresolved rather than
-/// re-entering expression resolution from a control-flow predicate.
+/// property chain, a call result, a `new` expression) goes through the
+/// caller's [`ReceiverResolverFn`], guarded against the cycle that
+/// resolving an expression from a control-flow predicate can form.
 fn receiver_class_names(object: &Expression<'_>, ctx: &ExitCtx<'_>) -> Vec<String> {
-    let Expression::Variable(Variable::Direct(dv)) = object else {
-        return Vec::new();
-    };
-    let var_name = bytes_to_str(dv.name);
-    if var_name == "$this" {
-        return vec![ctx.current_class.fqn().to_string()];
+    if let Expression::Variable(Variable::Direct(dv)) = object {
+        let var_name = bytes_to_str(dv.name);
+        if var_name == "$this" {
+            return vec![ctx.current_class.fqn().to_string()];
+        }
+        let Some(var_types) = ctx.var_types else {
+            return Vec::new();
+        };
+        return class_names_of(&var_types(var_name));
     }
-    let Some(var_types) = ctx.var_types else {
+    let Some(receiver_resolver) = ctx.receiver_resolver else {
         return Vec::new();
     };
-    var_types(var_name)
-        .iter()
-        .filter_map(|rt| rt.class_info.as_ref().map(|ci| ci.fqn().to_string()))
-        .collect()
+    let Some(_guard) = try_acquire_receiver_guard(object.span()) else {
+        return Vec::new();
+    };
+    receiver_resolver(object)
 }
 
 fn class_has_never_method(class_name: &str, method_name: &str, ctx: &ExitCtx<'_>) -> bool {
@@ -441,7 +520,15 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
-    if !then_body_unconditionally_exits(&if_stmt.body, &ExitCtx::from_var_ctx(ctx)) {
+    let receiver_resolver = |expr: &Expression<'_>| {
+        class_names_of(
+            &crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(expr, ctx),
+        )
+    };
+    if !then_body_unconditionally_exits(
+        &if_stmt.body,
+        &ExitCtx::from_var_ctx(ctx, Some(&receiver_resolver)),
+    ) {
         return;
     }
     if if_stmt.body.has_else_clause() || if_stmt.body.has_else_if_clauses() {

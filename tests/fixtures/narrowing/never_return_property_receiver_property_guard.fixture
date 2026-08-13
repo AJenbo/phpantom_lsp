@@ -1,0 +1,37 @@
+// test: property guard exiting through a never method on another property
+// feature: completion
+// Typing the receiver re-enters property narrowing for the same method,
+// which must resolve the declared property type instead of recursing
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+class Aborter {
+    public function fail(): never {
+        throw new \RuntimeException();
+    }
+}
+
+class Holder {
+    /** @var Foo|Bar */
+    public $prop;
+
+    private Aborter $aborter;
+
+    public function test(): void {
+        if (!$this->prop instanceof Foo) {
+            $this->aborter->fail();
+        }
+
+        $this->prop-><>
+    }
+}

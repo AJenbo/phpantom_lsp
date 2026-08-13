@@ -1,0 +1,34 @@
+// test: guard calling a never-returning method on a helper call result
+// feature: completion
+// The receiver is a function call, not a variable, so its class comes
+// from the call's return type
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+class Aborter {
+    public function fail(): never {
+        throw new \RuntimeException();
+    }
+}
+
+function aborter(): Aborter {
+    return new Aborter();
+}
+
+function test(Foo|Bar $x): void {
+    if (!$x instanceof Foo) {
+        aborter()->fail();
+    }
+
+    $x-><>
+}

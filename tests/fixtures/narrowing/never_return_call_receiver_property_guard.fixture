@@ -1,0 +1,38 @@
+// test: property guard exiting through a never method on a helper call result
+// feature: completion
+// The property narrowing path must type a non-variable receiver too
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+class Aborter {
+    public function fail(): never {
+        throw new \RuntimeException();
+    }
+}
+
+function aborter(): Aborter {
+    return new Aborter();
+}
+
+class Holder {
+    /** @var Foo|Bar */
+    public $prop;
+
+    public function test(): void {
+        if (!$this->prop instanceof Foo) {
+            aborter()->fail();
+        }
+
+        $this->prop-><>
+    }
+}

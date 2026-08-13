@@ -872,6 +872,21 @@ class GuardClauseDemo
         $unknown->crush();                        // narrowed to Rock
     }
 
+    /**
+     * A guard body whose only statement returns `never` cannot fall
+     * through, so it terminates the branch just like `return` does.
+     * The receiver does not have to be a variable: the helper call's
+     * return type says which class `fail()` is looked up on.
+     */
+    public function neverGuard(): void
+    {
+        $produce = pickRockOrBanana();            // Rock|Banana
+        if (!$produce instanceof Banana) {
+            demoAborter()->fail('not a banana');  // : never — exits here
+        }
+        $produce->peel();                         // narrowed to Banana after guard
+    }
+
     /** Positive instanceof + early return on a mixed parameter. */
     public function mixedGuard(mixed $value): void
     {
@@ -7447,6 +7462,20 @@ function pickRockOrBanana(): Rock|Banana
     return new Rock();
 }
 
+/** Its one method never returns, so calling it ends the code path. */
+class DemoAborter
+{
+    public function fail(string $why): never
+    {
+        throw new \RuntimeException($why);
+    }
+}
+
+function demoAborter(): DemoAborter
+{
+    return new DemoAborter();
+}
+
 /**
  * A union that mixes a class with an array of that class, the shape a
  * conditional return type produces (`$key is null ? Rock[] : Rock`).
@@ -8876,6 +8905,15 @@ function runDemoAssertions(): void
     } else {
         assert($guardSubject instanceof Banana, 'Guard: else must be Banana');
         }
+
+    // ── Guard clause exiting through a never-returning method ───────────
+    $neverGuardSubject = pickRockOrBanana();
+    if (!$neverGuardSubject instanceof Banana) {
+        // demoAborter()->fail() would throw in real code
+        assert($neverGuardSubject instanceof Rock, 'Never guard: not Banana must be Rock');
+    } else {
+        assert(is_string($neverGuardSubject->peel()), 'Never guard: Banana survives the guard');
+    }
 
         // ── Guard clause: positive instanceof + early return on mixed ────
         // After `if ($x instanceof Y) { return; }`, $x is NOT Y.

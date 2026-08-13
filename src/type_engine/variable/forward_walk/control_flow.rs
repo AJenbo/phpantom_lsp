@@ -548,6 +548,7 @@ pub(crate) fn process_if_colon_body<'b>(
 /// not just `$this->fail()`.
 fn branch_exits(stmt: &Statement<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) -> bool {
     let var_types = |var_name: &str| scope.get(var_name).to_vec();
+    let receiver_resolver = |expr: &Expression<'_>| receiver_class_names(expr, scope, ctx);
     narrowing::statement_unconditionally_exits(
         stmt,
         &narrowing::ExitCtx {
@@ -556,8 +557,25 @@ fn branch_exits(stmt: &Statement<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'
             function_loader: ctx.loaders.function_loader,
             resolved_class_cache: ctx.resolved_class_cache,
             var_types: Some(&var_types),
+            receiver_resolver: Some(&receiver_resolver),
         },
     )
+}
+
+/// Type a method-call receiver that is not a plain variable, so that a
+/// guard body ending in `app()->abort()` or `$this->aborter->fail()`
+/// terminates the branch.
+///
+/// The scope is read as a snapshot: resolution goes through the shared
+/// RHS pipeline with the walker's in-progress scope injected as the
+/// variable resolver, so it answers from types already established
+/// rather than re-walking the body it was called from.
+fn receiver_class_names(
+    expr: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<String> {
+    narrowing::class_names_of(&resolve_rhs_with_scope(expr, scope, ctx))
 }
 
 /// Check whether a colon-delimited if/elseif/else branch terminates, so
@@ -572,12 +590,14 @@ fn branch_exits_stmts<'s>(
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
     let var_types = |var_name: &str| scope.get(var_name).to_vec();
+    let receiver_resolver = |expr: &Expression<'_>| receiver_class_names(expr, scope, ctx);
     let exit_ctx = narrowing::ExitCtx {
         current_class: ctx.current_class,
         class_loader: ctx.class_loader,
         function_loader: ctx.loaders.function_loader,
         resolved_class_cache: ctx.resolved_class_cache,
         var_types: Some(&var_types),
+        receiver_resolver: Some(&receiver_resolver),
     };
     stmts.any(|s| narrowing::statement_unconditionally_exits(s, &exit_ctx))
 }

@@ -1,0 +1,28 @@
+// test: guard calling a never-returning method on a fresh instance
+// feature: completion
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+class Aborter {
+    public function fail(): never {
+        throw new \RuntimeException();
+    }
+}
+
+function test(Foo|Bar $x): void {
+    if (!$x instanceof Foo) {
+        (new Aborter())->fail();
+    }
+
+    $x-><>
+}
