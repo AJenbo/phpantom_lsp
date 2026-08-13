@@ -849,17 +849,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B98. Array-index access into a relation collection loses its element type across a multi-hop relation chain
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1349,17 +1338,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B98. Array-index access into a relation collection loses its element type across a multi-hop relation chain
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1443,39 +1421,6 @@ site, so <code>lookUp()</code> should resolve identically to <code>lookUp('immut
 <p><strong>Fix:</strong> wherever the explicit-argument case resolves <code>T</code> to the literal
 passed at the call site, apply the same resolution when the argument is
 omitted and a literal default value is available.</p>
-<h3 id="b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain">B98. Array-index access into a relation collection loses its element type across a multi-hop relation chain<a class="headerlink" href="#b98-array-index-access-into-a-relation-collection-loses-its-element-type-across-a-multi-hop-relation-chain" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// $product-&gt;subcategories: HasMany&lt;Subcategory, $this&gt;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">foreach ($product-&gt;subcategories as $subcategory) {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    // $subcategory-&gt;category: BelongsTo&lt;Category, $this&gt;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    // Category::$translations: HasMany&lt;CategoryTranslation, $this&gt;</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    if (!$subcategory-&gt;category-&gt;translations[0]) {</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        continue;</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    }</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    echo $subcategory-&gt;category-&gt;translations[0]-&gt;name; // unresolved_member_access</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
-</code></pre></div>
-<p>A single-hop relation collection index (<code>$model-&gt;children[0]-&gt;name</code>) resolves
-fine: <code>build_property_type()</code> in
-<code>src/virtual_members/laravel/relationships.rs</code> types the property as
-<code>Collection&lt;Related&gt;</code>, and <code>extract_value_type()</code> in <code>src/php_type/mod.rs</code>
-correctly reads the generic's element type on indexing. But when the
-collection property is reached through a chain of two or more relation hops
-(<code>$subcategory-&gt;category-&gt;translations[0]</code>, where both <code>category</code> and
-<code>translations</code> are themselves relation-backed virtual properties), indexing
-the final collection reports <code>Cannot verify property 'name' — type of
-'...' could not be resolved</code> instead of resolving to the related model.
-Reproduced in <code>projects/luxplus-shared/src/core/Exports/ProductExport.php</code>
-(7 occurrences across lines 51-68, all on the same chained pattern; the
-<code>foreach</code> loop variable itself, <code>$subcategory</code>, resolves correctly, so the
-loss happens specifically at the second relation hop plus array index, not at
-the <code>foreach</code> element type).</p>
-<p><strong>Fix:</strong> not investigated. Likely the resolver used for
-<code>$obj-&gt;relationA-&gt;relationB[N]</code> (property access chained off a relation
-property, then indexed) does not re-run the same relation virtual-property
-synthesis on the intermediate <code>relationA</code> result before resolving
-<code>relationB</code>, unlike the single-hop case. Bisect against a minimal
-<code>$a-&gt;one-&gt;many[0]</code> repro to confirm where the type is dropped.</p>
 
 
 
