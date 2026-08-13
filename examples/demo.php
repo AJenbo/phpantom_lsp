@@ -1144,6 +1144,25 @@ class ConditionalReturnDemo
         echo $wordCount + 1;
         $wordList = str_word_count('two words', 1);
         strtoupper($wordList[0]);                 // format 1 → list<string>
+
+        // The replace family returns the shape it was handed, so a string
+        // subject rules out the array branch its signature also names.
+        $swapped = str_replace('a', 'b', 'banana');
+        strtoupper($swapped);                     // string subject → string
+        $swappedAll = str_replace('a', 'b', ['banana', 'apple']);
+        strtoupper($swappedAll[0]);               // array subject → array<array-key, string>
+
+        // `preg_replace()` keeps its `null` error branch for a string
+        // subject, where PCRE really can fail, and drops it for an array.
+        $masked = preg_replace('/\d/', '*', 'a1b2') ?? '';
+        strtoupper($masked);                      // string subject → string|null
+        $maskedAll = preg_replace('/\d/', '*', ['a1', 'b2']);
+        strtoupper($maskedAll[0]);                // array subject → array<array-key, string>
+
+        // `JSON_THROW_ON_ERROR` raises a JsonException instead of returning
+        // `false`, so the failure branch cannot happen at this call site.
+        $json = json_encode(['ok' => true], JSON_THROW_ON_ERROR);
+        strtoupper($json);                        // string, not string|false
     }
 }
 
@@ -8286,6 +8305,16 @@ function runDemoAssertions(): void
     assert(str_word_count('two words') === 2, 'the default $format of 0 counts the words');
     assert(str_word_count('two words', 1) === ['two', 'words'], 'format 1 lists the words');
     assert(str_word_count('two words', 2) === [0 => 'two', 4 => 'words'], 'format 2 keys the words by offset');
+
+    // ── Subject-keyed conditional return type (the replace family) ───────
+    assert(str_replace('a', 'b', 'banana') === 'bbnbnb', 'a string subject replaces into a string');
+    assert(str_replace('a', 'b', ['banana', 'apple']) === ['bbnbnb', 'bpple'], 'an array subject replaces into an array');
+    assert(preg_replace('/\d/', '*', 'a1b2') === 'a*b*', 'a string subject is replaced into a string');
+    assert(preg_replace('/\d/', '*', ['a1', 'b2']) === ['a*', 'b*'], 'an array subject is replaced into an array');
+    assert(substr_replace('banana', 'x', 0, 1) === 'xanana', 'a string subject is spliced into a string');
+
+    // ── Flag-keyed return type (json_encode + JSON_THROW_ON_ERROR) ───────
+    assert(json_encode(['ok' => true], JSON_THROW_ON_ERROR) === '{"ok":true}', 'the flag makes the failure branch a JsonException instead of false');
 
     // ── Closure / arrow function return types ───────────────────────────
     $makePenClosure = function(): Pen { return new Pen(); };

@@ -9672,3 +9672,73 @@ useString($line);
         "only false should be narrowed away, got {messages:?}"
     );
 }
+
+// ─── Builtins whose return type depends on an argument ──────────────────────
+
+/// `preg_replace`/`str_replace` are declared with the flat union of both of
+/// their overloads, but a string subject can only come back as a string, so
+/// the result satisfies a `string` parameter.
+#[test]
+fn a_replace_on_a_string_subject_is_a_string() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+function test(string $text): void {
+    useString(preg_replace('/a/', 'b', $text) ?? '');
+    useString(str_replace('a', 'b', $text));
+    useString(substr_replace($text, 'b', 0, 1));
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The array branch is still enforced: an array subject returns an array,
+/// which no `string` parameter accepts.
+#[test]
+fn a_replace_on_an_array_subject_is_not_a_string() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+/** @param list<string> $lines */
+function test(array $lines): void {
+    useString(str_replace('a', 'b', $lines));
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+/// `json_encode()` is declared `string|false`, but `JSON_THROW_ON_ERROR`
+/// raises a `JsonException` instead of returning `false`, so the result
+/// satisfies a `string` parameter.
+#[test]
+fn json_encode_with_throw_on_error_is_a_string() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+function test(mixed $value): void {
+    useString(json_encode($value, JSON_THROW_ON_ERROR));
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Without the flag the failure branch is real and still reported.
+#[test]
+fn json_encode_without_throw_on_error_may_be_false() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+function test(mixed $value): void {
+    useString(json_encode($value));
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("false"),
+        "the failure branch is what is reported, got {messages:?}"
+    );
+}

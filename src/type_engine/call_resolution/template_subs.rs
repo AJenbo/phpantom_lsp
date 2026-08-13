@@ -15,8 +15,8 @@ use crate::types::*;
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 
 use super::return_types::{
-    resolve_call_return_hint, resolve_chain_declared_return, resolve_expression_to_type,
-    resolve_literal_type, resolve_static_access_type,
+    resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
+    resolve_expression_to_type, resolve_literal_type, resolve_static_access_type,
 };
 
 impl Backend {
@@ -688,6 +688,13 @@ impl Backend {
 
         // ── Literal values ──────────────────────────────────────
         if let Some(ty) = resolve_literal_type(trimmed) {
+            return Some(ty);
+        }
+
+        // ── Casts ───────────────────────────────────────────────
+        // `(string) $customer->id` is a `string` whatever the property
+        // resolves to, so the cast answers before the operand is read.
+        if let Some(ty) = resolve_cast_type(trimmed) {
             return Some(ty);
         }
 

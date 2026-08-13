@@ -33,14 +33,23 @@
 //!    `$format`, so the count, the word list, and the offset-keyed map each
 //!    resolve on their own.
 //!
-//! 3. **`stream_bucket_make_writeable`** -- phpstorm-stubs type the
+//! 3. **The replace family** -- `preg_replace`, `preg_replace_callback`,
+//!    `preg_replace_callback_array`, `preg_filter`, `str_replace`,
+//!    `str_ireplace` and `substr_replace` all return an array when their
+//!    subject is an array and a string when it is a string, but the stubs
+//!    declare the flat union `array|string` (plus `null` for the `preg_`
+//!    ones). We patch each with a conditional return type keyed on the
+//!    subject, so a string subject stops carrying an impossible array
+//!    branch. Mirrors PHPStan's `ReplaceFunctionsDynamicReturnTypeExtension`.
+//!
+//! 4. **`stream_bucket_make_writeable`** -- phpstorm-stubs type the
 //!    return as `object|null` below PHP 8.4 (the `StreamBucket` class
 //!    only exists from 8.4 onward). Bare `object` in a union is not
 //!    recognised as the universal-container case, so property access
 //!    on the result is unverifiable. We override the pre-8.4 case to
 //!    `stdClass|null`, matching PHPStan's function map.
 //!
-//! 4. **`array_map`** / **`array_filter`** -- phpstorm-stubs type the
+//! 5. **`array_map`** / **`array_filter`** -- phpstorm-stubs type the
 //!    callback as bare `callable` and the array as bare `array`, so a
 //!    closure passed to them (`array_map(fn($x) => …, $items)`) leaves
 //!    its parameter untyped. We add `@template TValue`, retype the
@@ -50,7 +59,7 @@
 //!    return type (and thus the function's own return) stays in the
 //!    value-inspecting logic in `raw_type_inference.rs`.
 //!
-//! 5. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//! 6. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
 //!    `mktime` and the rest of [`crate::benevolent_builtins`] declare a
 //!    failure branch that idiomatic PHP never checks. Their return type is
 //!    tagged so the diagnostics stop enforcing that branch. Unlike the
@@ -89,7 +98,7 @@
 //!    `@param` is untyped `object|array`.  We bind `TKey`/`TValue` from
 //!    the `$array` argument, matching PHPStan's stubs.
 //!
-//! 7. **Benevolent methods** -- the class-level half of function patch 5,
+//! 7. **Benevolent methods** -- the class-level half of function patch 6,
 //!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
 //!    `DateTime::modify` and `Closure::bind`.
 //!
@@ -121,6 +130,12 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
+        "preg_replace"
+        | "preg_replace_callback"
+        | "preg_replace_callback_array"
+        | "preg_filter" => patch_replace_family(func, "$subject", true),
+        "str_replace" | "str_ireplace" => patch_replace_family(func, "$subject", false),
+        "substr_replace" => patch_replace_family(func, "$string", false),
         _ => {}
     }
     if crate::benevolent_builtins::function_is_benevolent(&func.name) {
@@ -263,6 +278,50 @@ fn patch_str_word_count(func: &mut FunctionInfo) {
                 unknown_format,
             ),
         ),
+    ));
+}
+
+/// Patch a member of the replace family to have a conditional return type
+/// keyed on its subject argument.
+///
+/// `preg_replace`, `str_replace` and their relatives take a subject that may
+/// be either a string or an array of strings, and return the same shape they
+/// were given. The stubs can only declare the flat union (`array|string`, plus
+/// `null` for the `preg_` family, which returns `null` on a PCRE error), so a
+/// call with a string subject carries an array branch that cannot happen, and
+/// vice versa.
+///
+/// `subject_param` names the parameter holding the subject (`$string` for
+/// `substr_replace`, `$subject` for the rest) and `nullable_on_error` marks
+/// the functions whose string branch keeps the `null` error result. An array
+/// subject is answered per element, so no error branch survives there.
+///
+/// A subject whose type cannot be pinned down at the call site leaves the
+/// declared union, which is all the call can promise.
+fn patch_replace_family(func: &mut FunctionInfo, subject_param: &str, nullable_on_error: bool) {
+    // Bail out if the stub does not have the parameter the conditional keys
+    // on: without it the subject cannot be identified and the conditional
+    // would be decided against an unrelated argument.
+    if !func.parameters.iter().any(|p| p.name == subject_param) {
+        return;
+    }
+
+    // The subject's keys carry over untouched, so a string-keyed subject
+    // keeps its string keys — hence `array-key` rather than `int`.
+    let replaced_array =
+        PhpType::generic_array(PhpType::named(atom("array-key")), PhpType::string());
+    let replaced_string = if nullable_on_error {
+        PhpType::union(vec![PhpType::string(), PhpType::null()])
+    } else {
+        PhpType::string()
+    };
+
+    func.conditional_return = Some(PhpType::conditional(
+        subject_param,
+        false,
+        PhpType::array(),
+        replaced_array,
+        replaced_string,
     ));
 }
 

@@ -679,50 +679,35 @@ upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
 `self::` cases survive); port them back.
 
+
 ---
 
-## T38. Several core builtins have a return type that depends on an argument's value or shape
-**Impact: High · Effort: Medium**
+## T40. `pathinfo()` returns a shape or a string depending on the flags argument
+**Impact: Low-Medium · Effort: Low**
 
 ```php
-$json = json_encode($value, JSON_THROW_ON_ERROR);
-needsString($json); // reported: got string|false — THROW_ON_ERROR makes false impossible
-
-$out = preg_replace($pattern, $replacement, $subject); // $subject: string
-needsString($out); // reported: got string|array<string> — $subject is a string, so the array branch can't happen
+$parts = pathinfo($path);                      // array{dirname: …, basename: …, extension?: …, filename: …}
+$name  = pathinfo($path, PATHINFO_FILENAME);   // string
+needsString($name); // reported: got string|array{…} — a single component is always a string
 ```
 
-phpstorm-stubs (and PHPantom's own signatures) declare these functions
-with the flat union of every possible overload's return type, because
-the stub format has no way to express "the return type depends on the
-value of this specific argument." PHPStan instead ships a
-`DynamicFunctionReturnTypeExtension` per case:
-`JsonThrowOnErrorDynamicReturnTypeExtension` drops the `false` branch of
-`json_encode`/`json_decode` when the flags argument provably includes
-the `JSON_THROW_ON_ERROR` bit; a `preg_replace`/`preg_replace_callback`/
-`str_replace`/`str_ireplace` family extension picks the `array` or
-`string` branch based on whether the `$subject` argument is an array or
-a string; `pathinfo()` similarly depends on whether a `$flags` argument
-is present. None of this is modelled today, so PHPantom always reports
-the full declared union regardless of the actual call site — one of the
-largest sources of `type_mismatch_argument`/`_return` false positives
-found in the 2026-08-12 sample-project sweep (over 150 instances of the
-`preg_replace`/`str_replace`-family shape alone, plus dozens more from
-`json_encode`/`json_decode`).
+`pathinfo()` hands back an array of every component when its `$flags`
+argument is left at the default `PATHINFO_ALL`, and a plain string when
+the caller names one component. phpstorm-stubs declare the flat union, so
+both call shapes carry the branch the other one takes.
 
-**Fix:** add a small dynamic-return-type mechanism for builtin functions,
-mirroring the existing PHPStan conditional-return-type support
-(`php_type/transform.rs`'s `ConditionalType` handling, added for
-user-defined `@return ($x is Y ? A : B)` docblocks): for a short,
-explicit list of builtin functions, inspect the resolved argument type
-or literal value at the call site and pick the matching branch instead
-of returning the raw stub union. Start with `json_encode`/`json_decode`
-(`JSON_THROW_ON_ERROR` bit test) and the `preg_replace`/`str_replace`
-family (array-vs-string `$subject`), since those account for most of
-the volume found.
+The mechanism this needs already exists, in the shape used for
+`json_encode`'s `JSON_THROW_ON_ERROR`
+(`type_engine/types/flag_returns.rs`): read the flags argument's text at
+the call site and pick a branch from it. A conditional return type in
+`stub_patches.rs` cannot express this one, because the deciding value
+arrives as a global constant (`PATHINFO_FILENAME`) and a condition can
+only name a literal value or a class constant.
 
-A case the condition can name outright (an argument's value, or whether it
-is an array or a string) needs no new mechanism: a conditional return type
-in `stub_patches.rs` covers it, as `range()` and `str_word_count()` do. The
-`json_encode`/`json_decode` flag test is the case that does, since a bit
-test on the flags argument is not something a condition can express.
+**Fix:** add `pathinfo` to `flag_returns.rs`: the string branch when the
+flags argument names one of `PATHINFO_DIRNAME`, `PATHINFO_BASENAME`,
+`PATHINFO_EXTENSION` or `PATHINFO_FILENAME` (or an integer with a single
+bit set), and the array branch when the argument is left out. Anything
+else keeps the declared union. Left over from the work that took the
+`preg_replace`/`str_replace` family and `json_encode`, the two shapes
+that accounted for the bulk of the volume.

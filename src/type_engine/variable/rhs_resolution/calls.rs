@@ -15,7 +15,6 @@ use crate::types::{ClassInfo, ResolvedType};
 use crate::virtual_members::laravel::validated_shape;
 
 use crate::type_engine::call_resolution::MethodReturnCtx;
-use crate::type_engine::conditional_resolution::resolve_conditional_with_args;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
@@ -918,21 +917,53 @@ pub(super) fn resolve_rhs_function_call<'b>(
         && let Some(fl) = function_loader
         && let Some(func_info) = fl(name, func_name_offset)
     {
-        // Try conditional return type first
-        if let Some(ref cond) = func_info.conditional_return {
+        // A return type the call site decides (a conditional keyed on an
+        // argument, or a branch the flags argument rules out) is
+        // authoritative, so it is tried before the declared type.
+        if func_info.conditional_return.is_some()
+            || crate::type_engine::types::flag_returns::has_flag_dependent_return(name)
+        {
             let var_resolver = build_var_resolver_from_ctx(ctx);
-            let tpl = crate::type_engine::types::conditional::TemplateContext::with_params(
-                &func_info.template_params,
-            );
-            let resolved_type = resolve_conditional_with_args(
-                cond,
-                &func_info.parameters,
-                &func_call.argument_list,
-                Some(&var_resolver),
-                Some(current_class_name),
-                class_loader,
-                &tpl,
-            );
+            let rctx = ctx.as_resolution_ctx();
+            // `is <Type>` conditions on an argument that isn't a literal
+            // (`preg_replace($p, $r, $subject)`) are decided by the
+            // argument's resolved type, so the branch a call takes matches
+            // what it was actually handed.
+            let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
+            let text_args =
+                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                    &func_call.argument_list,
+                    content,
+                )
+                .join(", ");
+            let resolved_type = func_info.conditional_return.as_ref().and_then(|cond| {
+                let tpl = crate::type_engine::types::conditional::TemplateContext {
+                    defaults: None,
+                    params: &func_info.template_params,
+                    arg_type_resolver: Some(&arg_ty_resolver),
+                };
+                crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
+                    cond,
+                    &func_info.parameters,
+                    &text_args,
+                    Some(&var_resolver),
+                    Some(current_class_name),
+                    class_loader,
+                    &tpl,
+                )
+            })
+            // A branch the flags argument rules out (`json_encode(…,
+            // JSON_THROW_ON_ERROR)` never returning `false`) is decided the
+            // same way: at the call site, from the declared return type.
+            .or_else(|| {
+                crate::type_engine::types::flag_returns::flag_narrowed_return_type(
+                    name,
+                    &func_info.parameters,
+                    &text_args,
+                    func_info.return_type.as_ref()?,
+                    Some(&arg_ty_resolver),
+                )
+            });
             if let Some(ref ty) = resolved_type {
                 let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     ty,

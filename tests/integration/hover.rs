@@ -12909,6 +12909,157 @@ function probe(string $text, int $format): void {
     );
 }
 
+/// The replace family returns what its subject was: a string subject can
+/// never come back as an array, and an array subject never as a string. A
+/// subject whose type isn't known keeps the declared union.
+#[test]
+fn hover_replace_family_follows_its_subject() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///replace_family.php";
+    let content = r#"<?php
+/**
+ * @param list<string> $lines
+ */
+function probe(string $text, array $lines, mixed $anything): void {
+    $one = preg_replace('/a/', 'b', $text);
+    $one;
+    $many = preg_replace('/a/', 'b', $lines);
+    $many;
+    $swapped = str_replace('a', 'b', $text);
+    $swapped;
+    $swappedMany = str_replace('a', 'b', $lines);
+    $swappedMany;
+    $unknown = str_replace('a', 'b', $anything);
+    $unknown;
+}
+"#;
+
+    let one = hover_text(&hover_at(&backend, uri, content, 6, 6).expect("hover $one")).to_string();
+    assert!(
+        one.contains("string") && !one.contains("array"),
+        "a string subject rules out the array branch: {one}"
+    );
+
+    let many =
+        hover_text(&hover_at(&backend, uri, content, 8, 6).expect("hover $many")).to_string();
+    assert!(
+        many.contains("array<array-key, string>"),
+        "an array subject comes back as an array of strings: {many}"
+    );
+
+    let swapped =
+        hover_text(&hover_at(&backend, uri, content, 10, 6).expect("hover $swapped")).to_string();
+    assert!(
+        swapped.contains("string") && !swapped.contains("array") && !swapped.contains("null"),
+        "str_replace on a string returns a plain string: {swapped}"
+    );
+
+    let swapped_many =
+        hover_text(&hover_at(&backend, uri, content, 12, 6).expect("hover $swappedMany"))
+            .to_string();
+    assert!(
+        swapped_many.contains("array<array-key, string>"),
+        "str_replace on an array returns an array: {swapped_many}"
+    );
+
+    let unknown =
+        hover_text(&hover_at(&backend, uri, content, 14, 6).expect("hover $unknown")).to_string();
+    assert!(
+        unknown.contains("string") && unknown.contains("array"),
+        "a subject of unknown shape keeps both branches: {unknown}"
+    );
+}
+
+/// A cast subject decides the branch on its own: `(string) $whatever` is a
+/// string however the operand resolves, which is how much of the real code
+/// that feeds a replace is written.
+#[test]
+fn hover_a_cast_subject_decides_the_replace_branch() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///replace_cast_subject.php";
+    let content = r#"<?php
+function probe(mixed $anything): void {
+    $out = str_replace('a', 'b', (string) $anything);
+    $out;
+}
+"#;
+
+    let out = hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $out")).to_string();
+    assert!(
+        out.contains("string") && !out.contains("array"),
+        "a cast to string rules out the array branch: {out}"
+    );
+}
+
+/// `preg_replace` reports a PCRE error as `null`, but only for a string
+/// subject: an array subject is answered per element and comes back an array.
+#[test]
+fn hover_preg_replace_keeps_its_error_branch_for_a_string() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///preg_replace_null.php";
+    let content = r#"<?php
+function probe(string $text): void {
+    $out = preg_replace('/a/', 'b', $text);
+    $out;
+}
+"#;
+
+    let out = hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $out")).to_string();
+    assert!(
+        out.contains("string") && out.contains("null"),
+        "the PCRE error branch survives: {out}"
+    );
+}
+
+/// `JSON_THROW_ON_ERROR` makes `json_encode()`'s `false` branch impossible:
+/// the failure it reports is thrown instead. Without the flag the declared
+/// `string|false` stands.
+#[test]
+fn hover_json_encode_drops_false_with_throw_on_error() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///json_encode_flags.php";
+    let content = r#"<?php
+function probe(mixed $value, int $flags): void {
+    $thrown = json_encode($value, JSON_THROW_ON_ERROR);
+    $thrown;
+    $alsoThrown = json_encode($value, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+    $alsoThrown;
+    $plain = json_encode($value);
+    $plain;
+    $unknown = json_encode($value, $flags);
+    $unknown;
+}
+"#;
+
+    let thrown =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $thrown")).to_string();
+    assert!(
+        thrown.contains("string") && !thrown.contains("false"),
+        "the flag rules out the false branch: {thrown}"
+    );
+
+    let also_thrown =
+        hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $alsoThrown")).to_string();
+    assert!(
+        also_thrown.contains("string") && !also_thrown.contains("false"),
+        "the flag counts when OR-ed with others: {also_thrown}"
+    );
+
+    let plain =
+        hover_text(&hover_at(&backend, uri, content, 7, 6).expect("hover $plain")).to_string();
+    assert!(
+        plain.contains("false"),
+        "without the flag the failure branch stands: {plain}"
+    );
+
+    let unknown =
+        hover_text(&hover_at(&backend, uri, content, 9, 6).expect("hover $unknown")).to_string();
+    assert!(
+        unknown.contains("false"),
+        "an unreadable flags argument leaves the declared union: {unknown}"
+    );
+}
+
 /// `+=` on arrays is an array union in PHP, not numeric addition.
 /// The inferred type must be `array`, not `int|float`.
 #[test]

@@ -878,22 +878,55 @@ impl Backend {
                 if let Some(fl) = ctx.function_loader
                     && let Some(func_info) = fl(func_name, 0)
                 {
-                    if let Some(ref cond) = func_info.conditional_return {
+                    if func_info.conditional_return.is_some()
+                        || crate::type_engine::types::flag_returns::has_flag_dependent_return(
+                            func_name,
+                        )
+                    {
                         let var_resolver = build_var_resolver(ctx);
-                        let tpl = TemplateContext::with_params(&func_info.template_params);
-                        let resolved_type = if !text_args.is_empty() {
-                            resolve_conditional_with_text_args(
-                                cond,
-                                &func_info.parameters,
-                                text_args,
-                                Some(&var_resolver),
-                                ctx.current_class.map(|c| c.name.as_str()),
-                                ctx.class_loader,
-                                &tpl,
-                            )
-                        } else {
-                            resolve_conditional_without_args(cond, &func_info.parameters)
-                        };
+                        // `is <Type>` conditions on an argument that isn't a
+                        // literal (`preg_replace($p, $r, $subject)`) are
+                        // decided by the argument's resolved type, so the
+                        // branch a call takes matches what it was handed.
+                        let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
+                        let resolved_type = func_info
+                            .conditional_return
+                            .as_ref()
+                            .and_then(|cond| {
+                                if text_args.is_empty() {
+                                    return resolve_conditional_without_args(
+                                        cond,
+                                        &func_info.parameters,
+                                    );
+                                }
+                                let tpl = TemplateContext {
+                                    defaults: None,
+                                    params: &func_info.template_params,
+                                    arg_type_resolver: Some(&arg_ty_resolver),
+                                };
+                                resolve_conditional_with_text_args(
+                                    cond,
+                                    &func_info.parameters,
+                                    text_args,
+                                    Some(&var_resolver),
+                                    ctx.current_class.map(|c| c.name.as_str()),
+                                    ctx.class_loader,
+                                    &tpl,
+                                )
+                            })
+                            // A branch the flags argument rules out
+                            // (`json_encode(…, JSON_THROW_ON_ERROR)` never
+                            // returning `false`) is decided the same way: at
+                            // the call site, from the declared return type.
+                            .or_else(|| {
+                                crate::type_engine::types::flag_returns::flag_narrowed_return_type(
+                                    func_name,
+                                    &func_info.parameters,
+                                    text_args,
+                                    func_info.return_type.as_ref()?,
+                                    Some(&arg_ty_resolver),
+                                )
+                            });
                         if let Some(parsed_ty) = resolved_type {
                             let classes: Vec<Arc<ClassInfo>> =
                                 crate::type_engine::type_resolution::type_hint_to_classes_typed(
@@ -1897,6 +1930,92 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
     None
 }
 
+/// The type a cast expression produces, or `None` when the text is not a
+/// cast.
+///
+/// A cast names its own result whatever its operand turns out to be, which is
+/// what makes it readable from the source text alone: `(string) $customer->id`
+/// is a `string` without resolving the property. `(array)` promises an array
+/// but says nothing about its contents, so it stays bare.
+///
+/// Only a cast applied to a single operand answers. A cast that is one side of
+/// a larger expression (`(int) $a / 2`, `(int) $a === $b`) has the operator's
+/// result type, not the cast's, so those are left to the caller's other paths
+/// rather than answered wrongly.
+pub(super) fn resolve_cast_type(text: &str) -> Option<PhpType> {
+    let (keyword, operand) = text.strip_prefix('(')?.split_once(')')?;
+    if !operand_is_single(operand.trim()) {
+        return None;
+    }
+    let name = match keyword.trim().to_ascii_lowercase().as_str() {
+        "string" | "binary" => "string",
+        "int" | "integer" => "int",
+        "float" | "double" | "real" => "float",
+        "bool" | "boolean" => "bool",
+        "array" => "array",
+        "object" => "object",
+        _ => return None,
+    };
+    Some(PhpType::named(atom(name)))
+}
+
+/// Whether `operand` is one expression rather than several joined by an
+/// operator.
+///
+/// A variable, property or method chain, array index, call, or literal counts
+/// as one; anything carrying a binary operator at the top level (outside its
+/// own brackets, quotes and parentheses) does not. `->` and `?->` are chain
+/// links, not operators.
+fn operand_is_single(operand: &str) -> bool {
+    if operand.is_empty() {
+        return false;
+    }
+    let bytes = operand.as_bytes();
+    let mut depth: u32 = 0;
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' | b'"' => quote = Some(b),
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            // `->` and `?->` continue the chain, so they are stepped over
+            // whole; a bare `-` or `?` is subtraction or a ternary.
+            b'-' | b'?' if depth == 0 => {
+                if bytes[i..].starts_with(b"->") {
+                    i += 2;
+                } else if bytes[i..].starts_with(b"?->") {
+                    i += 3;
+                } else {
+                    return false;
+                }
+                continue;
+            }
+            b'.' | b'+' | b'*' | b'/' | b'%' | b'<' | b'>' | b'=' | b'!' | b'&' | b'|' | b'^'
+            | b',' | b' ' | b'\t' | b'\n'
+                if depth == 0 =>
+            {
+                return false;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    true
+}
+
 /// Resolve a literal expression to its PHP type.
 ///
 /// Returns `Some(PhpType)` for string literals (`"…"`, `'…'`), integer
@@ -1958,6 +2077,62 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod cast_tests {
+    use super::resolve_cast_type;
+
+    fn cast(text: &str) -> Option<String> {
+        resolve_cast_type(text).map(|ty| ty.to_string())
+    }
+
+    #[test]
+    fn a_cast_names_its_result_type() {
+        assert_eq!(cast("(string) $value").as_deref(), Some("string"));
+        assert_eq!(cast("(int)$value").as_deref(), Some("int"));
+        assert_eq!(cast("(bool) $flag").as_deref(), Some("bool"));
+        assert_eq!(cast("(float) $n").as_deref(), Some("float"));
+        assert_eq!(cast("(array) $thing").as_deref(), Some("array"));
+        assert_eq!(cast("(object) $thing").as_deref(), Some("object"));
+    }
+
+    #[test]
+    fn the_aliases_php_accepts_read_the_same() {
+        assert_eq!(cast("(integer) $n").as_deref(), Some("int"));
+        assert_eq!(cast("(boolean) $b").as_deref(), Some("bool"));
+        assert_eq!(cast("(double) $n").as_deref(), Some("float"));
+        assert_eq!(cast("(binary) $s").as_deref(), Some("string"));
+    }
+
+    #[test]
+    fn a_chain_or_index_operand_still_counts_as_one() {
+        assert_eq!(
+            cast("(string) $order->customer->id").as_deref(),
+            Some("string")
+        );
+        assert_eq!(cast("(string) $row['name']").as_deref(), Some("string"));
+        assert_eq!(cast("(string) $order?->total()").as_deref(), Some("string"));
+        assert_eq!(cast("(string) $row['a b']").as_deref(), Some("string"));
+    }
+
+    #[test]
+    fn a_cast_inside_a_larger_expression_is_left_alone() {
+        assert_eq!(cast("(int) $a / 2"), None);
+        assert_eq!(cast("(int) $a === $b"), None);
+        assert_eq!(cast("(string) $a . $b"), None);
+        assert_eq!(cast("(int) $a - 1"), None);
+        assert_eq!(cast("(bool) $a && $b"), None);
+    }
+
+    #[test]
+    fn text_that_is_not_a_cast_answers_nothing() {
+        assert_eq!(cast("$value"), None);
+        assert_eq!(cast("($value)"), None);
+        assert_eq!(cast("(string)"), None);
+        assert_eq!(cast("(new Order())->total()"), None);
+        assert_eq!(cast("strlen($value)"), None);
+    }
 }
 
 #[cfg(test)]
