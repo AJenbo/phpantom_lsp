@@ -9701,7 +9701,7 @@ class Service {
 // ─── Variable-key array assignment type strings ─────────────────────────────
 
 #[test]
-fn hover_variable_key_string_produces_array_int_or_string_value() {
+fn hover_variable_key_string_produces_array_string_value() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -9723,13 +9723,13 @@ class Svc {
 "#;
 
     // Hover on `$indexed` at line 13 (the usage after the loop).
-    // A broad string may be a decimal-integer string at runtime, which PHP
-    // stores as an integer key.
+    // A broad string key stays `string`: only a literal decimal-integer
+    // string is known to become an integer key at runtime.
     let hover = hover_at(&backend, uri, content, 13, 9).expect("expected hover on $indexed");
     let text = hover_text(&hover);
     assert!(
-        text.contains("array<int|string, Pen>"),
-        "Variable-key assignment with broad string key should produce array<int|string, Pen>, got: {}",
+        text.contains("array<string, Pen>"),
+        "Variable-key assignment with broad string key should produce array<string, Pen>, got: {}",
         text
     );
 }

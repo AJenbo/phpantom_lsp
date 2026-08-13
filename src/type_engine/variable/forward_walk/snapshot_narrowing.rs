@@ -3,7 +3,8 @@ use super::*;
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
-use crate::atom::Atom;
+use std::sync::Arc;
+
 use crate::type_engine::types::narrowing;
 
 // ─── `&&` chain narrowing for diagnostic scope snapshots ────────────────────
@@ -81,10 +82,10 @@ pub(crate) fn collect_or_chain_operands_inner<'b>(
 /// accesses inside the narrowed context see the correct variable types.
 ///
 /// Unlike [`record_scope_snapshot_recursive`], this function does NOT
-/// record snapshots at every sub-expression offset.  It only writes
-/// snapshots at offsets inside match arms and ternary branches where
-/// narrowing applies.  This avoids polluting the scope cache with
-/// redundant entries that could conflict with `&&`-chain snapshots.
+/// record snapshots at every sub-expression offset.  It writes them only
+/// inside match arms and ternary branches, where the branch scope can
+/// legitimately differ from the enclosing one.  This avoids polluting the
+/// scope cache with entries that could conflict with `&&`-chain snapshots.
 pub(crate) fn record_match_ternary_snapshots<'b>(
     expr: &'b Expression<'b>,
     scope: &ScopeState,
@@ -113,43 +114,25 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
             }
         }
         Expression::Conditional(conditional) => {
-            // Only apply narrowing when the condition adds information the
-            // guarded branch relies on: an instanceof check (simple or
-            // compound OR), a member-existence proof
-            // (`property_exists`/`method_exists`/`isset($x->prop)`), or a
-            // null/false/truthiness guard (`$x !== null`, `isset($x)`, the
-            // bare `$x` check) — the same forms `apply_null_narrowing_truthy`
-            // recognises for `if`/`while` bodies.
-            let has_narrowing = {
-                let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
-                var_names.iter().any(|vn| {
-                    narrowing::try_extract_instanceof(conditional.condition, vn).is_some()
-                        || narrowing::try_extract_compound_or_instanceof(conditional.condition, vn)
-                            .is_some()
-                })
-            } || condition_proves_member(conditional.condition, scope)
-                || condition_proves_null_or_truthy(conditional.condition)
-                || !assertion_alias_extractions(conditional.condition, scope).is_empty();
-            if has_narrowing {
+            // Each arm is evaluated under its own polarity of the condition,
+            // exactly like an `if`/`else` body, and does so unconditionally:
+            // gating on a list of recognised condition shapes silently
+            // missed every form added to the narrowing pipeline afterwards,
+            // and left the arm offsets with no snapshot at all, so the
+            // diagnostic fell back to whatever scope it could find nearby.
+            if let Some(then_expr) = conditional.then {
                 let mut then_scope = scope.clone();
                 apply_condition_narrowing(conditional.condition, &mut then_scope, ctx);
-                if let Some(then_expr) = conditional.then {
-                    record_scope_snapshot(then_expr.span().start.offset, &then_scope);
-                    record_scope_snapshot_recursive(then_expr, &then_scope);
-                    record_match_ternary_snapshots(then_expr, &then_scope, ctx);
-                }
-                let mut else_scope = scope.clone();
-                apply_condition_narrowing_inverse(conditional.condition, &mut else_scope, ctx);
-                record_scope_snapshot(conditional.r#else.span().start.offset, &else_scope);
-                record_scope_snapshot_recursive(conditional.r#else, &else_scope);
-                record_match_ternary_snapshots(conditional.r#else, &else_scope, ctx);
-            } else {
-                // No applicable narrowing — just recurse for nested patterns.
-                if let Some(then_expr) = conditional.then {
-                    record_match_ternary_snapshots(then_expr, scope, ctx);
-                }
-                record_match_ternary_snapshots(conditional.r#else, scope, ctx);
+                record_scope_snapshot(then_expr.span().start.offset, &then_scope);
+                record_scope_snapshot_recursive(then_expr, &then_scope);
+                record_match_ternary_snapshots(then_expr, &then_scope, ctx);
             }
+
+            let mut else_scope = scope.clone();
+            apply_condition_narrowing_inverse(conditional.condition, &mut else_scope, ctx);
+            record_scope_snapshot(conditional.r#else.span().start.offset, &else_scope);
+            record_scope_snapshot_recursive(conditional.r#else, &else_scope);
+            record_match_ternary_snapshots(conditional.r#else, &else_scope, ctx);
         }
         Expression::Assignment(assignment) => {
             record_match_ternary_snapshots(assignment.rhs, scope, ctx);
@@ -441,4 +424,28 @@ pub(crate) fn record_scope_snapshot_recursive(expr: &Expression<'_>, scope: &Sco
         }
         _ => {}
     }
+}
+
+/// Whether a narrowing pass changed a variable's resolved type.
+///
+/// Both halves of a `ResolvedType` matter. The type string carries most
+/// narrowings, but a member-existence guard (`property_exists($x, 'p')`)
+/// leaves it untouched and only swaps in a `ClassInfo` carrying the proven
+/// member, so the class side is compared by `Arc` identity too — every
+/// narrowing that rebuilds a `ClassInfo` yields a fresh allocation.
+///
+/// This is deliberately stricter than
+/// [`resolved_types_differ`](super::resolved_types_differ), which compares
+/// classes by FQN: that one drives loop fix-point iteration, where treating
+/// a re-allocated but equal `ClassInfo` as a change would stop it converging.
+pub(crate) fn narrowing_changed_types(before: &[ResolvedType], after: &[ResolvedType]) -> bool {
+    before.len() != after.len()
+        || before.iter().zip(after).any(|(a, b)| {
+            a.type_string != b.type_string
+                || match (&a.class_info, &b.class_info) {
+                    (Some(x), Some(y)) => !Arc::ptr_eq(x, y),
+                    (None, None) => false,
+                    _ => true,
+                }
+        })
 }

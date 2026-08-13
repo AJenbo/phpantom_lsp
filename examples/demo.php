@@ -445,6 +445,93 @@ class CompoundNarrowingDemo
 }
 
 
+// ── Scalar Guards in Compound Conditions and Ternaries ──────────────────────
+// The `is_*` family, null checks, and comparisons narrow wherever they are
+// written: each operand of a negated `||` guard, both arms of a ternary in any
+// position, and an assignment made inside an `elseif` condition.
+
+class ScalarGuardNarrowingDemo
+{
+    /**
+     * Falling through `if (!guard1 || !guard2) { return; }` means every
+     * operand was false, so each one's inverse holds afterwards.
+     */
+    public function rejectEverythingElse(string|array|null $payload): string
+    {
+        if (!is_string($payload) || $payload === '') {
+            return 'skipped';
+        }
+
+        // `!is_string` ruled out the array and null halves, and `=== ''`
+        // refines what is left to non-empty-string.
+        return takesNonEmptyString($payload);      // non-empty-string
+    }
+
+    /** Each arm of a ternary is resolved under its own polarity. */
+    public function eitherArm(string|array|null $period): string
+    {
+        $chosen = is_string($period) ? $period : 'today';
+
+        // The same ternary in argument position narrows identically.
+        return takesGradeString(is_string($period) ? $period : $chosen);
+    }
+
+    /** A nested ternary's else arm carries the outer condition's inverse. */
+    public function nested(string|int|null $value): string
+    {
+        return is_string($value)
+            ? $value                               // string
+            : (is_int($value) ? (string) $value : 'none');
+    }
+
+    /** An assignment in an `elseif` condition narrows what it wrote. */
+    public function fromElseif(bool $skip, string|array|null $raw): string
+    {
+        if ($skip) {
+            return 'skipped';
+        } elseif ($found = scaffoldingReadPayload($raw)) {
+            return takesStringOrArray($found);     // string|array, never null
+        }
+
+        return 'empty';
+    }
+
+    /**
+     * A key expression keeps its own domain, so a map built under `string`
+     * keys really is `array<string, string>` rather than `array<int|string, …>`.
+     *
+     * @param  list<LabelledRock>  $specimens
+     * @return array<string, string>
+     */
+    public function labelMap(array $specimens): array
+    {
+        $labels = [];
+        foreach ($specimens as $specimen) {
+            $labels[$specimen->label()] = $specimen->crush();
+        }
+
+        return $labels;                            // array<string, string>
+    }
+
+    /**
+     * An `int` counter used as a write key stays an `int` key, whether it
+     * steps before or after the read.
+     *
+     * @return array<int, string>
+     */
+    public function numberedLines(): array
+    {
+        $line = 0;
+        $numbered = [];
+        foreach (['first', 'second'] as $text) {
+            $numbered[++$line] = $text;
+        }
+
+        return $numbered;                          // array<int, string>
+    }
+}
+
+
 // ── Discriminating-Property Narrowing ───────────────────────────────────────
 // A union of object types is narrowed by a check on a property only some of
 // its members could have passed, the way TypeScript discriminates on a tag.
@@ -7584,6 +7671,25 @@ function takesNumeric(int|float|string $value): void {}
 /** @param 'a'|'b'|'c' $grade */
 function takesGrade(string $grade): void {}
 
+/** @param non-empty-string $value */
+function takesNonEmptyString(string $value): string { return $value; }
+
+function takesGradeString(string $value): string { return $value; }
+
+function takesStringOrArray(string|array $value): string
+{
+    return is_array($value) ? 'array' : $value;
+}
+
+/**
+ * @param  string|array|null  $raw
+ * @return string|array|null
+ */
+function scaffoldingReadPayload($raw)
+{
+    return $raw;
+}
+
 /** @param 'a'|'b'|'c' $mark
  *  @return 'a'|'b'|'c' */
 function scaffoldingGradeOnOpeningLine(string $mark): string
@@ -7991,6 +8097,29 @@ function runDemoAssertions(): void
     assert(
         $discriminant->byTagValue() === 5.0,
         "state === 'weighed' picks Weighed, the only member with grams",
+    );
+
+    // ── Scalar guards in compound conditions and ternaries ─────────────
+    $scalarGuards = new ScalarGuardNarrowingDemo();
+    assert($scalarGuards->rejectEverythingElse('payload') === 'payload', 'a string payload survives both conjuncts');
+    assert($scalarGuards->rejectEverythingElse('') === 'skipped', 'an empty string is rejected by the second conjunct');
+    assert($scalarGuards->rejectEverythingElse([]) === 'skipped', 'an array is rejected by the first conjunct');
+    assert($scalarGuards->rejectEverythingElse(null) === 'skipped', 'null is rejected by the first conjunct');
+    assert($scalarGuards->eitherArm('week') === 'week', 'the then arm yields the checked string');
+    assert($scalarGuards->eitherArm(null) === 'today', 'the else arm yields the literal fallback');
+    assert($scalarGuards->nested('text') === 'text', 'a nested ternary picks the string arm first');
+    assert($scalarGuards->nested(7) === '7', 'the inner arm casts the int the outer condition ruled out');
+    assert($scalarGuards->nested(null) === 'none', 'both conditions failing reaches the innermost fallback');
+    assert($scalarGuards->fromElseif(true, 'x') === 'skipped', 'the leading if wins when it holds');
+    assert($scalarGuards->fromElseif(false, 'x') === 'x', 'the elseif assignment is truthy and reaches the body');
+    assert($scalarGuards->fromElseif(false, null) === 'empty', 'a falsy elseif assignment falls through');
+    assert(
+        $scalarGuards->labelMap([new LabelledRock()]) === ['granite' => 'smash!'],
+        'a map written under a string key really is keyed by that string',
+    );
+    assert(
+        $scalarGuards->numberedLines() === [1 => 'first', 2 => 'second'],
+        'a pre-incremented counter really produces integer keys',
     );
 
     // ── class-string guard keeps its type argument ─────────────────────

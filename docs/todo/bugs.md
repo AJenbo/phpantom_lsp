@@ -179,35 +179,6 @@ non-null after the call; add a literal-pattern group-shape analysis
 
 ## Array types
 
-### B145. A non-literal string or int write key widens to `int|string`
-
-**Impact: High · Effort: Low-Medium**
-
-```php
-/** @return array<string, string> */
-function flags(array $countries): array {
-    $flags = [];
-    foreach ($countries as $c) { $flags[$c->value] = $c->flag(); }
-    return $flags;   // reported array<int|string, string>
-}
-```
-
-`normalize_array_key` (`type_engine/variable/resolution.rs`, the
-`is_string_subtype()` arm) widens every non-literal `string` key to
-`int|string` on the grounds that a numeric string becomes an int key
-at runtime. PHPStan deliberately keeps `string` (only *literal*
-decimal-int strings convert), and every consumer declares
-`array<string, T>`, so the widening produces a mismatch at ~28 sites
-across six projects — including keys after an explicit `(string)`
-cast, backed-enum `->value` reads, and `ReflectionProperty::getName()`.
-Int-typed key expressions (`$result[++$line]`, `$products[$item->id]`
-after `assert(is_int(...))`) equally widen to `array-key`.
-
-**Fix:** drop the broad-string arm; use the key expression's resolved
-type (string stays `string`, int stays `int`), keeping the int
-conversion for literal decimal keys only. Apply the same rule to
-`foreach` key inference.
-
 ### B146. Array builtins lose key and element generics
 
 **Impact: High · Effort: Medium**
@@ -317,66 +288,6 @@ Two inverse defects at `if`/`else` merges (~5 sites):
 **Fix:** at the merge, each branch contributes its end-state (declared
 type transformed by that branch's assignments/narrowings), and the
 join is the union of branch end-states — nothing more, nothing less.
-
-### B151. Negated compound guards with an early exit narrow nothing
-
-**Impact: Medium-High · Effort: Medium**
-
-```php
-if (!is_string($payload) || $payload === '') { continue; }
-$this->fromPayload($payload);   // reported: got string|array|null
-```
-
-The `if (!guard1 || !guard2) { exit; }` idiom — with `return`,
-`continue`, `throw`, or `abort()` as the exit — leaves the
-fall-through scope un-narrowed (~10 sites across five projects).
-Single-guard forms fail too: `if (!is_resource($h)) { return; }`,
-`if (!is_array($x)) { $x = [$x]; }` (both arms), and `!== ''`
-producing `non-empty-string` on the fall-through path. `is_array` and
-`is_resource` appear to lack guard support in any position, while
-`is_string`/`is_int` work in the plain `if` form — audit the `is_*`
-family for coverage while in there.
-
-**Fix:** apply De Morgan over `||`/`&&` in a negated condition whose
-branch terminates, narrowing the fall-through with each conjunct; fill
-the `is_array`/`is_resource` guard gaps.
-
-### B152. A ternary's arms do not receive the condition's narrowing
-
-**Impact: High · Effort: Medium**
-
-```php
-$period = is_string($req) ? $req : 'today';   // reported string|array|null
-$icon   = $tier->app_icon ? image($tier->app_icon) : '';   // reported null|string
-```
-
-The condition narrows neither the true arm nor the false arm — the
-raw union flows into both (~14 sites across six projects, the
-second-largest pure-narrowing cluster). The failure is worst in
-argument position: the same ternary in assignment position sometimes
-works, so the machinery exists but is not wired into every expression
-context. `$pos === false ? null : $pos` keeping `false` in the else
-arm is the same defect in negative polarity.
-
-**Fix:** run condition type-specification when resolving a ternary
-(both arms, both polarities), independent of the expression's
-syntactic position; `?:` reuses the subject's truthy/falsy split.
-
-### B153. Short-circuit operators do not narrow their right operand
-
-**Impact: Medium · Effort: Low-Medium**
-
-The right operand of `&&` sees the left operand's positive narrowing
-(`is_array($this->address) && array_key_exists($k, $this->address)`
-— note the property subject), and the right operand of `||` sees the
-*negative* narrowing (`$hash === false || $this->isModified($f, $hash)`;
-`null === $x || $this->check($customer, $x)`). Neither happens today
-(4 sites). The same condition-scope plumbing should make an
-assignment inside an `elseif` condition truthy-narrow its variable
-(`} elseif ($token = $req->bearerToken()) {`).
-
-**Fix:** evaluate the left operand's type specification into the
-scope used for the right operand, per polarity.
 
 ### B154. A check on a nullsafe chain does not narrow the receiver
 

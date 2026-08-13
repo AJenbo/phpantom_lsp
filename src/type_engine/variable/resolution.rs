@@ -1951,16 +1951,11 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
                 push_unique(normalized, PhpType::int());
                 true
             }
-            _ if is_non_numeric_string_domain(ty) => {
-                // Class/interface/callable identifiers cannot be decimal
-                // integer strings, so PHP always keeps them as string keys.
-                push_unique(normalized, PhpType::string());
-                true
-            }
-            _ if ty.is_string_subtype() => {
-                // A broad string may be a valid decimal-integer string at
-                // runtime, in which case PHP stores it as an integer key.
-                push_unique(normalized, PhpType::int());
+            _ if ty.is_string_subtype() || is_non_numeric_string_domain(ty) => {
+                // Only a *literal* decimal-integer string is known to become
+                // an int key (handled above).  A broad string keeps `string`,
+                // because widening it to `int|string` would mismatch every
+                // `array<string, T>` the value is declared against.
                 push_unique(normalized, PhpType::string());
                 true
             }

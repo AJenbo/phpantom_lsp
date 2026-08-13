@@ -687,7 +687,7 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$dynamic"),
-        "array<int|string, int>"
+        "array<string, int>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$from_variable"),
@@ -852,6 +852,17 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
     $broad_string_map = [];
     $broad_string_map[$broad_string_key] = 'x';
 
+    $cast_map = [];
+    $cast_map[(string) $int_key] = 'x';
+
+    $line = 0;
+    $pre_increment_map = [];
+    $pre_increment_map[++$line] = 'x';
+
+    $slot = 0;
+    $post_increment_map = [];
+    $post_increment_map[$slot++] = 'x';
+
     $direct_decimal_map = [];
     $direct_decimal_map['8'] = 'x';
     $direct_negative_map = [];
@@ -865,6 +876,7 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
 
     echo $int_map, $float_map, $union_map, $null_map, $nullable_map,
         $decimal_string_map, $leading_zero_map, $broad_string_map,
+        $cast_map, $pre_increment_map, $post_increment_map,
         $direct_decimal_map, $direct_negative_map, $direct_leading_zero_map,
         $direct_plus_map, $direct_decimal_float_map;
 }
@@ -898,9 +910,25 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
         resolve_literal_test_var(content, "$leading_zero_map"),
         "array<string, string>"
     );
+    // A broad `string` key stays `string`: only a *literal* decimal-integer
+    // string is known to become an int key at runtime.
     assert_eq!(
         resolve_literal_test_var(content, "$broad_string_map"),
-        "array<int|string, string>"
+        "array<string, string>"
+    );
+    // An explicit `(string)` cast and an int-typed step expression keep their
+    // own key domain rather than falling back to `array-key`.
+    assert_eq!(
+        resolve_literal_test_var(content, "$cast_map"),
+        "array<string, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$pre_increment_map"),
+        "array<int, string>"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$post_increment_map"),
+        "array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_decimal_map"),
@@ -942,7 +970,7 @@ fn collection_key_normalization_preserves_non_numeric_string_domains() {
         normalize_array_key_type(&PhpType::string())
             .unwrap()
             .to_string(),
-        "int|string"
+        "string"
     );
     assert_eq!(
         normalize_array_key_type(&PhpType::named(atom("number"))),

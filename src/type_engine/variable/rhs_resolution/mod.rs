@@ -171,6 +171,20 @@ fn resolve_var_types(
     ctx: &VarResolutionCtx<'_>,
     cursor_offset: u32,
 ) -> Vec<ResolvedType> {
+    // A narrowing established by the enclosing match arm or ternary
+    // condition outranks the scope: it describes this position, while the
+    // scope entry describes the variable before the condition was tested.
+    if !ctx.match_arm_narrowing.is_empty() {
+        let key = if var_name.starts_with('$') {
+            var_name.to_string()
+        } else {
+            format!("${var_name}")
+        };
+        if let Some(narrowed) = ctx.match_arm_narrowing.get(&key) {
+            return narrowed.clone();
+        }
+    }
+
     // ── Forward-walker fast path ────────────────────────────────
     // When a scope_var_resolver is available, read variable types
     // directly from the forward walker's ScopeState.  This avoids
@@ -599,6 +613,9 @@ fn resolve_conditional_chain<'b>(
 ) -> Vec<ResolvedType> {
     let mut combined: Vec<ResolvedType> = Vec::new();
     let mut current = conditional;
+    // Narrowing carried down the else spine: reaching link N means every
+    // earlier condition was false, so their inverse specifications all hold.
+    let mut carried = ctx.match_arm_narrowing.clone();
     loop {
         // A short ternary (`$a ?: $b`) reuses the condition as its then
         // branch.
@@ -607,6 +624,10 @@ fn resolve_conditional_chain<'b>(
         let truthiness = static_condition_truthiness(current.condition);
         if truthiness != Some(false) {
             let then_ctx = ctx.with_cursor_offset(then_expr.span().start.offset);
+            // The then arm only runs when the condition held, so it sees the
+            // condition's positive narrowing — the same specification an
+            // `if` body gets.
+            let then_ctx = with_arm_narrowing(&then_ctx, &carried, current.condition, true);
             let then_results = resolve_rhs_expression(then_expr, &then_ctx);
             let then_results = widen_unresolved_branch(then_expr, then_results);
             // The short form yields the condition's value, and reaching it
@@ -623,9 +644,15 @@ fn resolve_conditional_chain<'b>(
             return simplify_branch_results(combined);
         }
         match peel_type_transparent(current.r#else) {
-            Expression::Conditional(next) => current = next,
+            Expression::Conditional(next) => {
+                merge_arm_narrowing(&mut carried, current.condition, false, ctx);
+                current = next;
+            }
             _ => {
                 let else_ctx = ctx.with_cursor_offset(current.r#else.span().start.offset);
+                // Reaching the else arm proves the condition was false, so it
+                // sees the inverse narrowing.
+                let else_ctx = with_arm_narrowing(&else_ctx, &carried, current.condition, false);
                 let else_results = resolve_rhs_expression(current.r#else, &else_ctx);
                 ResolvedType::extend_unique(
                     &mut combined,
@@ -634,6 +661,36 @@ fn resolve_conditional_chain<'b>(
                 return simplify_branch_results(combined);
             }
         }
+    }
+}
+
+/// Derive a context whose variable lookups see `condition`'s narrowing for
+/// the given polarity, layered on top of `carried`.
+///
+/// The condition's own specification wins over `carried`: it is evaluated
+/// against the same declared types and is the more specific of the two.
+fn with_arm_narrowing<'a>(
+    ctx: &VarResolutionCtx<'a>,
+    carried: &HashMap<String, Vec<ResolvedType>>,
+    condition: &Expression<'_>,
+    truthy: bool,
+) -> VarResolutionCtx<'a> {
+    let mut overrides = carried.clone();
+    merge_arm_narrowing(&mut overrides, condition, truthy, ctx);
+    ctx.with_match_arm_narrowing(overrides)
+}
+
+/// Fold `condition`'s narrowing for one polarity into an override map.
+fn merge_arm_narrowing(
+    overrides: &mut HashMap<String, Vec<ResolvedType>>,
+    condition: &Expression<'_>,
+    truthy: bool,
+    ctx: &VarResolutionCtx<'_>,
+) {
+    for (name, types) in crate::type_engine::variable::forward_walk::condition_narrowing_overrides(
+        condition, truthy, ctx,
+    ) {
+        overrides.insert(name, types);
     }
 }
 
@@ -853,6 +910,18 @@ fn resolve_rhs_expression_inner<'b>(
                 || PhpType::union(vec![PhpType::int(), PhpType::float()]),
             ))]
         }
+        // `++$x` / `--$x` evaluate to the value *after* the step, so a
+        // numeric operand keeps its own domain (`int` stays `int` rather
+        // than widening to `array-key` when used as an array write key).
+        Expression::UnaryPrefix(unary) if unary.operator.is_increment_or_decrement() => {
+            match stepped_numeric_type(&resolve_rhs_expression(unary.operand, ctx)) {
+                Some(ty) => vec![ResolvedType::from_type_string(ty)],
+                None => vec![],
+            }
+        }
+        // `$x++` / `$x--` evaluate to the value *before* the step, which is
+        // exactly the operand's type.
+        Expression::UnaryPostfix(unary) => resolve_rhs_expression(unary.operand, ctx),
         // Type casts (`(int) $x`), `!`, and `~`.  The result depends on the
         // operator, not on how the expression is reached, so a cast in a
         // ternary branch resolves the same as one assigned directly.
@@ -1054,6 +1123,40 @@ pub(crate) fn unary_prefix_result_type(
         }
         _ => return None,
     })
+}
+
+/// The type `++`/`--` produces for a numeric operand.
+///
+/// The step widens a literal (`5` becomes `int`, not `6`) but stays inside
+/// the operand's own domain. Non-numeric operands are left unresolved: PHP
+/// increments strings alphanumerically, leaves bools and arrays untouched,
+/// and treats null asymmetrically (`++null` is `1`, `--null` is `null`).
+fn stepped_numeric_type(operand: &[ResolvedType]) -> Option<PhpType> {
+    if operand.is_empty() {
+        return None;
+    }
+    let joined = ResolvedType::types_joined(operand);
+    let mut stepped = Vec::new();
+    for member in joined.union_members() {
+        if member.is_int_subtype() {
+            push_unique_type(&mut stepped, PhpType::int());
+        } else if member.is_float_subtype() {
+            push_unique_type(&mut stepped, PhpType::float());
+        } else {
+            return None;
+        }
+    }
+    match stepped.len() {
+        0 => None,
+        1 => stepped.into_iter().next(),
+        _ => Some(PhpType::union(stepped)),
+    }
+}
+
+fn push_unique_type(types: &mut Vec<PhpType>, member: PhpType) {
+    if !types.iter().any(|existing| existing == &member) {
+        types.push(member);
+    }
 }
 
 /// The object shape `(object) $expr` produces: an array shape casts

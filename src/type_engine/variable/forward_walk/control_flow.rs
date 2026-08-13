@@ -136,8 +136,12 @@ pub(crate) fn process_if_statement_body<'b>(
                     }
                     apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
                 }
-                apply_condition_narrowing(ei.condition, scope, ctx);
+                // The assignment runs before the narrowing, exactly as it
+                // does for the leading `if`: `elseif ($x = f())` has to put
+                // `$x` in scope before the truthy test can strip its falsy
+                // members.
                 process_condition_assignment(ei.condition, scope, ctx);
+                apply_condition_narrowing(ei.condition, scope, ctx);
                 seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
                 walk_body_forward(std::iter::once(ei.statement), scope, ctx);
                 return;
@@ -182,8 +186,8 @@ pub(crate) fn process_if_statement_body<'b>(
         if is_diagnostic_scope_active() {
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
-        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
+        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(std::iter::once(ei.statement), &mut ei_scope, ctx);
         let exits = branch_exits(ei.statement, &ei_scope, ctx);
@@ -378,8 +382,8 @@ pub(crate) fn process_if_colon_body<'b>(
             for prev_ei in body.else_if_clauses.iter().take(idx) {
                 apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
             }
-            apply_condition_narrowing(ei.condition, scope, ctx);
             process_condition_assignment(ei.condition, scope, ctx);
+            apply_condition_narrowing(ei.condition, scope, ctx);
             seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
             walk_body_forward(ei.statements.iter(), scope, ctx);
             return;
@@ -430,8 +434,8 @@ pub(crate) fn process_if_colon_body<'b>(
         if is_diagnostic_scope_active() {
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
-        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
+        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(ei.statements.iter(), &mut ei_scope, ctx);
         let exits = branch_exits_stmts(ei.statements.iter(), &ei_scope, ctx);

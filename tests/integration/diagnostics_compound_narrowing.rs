@@ -882,3 +882,347 @@ function run(): void {{
     let messages = type_error_messages(&backend, uri, &text);
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// Scaffolding for the `if (!guard1 || !guard2) { exit; }` idiom: a wide
+/// union parameter and consumers that only accept one of its members.
+const EXIT_GUARD_SCAFFOLD: &str = r#"<?php
+namespace ExitGuard;
+
+function useString(string $value): void {}
+function useArray(array $value): void {}
+function useResource($handle): void {}
+"#;
+
+/// A negated compound guard that leaves the scope by `return` narrows the
+/// fall-through by every conjunct, not just the last one.
+#[test]
+fn a_negated_or_guard_with_a_return_narrows_each_conjunct() {
+    let backend = create_test_backend();
+    let uri = "file:///exit_guard_return.php";
+    let text = format!(
+        "{EXIT_GUARD_SCAFFOLD}
+function run(string|array|null $payload): void {{
+    if (! is_string($payload) || $payload === '') {{
+        return;
+    }}
+    useString($payload);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `throw` and `continue` end the branch the same way `return` does.
+#[test]
+fn a_negated_or_guard_narrows_for_every_exit_form() {
+    let backend = create_test_backend();
+    let uri = "file:///exit_guard_forms.php";
+    let text = format!(
+        "{EXIT_GUARD_SCAFFOLD}
+function thrown(string|array|null $payload): void {{
+    if (! is_string($payload) || $payload === '') {{
+        throw new \\Exception('bad');
+    }}
+    useString($payload);
+}}
+
+/** @param iterable<string|array|null> $items */
+function skipped(iterable $items): void {{
+    foreach ($items as $payload) {{
+        if (! is_string($payload) || $payload === '') {{
+            continue;
+        }}
+        useString($payload);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Three conjuncts, so the fall-through depends on more than a pair.
+#[test]
+fn a_three_way_negated_or_guard_narrows_every_conjunct() {
+    let backend = create_test_backend();
+    let uri = "file:///exit_guard_three.php";
+    let text = format!(
+        "{EXIT_GUARD_SCAFFOLD}
+function run(string|array|null|int $value): void {{
+    if (! is_string($value) || $value === '' || \\strlen($value) > 5) {{
+        return;
+    }}
+    useString($value);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `is_array` and `is_resource` narrow in a negated compound guard too.
+#[test]
+fn is_array_and_is_resource_narrow_in_a_negated_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///exit_guard_array_resource.php";
+    let text = format!(
+        "{EXIT_GUARD_SCAFFOLD}
+function arrays(string|array|null $value): void {{
+    if (! is_array($value) || $value === []) {{
+        return;
+    }}
+    useArray($value);
+}}
+
+function resources(mixed $handle): void {{
+    if (! is_resource($handle)) {{
+        return;
+    }}
+    useResource($handle);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The `else` of the guard sees the same narrowing the fall-through does.
+#[test]
+fn the_else_of_a_negated_or_guard_narrows_each_conjunct() {
+    let backend = create_test_backend();
+    let uri = "file:///exit_guard_else.php";
+    let text = format!(
+        "{EXIT_GUARD_SCAFFOLD}
+function run(string|array|null $payload): void {{
+    if (! is_string($payload) || $payload === '') {{
+        return;
+    }} else {{
+        useString($payload);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Scaffolding for ternary-arm narrowing: consumers that accept exactly one
+/// member of a wide union.
+const TERNARY_SCAFFOLD: &str = r#"<?php
+namespace Ternary;
+
+class Icon {}
+
+function useString(string $value): void {}
+function useInt(int $value): void {}
+function useIcon(Icon $value): void {}
+function passThrough(string $value): string { return $value; }
+"#;
+
+/// A type-guard condition narrows the then arm, in assignment position.
+#[test]
+fn a_type_guard_ternary_narrows_its_then_arm() {
+    let backend = create_test_backend();
+    let uri = "file:///ternary_then.php";
+    let text = format!(
+        "{TERNARY_SCAFFOLD}
+function run(string|array|null $req): void {{
+    $period = is_string($req) ? $req : 'today';
+    useString($period);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The same ternary in argument position, where the sweep found the bulk of
+/// the false positives.
+#[test]
+fn a_type_guard_ternary_narrows_in_argument_position() {
+    let backend = create_test_backend();
+    let uri = "file:///ternary_arg.php";
+    let text = format!(
+        "{TERNARY_SCAFFOLD}
+function run(string|array|null $req): void {{
+    useString(is_string($req) ? $req : 'today');
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A negated condition puts the narrowing on the else arm instead.
+#[test]
+fn a_negated_ternary_narrows_its_else_arm() {
+    let backend = create_test_backend();
+    let uri = "file:///ternary_negated.php";
+    let text = format!(
+        "{TERNARY_SCAFFOLD}
+function run(string|array|null $req): void {{
+    $period = ! is_string($req) ? 'today' : $req;
+    useString($period);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A null check and a bare truthy check narrow their then arm too.
+#[test]
+fn a_null_check_ternary_narrows_its_then_arm() {
+    let backend = create_test_backend();
+    let uri = "file:///ternary_null.php";
+    let text = format!(
+        "{TERNARY_SCAFFOLD}
+function explicit(?string $s): void {{
+    useString($s !== null ? $s : 'x');
+}}
+
+function truthy(?string $s): void {{
+    useString($s ? passThrough($s) : 'x');
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A nested ternary's else arm carries the outer condition's inverse
+/// narrowing as well as its own.
+#[test]
+fn a_nested_ternary_carries_the_outer_inverse_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///ternary_nested.php";
+    let text = format!(
+        "{TERNARY_SCAFFOLD}
+function run(string|int|null $v): void {{
+    $out = is_string($v) ? passThrough($v) : (is_int($v) ? $v : 0);
+    useInt(is_string($v) ? 0 : (is_int($v) ? $v : 0));
+    useString(is_string($v) ? $v : 'x');
+    echo $out;
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `instanceof` in a ternary condition narrows the arm to the class.
+#[test]
+fn an_instanceof_ternary_narrows_its_then_arm() {
+    let backend = create_test_backend();
+    let uri = "file:///ternary_instanceof.php";
+    let text = format!(
+        "{TERNARY_SCAFFOLD}
+function run(Icon|string $v): void {{
+    useIcon($v instanceof Icon ? $v : new Icon());
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Scaffolding for short-circuit narrowing: a wide union source and
+/// consumers that accept only part of it.
+const SHORT_CIRCUIT_SCAFFOLD: &str = r#"<?php
+namespace ShortCircuit;
+
+function useStringBool(string $value): bool { return true; }
+function useArrayBool(array $value): bool { return true; }
+function useStringOrArray(string|array $value): void {}
+
+class Source {
+    /** @return string|array|null */
+    public function read() { return null; }
+}
+"#;
+
+/// The right operand of `&&` sees the left operand's positive narrowing,
+/// and the right operand of `||` sees its negative narrowing.
+#[test]
+fn short_circuit_operands_see_the_left_operands_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///short_circuit.php";
+    let text = format!(
+        "{SHORT_CIRCUIT_SCAFFOLD}
+function andRight(string|array|null $v): bool {{
+    return is_string($v) && useStringBool($v);
+}}
+
+function andRightArray(string|array|null $v): bool {{
+    return is_array($v) && useArrayBool($v);
+}}
+
+function orRight(string|array|null $v): bool {{
+    return ! is_string($v) || useStringBool($v);
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A property subject narrows across the operator too.
+#[test]
+fn short_circuit_operands_narrow_a_property_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///short_circuit_property.php";
+    let text = format!(
+        "{SHORT_CIRCUIT_SCAFFOLD}
+class Holder {{
+    /** @var array<string, string>|string|null */
+    private $address;
+
+    public function andProperty(): bool {{
+        return is_array($this->address) && useArrayBool($this->address);
+    }}
+
+    public function orProperty(): bool {{
+        return ! is_array($this->address) || useArrayBool($this->address);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// An assignment inside an `elseif` condition truthy-narrows the variable
+/// it wrote, the same way the leading `if` form already did.
+#[test]
+fn an_assignment_in_an_elseif_condition_narrows_its_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_assignment.php";
+    let text = format!(
+        "{SHORT_CIRCUIT_SCAFFOLD}
+function leading(Source $source): void {{
+    if ($value = $source->read()) {{
+        useStringOrArray($value);
+    }}
+}}
+
+function trailing(Source $source, bool $flag): void {{
+    if ($flag) {{
+        return;
+    }} elseif ($value = $source->read()) {{
+        useStringOrArray($value);
+    }}
+}}
+
+function alternativeSyntax(Source $source, bool $flag): void {{
+    if ($flag):
+        return;
+    elseif ($value = $source->read()):
+        useStringOrArray($value);
+    endif;
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}

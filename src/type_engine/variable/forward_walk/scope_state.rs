@@ -498,6 +498,28 @@ pub(crate) struct ForwardWalkCtx<'a> {
 }
 
 impl<'a> ForwardWalkCtx<'a> {
+    /// Build a walk context from a variable-resolution context.
+    ///
+    /// Lets the expression resolvers reach the narrowing pipeline that lives
+    /// on this side of the walk (ternary arms, short-circuit operands) rather
+    /// than re-deriving narrowing from syntax on their own.
+    pub(crate) fn from_var_ctx(
+        ctx: &crate::type_engine::resolver::VarResolutionCtx<'a>,
+    ) -> ForwardWalkCtx<'a> {
+        ForwardWalkCtx {
+            current_class: ctx.current_class,
+            all_classes: ctx.all_classes,
+            content: ctx.content,
+            cursor_offset: ctx.cursor_offset,
+            class_loader: ctx.class_loader,
+            backend: ctx.backend,
+            loaders: ctx.loaders,
+            resolved_class_cache: ctx.resolved_class_cache,
+            enclosing_return_type: ctx.enclosing_return_type.clone(),
+            top_level_scope: ctx.top_level_scope.clone(),
+        }
+    }
+
     /// Return a copy of this context with a different `cursor_offset`.
     ///
     /// Used by the two-pass loop strategy: pass 1 runs with

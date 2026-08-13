@@ -6,7 +6,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::{MethodInfo, PropertyInfo, ResolvedType};
@@ -819,43 +819,32 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Decompose `||` chains: NOT (A || B) = !A && !B.
-    // Each operand's inverse is applied sequentially (intersection
-    // semantics: all must hold simultaneously).
+    // De Morgan over `||`: NOT (A || B) = !A && !B.  Every operand's inverse
+    // holds at the same time, so they apply sequentially to one scope.  This
+    // is what makes the `if (!guard1 || !guard2) { return; }` idiom narrow
+    // its fall-through by each conjunct.
     let or_operands = collect_or_chain_operands(condition);
     if or_operands.len() > 1 {
         for operand in &or_operands {
-            apply_condition_narrowing_inverse_single(operand, scope, ctx);
+            // Recurse rather than calling the single-operand form directly,
+            // so a nested `&&` inside one `||` operand is decomposed too.
+            apply_condition_narrowing_inverse(operand, scope, ctx);
         }
-        // Type guard, null, phpstan-assert, and in_array narrowing
-        // operate on the full condition expression.
-        apply_type_guard_narrowing_inverse(condition, scope);
-        apply_class_string_guard_narrowing(condition, scope, ctx, false);
-        apply_null_narrowing_inverse(condition, scope, ctx);
-        apply_phpstan_assert_condition_narrowing(condition, scope, ctx, true);
-        apply_in_array_narrowing(condition, scope, ctx, true);
         return;
     }
 
-    // Decompose `&&` chains so that each operand is processed
-    // individually.  For guard clauses like
-    // `if (!$x instanceof A && !$x instanceof B) { return; }`,
-    // the inverse (code after the guard) means `$x IS A || $x IS B`.
-    //
-    // De Morgan: NOT (!A && !B) = A || B.  Each operand's inverse
-    // produces one branch of the union.  We clone the scope for each
-    // operand, apply the inverse, then merge (union) all results back
-    // into the main scope.
-    let operands = collect_and_chain_operands(condition);
-    if operands.len() > 1 {
+    // De Morgan over `&&`: NOT (A && B) = !A || !B.  The operands are
+    // alternatives, not simultaneous facts, so each contributes one branch
+    // of a union: narrow a clone per operand, then merge.
+    let and_operands = collect_and_chain_operands(condition);
+    if and_operands.len() > 1 {
         let base_scope = scope.clone();
         let mut branch_scopes: Vec<ScopeState> = Vec::new();
-        for operand in &operands {
+        for operand in &and_operands {
             let mut branch = base_scope.clone();
-            apply_condition_narrowing_inverse_single(operand, &mut branch, ctx);
+            apply_condition_narrowing_inverse(operand, &mut branch, ctx);
             branch_scopes.push(branch);
         }
-        // Merge all branch scopes (union of all narrowed types).
         if let Some(first) = branch_scopes.first() {
             let mut merged = first.clone();
             for branch in &branch_scopes[1..] {
@@ -863,16 +852,86 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
             }
             *scope = merged;
         }
-        // Type guard, null, phpstan-assert, and in_array narrowing
-        // operate on the full condition expression.
-        apply_type_guard_narrowing_inverse(condition, scope);
-        apply_class_string_guard_narrowing(condition, scope, ctx, false);
-        apply_null_narrowing_inverse(condition, scope, ctx);
-        apply_phpstan_assert_condition_narrowing(condition, scope, ctx, true);
-        apply_in_array_narrowing(condition, scope, ctx, true);
         return;
     }
 
+    apply_condition_narrowing_inverse_operand(condition, scope, ctx);
+}
+
+/// The variable overrides a condition establishes for one polarity, ready to
+/// hand to [`VarResolutionCtx::with_match_arm_narrowing`].
+///
+/// This is how the expression resolvers (ternary arms, short-circuit
+/// operands) get their narrowing: they run the *same* pipeline `if`/`else`
+/// bodies use, over a scope seeded with just the subjects the condition
+/// names, and keep whatever it changed. Every rule added to the pipeline
+/// therefore reaches every expression position for free.
+///
+/// Returns an empty map when the condition narrows nothing, which callers
+/// use to skip building a derived context at all.
+pub(crate) fn condition_narrowing_overrides<'b>(
+    condition: &'b Expression<'b>,
+    truthy: bool,
+    ctx: &VarResolutionCtx<'_>,
+) -> HashMap<String, Vec<ResolvedType>> {
+    let Some(resolver) = ctx.scope_var_resolver else {
+        return HashMap::new();
+    };
+
+    let mut subjects: Vec<String> = Vec::new();
+    collect_condition_subject_vars(condition, &mut subjects);
+    for key in collect_condition_property_keys(condition) {
+        if !subjects.contains(&key) {
+            subjects.push(key);
+        }
+    }
+    if subjects.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut scope = ScopeState::new();
+    for subject in &subjects {
+        let types = resolver(subject);
+        if !types.is_empty() {
+            scope.set(subject, types);
+        }
+    }
+    if scope.locals.is_empty() {
+        return HashMap::new();
+    }
+
+    let seeded = scope.locals.clone();
+    let walk_ctx = ForwardWalkCtx::from_var_ctx(ctx);
+    if truthy {
+        apply_condition_narrowing(condition, &mut scope, &walk_ctx);
+    } else {
+        apply_condition_narrowing_inverse(condition, &mut scope, &walk_ctx);
+    }
+
+    scope
+        .locals
+        .into_iter()
+        .filter(|(name, types)| {
+            !types.is_empty()
+                && seeded
+                    .get(name)
+                    .is_none_or(|before| narrowing_changed_types(before, types))
+        })
+        .map(|(name, types)| (name.to_string(), types))
+        .collect()
+}
+
+/// Apply every inverse narrowing rule to a condition that is no longer a
+/// `&&`/`||` chain.
+///
+/// [`apply_condition_narrowing_inverse`] does the De Morgan decomposition and
+/// hands each leaf here, so every rule sees the operand it can actually match
+/// instead of the compound expression wrapping it.
+fn apply_condition_narrowing_inverse_operand<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     apply_condition_narrowing_inverse_single(condition, scope, ctx);
 
     // Inverse type guard narrowing: `if (is_object($x))` in else → exclude object.
@@ -1909,6 +1968,14 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_null_in_scope(&var_name, scope);
     }
+    // `$x !== ''` / `$x !== []` — refine to the non-empty counterpart.
+    // `$x === ''` proves the opposite and is handled by the inverse pass.
+    if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition)
+        && non_empty
+    {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        refine_non_empty_in_scope(&var_name, empty, scope);
+    }
     // `!empty($x)` — truthy branch means $x is non-empty (truthy):
     // strip null and false from the type.
     if let Some(var_name) = extract_not_empty_var(condition) {
@@ -1982,6 +2049,14 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some(var_name) = extract_non_false_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_false_in_scope(&var_name, scope);
+    }
+    // When the condition is `$x === ''` / `$x === []`, the inverse
+    // (else/guard) means $x is non-empty.
+    if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition)
+        && !non_empty
+    {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        refine_non_empty_in_scope(&var_name, empty, scope);
     }
     // When the condition is a bare `$x` (truthy check), the inverse means
     // $x is falsy.  For nullable types (`T|null`), narrow to null.
@@ -2195,6 +2270,135 @@ pub(crate) fn extract_non_false_check_var(expr: &Expression<'_>) -> Option<Strin
             None
         }
         _ => None,
+    }
+}
+
+/// The empty value a condition compares a subject against.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmptyValue {
+    String,
+    Array,
+}
+
+/// Extract the subject of a strict comparison against an empty literal:
+/// `$x !== ''`, `'' === $x`, `$x !== []`, and their negations.
+///
+/// Returns the subject key plus which empty value it was compared to, and
+/// whether the comparison proves the subject is non-empty (`true`) or empty
+/// (`false`).
+///
+/// Only the strict operators are recognised. `$x != ''` also rules out
+/// `null`, and PHP 8 changed how `0 == ''` compares, so the loose form does
+/// not map onto a single refinement.
+pub(crate) fn extract_empty_value_check(
+    expr: &Expression<'_>,
+) -> Option<(String, EmptyValue, bool)> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let Expression::Binary(bin) = inner else {
+        return None;
+    };
+    let non_empty = match bin.operator {
+        BinaryOperator::NotIdentical(_) => !negated,
+        BinaryOperator::Identical(_) => negated,
+        _ => return None,
+    };
+    let (subject, empty) = match (empty_literal_kind(bin.rhs), empty_literal_kind(bin.lhs)) {
+        (Some(kind), _) => (bin.lhs, kind),
+        (_, Some(kind)) => (bin.rhs, kind),
+        _ => return None,
+    };
+    let name = expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))?;
+    Some((name, empty, non_empty))
+}
+
+/// Which empty literal an expression is, if any: `''`/`""` or `[]`/`array()`.
+fn empty_literal_kind(expr: &Expression<'_>) -> Option<EmptyValue> {
+    match expr {
+        Expression::Parenthesized(paren) => empty_literal_kind(paren.expression),
+        Expression::Literal(Literal::String(s)) => s
+            .value
+            .is_some_and(|value| value.is_empty())
+            .then_some(EmptyValue::String),
+        Expression::Array(array) => array.elements.is_empty().then_some(EmptyValue::Array),
+        Expression::LegacyArray(array) => array.elements.is_empty().then_some(EmptyValue::Array),
+        _ => None,
+    }
+}
+
+/// Refine a variable's type to its non-empty counterpart.
+///
+/// `string` becomes `non-empty-string`, `array<K, V>` becomes
+/// `non-empty-array<K, V>`, `list<T>` becomes `non-empty-list<T>`, and the
+/// empty literal itself (`''`, `array{}`) drops out of a union. Members
+/// outside the compared domain are left alone: `$x !== ''` on a
+/// `string|array` says nothing about the array half.
+pub(crate) fn refine_non_empty_in_scope(var_name: &str, empty: EmptyValue, scope: &mut ScopeState) {
+    let types = scope.get(var_name).to_vec();
+    if types.is_empty() {
+        return;
+    }
+
+    let refined: Vec<ResolvedType> = types
+        .into_iter()
+        .filter_map(|mut rt| {
+            rt.type_string = refine_non_empty_type(&rt.type_string, empty)?;
+            Some(rt)
+        })
+        .collect();
+
+    if !refined.is_empty() {
+        scope.set(var_name, refined);
+    }
+}
+
+/// Apply [`refine_non_empty_in_scope`]'s rule to one `PhpType`, returning
+/// `None` when every member was the empty value being ruled out.
+fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
+    if let TypeKind::Union(members) = ty.kind() {
+        let refined: Vec<PhpType> = members
+            .iter()
+            .filter_map(|member| refine_non_empty_type(member, empty))
+            .collect();
+        return match refined.len() {
+            0 => None,
+            1 => refined.into_iter().next(),
+            _ => Some(PhpType::union(refined)),
+        };
+    }
+
+    match empty {
+        EmptyValue::String => {
+            if ty
+                .as_literal()
+                .and_then(LiteralValue::string_content)
+                .as_deref()
+                == Some("")
+            {
+                return None;
+            }
+            match ty.kind() {
+                TypeKind::Named(name) if name == "string" => {
+                    Some(PhpType::named(atom("non-empty-string")))
+                }
+                _ => Some(ty.clone()),
+            }
+        }
+        EmptyValue::Array => match ty.kind() {
+            TypeKind::ArrayShape(entries) if entries.is_empty() => None,
+            TypeKind::Named(name) if name == "array" => {
+                Some(PhpType::named(atom("non-empty-array")))
+            }
+            TypeKind::Named(name) if name == "list" => Some(PhpType::named(atom("non-empty-list"))),
+            TypeKind::Generic(generic) if generic.name == "array" => Some(PhpType::generic_atom(
+                atom("non-empty-array"),
+                generic.args.clone(),
+            )),
+            TypeKind::Generic(generic) if generic.name == "list" => Some(PhpType::generic_atom(
+                atom("non-empty-list"),
+                generic.args.clone(),
+            )),
+            _ => Some(ty.clone()),
+        },
     }
 }
 
@@ -2562,6 +2766,80 @@ pub(crate) fn collect_condition_var_names(expr: &Expression<'_>) -> Vec<String> 
     let mut names = Vec::new();
     collect_condition_var_names_inner(expr, &mut names);
     names
+}
+
+/// Collect every variable a condition reads, in source order.
+///
+/// Unlike [`collect_condition_var_names`], which only picks out the subjects
+/// of `instanceof`-shaped checks, this is the full set of candidates the
+/// narrowing pipeline should consider — the equivalent of the `scope.locals`
+/// key list `apply_condition_narrowing` walks when it has a live scope.
+pub(crate) fn collect_condition_subject_vars(expr: &Expression<'_>, out: &mut Vec<String>) {
+    let push = |name: String, out: &mut Vec<String>| {
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    };
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => {
+            push(bytes_to_str(dv.name).to_string(), out);
+        }
+        Expression::Parenthesized(inner) => collect_condition_subject_vars(inner.expression, out),
+        Expression::UnaryPrefix(unary) => collect_condition_subject_vars(unary.operand, out),
+        Expression::UnaryPostfix(unary) => collect_condition_subject_vars(unary.operand, out),
+        Expression::Binary(bin) => {
+            collect_condition_subject_vars(bin.lhs, out);
+            collect_condition_subject_vars(bin.rhs, out);
+        }
+        Expression::Assignment(assignment) => {
+            collect_condition_subject_vars(assignment.lhs, out);
+            collect_condition_subject_vars(assignment.rhs, out);
+        }
+        Expression::Conditional(conditional) => {
+            collect_condition_subject_vars(conditional.condition, out);
+            if let Some(then) = conditional.then {
+                collect_condition_subject_vars(then, out);
+            }
+            collect_condition_subject_vars(conditional.r#else, out);
+        }
+        Expression::Call(call) => {
+            let args = match call {
+                Call::Function(fc) => {
+                    collect_condition_subject_vars(fc.function, out);
+                    &fc.argument_list
+                }
+                Call::Method(mc) => {
+                    collect_condition_subject_vars(mc.object, out);
+                    &mc.argument_list
+                }
+                Call::NullSafeMethod(mc) => {
+                    collect_condition_subject_vars(mc.object, out);
+                    &mc.argument_list
+                }
+                Call::StaticMethod(sc) => &sc.argument_list,
+            };
+            for arg in args.arguments.iter() {
+                collect_condition_subject_vars(arg.value(), out);
+            }
+        }
+        Expression::Access(Access::Property(pa)) => collect_condition_subject_vars(pa.object, out),
+        Expression::Access(Access::NullSafeProperty(pa)) => {
+            collect_condition_subject_vars(pa.object, out);
+        }
+        Expression::ArrayAccess(aa) => {
+            collect_condition_subject_vars(aa.array, out);
+            collect_condition_subject_vars(aa.index, out);
+        }
+        Expression::Construct(Construct::Isset(isset)) => {
+            for value in isset.values.iter() {
+                collect_condition_subject_vars(value, out);
+            }
+        }
+        Expression::Construct(Construct::Empty(empty)) => {
+            collect_condition_subject_vars(empty.value, out);
+        }
+        _ => {}
+    }
 }
 
 /// Whether a scope key is a synthetic property/array access key

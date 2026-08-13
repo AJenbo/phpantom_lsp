@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ResolvedType};
 
@@ -730,6 +730,7 @@ pub(crate) enum TypeGuardKind {
     Callable,
     Null,
     Scalar,
+    Resource,
 }
 
 /// Return the canonical `PhpType` that a type-guard narrows `mixed` to.
@@ -755,6 +756,7 @@ fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
             PhpType::string(),
             PhpType::bool(),
         ]),
+        TypeGuardKind::Resource => PhpType::named(atom("resource")),
     }
 }
 
@@ -792,6 +794,7 @@ pub(crate) fn try_extract_type_guard(
                 "is_callable" => TypeGuardKind::Callable,
                 "is_null" => TypeGuardKind::Null,
                 "is_scalar" => TypeGuardKind::Scalar,
+                "is_resource" => TypeGuardKind::Resource,
                 _ => return None,
             };
             let args = &fc.argument_list.arguments;
@@ -837,6 +840,10 @@ fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
                 || ty.is_subtype_of(&PhpType::float())
                 || ty.is_subtype_of(&PhpType::bool())
         }
+        // `is_resource()` returns false for a closed resource, but a value
+        // declared `closed-resource` is still in the resource domain, so the
+        // subtype check covers both refinements.
+        TypeGuardKind::Resource => ty.is_subtype_of(&PhpType::named(atom("resource"))),
     }
 }
 
