@@ -30,10 +30,14 @@ class SyncBakeryCommand extends Command
     {
         // Own-parameter completion + hover: trigger completion inside the
         // string and only `bakery` is offered; hover shows its description.
+        // The signature also decides the type: `{bakery}` is required, so
+        // it is a plain string rather than the framework's declared
+        // array|string|int|bool|null union.
         $bakery = $this->argument('bakery');
 
         // Options complete to `fresh` and `since`; hover shows "takes a
-        // value" for `--since`.
+        // value" for `--since`.  A value-less `{--fresh}` is a boolean flag;
+        // `{--since=}` may be left out, so it is ?string.
         $onlyFresh = $this->option('fresh');
         $since = $this->option('since');
 

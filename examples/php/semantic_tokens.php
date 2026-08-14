@@ -85,10 +85,12 @@ class SemanticMemberVerificationDemo
 // ── Semantic Tokens: magic members ──────────────────────────────────────────
 // Members that exist only as docblock tags are resolved like declared ones,
 // so they are colored as a property and a method rather than left as unknown
-// text. (full mode)
+// text. That holds on both sides: the name in the tag below is colored by the
+// tag that declares it, and matches the color it gets everywhere it is used.
+// (full mode)
 
 /**
- * @property string $displayName
+ * @property string $displayName    <- colored as a property
  * @method string shout(string $text)
  * @method static string brand()
  */

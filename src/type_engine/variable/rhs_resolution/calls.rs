@@ -897,11 +897,14 @@ pub(super) fn resolve_rhs_function_call<'b>(
     }
 
     // ── Laravel translation helper return type narrowing ─────
-    // `trans()`/`__()` declare a return type of `array|string` (plus a
-    // `null` branch for `__()`'s no-key form) because a translation key
-    // may name a whole group. A literal key that resolves to a scalar
-    // entry can never take the array branch, so narrow to `string`.
-    if let Some(ref name) = func_name {
+    // `trans()`/`__()` declare a return type of `string|array|null` because
+    // a translation key may name a whole group, and the keyless form hands
+    // the key straight back. The key decides which branch a call takes:
+    // a leaf entry is a `string`, a group is the array beneath it, and
+    // `__()` with no key at all is the `null`.
+    if let Some(ref name) = func_name
+        && let Some(resolver) = ctx.loaders.trans_resolver
+    {
         let normalized_func = name.trim_start_matches('\\');
         if matches!(normalized_func, "trans" | "__") {
             let arg_texts =
@@ -909,14 +912,21 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     &func_call.argument_list,
                     content,
                 );
-            if let Some(first_arg) = arg_texts.first()
-                && let Some(key) = crate::util::unescape_php_string_literal(first_arg.trim())
-                && !key.is_empty()
-                && !key.contains('$')
-                && let Some(resolver) = ctx.loaders.trans_resolver
-                && let Some(ty) = resolver(&key)
-            {
-                return vec![ResolvedType::from_type_string(ty)];
+            match arg_texts.first() {
+                Some(first_arg) => {
+                    let ty = crate::util::unescape_php_string_literal(first_arg.trim())
+                        .filter(|key| !key.is_empty() && !key.contains('$'))
+                        .and_then(|key| resolver(&key))
+                        .unwrap_or_else(crate::virtual_members::laravel::unresolved_trans_type);
+                    return vec![ResolvedType::from_type_string(ty)];
+                }
+                // `trans()` with no key hands back the translator itself, a
+                // shape this narrowing does not model; `__()` returns the
+                // null it was given.
+                None if normalized_func == "__" => {
+                    return vec![ResolvedType::from_type_string(PhpType::null())];
+                }
+                None => {}
             }
         }
     }
@@ -1413,6 +1423,11 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
         }
         if let Some(result) =
             try_resolve_trans_method_type(&owner.fqn(), &method_name, argument_list, ctx)
+        {
+            return result;
+        }
+        if let Some(result) =
+            try_resolve_command_accessor_type(owner, &method_name, argument_list, ctx)
         {
             return result;
         }
@@ -2423,10 +2438,43 @@ fn try_resolve_trans_method_type(
         ctx.content,
     );
     let first_arg = arg_texts.first()?;
-    let key = crate::util::unescape_php_string_literal(first_arg.trim())?;
-    if key.is_empty() || key.contains('$') {
+    let ty = crate::util::unescape_php_string_literal(first_arg.trim())
+        .filter(|key| !key.is_empty() && !key.contains('$'))
+        .and_then(|key| resolver(&key))
+        .unwrap_or_else(crate::virtual_members::laravel::unresolved_trans_type);
+    Some(vec![ResolvedType::from_type_string(ty)])
+}
+
+/// Narrow `$this->argument('user')` / `$this->option('queue')` on an Artisan
+/// command to the type its own `$signature` declares for that parameter.
+///
+/// The framework's declared union spans every parameter shape at once, so
+/// without this a value-less `{--flag}` reads as `array|string|int|bool|null`
+/// wherever it is used.
+fn try_resolve_command_accessor_type(
+    class: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !crate::virtual_members::laravel::is_command_accessor(method_name) {
         return None;
     }
-    let ty = resolver(&key)?;
+    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        ctx.content,
+    );
+    let key = match arg_texts.first() {
+        // A key built at runtime names no parameter we can look up.
+        Some(text) => Some(crate::util::unescape_php_string_literal(text.trim())?),
+        None => None,
+    };
+    let ty = crate::virtual_members::laravel::resolve_command_accessor_type(
+        class,
+        method_name,
+        key.as_deref(),
+        ctx.class_loader,
+        ctx.backend,
+    )?;
     Some(vec![ResolvedType::from_type_string(ty)])
 }

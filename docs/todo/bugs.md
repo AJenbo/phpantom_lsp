@@ -373,33 +373,6 @@ normal fall-through.
 
 ## Laravel
 
-### B165. `__()` / `trans()` report their raw `string|array|null` signature
-
-**Impact: High · Effort: Medium**
-
-27 sites in one project: every `{{ __('key') }}` echo, `__()` fed to
-an `HtmlString`, and `assertSee(__('key'))` mismatches because the
-helper's framework signature is `string|array|null`. PHPantom already
-indexes translation keys and their shapes (`trans_keys.rs`); a
-literal-key call can resolve to the actual translation's type
-(`string` for a leaf, `array<…>` for a group), which is strictly
-better than larastan's benevolent-union hand-wave. A keyless `__()`
-returns `null`; an unresolvable dynamic key should stay permissive
-(treat as accepting-any-branch rather than reporting every branch).
-
-### B166. Console `argument()` / `option()` ignore the command's `$signature`
-
-**Impact: High · Effort: Medium**
-
-29 sites in one project. `$this->argument('name')` /
-`$this->option('markets')` return the framework's raw
-`array|string|float|int|bool|null` union. The command's own
-`$signature` string decides the real type per entry: a value-less
-`{--flag}` is `bool`, `{--opt=}` is `string|null`, `{arg}` is
-`string`, `{arg*}` is `array<string>`. PHPantom already parses
-signature strings for command-name indexing; extend that to type
-these two accessors (Symfony `InputDefinition` semantics).
-
 ### B167. Factory `create()`/`make()` keep the collection half on single-model chains
 
 **Impact: Medium-High · Effort: Low-Medium**
@@ -455,32 +428,3 @@ A project extending PHPStan (`vendor/phpstan/phpstan` ships
 (1 site — a custom extension calling `getConstantStrings()`). Check
 what the package's `bootstrap.php` exposes and whether indexing the
 phar (or its extracted stubs) is feasible.
-
-### B177. A `@property` tag name is highlighted as a method
-
-**Impact: Low · Effort: Low**
-
-The member name in a `@property` tag emits the `method` semantic
-token, while the same name emits `property` everywhere it is used:
-
-```php
-/**
- * @property string $displayName    <- `displayName` highlights as a method
- * @method string shout(string $x)  <- correct
- */
-class Demo
-{
-    public function demo(): string
-    {
-        return $this->displayName;  // highlights as a property, as it should
-    }
-}
-```
-
-Both tags produce a `MemberDeclaration` span, and
-`classify_member_declaration` looks the name up in the enclosing
-class's own members. A tag-declared member is not there, so both fall
-through to the `TT_METHOD` default. Classify the declaration from the
-tag that produced it (or from the resolved virtual members) instead of
-the fallback. `SemanticMagicMemberDemo` in
-`examples/php/semantic_tokens.php` shows the case.

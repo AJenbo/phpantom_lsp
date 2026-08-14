@@ -698,3 +698,208 @@ class Runner {
         "expected the unknown name to be app:nope, got {command_diags:?}"
     );
 }
+
+// ─── Signature-typed accessors ─────────────────────────────────────────────
+
+const TYPED_COMMAND: &str = "\
+<?php
+namespace App\\Console\\Commands;
+use Illuminate\\Console\\Command;
+class TypedCommand extends Command
+{
+    protected $signature = 'app:typed {user} {slug?} {tags*} {--queue} {--format=} {--limit=10} {--id=*}';
+    public function handle(): void
+    {
+        $user = $this->argument('user');
+        $slug = $this->argument('slug');
+        $tags = $this->argument('tags');
+        $queue = $this->option('queue');
+        $format = $this->option('format');
+        $limit = $this->option('limit');
+        $ids = $this->option('id');
+        $unknown = $this->option('nope');
+    }
+}
+";
+
+const ATTRIBUTE_TYPED_COMMAND: &str = "\
+<?php
+namespace App\\Console\\Commands;
+use Illuminate\\Console\\Attributes\\Signature;
+use Illuminate\\Console\\Command;
+#[Signature('app:attributed {--days=7}')]
+class AttributedCommand extends Command
+{
+    public function handle(): void
+    {
+        $days = $this->option('days');
+    }
+}
+";
+
+/// Hover text for the first occurrence of `needle` in `TYPED_COMMAND`.
+async fn hover_in_typed_command(
+    backend: &phpantom_lsp::Backend,
+    uri: &str,
+    needle: &str,
+) -> String {
+    let position = position_after(TYPED_COMMAND, needle);
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse(uri).unwrap(),
+                },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    match hover.map(|h| h.contents) {
+        Some(HoverContents::Markup(markup)) => markup.value,
+        Some(HoverContents::Scalar(MarkedString::String(s))) => s,
+        Some(HoverContents::Scalar(MarkedString::LanguageString(ls))) => ls.value,
+        _ => String::new(),
+    }
+}
+
+#[tokio::test]
+async fn signature_types_argument_and_option_accessors() {
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[("src/Console/Commands/TypedCommand.php", TYPED_COMMAND)],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Console/Commands/TypedCommand.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, TYPED_COMMAND).await;
+
+    for (needle, expected) in [
+        // `{user}` is required, so it always arrives.
+        ("$user", "$user = string"),
+        // `{slug?}` may be left out and carries no default.
+        ("$slug", "$slug = ?string"),
+        // `{tags*}` collects every value it is given.
+        ("$tags", "$tags = list<string>"),
+        // `{--queue}` takes no value, so it is a flag.
+        ("$queue", "$queue = bool"),
+        // `{--format=}` takes a value but has no default.
+        ("$format", "$format = ?string"),
+        // `{--limit=10}` always has a value.
+        ("$limit", "$limit = string"),
+        // `{--id=*}` is an array option.
+        ("$ids", "$ids = list<string>"),
+    ] {
+        let text = hover_in_typed_command(&backend, &uri, needle).await;
+        assert!(
+            text.contains(expected),
+            "expected `{expected}` in hover for {needle}, got: {text}"
+        );
+    }
+
+    // A name the signature does not declare stays on the framework's own
+    // declared type rather than being invented.
+    let unknown = hover_in_typed_command(&backend, &uri, "$unknown").await;
+    assert!(
+        !unknown.contains("bool") && !unknown.contains("string"),
+        "an undeclared option must not be typed from the signature, got: {unknown}"
+    );
+}
+
+#[tokio::test]
+async fn an_attribute_declared_signature_types_the_accessors_too() {
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[(
+            "src/Console/Commands/AttributedCommand.php",
+            ATTRIBUTE_TYPED_COMMAND,
+        )],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(
+        dir.path()
+            .join("src/Console/Commands/AttributedCommand.php"),
+    )
+    .unwrap()
+    .to_string();
+    open(&backend, &uri, ATTRIBUTE_TYPED_COMMAND).await;
+
+    let position = position_after(ATTRIBUTE_TYPED_COMMAND, "$days");
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse(&uri).unwrap(),
+                },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    let text = match hover.map(|h| h.contents) {
+        Some(HoverContents::Markup(markup)) => markup.value,
+        _ => String::new(),
+    };
+    assert!(text.contains("$days = string"), "got: {text}");
+}
+
+#[tokio::test]
+async fn a_command_that_writes_its_own_accessor_keeps_its_declared_type() {
+    const OVERRIDING_COMMAND: &str = "\
+<?php
+namespace App\\Console\\Commands;
+use Illuminate\\Console\\Command;
+class OverridingCommand extends Command
+{
+    protected $signature = 'app:overriding {--flag}';
+    public function option($key = null): int { return 0; }
+    public function handle(): void
+    {
+        $flag = $this->option('flag');
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[(
+            "src/Console/Commands/OverridingCommand.php",
+            OVERRIDING_COMMAND,
+        )],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(
+        dir.path()
+            .join("src/Console/Commands/OverridingCommand.php"),
+    )
+    .unwrap()
+    .to_string();
+    open(&backend, &uri, OVERRIDING_COMMAND).await;
+
+    let position = position_after(OVERRIDING_COMMAND, "$flag");
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse(&uri).unwrap(),
+                },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    let text = match hover.map(|h| h.contents) {
+        Some(HoverContents::Markup(markup)) => markup.value,
+        _ => String::new(),
+    };
+    assert!(
+        text.contains("$flag = int"),
+        "the command's own return type wins over the signature, got: {text}"
+    );
+}

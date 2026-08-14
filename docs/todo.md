@@ -28,8 +28,6 @@ within the same impact tier.
 | B167 | [Factory `create()`/`make()` keep the collection half on single-model chains](todo/bugs.md#b167-factory-createmake-keep-the-collection-half-on-single-model-chains) | Medium-High | Low-Medium |
 | B144 | [`preg_match` `$matches` is nullable and shapeless](todo/bugs.md#b144-preg_match-matches-is-nullable-and-shapeless)                                        | High        | Medium      |
 | B146 | [Array builtins lose key and element generics](todo/bugs.md#b146-array-builtins-lose-key-and-element-generics)                                             | High        | Medium      |
-| B165 | [`__()` / `trans()` report their raw `string\|array\|null` signature](todo/bugs.md#b165-__--trans-report-their-raw-stringarraynull-signature)              | High        | Medium      |
-| B166 | [Console `argument()` / `option()` ignore the command's `$signature`](todo/bugs.md#b166-console-argument--option-ignore-the-commands-signature)            | High        | Medium      |
 | B141 | [A `never` conditional branch does not assert the condition](todo/bugs.md#b141-a-never-conditional-branch-does-not-assert-the-condition) | Medium-High | Medium      |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 | B150 | [Branch-local reassignment and narrowing are wrong at the join point](todo/bugs.md#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point) | Medium-High | Medium    |
@@ -118,7 +116,6 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 | D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B177 | [A `@property` tag name is highlighted as a method](todo/bugs.md#b177-a-property-tag-name-is-highlighted-as-a-method)                                                       | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

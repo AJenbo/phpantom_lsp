@@ -173,6 +173,7 @@ mod laravel_route_ownership;
 mod laravel_route_params;
 mod laravel_schema_macro_startup;
 mod laravel_trans_loader;
+mod laravel_trans_types;
 mod laravel_validated_shape;
 mod lsp_concurrency;
 mod narrowing_condition_proofs;

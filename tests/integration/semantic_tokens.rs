@@ -427,6 +427,40 @@ function test(Foo $f) {
 }
 
 #[test]
+fn docblock_tag_member_declarations_are_classified_by_their_tag() {
+    let php = r#"<?php
+/**
+ * @property string $displayName
+ * @method string shout(string $text)
+ */
+class Demo
+{
+    public function demo(): string
+    {
+        return $this->displayName;
+    }
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+
+    let display_name = decoded
+        .iter()
+        .find(|t| t.line == 2 && t.length == 11)
+        .expect("expected a token for the @property name");
+    assert_eq!(
+        display_name.token_type, TT_PROPERTY,
+        "a @property tag declares a property, not a method"
+    );
+
+    let shout = decoded
+        .iter()
+        .find(|t| t.line == 3 && t.length == 5)
+        .expect("expected a token for the @method name");
+    assert_eq!(shout.token_type, TT_METHOD);
+}
+
+#[test]
 fn static_method_call_has_static_modifier() {
     let php = r#"<?php
 class Foo {

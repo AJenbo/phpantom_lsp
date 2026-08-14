@@ -28,15 +28,21 @@
 //!
 //! The parsed signature of the *enclosing* command class also drives
 //! completion / validation of `$this->argument('user')` and
-//! `$this->option('queue')` against that same command's own parameters.
+//! `$this->option('queue')` against that same command's own parameters,
+//! and gives both accessors the type the named parameter really holds
+//! ([`resolve_accessor_type`]) instead of the framework's raw
+//! `array|string|int|bool|null` union.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_syntax::cst::*;
 
-use super::helpers::extract_string_literal;
+use super::helpers::{extract_string_literal, walks_parent_chain};
+use crate::php_type::PhpType;
+use crate::types::{ClassInfo, PropertySource};
 
 /// A single parsed argument or option from a command `$signature`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +173,19 @@ impl LaravelCommandIndex {
     /// Look up a command by name.
     pub(crate) fn get(&self, name: &str) -> Option<&CommandEntry> {
         self.by_name.get(name)
+    }
+
+    /// Look up a command by the class that declares it.
+    ///
+    /// The by-name lookup cannot answer this: a command reached through its
+    /// own `$this` is identified by class, and the signature is what the
+    /// accessor types need.  Commands number in the tens even in a large
+    /// project, so the scan is cheaper than a second index.
+    pub(crate) fn get_by_fqn(&self, fqn: &str) -> Option<&CommandEntry> {
+        self.by_uri
+            .values()
+            .flatten()
+            .find(|entry| entry.fqn.as_deref() == Some(fqn))
     }
 
     /// All known command names, sorted and deduplicated.
@@ -404,6 +423,123 @@ fn split_default_array(token: &str) -> Option<(String, String)> {
         return None;
     }
     Some((token[..idx].to_string(), default.to_string()))
+}
+
+// ─── Accessor return types ─────────────────────────────────────────────────────
+
+/// The base class every Artisan command extends.
+const CONSOLE_COMMAND_FQN: &str = "Illuminate\\Console\\Command";
+
+/// Whether `method_name` is one of the two signature-typed accessors.
+pub(crate) fn is_command_accessor(method_name: &str) -> bool {
+    matches!(method_name, "argument" | "option")
+}
+
+/// The type `$this->argument($key)` / `$this->option($key)` hands back on a
+/// command class, read off that command's own `$signature`.
+///
+/// Laravel declares both accessors as
+/// `array|string|int|bool|null`, the union of every shape a console
+/// parameter can take, because the framework cannot see which parameter a
+/// call names.  The `$signature` can: `{--flag}` is a boolean flag,
+/// `{--opt=}` is an optional value, `{arg}` is required, `{arg*}` collects
+/// a list.  Symfony's `InputDefinition` decides the rest — every value that
+/// reaches PHP comes off the command line as a string.
+///
+/// Returns `None` — leaving the declared union in place — when the receiver
+/// is not a command, the class declares no signature, or the signature does
+/// not name `key`.  A `None` `key` is the no-argument form, which hands back
+/// the whole parsed set.
+pub(crate) fn resolve_accessor_type(
+    class: &ClassInfo,
+    method_name: &str,
+    key: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
+) -> Option<PhpType> {
+    if !is_command_accessor(method_name) {
+        return None;
+    }
+    if !walks_parent_chain(class, class_loader, |name| name == CONSOLE_COMMAND_FQN) {
+        return None;
+    }
+    // A command that writes its own `argument()` / `option()` keeps whatever
+    // it declared; only the accessors inherited from the framework are ours
+    // to reinterpret.  The receiver may already be a merged class, so the
+    // own-member check goes through the loader, which hands back the class
+    // as parsed.
+    if class_loader(&class.fqn()).is_some_and(|raw| raw.get_method_ci(method_name).is_some()) {
+        return None;
+    }
+
+    let Some(key) = key else {
+        // `argument()` / `option()` with no key return the whole parsed
+        // set, keyed by parameter name.  The values still span every
+        // parameter shape in the signature, so `mixed` is as far as this
+        // form narrows.
+        return Some(PhpType::generic_array(PhpType::string(), PhpType::mixed()));
+    };
+
+    let signature = class_signature(class, backend)?;
+    let is_option = method_name == "option";
+    let param = if is_option {
+        signature.option(key)?
+    } else {
+        signature.argument(key)?
+    };
+    Some(param_type(param, is_option))
+}
+
+/// The parsed signature of a command class.
+///
+/// The `$signature` property is read straight off the class: the receiver
+/// may be a merged class, which carries the base class's own valueless
+/// `protected $signature;` alongside the command's initialised one, so the
+/// scan looks for the declaration that actually holds a value.  A command
+/// that declares itself through `#[Signature]` / `#[AsCommand]` instead has
+/// no such property, and comes from the command index, which parses both
+/// attribute forms while scanning.
+fn class_signature(
+    class: &ClassInfo,
+    backend: Option<&crate::Backend>,
+) -> Option<CommandSignature> {
+    let declared = class
+        .properties
+        .iter()
+        .filter(|p| p.name == "signature")
+        .find_map(|p| match p.source.as_ref() {
+            Some(PropertySource::DeclaredDefault { value }) => {
+                crate::util::unescape_php_string_literal(value.trim())
+            }
+            _ => None,
+        });
+    if let Some(expression) = declared {
+        return Some(parse_signature(&expression));
+    }
+
+    let backend = backend?;
+    let index = backend.laravel_commands.read();
+    let entry = index.get_by_fqn(&class.fqn())?;
+    Some(entry.signature.clone())
+}
+
+/// The type a single parsed signature parameter holds.
+fn param_type(param: &CommandParam, is_option: bool) -> PhpType {
+    // A value-less option is a flag Symfony reports as a boolean.
+    if is_option && !param.takes_value {
+        return PhpType::bool();
+    }
+    // `{arg*}` / `{--opt=*}` collect every occurrence into a list of the
+    // strings that were passed.
+    if param.is_array {
+        return PhpType::list(PhpType::string());
+    }
+    // A parameter that may be left out and carries no default is `null`
+    // when it is: `{arg?}` and `{--opt=}`.
+    if param.default.is_none() && (param.optional || is_option) {
+        return PhpType::nullable(PhpType::string());
+    }
+    PhpType::string()
 }
 
 // ─── Source scanner ────────────────────────────────────────────────────────────

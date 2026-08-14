@@ -819,6 +819,29 @@ impl Backend {
                 }
             }
         }
+
+        // A `@property` / `@method` tag declares its member in the class
+        // docblock, which sits *before* the class body the scan above
+        // covers, so the name is classified from the tag that declared it
+        // on the class the docblock is attached to.
+        if let Some(class) = ctx
+            .classes
+            .iter()
+            .filter(|c| offset < c.decl_start_offset)
+            .min_by_key(|c| c.decl_start_offset)
+        {
+            if class.doc_properties().iter().any(|(prop, _)| prop == name) {
+                return TT_PROPERTY;
+            }
+            if class
+                .doc_methods()
+                .iter()
+                .any(|m| m.name.eq_ignore_ascii_case(name))
+            {
+                return TT_METHOD;
+            }
+        }
+
         // Fall back to method if we can't determine.
         TT_METHOD
     }

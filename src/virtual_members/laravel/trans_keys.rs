@@ -8,20 +8,41 @@ use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 
 impl Backend {
-    /// Narrow a translation key argument's type to `string` when the key
-    /// names a scalar entry, so that `__('messages.welcome')`/`trans(...)`/
-    /// `Lang::get(...)` calls don't carry the full `array|string` union of
-    /// the framework's declared return type into an argument that a
-    /// literal key can never actually make an array.
+    /// The type a translation key resolves to, so that
+    /// `__('messages.welcome')` / `trans(...)` / `Lang::get(...)` calls
+    /// don't carry the full `string|array|null` union of the framework's
+    /// declared return type into an argument a literal key settles.
     ///
-    /// Returns `None` (leaving the declared union in place) when the key
-    /// names a translation group, or cannot be resolved at all.
+    /// A leaf entry is the line itself; a group hands back the nested array
+    /// of lines beneath it.  A key the indexed translations do not cover
+    /// falls back to [`unresolved_trans_type`].
     pub(crate) fn resolve_trans_type(&self, key: &str) -> Option<PhpType> {
         match self.cached_trans_key_shapes().get(key) {
             Some(false) => Some(PhpType::string()),
-            Some(true) | None => None,
+            Some(true) => Some(trans_group_type()),
+            None => Some(unresolved_trans_type()),
         }
     }
+}
+
+/// The type a translation group resolves to: the lines nested beneath it,
+/// keyed by their own names.  The values are a mix of lines and further
+/// groups, which is as far as a key alone settles the shape.
+fn trans_group_type() -> PhpType {
+    PhpType::generic_array(PhpType::string(), PhpType::mixed())
+}
+
+/// The type a translation call hands back when its key cannot be read: one
+/// built at runtime, or one naming lines that are not in the workspace.
+///
+/// `null` is not among the branches.  `__()` and `trans()` return it only
+/// for the keyless form, and every call that names a key at all gets a
+/// string back even when the translation is missing (Laravel echoes the key
+/// itself).  Which of the two remaining branches applies depends on a key
+/// PHPantom cannot see, so the union is benevolent: a call site that passes
+/// it on is accepted rather than reported against every branch.
+pub(crate) fn unresolved_trans_type() -> PhpType {
+    PhpType::benevolent(PhpType::union(vec![PhpType::string(), trans_group_type()]))
 }
 
 /// Resolve `__('file.key')` / `trans('file.key')` / `Lang::get('file.key')` to the

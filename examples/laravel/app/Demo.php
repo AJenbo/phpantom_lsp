@@ -534,6 +534,14 @@ class Demo
         trans_choice('messages.notifications', 5);
         Lang::get('pagination.next');
         Lang::has('validation.required');
+
+        // The framework declares string|array|null for all three helpers,
+        // because a key may name a whole group and the keyless form hands
+        // its own null back.  The key at the call site settles which of
+        // those a call really returns — hover each one to see it.
+        __('messages.welcome');     // string, a single line
+        __('validation.between');   // array, the lines under it
+        __();                       // null, no key to look up
     }
 
     /**

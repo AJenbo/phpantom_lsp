@@ -140,7 +140,9 @@ pub(crate) mod where_property;
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{
-    LaravelCommandIndex, command_signature_at_offset, is_command_directory_uri, scan_command_file,
+    LaravelCommandIndex, command_signature_at_offset, is_command_accessor,
+    is_command_directory_uri, resolve_accessor_type as resolve_command_accessor_type,
+    scan_command_file,
 };
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
@@ -173,7 +175,7 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use trans_keys::collect_trans_declarations;
+pub(crate) use trans_keys::{collect_trans_declarations, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars};
 pub(crate) use view_names::canonical_view_name;
