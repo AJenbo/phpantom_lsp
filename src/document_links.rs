@@ -11,7 +11,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{DocumentLink, Range, Url};
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::text_position::offset_to_position;
 
 /// A resolved include/require path with its source range in the document.
@@ -276,7 +276,7 @@ fn try_evaluate_path_expr(expr: &Expression<'_>, file_dir: &Path) -> Option<Stri
         Expression::Literal(literal::Literal::String(s)) => {
             // Prefer the parsed value, fall back to raw (which includes quotes).
             let value = match s.value {
-                Some(v) => bytes_to_str(v),
+                Some(v) => literal_bytes_to_str(v)?,
                 None => strip_quotes(bytes_to_str(s.raw)),
             };
             if value.is_empty() {

@@ -7,7 +7,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::docblock;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ResolvedType;
@@ -300,15 +300,20 @@ pub(super) enum ArrayBracketSegment {
 pub(super) fn classify_array_index(index: &Expression<'_>) -> ArrayBracketSegment {
     match index {
         Expression::Literal(Literal::String(s)) => {
-            let key = s
-                .value
-                .map(|v| bytes_to_str(v).to_string())
-                .unwrap_or_else(|| {
+            let key = match s.value {
+                // A value that is not UTF-8 (`$a["\x8b"]`) cannot be
+                // written as a shape key, so the access stays opaque.
+                Some(bytes) => match literal_bytes_to_str(bytes) {
+                    Some(key) => key.to_string(),
+                    None => return ArrayBracketSegment::ElementAccess,
+                },
+                None => {
                     let raw_str = bytes_to_str(s.raw);
                     crate::text_scan::unquote_php_string(raw_str)
                         .unwrap_or(raw_str)
                         .to_string()
-                });
+                }
+            };
             ArrayBracketSegment::StringKey(key)
         }
         // An integer literal index (`$pair[0]`) addresses either an explicit

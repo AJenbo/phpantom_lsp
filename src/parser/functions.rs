@@ -7,7 +7,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::{atom, atom_bytes, bytes_to_str};
+use crate::atom::{atom, atom_bytes, bytes_to_str, literal_bytes_to_str};
 use crate::docblock;
 use crate::types::*;
 
@@ -61,10 +61,10 @@ fn try_extract_function_exists_guard<'a>(condition: &'a Expression<'a>) -> Optio
     if let Expression::Literal(Literal::String(lit_str)) = first_expr {
         // `value` is the unquoted content; fall back to stripping quotes
         // from `raw`.
-        let name = lit_str
-            .value
-            .map(bytes_to_str)
-            .or_else(|| crate::text_scan::unquote_php_string(bytes_to_str(lit_str.raw)))?;
+        let name = match lit_str.value {
+            Some(bytes) => literal_bytes_to_str(bytes)?,
+            None => crate::text_scan::unquote_php_string(bytes_to_str(lit_str.raw))?,
+        };
         if !name.is_empty() {
             return Some(name);
         }
@@ -760,7 +760,7 @@ impl Backend {
                 Argument::Named(named) => named.value,
             };
             if let Expression::Literal(Literal::String(lit_str)) = first_expr
-                && let Some(name) = lit_str.value
+                && let Some(name) = lit_str.value.and_then(literal_bytes_to_str)
                 && !name.is_empty()
             {
                 let offset = ident.span().start.offset;
@@ -774,7 +774,7 @@ impl Backend {
                     let end = val_expr.span().end.offset as usize;
                     content.get(start..end).map(|s| s.to_string())
                 });
-                return Some((bytes_to_str(name).to_string(), offset, value_text));
+                return Some((name.to_string(), offset, value_text));
             }
         }
         None

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{Atom, atom, bytes_to_str, last_segment};
+use crate::atom::{Atom, atom, bytes_to_str, last_segment, literal_bytes_to_str};
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{
@@ -1705,14 +1705,12 @@ fn keyed_slot_base(base: &PhpType) -> PhpType {
 /// entries.
 pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<String> {
     if let Expression::Literal(Literal::String(s)) = index {
-        let key = s
-            .value
-            .map(|v| bytes_to_str(v).to_string())
-            .unwrap_or_else(|| {
-                crate::text_scan::unquote_php_string(bytes_to_str(s.raw))
-                    .unwrap_or(bytes_to_str(s.raw))
-                    .to_string()
-            });
+        let key = match s.value {
+            Some(bytes) => literal_bytes_to_str(bytes)?.to_string(),
+            None => crate::text_scan::unquote_php_string(bytes_to_str(s.raw))
+                .unwrap_or(bytes_to_str(s.raw))
+                .to_string(),
+        };
         // PHP casts canonical decimal-integer strings (including negatives)
         // to int keys. Keep non-canonical numeric-looking strings such as
         // `"08"`, `"+8"`, and `"1.5"` as exact shape keys.

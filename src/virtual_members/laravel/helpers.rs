@@ -1430,7 +1430,7 @@ pub(crate) fn extract_dir_concat_path<'a>(
         return None;
     };
     if let Some(value) = s.value {
-        Some(crate::atom::bytes_to_str(value))
+        crate::atom::literal_bytes_to_str(value)
     } else {
         let start = s.span.start.offset as usize + 1;
         let end = s.span.end.offset as usize - 1;

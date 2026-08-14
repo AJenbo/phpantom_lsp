@@ -160,7 +160,12 @@ fn collect_compact_name_from_arg(expr: &Expression<'_>, vars: &mut HashSet<Strin
             // quotes); fall back to `raw` and strip quotes manually
             // if `value` is `None`.
             let name: &str = if let Some(v) = s.value {
-                crate::atom::bytes_to_str(v)
+                // A value that is not UTF-8 (`compact("\x8b")`) cannot name
+                // a variable, so there is nothing to collect.
+                let Some(v) = crate::atom::literal_bytes_to_str(v) else {
+                    return;
+                };
+                v
             } else {
                 let raw = crate::atom::bytes_to_str(s.raw);
                 raw.strip_prefix('\'')

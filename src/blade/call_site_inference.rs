@@ -31,7 +31,7 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap};
@@ -1989,7 +1989,7 @@ fn is_compact_call(call: &FunctionCall<'_>) -> bool {
 /// The contents of a single- or double-quoted string literal, when it
 /// is a plain identifier-safe name.
 pub(crate) fn string_literal_contents(s: &LiteralString<'_>) -> Option<String> {
-    let value = s.value.map(bytes_to_str)?;
+    let value = s.value.and_then(literal_bytes_to_str)?;
     is_variable_name(value).then(|| value.to_string())
 }
 

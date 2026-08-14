@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ClassInfo;
 
@@ -263,9 +263,10 @@ fn argument_value_key(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::Literal(Literal::String(s)) => {
             let raw_str = bytes_to_str(s.raw);
-            let value = s.value.map(bytes_to_str).unwrap_or_else(|| {
-                crate::text_scan::unquote_php_string(raw_str).unwrap_or(raw_str)
-            });
+            let value = match s.value {
+                Some(bytes) => literal_bytes_to_str(bytes)?,
+                None => crate::text_scan::unquote_php_string(raw_str).unwrap_or(raw_str),
+            };
             // Escape so that two different strings cannot render to the
             // same key: `f("a'b")` and `f("a", "b")` must stay distinct.
             let mut out = String::with_capacity(value.len() + 2);
@@ -408,15 +409,15 @@ pub(in crate::type_engine) fn array_access_key_as_string(
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to stripping
             // quotes from `raw`.
-            let key = s
-                .value
-                .map(|v| bytes_to_str(v).to_string())
-                .unwrap_or_else(|| {
+            let key = match s.value {
+                Some(bytes) => literal_bytes_to_str(bytes)?.to_string(),
+                None => {
                     let raw_str = bytes_to_str(s.raw);
                     crate::text_scan::unquote_php_string(raw_str)
                         .unwrap_or(raw_str)
                         .to_string()
-                });
+                }
+            };
             Some(key)
         }
         Expression::Literal(Literal::Integer(i)) => {

@@ -8,7 +8,7 @@ use mago_syntax::cst::*;
 
 use super::array_func_rules::{ArrayFuncArgs, array_func_element_type, array_func_raw_type};
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::docblock;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
@@ -158,9 +158,11 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
 fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> String {
     match key {
         Expression::Literal(Literal::String(s)) => {
-            // `value` is the unquoted content; fall back to unquoting `raw`.
+            // `value` is the unquoted content; fall back to unquoting `raw`,
+            // which is also where a value that is not UTF-8 (`"\x8b"`) lands.
             s.value
-                .map(|v| bytes_to_str(v).to_string())
+                .and_then(literal_bytes_to_str)
+                .map(str::to_string)
                 .unwrap_or_else(|| {
                     crate::text_scan::unquote_php_string(bytes_to_str(s.raw))
                         .unwrap_or(bytes_to_str(s.raw))

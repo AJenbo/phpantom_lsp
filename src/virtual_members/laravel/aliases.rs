@@ -580,7 +580,7 @@ fn string_literal_matches(expr: &Expression<'_>, expected: &str) -> bool {
     matches!(
         expr,
         Expression::Literal(literal::Literal::String(s))
-            if s.value.is_some_and(|v| bytes_to_str(v) == expected)
+            if s.value.is_some_and(|v| v == expected.as_bytes())
     )
 }
 

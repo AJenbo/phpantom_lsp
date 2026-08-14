@@ -1495,7 +1495,7 @@ fn string_literal_value(expr: &Expression<'_>, content: &str) -> Option<String> 
         return None;
     };
     if let Some(value) = s.value {
-        return Some(crate::atom::bytes_to_str(value).to_string());
+        return crate::atom::literal_bytes_to_str(value).map(str::to_string);
     }
     let start = s.span.start.offset as usize + 1;
     let end = s.span.end.offset as usize - 1;

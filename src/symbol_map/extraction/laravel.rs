@@ -1088,11 +1088,12 @@ pub(super) fn try_emit_array_callable_span(
     if inner_start >= inner_end || inner_end as usize > content.len() {
         return;
     }
-    let member_name = if let Some(value) = s.value {
-        bytes_to_str(value)
-    } else {
-        &content[inner_start as usize..inner_end as usize]
-    };
+    // A value that is not UTF-8 (`"\x8b"`) falls back to the source text,
+    // which the identifier-shape check below then rejects.
+    let member_name = s
+        .value
+        .and_then(literal_bytes_to_str)
+        .unwrap_or(&content[inner_start as usize..inner_end as usize]);
     // Guard against non-identifier strings (e.g. `[$a, 'some text']`).
     if member_name.is_empty()
         || !member_name
@@ -1155,11 +1156,10 @@ pub(super) fn emit_compact_name_spans(
                 return;
             }
 
-            let name = if let Some(value) = s.value {
-                bytes_to_str(value)
-            } else {
-                &content[inner_start as usize..inner_end as usize]
-            };
+            let name = s
+                .value
+                .and_then(literal_bytes_to_str)
+                .unwrap_or(&content[inner_start as usize..inner_end as usize]);
             if name.is_empty() {
                 return;
             }
@@ -1433,11 +1433,10 @@ pub(super) fn laravel_route_scan_expr(
             if inner_start >= inner_end || inner_end as usize > content.len() {
                 return;
             }
-            let method_name = if let Some(value) = s.value {
-                bytes_to_str(value)
-            } else {
-                &content[inner_start as usize..inner_end as usize]
-            };
+            let method_name = s
+                .value
+                .and_then(literal_bytes_to_str)
+                .unwrap_or(&content[inner_start as usize..inner_end as usize]);
             // Must look like a valid PHP method name.
             if method_name.is_empty()
                 || !method_name

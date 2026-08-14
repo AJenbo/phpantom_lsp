@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
@@ -504,16 +504,17 @@ pub(in crate::type_engine) fn string_literal_value(expr: &Expression<'_>) -> Opt
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to stripping
             // quotes from `raw`.
-            Some(
-                s.value
-                    .map(|v| bytes_to_str(v).to_string())
-                    .unwrap_or_else(|| {
-                        let raw_str = bytes_to_str(s.raw);
+            match s.value {
+                Some(bytes) => Some(literal_bytes_to_str(bytes)?.to_string()),
+                None => {
+                    let raw_str = bytes_to_str(s.raw);
+                    Some(
                         crate::text_scan::unquote_php_string(raw_str)
                             .unwrap_or(raw_str)
-                            .to_string()
-                    }),
-            )
+                            .to_string(),
+                    )
+                }
+            }
         }
         _ => None,
     }

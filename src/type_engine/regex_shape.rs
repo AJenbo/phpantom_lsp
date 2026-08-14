@@ -27,7 +27,7 @@ use mago_syntax::cst::{
     Variable,
 };
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{PhpType, ShapeEntry};
 
 /// `PREG_PATTERN_ORDER`: `preg_match_all` groups the results by capture
@@ -243,7 +243,7 @@ fn literal_string<'b>(expr: &'b Expression<'b>) -> Option<Cow<'b, str>> {
         return None;
     };
     match string.value {
-        Some(value) => Some(Cow::Borrowed(bytes_to_str(value))),
+        Some(value) => literal_bytes_to_str(value).map(Cow::Borrowed),
         None => crate::text_scan::decode_php_string_literal(bytes_to_str(string.raw)),
     }
 }

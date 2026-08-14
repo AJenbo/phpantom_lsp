@@ -16,7 +16,7 @@ use super::{
     SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite, ViewReceiverClass,
     ViewReceiverSite,
 };
-use crate::atom::bytes_to_str;
+use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::util::strip_fqn_prefix;
 
 // ─── Extraction context ─────────────────────────────────────────────────────

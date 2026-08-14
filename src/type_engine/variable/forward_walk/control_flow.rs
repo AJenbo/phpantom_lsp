@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
@@ -1756,13 +1756,13 @@ pub(crate) fn extract_foreach_var_name(expr: &Expression<'_>) -> Option<String> 
 /// Handles string literals (`'user'`, `"user"`) and integer literals.
 pub(crate) fn extract_foreach_destr_key(key_expr: &Expression<'_>) -> Option<String> {
     match key_expr {
-        Expression::Literal(Literal::String(lit_str)) => lit_str
-            .value
-            .map(|v| bytes_to_str(v).to_string())
-            .or_else(|| {
+        Expression::Literal(Literal::String(lit_str)) => match lit_str.value {
+            Some(bytes) => Some(literal_bytes_to_str(bytes)?.to_string()),
+            None => {
                 let raw = bytes_to_str(lit_str.raw).to_string();
                 Some(raw.trim_matches('\'').trim_matches('"').to_string())
-            }),
+            }
+        },
         Expression::Literal(Literal::Integer(lit_int)) => {
             Some(bytes_to_str(lit_int.raw).to_string())
         }

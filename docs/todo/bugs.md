@@ -18,60 +18,7 @@ per-project inventory. Entries filed later say where they came from.
 
 ## Crashes
 
-### B150. A `\xNN` escape in a string literal aborts the process
-
-**Impact: High · Effort: Low**
-
-Found while diffing analyser output over `laravel/framework` on
-2026-08-14, not in the sample-project sweep. Seven lines reproduce it:
-
-```php
-<?php
-function probe(string $output): void
-{
-    if (($pos = strpos($output, "\x8b")) !== false) {
-        echo $pos;
-    }
-}
-```
-
-```
-$ phpantom_lsp analyze r.php
-thread 'diag-worker' panicked at library/core/src/str/validations.rs:48:36:
-unsafe precondition(s) violated: hint::unreachable_unchecked must never be reached
-thread caused non-unwinding panic. aborting.
-```
-
-`bytes_to_str` (`src/atom.rs`) is `str::from_utf8_unchecked`, on the
-stated ground that "PHP source is always valid UTF-8 (mago guarantees
-this after lexing)". That holds for identifiers, not for a string
-literal's *decoded* value: mago resolves `\x8b` to the single byte
-`0x8b`, and `LiteralString::value` then holds bytes no UTF-8 string
-can. `argument_value_key`
-(`type_engine/types/narrowing/resolve.rs`) builds a `&str` from that
-value and iterates it with `.chars()`, which is where the
-undefined-behaviour check fires. The panic is non-unwinding, so
-`catch_unwind` cannot contain it and the whole process goes down: on
-the CLI the run dies mid-analysis, and in the editor the server exits.
-
-Two things make it worse than the repro suggests. The check that fires
-here is a debug-build assertion, so a release build performs the
-undefined behaviour silently instead of aborting. And the same
-`bytes_to_str`-on-a-literal-value pattern is spread across roughly
-three dozen call sites (`regex_shape::literal_string`,
-`extract_array_key_for_shape`, the docblock and Blade readers, …), any
-of which a `\xNN` escape can reach.
-
-A raw non-UTF-8 byte written directly into the source file did not
-reproduce it in the same position, so the decode path is the one that
-matters.
-
-**Fix:** make the conversion of a *literal value* checked, since that
-is the one place the input is arbitrary bytes rather than lexed PHP
-identifier text: `str::from_utf8(...)` with a lossy or skip-this-value
-fallback. Keep `bytes_to_str` unchecked for the identifier and raw-token
-paths where mago's guarantee does hold, and correct its safety comment
-to say which inputs it covers.
+No outstanding items.
 
 ## Type comparison
 

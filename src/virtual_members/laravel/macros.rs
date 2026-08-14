@@ -30,7 +30,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
 use crate::types::{ClassInfo, MethodInfo, PhpVersion};
 
@@ -1112,7 +1112,7 @@ pub(super) fn resolve_target_fqn(
 /// a variable, a constant).
 pub(super) fn string_literal_value<'arena>(expr: &Expression<'arena>) -> Option<&'arena str> {
     match expr {
-        Expression::Literal(Literal::String(s)) => s.value.map(bytes_to_str),
+        Expression::Literal(Literal::String(s)) => s.value.and_then(literal_bytes_to_str),
         _ => None,
     }
 }
@@ -1228,7 +1228,7 @@ fn find_return_array_entry<'ast, 'arena>(
                 if matches!(
                     k,
                     Expression::Literal(Literal::String(s))
-                        if s.value.is_some_and(|val| bytes_to_str(val) == key)
+                        if s.value.is_some_and(|val| val == key.as_bytes())
                 ) {
                     return Some(v);
                 }

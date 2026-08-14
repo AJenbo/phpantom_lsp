@@ -767,3 +767,85 @@ class Controller {
         }
     }
 }
+
+/// A `\xNN` escape decodes to a byte no UTF-8 string can hold, so the
+/// literal's *value* is arbitrary bytes rather than source text.  Reading
+/// one through the unchecked `bytes_to_str` was undefined behaviour, and
+/// aborted the process with a non-unwinding panic in debug builds.
+///
+/// The literals here reach the narrowing subject keys, array-shape keys,
+/// regex shapes, `compact()` name collection, `define()` extraction, and
+/// the docblock/interpolation readers.
+#[test]
+fn non_utf8_string_escapes_do_not_crash() {
+    let backend = create_test_backend();
+    let uri = "file:///non_utf8.php";
+
+    let content = r#"<?php
+
+define("BAD\x8bCONST", 1);
+
+function probe(string $output, array $rows): void
+{
+    if (($pos = strpos($output, "\x8b")) !== false) {
+        echo $pos;
+    }
+
+    $map = ["\x8b" => 'a', 'ok' => 'b'];
+    echo $map["\x8b"];
+    echo $map['ok'];
+
+    $joined = "prefix" . "\x8b" . "suffix";
+    echo $joined;
+
+    if (preg_match("/\x8b(?<name>\d+)/", $output, $m)) {
+        echo $m['name'];
+    }
+
+    foreach ($rows as ["\x8b" => $first, 'id' => $id]) {
+        echo $first, $id;
+    }
+
+    $names = compact("\x8b");
+    echo count($names);
+
+    echo constant("BAD\x8bCONST");
+    echo strlen("\212\377");
+}
+
+class Holder
+{
+    /** @var array<string, string> */
+    private array $bag = ["\x8b" => 'v'];
+
+    public function get(): string
+    {
+        return $this->bag["\x8b"];
+    }
+}
+
+$h = new Holder();
+echo $h->get();
+probe("\x8b", []);
+"#;
+
+    // Parsing and symbol-map extraction must not abort.
+    backend.update_ast(uri, content);
+
+    // Diagnostics walk every expression, which is the path that aborted.
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri, content, &mut diagnostics);
+
+    // Hover exercises the same conversions outside a diagnostic pass.
+    for (i, line) in content.lines().enumerate() {
+        let col = line.len().min(20) as u32;
+        let _ = backend.handle_hover(
+            uri,
+            content,
+            Position {
+                line: i as u32,
+                character: col,
+            },
+        );
+    }
+}

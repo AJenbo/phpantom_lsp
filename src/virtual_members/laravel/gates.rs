@@ -35,7 +35,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
 use crate::types::{ClassInfo, MethodInfo};
 
@@ -361,8 +361,8 @@ fn class_constant_fqn(expr: &Expression<'_>, resolved: &OwnedResolvedNames) -> O
                 .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()))
         }
         Expression::Literal(Literal::String(s)) => {
-            let value = s.value?;
-            let fqn = bytes_to_str(value).replace("\\\\", "\\");
+            let value = literal_bytes_to_str(s.value?)?;
+            let fqn = value.replace("\\\\", "\\");
             let fqn = fqn.trim_start_matches('\\');
             (!fqn.is_empty() && fqn.contains('\\')).then(|| fqn.to_string())
         }

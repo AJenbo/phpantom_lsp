@@ -36,14 +36,33 @@ pub type AtomMap<V> = HashMap<Atom, V, BuildHasherDefault<IdentityHasher>>;
 /// A high-performance `HashSet` using `Atom` as the key.
 pub type AtomSet = HashSet<Atom, BuildHasherDefault<IdentityHasher>>;
 
-/// Convert a byte slice to a string slice.
+/// Convert a byte slice borrowed from PHP *source text* to a string slice.
 ///
-/// PHP source is always valid UTF-8 (mago guarantees this after lexing),
-/// so this is a safe unchecked conversion on the hot path.
+/// Every PHP file is read as a `String`, so any byte slice the lexer hands
+/// back that points into the source (identifiers, keywords, operators, and
+/// the `raw` token text of a literal) is a slice of valid UTF-8 on a
+/// character boundary. This covers those inputs only.
+///
+/// It does **not** cover the *decoded* value of a string literal
+/// ([`mago_syntax::cst::LiteralString::value`]): mago resolves `"\x8b"` to
+/// the single byte `0x8b`, which no UTF-8 string can hold. Use
+/// [`literal_bytes_to_str`] for those.
 #[inline]
 pub fn bytes_to_str(bytes: &[u8]) -> &str {
-    // SAFETY: mago lexer only produces valid UTF-8 identifier bytes
+    // SAFETY: the caller passes a slice of the source text, which is UTF-8
     unsafe { std::str::from_utf8_unchecked(bytes) }
+}
+
+/// Convert the decoded value of a PHP string literal to a string slice,
+/// returning `None` when it is not valid UTF-8.
+///
+/// Unlike [`bytes_to_str`], the input here is arbitrary bytes rather than
+/// source text: an escape such as `"\x8b"` or `"\212"` decodes to a byte
+/// that cannot appear in a `str`. Callers treat `None` as "this literal's
+/// value is not something I can read" and fall back or bail out.
+#[inline]
+pub fn literal_bytes_to_str(bytes: &[u8]) -> Option<&str> {
+    std::str::from_utf8(bytes).ok()
 }
 
 /// Intern a byte slice as an [`Atom`], treating it as UTF-8.
