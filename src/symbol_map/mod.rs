@@ -245,12 +245,13 @@ pub(crate) enum SymbolKind {
         name: Atom,
     },
 
-    /// A string literal argument inside `compact('var')` that references
-    /// a local variable by name.
+    /// A local variable referenced by a bare name rather than by `$name`:
+    /// a string literal argument inside `compact('var')`, or the name in a
+    /// `"${var}"` string interpolation.
     ///
-    /// The span covers the string content inside the quotes so rename and
-    /// go-to-definition can treat it as a variable reference while still
-    /// replacing only the bare name text.
+    /// The span covers just the name so rename and go-to-definition can
+    /// treat it as a variable reference while still replacing only the bare
+    /// name text.
     CompactVariable {
         /// Variable name without `$` prefix.
         name: Atom,

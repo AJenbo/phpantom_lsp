@@ -47,9 +47,57 @@ pub(super) fn extract_variable_symbol_spans<'a>(
                 });
             }
         }
-        Variable::Indirect(iv) => extract_from_expression(iv.expression, ctx, scope_start),
+        Variable::Indirect(iv) => extract_indirect_variable(iv.expression, ctx, scope_start),
         Variable::Nested(nv) => extract_variable_symbol_spans(nv.variable, ctx, scope_start),
     }
+}
+
+/// Extract the inside of a `${…}` variable.
+///
+/// Outside a string this is a variable-variable, whose body is a real
+/// expression (`${$name}`, `${'name'}`) and is extracted as one.  Inside a
+/// string it is the `"${data}"` / `"${data['code']}"` spelling, where the
+/// name is a bare word that PHP reads as the variable `$data`.  Only that
+/// spelling leaves a bare `Identifier` behind (everywhere else the parser
+/// promotes one to `ConstantAccess`), so extracting it as an expression
+/// reported the variable's own name as an unknown class.
+fn extract_indirect_variable<'a>(
+    expr: &'a Expression<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    // `"${data}"`
+    if let Expression::Identifier(ident) = expr {
+        emit_interpolated_variable_name(ident, ctx);
+        return;
+    }
+
+    // `"${data['code']}"` — the offset is a real expression here, unlike
+    // the `"$data[code]"` spelling, so it is extracted as usual.
+    if let Expression::ArrayAccess(access) = expr
+        && let Expression::Identifier(ident) = access.array
+    {
+        emit_interpolated_variable_name(ident, ctx);
+        extract_from_expression(access.index, ctx, scope_start);
+        return;
+    }
+
+    extract_from_expression(expr, ctx, scope_start);
+}
+
+/// Emit the bare name of a `"${data}"` interpolation as a variable
+/// reference.  `CompactVariable` is the kind for a variable named without
+/// its `$`, so hover, go-to-definition, find-references, and rename all
+/// treat the name as the local variable while rewriting only the bare text.
+fn emit_interpolated_variable_name<'a>(ident: &'a Identifier<'a>, ctx: &mut ExtractionCtx<'a>) {
+    let span = ident.span();
+    ctx.spans.push(SymbolSpan {
+        start: span.start.offset,
+        end: span.end.offset,
+        kind: SymbolKind::CompactVariable {
+            name: crate::atom::atom(bytes_to_str(ident.value())),
+        },
+    });
 }
 
 pub(super) fn extract_from_expression<'a>(
@@ -141,6 +189,10 @@ pub(super) fn extract_from_expression<'a>(
             }
         }
 
+        // ── Indirect variables: `${…}`, `$$name` ──
+        // The direct `$name` case has its own arm above.
+        Expression::Variable(var) => extract_variable_symbol_spans(var, ctx, scope_start),
+
         // ── Instantiation: `new Foo(...)` ──
         Expression::Instantiation(inst) => extract_instantiation_expr(inst, ctx, scope_start),
 
@@ -231,7 +283,17 @@ pub(super) fn extract_from_expression<'a>(
         // ── Array access ──
         Expression::ArrayAccess(access) => {
             extract_from_expression(access.array, ctx, scope_start);
-            extract_from_expression(access.index, ctx, scope_start);
+            // An index that is still a bare `Identifier` can only have come
+            // from the unquoted offset of a simple interpolation
+            // (`"$data[code]"`), where PHP reads the offset as the literal
+            // string `'code'`.  Everywhere else the parser promotes a bare
+            // identifier to `ConstantAccess` once it sees the following
+            // token, so a genuine constant key (`$data[MY_KEY]`) never
+            // reaches here as an `Identifier`.  Emitting the offset would
+            // report it as an unknown class, one per interpolated key.
+            if !matches!(access.index, Expression::Identifier(_)) {
+                extract_from_expression(access.index, ctx, scope_start);
+            }
         }
 
         // ── Closures / arrow functions ──

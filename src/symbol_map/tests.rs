@@ -2974,6 +2974,106 @@ fn namespaced_standalone_constant_produces_constant_reference() {
     }
 }
 
+#[test]
+fn unquoted_offset_in_string_interpolation_is_not_a_class_reference() {
+    // `"$data[code]"` reads `code` as the string key `'code'`, so the
+    // offset is neither a constant nor a class name.
+    let php = "<?php\nfunction t(array $data) { echo \"a $data[code] b\"; }\n";
+    let map = parse_and_extract(php);
+
+    let key_offset = php.find("code").unwrap() as u32;
+    assert!(
+        map.lookup(key_offset).is_none(),
+        "Unquoted interpolation offset should not be a symbol, got {:?}",
+        map.lookup(key_offset).map(|hit| &hit.kind)
+    );
+}
+
+#[test]
+fn constant_array_key_outside_interpolation_stays_a_constant_reference() {
+    // The interpolation fix skips an index that is still a bare
+    // `Identifier`, which relies on the parser promoting a real constant
+    // key to `ConstantAccess`.  Pin that invariant: a constant key must
+    // keep resolving so go-to-definition and find-references work on it.
+    let php = "<?php\nfunction t(array $data) { echo $data[MY_KEY]; }\n";
+    let map = parse_and_extract(php);
+
+    let key_offset = php.find("MY_KEY").unwrap() as u32;
+    let hit = map.lookup(key_offset);
+    assert!(hit.is_some(), "Should find MY_KEY as ConstantReference");
+    if let SymbolKind::ConstantReference { ref name } = hit.unwrap().kind {
+        assert_eq!(name, "MY_KEY");
+    } else {
+        panic!(
+            "Expected ConstantReference for MY_KEY, got {:?}",
+            hit.unwrap().kind
+        );
+    }
+}
+
+#[test]
+fn dollar_brace_interpolation_names_the_variable_not_a_class() {
+    // `"${data}"` names the variable `$data`, so the bare word is a
+    // variable reference rather than a class name.
+    let php = "<?php\nfunction t(array $data) { echo \"a ${data} b\"; }\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("${data").unwrap() as u32 + 2;
+    let hit = map.lookup(name_offset);
+    assert!(hit.is_some(), "Should find the ${{data}} name");
+    if let SymbolKind::CompactVariable { ref name } = hit.unwrap().kind {
+        assert_eq!(name, "data");
+    } else {
+        panic!(
+            "Expected CompactVariable for ${{data}}, got {:?}",
+            hit.unwrap().kind
+        );
+    }
+}
+
+#[test]
+fn dollar_brace_interpolation_with_offset_keeps_both_parts() {
+    // In `"${data['code']}"` the offset is a real expression, so the name
+    // is the variable and the quoted key stays a literal.
+    let php = "<?php\nfunction t(array $data) { echo \"a ${data['code']} b\"; }\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("${data").unwrap() as u32 + 2;
+    let hit = map.lookup(name_offset);
+    assert!(
+        matches!(
+            hit.map(|h| &h.kind),
+            Some(SymbolKind::CompactVariable { .. })
+        ),
+        "Expected CompactVariable for the ${{data['code']}} name, got {:?}",
+        hit.map(|h| &h.kind)
+    );
+
+    let key_offset = php.find("'code'").unwrap() as u32 + 1;
+    assert!(
+        map.lookup(key_offset).is_none(),
+        "A quoted offset is a literal, got {:?}",
+        map.lookup(key_offset).map(|h| &h.kind)
+    );
+}
+
+#[test]
+fn variable_variable_outside_a_string_still_extracts_its_expression() {
+    // `${$name}` is a real variable-variable: the inner expression must
+    // still be extracted, so `$name` resolves.
+    let php = "<?php\nfunction t(string $name) { echo ${$name}; }\n";
+    let map = parse_and_extract(php);
+
+    let inner_offset = php.find("${$name}").unwrap() as u32 + 2;
+    let hit = map.lookup(inner_offset);
+    assert!(hit.is_some(), "Should find $name inside ${{$name}}");
+    if let SymbolKind::Variable { ref name } = hit.unwrap().kind {
+        assert_eq!(name, "name");
+    } else {
+        panic!("Expected Variable for $name, got {:?}", hit.unwrap().kind);
+    }
+}
+
 // ── Pipe operator ───────────────────────────────────────────────────────────
 
 // Note: PHP 8.5 pipe operator support. The parser may or may not handle

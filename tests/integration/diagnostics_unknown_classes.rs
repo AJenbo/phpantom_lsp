@@ -1182,4 +1182,60 @@ class Holder {
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    /// Unquoted array keys in string interpolation (`"$data[code]"`)
+    /// are string keys, not class references. Closes #352.
+    #[test]
+    fn no_false_positive_for_unquoted_array_key_in_string_interpolation() {
+        let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+class Report
+{
+    /** @param array{code: string, label: string} $data */
+    public function line(array $data): string
+    {
+        return "code: $data[code] label: $data[label]";
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "unquoted array keys in string interpolation must not be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `"${data}"` names the variable `$data`, so neither the name nor a
+    /// quoted offset after it is a class reference.
+    #[test]
+    fn no_false_positive_for_dollar_brace_string_interpolation() {
+        let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+class Report
+{
+    /** @param array{code: string, label: string} $data */
+    public function line(array $data): string
+    {
+        return "code: ${data['code']} label: ${data['label']}";
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "a ${{}} interpolation must not be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }
