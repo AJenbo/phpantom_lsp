@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786680874391,
+  "lastUpdate": 1786715025929,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20773,6 +20773,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c0eea957e05442138c2703bda7dc17af0ed412ba",
+          "message": "Subtract what a never branch of a conditional return rules out\n\n`throw_unless()`, `throw_if()`, `abort_unless()` and the rest declare\ntheir effect in the return type rather than with an assertion tag:\n\n    @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never))\n\nA `never` branch is one the call cannot return through, so an argument\nvalue that selects it cannot have got past the call.  The argument was\nleft untouched, which made every guard written this way invisible: the\nvalue it had just proved present was still reported as possibly null on\nthe next line.\n\nA statement-level call whose callee has a conditional return type now\nsplits each argument into the alternatives it can hold at runtime\n(`?Foo` into `Foo` and `null`, `bool` into `true` and `false`), walks the\nconditional spine with each of them bound to the parameter, and drops the\nones that land on `never`.  The argument is keyed the way any other\nnarrowing subject is, so a property path or an array element narrows too.\n\nThe member-level condition test is separate from the shared conditional\nevaluator on purpose: that one answers `is false` only for an argument\nalready narrowed to a boolean, because a plain `bool` really may be\neither.  Here the alternatives have already been split apart, so a\nmember that cannot be a bool at all settles the condition, which is what\nsends a `null` argument down the else branch instead of leaving it\nundecided.  `non-empty-mixed` is read as \"truthy\", the condition this\nfamily is written against.",
+          "timestamp": "2026-08-14T07:24:28+02:00",
+          "tree_id": "66b867e7dd3b4383679e991cacc6ad91711ad24d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c0eea957e05442138c2703bda7dc17af0ed412ba"
+        },
+        "date": 1786715020793,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74,
             "unit": "MiB"
           }
         ]
