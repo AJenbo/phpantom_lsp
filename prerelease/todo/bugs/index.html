@@ -828,22 +828,50 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#preg_match" class="md-nav__link">
+  <a href="#crashes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        preg_match
+        Crashes
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="preg_match">
+    <nav class="md-nav" aria-label="Crashes">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b149-matches-is-typed-as-though-the-match-succeeded" class="md-nav__link">
+  <a href="#b150-a-xnn-escape-in-a-string-literal-aborts-the-process" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B149. <code>$matches</code> is typed as though the match succeeded
+        B150. A <code>\xNN</code> escape in a string literal aborts the process
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#type-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Type comparison
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b151-t-and-tnull-are-judged-by-different-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B151. <code>?T</code> and <code>T|null</code> are judged by different rules
       </span>
     </span>
   </a>
@@ -1362,22 +1390,50 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#preg_match" class="md-nav__link">
+  <a href="#crashes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        preg_match
+        Crashes
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="preg_match">
+    <nav class="md-nav" aria-label="Crashes">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b149-matches-is-typed-as-though-the-match-succeeded" class="md-nav__link">
+  <a href="#b150-a-xnn-escape-in-a-string-literal-aborts-the-process" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B149. <code>$matches</code> is typed as though the match succeeded
+        B150. A <code>\xNN</code> escape in a string literal aborts the process
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#type-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Type comparison
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b151-t-and-tnull-are-judged-by-different-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B151. <code>?T</code> and <code>T|null</code> are judged by different rules
       </span>
     </span>
   </a>
@@ -1465,30 +1521,103 @@ each bug's row lives in the current sprint/backlog.</p>
 diagnostics across ten projects, ~330 of them false positives). Site
 counts refer to that sweep; the git-ignored triage log has the full
 per-project inventory. Entries filed later say where they came from.</p>
-<h2 id="preg_match">preg_match<a class="headerlink" href="#preg_match" title="Permanent link">&para;</a></h2>
-<h3 id="b149-matches-is-typed-as-though-the-match-succeeded">B149. <code>$matches</code> is typed as though the match succeeded<a class="headerlink" href="#b149-matches-is-typed-as-though-the-match-succeeded" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
-<p><code>preg_match()</code> writes its out-parameter with the shape its pattern
-describes, and the forward walker applies that shape wherever the call
-appears, the code after a guard that may not have been taken included:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if (preg_match(&#39;/(\d+)/&#39;, $s, $m)) { /* … */ }</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">echo $m[1];                 // string; at runtime the key may not exist</span>
+<h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
+<h3 id="b150-a-xnn-escape-in-a-string-literal-aborts-the-process">B150. A <code>\xNN</code> escape in a string literal aborts the process<a class="headerlink" href="#b150-a-xnn-escape-in-a-string-literal-aborts-the-process" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Effort: Low</strong></p>
+<p>Found while diffing analyser output over <code>laravel/framework</code> on
+2026-08-14, not in the sample-project sweep. Seven lines reproduce it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">function</span> <span class="nf">probe</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$output</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">if</span> <span class="p">((</span><span class="nv">$pos</span> <span class="o">=</span> <span class="nb">strpos</span><span class="p">(</span><span class="nv">$output</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\x8b</span><span class="s2">&quot;</span><span class="p">))</span> <span class="o">!==</span> <span class="k">false</span><span class="p">)</span> <span class="p">{</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="k">echo</span> <span class="nv">$pos</span><span class="p">;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="p">}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">}</span>
 </code></pre></div>
-<p>PHPStan types this as <code>array{}|array{0: string, 1: string}</code>, the empty
-array being what a failed match leaves behind. Doing the same needs the
-seeding to know which branch of the condition it is writing into, which
-a single write into the shared scope before the branches are walked
-cannot express.</p>
-<p>The result is an under-report rather than a false positive: a key read
-outside the guard resolves to <code>string</code> instead of <code>string|null</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>$ phpantom_lsp analyze r.php
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>thread &#39;diag-worker&#39; panicked at library/core/src/str/validations.rs:48:36:
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>unsafe precondition(s) violated: hint::unreachable_unchecked must never be reached
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>thread caused non-unwinding panic. aborting.
+</code></pre></div>
+<p><code>bytes_to_str</code> (<code>src/atom.rs</code>) is <code>str::from_utf8_unchecked</code>, on the
+stated ground that "PHP source is always valid UTF-8 (mago guarantees
+this after lexing)". That holds for identifiers, not for a string
+literal's <em>decoded</em> value: mago resolves <code>\x8b</code> to the single byte
+<code>0x8b</code>, and <code>LiteralString::value</code> then holds bytes no UTF-8 string
+can. <code>argument_value_key</code>
+(<code>type_engine/types/narrowing/resolve.rs</code>) builds a <code>&amp;str</code> from that
+value and iterates it with <code>.chars()</code>, which is where the
+undefined-behaviour check fires. The panic is non-unwinding, so
+<code>catch_unwind</code> cannot contain it and the whole process goes down: on
+the CLI the run dies mid-analysis, and in the editor the server exits.</p>
+<p>Two things make it worse than the repro suggests. The check that fires
+here is a debug-build assertion, so a release build performs the
+undefined behaviour silently instead of aborting. And the same
+<code>bytes_to_str</code>-on-a-literal-value pattern is spread across roughly
+three dozen call sites (<code>regex_shape::literal_string</code>,
+<code>extract_array_key_for_shape</code>, the docblock and Blade readers, …), any
+of which a <code>\xNN</code> escape can reach.</p>
+<p>A raw non-UTF-8 byte written directly into the source file did not
+reproduce it in the same position, so the decode path is the one that
+matters.</p>
+<p><strong>Fix:</strong> make the conversion of a <em>literal value</em> checked, since that
+is the one place the input is arbitrary bytes rather than lexed PHP
+identifier text: <code>str::from_utf8(...)</code> with a lossy or skip-this-value
+fallback. Keep <code>bytes_to_str</code> unchecked for the identifier and raw-token
+paths where mago's guarantee does hold, and correct its safety comment
+to say which inputs it covers.</p>
+<h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
+<h3 id="b151-t-and-tnull-are-judged-by-different-rules">B151. <code>?T</code> and <code>T|null</code> are judged by different rules<a class="headerlink" href="#b151-t-and-tnull-are-judged-by-different-rules" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Effort: Low-Medium</strong></p>
+<p>Found on 2026-08-14 while checking why an optional array-shape key read
+was not reported, not in the sample-project sweep. The same type in its
+two spellings gets two different answers from every consumer:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function f(?string $x): string {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    trim($x);            // silent</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    return $x;           // silent</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">/** @param array{a: string|null} $row */</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">function g(array $row): void {</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    trim($row[&#39;a&#39;]);     // reported: null does not satisfy string</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>Assigning a <code>?string</code> into a <code>string</code> property and passing one to a
+user-defined <code>string</code> parameter are silent too, so this is not specific
+to the argument check: <code>type_mismatch_argument</code>, <code>type_mismatch_return</code>
+and the property-assignment check all report the union spelling and none
+of them report the <code>?T</code> one.</p>
+<p>The cause is the "Nullable arg → non-nullable param: MAYBE" escape hatch
+in <code>is_type_compatible</code> (<code>diagnostics/type_errors/compatibility.rs</code>),
+which returns compatible whenever the argument is a <code>TypeKind::Nullable</code>
+whose inner type fits, on the grounds that the null may have been guarded
+somewhere the walker could not follow. The hatch matches on the
+<em>spelling</em> rather than on the type, so <code>TypeKind::Union([T, null])</code> walks
+straight past it. Which spelling a value ends up with is an accident of
+how it was produced: a declared <code>?string</code> and a nullable docblock stay
+<code>Nullable</code>, while a union built by a branch merge, a <code>??</code> chain, or a
+resolver join comes out as <code>T|null</code>.</p>
+<p>This is what makes a read of an optional shape key
+(<code>array{a?: string}</code>, and the <code>array{0?: string, 1?: string}</code> a
+<code>preg_match</code> guard leaves behind where its branches rejoin) resolve
+correctly as <code>?string</code> and still go unreported when it is passed to a
+non-nullable parameter.</p>
+<p><strong>Fix:</strong> decide the policy once and apply it to both spellings. Reading
+the null out of the argument type rather than off its shape is the
+mechanical half (<code>accepts_null</code> / <code>non_null_type</code> already handle both);
+the judgement is whether the hatch stays at all, and the architecture
+note above it says what retiring one costs. Closing it is the larger
+change of the two, since a <code>?T</code> argument is common, so it may be worth
+narrowing it first (keep the hatch only where the null could plausibly
+have been guarded out) rather than removing it outright.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">foreach ($rows as $row) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">foreach ($rows as $row) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A list literal collapses to <code>array&lt;union-of-values&gt;</code>, so list
 destructuring and constant-offset reads cannot select a slot (6 sites
