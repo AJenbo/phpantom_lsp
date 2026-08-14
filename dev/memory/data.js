@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786730231566,
+  "lastUpdate": 1786731670183,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21113,6 +21113,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5d251c04b198cb64a8bdb08a40453bbb8d7c4540",
+          "message": "A `\"\\x8b\"` escape no longer takes the server down with it",
+          "timestamp": "2026-08-14T20:05:17+02:00",
+          "tree_id": "b8f410dfd1bc3ac733e1e36952e02464ae4870be",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5d251c04b198cb64a8bdb08a40453bbb8d7c4540"
+        },
+        "date": 1786731664894,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.2,
             "unit": "MiB"
           }
         ]
