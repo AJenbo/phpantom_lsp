@@ -36,6 +36,7 @@
 //! - **closure_resolution**: Closure and arrow-function parameter resolution
 
 pub(crate) mod call_resolution;
+pub(crate) mod regex_shape;
 pub(crate) mod resolver;
 pub mod subject_expr;
 pub(crate) mod subject_extraction;

@@ -1460,6 +1460,20 @@ class ConditionalReturnDemo
         $maskedAll = preg_replace('/\d/', '*', ['a1', 'b2']);
         strtoupper($maskedAll[0]);                // array subject → array<array-key, string>
 
+        // A literal pattern says which keys `preg_match()` fills in: the
+        // whole match under `0`, every capture group under its number, and
+        // a named group under its name as well.
+        if (preg_match('/(?<amount>\d+)(?<unit>\w*)/', '12kg', $size)) {
+            strtoupper($size['unit']);            // named group → string
+            strtoupper($size[1]);                 // the amount by number → string
+            strtoupper($size[0]);                 // the whole match → string
+        }
+
+        // `preg_match_all()` collects every match of a group, so the same
+        // key holds a list of them rather than one.
+        preg_match_all('/(\d+)/', '1, 2, 3', $numbers);
+        strtoupper($numbers[1][0]);               // group 1 → list<string>
+
         // `JSON_THROW_ON_ERROR` raises a JsonException instead of returning
         // `false`, so the failure branch cannot happen at this call site.
         $json = json_encode(['ok' => true], JSON_THROW_ON_ERROR);

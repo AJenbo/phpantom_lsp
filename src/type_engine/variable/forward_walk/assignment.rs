@@ -2612,6 +2612,12 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // `preg_match`'s `$matches` has no other by-reference parameter beside
+    // it, so nothing below is left to do once the pattern has typed it.
+    if seed_preg_matches(expr, scope, ctx) {
+        return;
+    }
+
     // Resolve the called function/method's parameters.
     let (arg_list, parameters) = match expr {
         Expression::Call(Call::Function(func_call)) => {
@@ -2822,6 +2828,93 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             );
         }
     }
+}
+
+/// Type `$matches` from the capture groups of the pattern a
+/// `preg_match`/`preg_match_all` call passes.
+///
+/// The parameter is declared `?array &$matches`, and a bare `array` is all
+/// the generic by-reference seeding above can offer. A literal pattern says
+/// more: which keys the array has, and which of them a successful match may
+/// leave out.
+///
+/// Returns whether the variable was typed. A pattern the group walk refuses,
+/// or a `$flags` argument that does not resolve to a constant, leaves the
+/// call to the generic path.
+fn seed_preg_matches<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Some(call) = crate::type_engine::regex_shape::preg_call(expr) else {
+        return false;
+    };
+    let flags = match call.flags {
+        None => 0,
+        Some(flags) => match preg_flag_bits(flags, scope, ctx) {
+            Some(flags) => flags,
+            None => return false,
+        },
+    };
+    let matches_type = call
+        .pattern
+        .as_deref()
+        .and_then(|pattern| {
+            crate::type_engine::regex_shape::matches_type(pattern, flags, call.matches_all)
+        })
+        .or_else(|| crate::type_engine::regex_shape::opaque_matches_type(flags, call.matches_all));
+    match matches_type {
+        Some(matches_type) => {
+            scope.set(
+                call.matches_var,
+                vec![ResolvedType::from_type_string(matches_type)],
+            );
+            true
+        }
+        None => false,
+    }
+}
+
+/// The flag mask a `preg_match` `$flags` argument holds.
+///
+/// Resolved through the shared pipeline so a named constant, a class
+/// constant, and a variable holding one all read the same. Returns `None`
+/// when the argument does not resolve to a single integer value, or to one
+/// whose bits the shape analysis does not model — the result's shape depends
+/// on the flags, so a mask that cannot be read is not one to guess at.
+fn preg_flag_bits<'b>(
+    expr: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<i64> {
+    let scope_snapshot = scope.locals.clone();
+    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
+        scope_snapshot
+            .get(&atom(var_name))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let var_ctx = VarResolutionCtx {
+        var_name: "",
+        current_class: ctx.current_class,
+        all_classes: ctx.all_classes,
+        content: ctx.content,
+        cursor_offset: ctx.cursor_offset,
+        class_loader: ctx.class_loader,
+        backend: ctx.backend,
+        loaders: ctx.loaders,
+        resolved_class_cache: ctx.resolved_class_cache,
+        enclosing_return_type: ctx.enclosing_return_type.clone(),
+        top_level_scope: ctx.top_level_scope.clone(),
+        branch_aware: false,
+        match_arm_narrowing: HashMap::new(),
+        scope_var_resolver: Some(&scope_resolver),
+    };
+    let flags =
+        crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, &var_ctx)
+            .as_ref()
+            .and_then(crate::type_engine::types::const_fold::literal_int_value)?;
+    crate::type_engine::regex_shape::flags_are_modelled(flags).then_some(flags)
 }
 
 /// Extract all `$variable` names that appear as direct arguments in a

@@ -18,34 +18,27 @@ per-project inventory. Entries filed later say where they came from.
 
 ## preg_match
 
-### B144. `preg_match` `$matches` is shapeless
+### B149. `$matches` is typed as though the match succeeded
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Low · Effort: Medium**
 
-`$matches` is an array of unknown keys, so every group read off it is
-`string` at best and the pattern's own capture groups say nothing:
+`preg_match()` writes its out-parameter with the shape its pattern
+describes, and the forward walker applies that shape wherever the call
+appears, the code after a guard that may not have been taken included:
 
 ```php
-if (preg_match('/(?<amount>\d+)(?<unit>\w*)/', $size, $match)) {
-    strtolower($match['unit']);   // no key check, no arity check
-}
+if (preg_match('/(\d+)/', $s, $m)) { /* … */ }
+echo $m[1];                 // string; at runtime the key may not exist
 ```
 
-Two remaining defects:
+PHPStan types this as `array{}|array{0: string, 1: string}`, the empty
+array being what a failed match leaves behind. Doing the same needs the
+seeding to know which branch of the condition it is writing into, which
+a single write into the shared scope before the branches are walked
+cannot express.
 
-1. No match-shape inference for literal patterns: PHPStan's
-   `RegexArrayShapeMatcher` types group 0 and every always-matching
-   group as `string` (`string|null` only under
-   `PREG_UNMATCHED_AS_NULL`), with named groups as keys. PDepend,
-   PHPMD, AGCMS and Bladestan all index `$match[1]`/`$match['name']`
-   directly inside the guard.
-2. `preg_match_all` group reads (`$matches[1]`) should be
-   `list<string>`, not `array<string>`.
-
-**Fix:** add a literal-pattern group-shape analysis (port the
-capture-group walk from PHPStan's `RegexArrayShapeMatcher`). Depends
-on B147: the matcher's result has nowhere to go until constant-array
-shapes exist as a value representation.
+The result is an under-report rather than a false positive: a key read
+outside the guard resolves to `string` instead of `string|null`.
 
 ## Array types
 

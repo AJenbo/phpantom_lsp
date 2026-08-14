@@ -26,8 +26,6 @@ within the same impact tier.
 | #    | Item                                                                                                                                                      | Impact      | Effort      |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
-| B144 | [`preg_match` `$matches` is shapeless](todo/bugs.md#b144-preg_match-matches-is-shapeless) (depends on B147)                                | Medium-High | Medium      |
-| B149 | [A `$this`/`static` return is lost on members injected at instantiation time](todo/bugs.md#b149-a-thisstatic-return-is-lost-on-members-injected-at-instantiation-time) | Medium | Medium |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -101,6 +99,7 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 | D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
+| B149 | [`$matches` is typed as though the match succeeded](todo/bugs.md#b149-matches-is-typed-as-though-the-match-succeeded)                                                       | Low         | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

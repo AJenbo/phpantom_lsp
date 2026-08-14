@@ -181,6 +181,7 @@ mod lsp_concurrency;
 mod narrowing_condition_proofs;
 mod parser;
 mod php_version;
+mod preg_match_shapes;
 mod references;
 mod references_laravel_trans;
 mod reparse_symbol_eviction;

@@ -700,6 +700,14 @@ function runDemoAssertions(): void
     assert(preg_replace('/\d/', '*', ['a1', 'b2']) === ['a*', 'b*'], 'an array subject is replaced into an array');
     assert(substr_replace('banana', 'x', 0, 1) === 'xanana', 'a string subject is spliced into a string');
 
+    // ── Capture-group shape (preg_match) ─────────────────────────────────
+    assert(preg_match('/(?<amount>\d+)(?<unit>\w*)/', '12kg', $size) === 1, 'the pattern matches the subject');
+    assert($size[0] === '12kg', 'key 0 holds the whole match');
+    assert($size['unit'] === 'kg', 'a named group is stored under its name');
+    assert($size[1] === '12' && $size[2] === 'kg', 'every group is stored under its number too');
+    preg_match_all('/(\d+)/', '1, 2, 3', $numbers);
+    assert($numbers[1] === ['1', '2', '3'], 'matching all collects every match of a group under its number');
+
     // ── Flag-keyed return type (json_encode + JSON_THROW_ON_ERROR) ───────
     assert(json_encode(['ok' => true], JSON_THROW_ON_ERROR) === '{"ok":true}', 'the flag makes the failure branch a JsonException instead of false');
     assert(ConditionalReturnDemo::JSON_FLAGS === JSON_THROW_ON_ERROR, 'a constant holding the flag holds its value');
