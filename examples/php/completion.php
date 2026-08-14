@@ -693,6 +693,27 @@ class TypeGuardNarrowingDemo
     }
 
     /**
+     * `is_iterable()` keeps the members `foreach` can walk: an array in
+     * any of its spellings, and an object whose interfaces reach
+     * \Traversable. A plain object goes out with the scalars.
+     */
+    public function iterableGuard(
+        Scaffolding\ItemIterableCollection|Scaffolding\Pen|string $value
+    ): void {
+        if (is_iterable($value)) {
+            foreach ($value as $item) {
+                $item->write();               // IteratorAggregate<int, Pen> → Scaffolding\Pen
+            }
+            return;
+        }
+        // $value is Scaffolding\Pen|string here — the collection passed the guard
+        if (is_string($value)) {
+            return;
+        }
+        $value->write();                      // Scaffolding\Pen is all that is left
+    }
+
+    /**
      * An `array<T>|false` return keeps its element type after the false
      * check, so the surviving array still iterates to the element type.
      */

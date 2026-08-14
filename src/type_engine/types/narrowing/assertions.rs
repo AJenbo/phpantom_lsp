@@ -277,19 +277,22 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
 ///
 /// So `@phpstan-assert string $x` (PHPUnit's `assertIsString`) narrows like
 /// `is_string($x)`, and its negation excludes `string`.  Returns `None` for
-/// class names and for pseudo-types without a corresponding guard —
-/// `iterable`, `resource`, and `null` (the last handled separately by the
-/// not-null path) — so those fall through to the class-based narrowing.
+/// class names, so those fall through to the class-based narrowing.
 fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
     match ty.kind() {
         TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some(TypeGuardKind::Array),
         TypeKind::Generic(g) if crate::php_type::is_array_like_name(&g.name) => {
-            // `iterable` is array-like by name but has no `is_iterable` guard
-            // kind, so it must not map to the array guard.
-            (!g.name.eq_ignore_ascii_case("iterable")).then_some(TypeGuardKind::Array)
+            // `iterable<T>` is array-like by name but admits a `Traversable`
+            // too, so it takes the wider guard.
+            Some(if g.name.eq_ignore_ascii_case("iterable") {
+                TypeGuardKind::Iterable
+            } else {
+                TypeGuardKind::Array
+            })
         }
         TypeKind::Named(n) => match n.to_ascii_lowercase().as_str() {
             "array" | "list" | "non-empty-array" | "non-empty-list" => Some(TypeGuardKind::Array),
+            "iterable" => Some(TypeGuardKind::Iterable),
             "string" => Some(TypeGuardKind::String),
             "int" | "integer" => Some(TypeGuardKind::Int),
             "float" | "double" => Some(TypeGuardKind::Float),

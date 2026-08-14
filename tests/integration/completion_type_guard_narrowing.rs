@@ -785,3 +785,132 @@ async fn test_instanceof_guard_narrows_repeated_method_call() {
         methods
     );
 }
+
+// ── is_iterable narrowing ───────────────────────────────────────────────
+
+/// `is_iterable()` keeps the members `foreach` can walk: an array in any
+/// spelling, and an object whose interfaces reach `Traversable`.  An
+/// ordinary object is dropped along with the scalars.
+#[tokio::test]
+async fn is_iterable_keeps_only_the_members_that_can_be_iterated() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///is_iterable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Traversable {}\n",
+        "interface IteratorAggregate extends Traversable {}\n",
+        "class Bag implements IteratorAggregate {\n",
+        "    public function count(): int { return 0; }\n",
+        "}\n",
+        "class Plain {\n",
+        "    public function plainOnly(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function run(Bag|Plain|string $value): void {\n",
+        "        if (is_iterable($value)) {\n",
+        "            $value->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 12: `            $value->` — cursor after `->`
+    let items = complete_at(&backend, &uri, text, 12, 20).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"count"),
+        "Bag reaches Traversable, so is_iterable keeps it, got: {:?}",
+        names
+    );
+    assert!(
+        !names.contains(&"plainOnly"),
+        "Plain implements nothing foreach can walk, got: {:?}",
+        names
+    );
+}
+
+/// The else branch is the inverse proof: what `foreach` cannot walk is
+/// exactly what is left.
+#[tokio::test]
+async fn the_else_branch_of_is_iterable_keeps_the_non_iterable_members() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///is_iterable_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Traversable {}\n",
+        "interface IteratorAggregate extends Traversable {}\n",
+        "class Bag implements IteratorAggregate {\n",
+        "    public function count(): int { return 0; }\n",
+        "}\n",
+        "class Plain {\n",
+        "    public function plainOnly(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function run(Bag|Plain $value): void {\n",
+        "        if (is_iterable($value)) {\n",
+        "            return;\n",
+        "        }\n",
+        "        $value->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 14: `        $value->` — cursor after `->`
+    let items = complete_at(&backend, &uri, text, 14, 16).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"plainOnly"),
+        "Plain is what survives a failed is_iterable, got: {:?}",
+        names
+    );
+    assert!(
+        !names.contains(&"count"),
+        "Bag passed the guard, so it cannot be here, got: {:?}",
+        names
+    );
+}
+
+/// PHPUnit's `assertIsIterable()` carries `@phpstan-assert iterable`,
+/// which names no class, so it narrows through the guard channel rather
+/// than the instanceof one.
+#[tokio::test]
+async fn an_iterable_assertion_tag_narrows_its_argument() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///assert_iterable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Traversable {}\n",
+        "interface IteratorAggregate extends Traversable {}\n",
+        "class Bag implements IteratorAggregate {\n",
+        "    public function count(): int { return 0; }\n",
+        "}\n",
+        "class Plain {\n",
+        "    public function plainOnly(): void {}\n",
+        "}\n",
+        "class Assert {\n",
+        "    /** @phpstan-assert iterable $actual */\n",
+        "    public static function assertIsIterable(mixed $actual): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    /** @param Bag|Plain $value */\n",
+        "    public function run($value): void {\n",
+        "        Assert::assertIsIterable($value);\n",
+        "        $value->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 17: `        $value->` — cursor after `->`
+    let items = complete_at(&backend, &uri, text, 17, 16).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"count"),
+        "the asserted iterable keeps Bag, got: {:?}",
+        names
+    );
+    assert!(
+        !names.contains(&"plainOnly"),
+        "Plain cannot be iterated, got: {:?}",
+        names
+    );
+}

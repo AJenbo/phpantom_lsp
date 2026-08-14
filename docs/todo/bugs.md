@@ -160,21 +160,6 @@ that receiver, unless the callee is declared `@phpstan-pure` /
 `$obj->get()` form has always had it), but keying calls with arguments
 widens the surface.
 
-### B176. `iterable` is not a type guard
-
-**Impact: Low-Medium · Effort: Low-Medium**
-
-`is_iterable($x)` narrows nothing, and neither does a
-`@phpstan-assert iterable $actual` tag (PHPUnit's `assertIsIterable`).
-`iterable` names no class, so the instanceof channel cannot carry it,
-and the type-guard channel has no kind for it the way it does for
-`array`, `string`, `callable` and the rest. The assertion is read and
-then silently dropped.
-
-**Fix:** add an `iterable` guard kind alongside the others, mapping to
-`array|Traversable` for the inclusion test so a union narrows to the
-members that can be iterated.
-
 ### B177. A doubly negated truthiness guard does not narrow
 
 **Impact: Low · Effort: Low-Medium**

@@ -555,7 +555,7 @@ pub(crate) fn apply_condition_narrowing<'b>(
     }
 
     // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
-    apply_type_guard_narrowing_truthy(condition, scope);
+    apply_type_guard_narrowing_truthy(condition, scope, ctx);
 
     // A check on `$x->prop` discriminates a union of objects when only
     // some of them declare a `prop` that could have passed it.
@@ -984,7 +984,7 @@ fn apply_condition_narrowing_inverse_operand<'b>(
     apply_condition_narrowing_inverse_single(condition, scope, ctx);
 
     // Inverse type guard narrowing: `if (is_object($x))` in else → exclude object.
-    apply_type_guard_narrowing_inverse(condition, scope);
+    apply_type_guard_narrowing_inverse(condition, scope, ctx);
 
     // Inverse class-string guard narrowing: `if (!is_a($x, Class::class, true))`
     // guard clause → after it, `$x` is a class-string of `Class`.
@@ -1598,8 +1598,9 @@ pub(crate) fn build_var_ctx<'a>(
 pub(crate) fn apply_type_guard_narrowing_truthy(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
 ) {
-    apply_type_guard_on_operands(condition, scope, true);
+    apply_type_guard_on_operands(condition, scope, true, ctx);
 }
 
 /// Apply type-guard narrowing in the inverse (else) branch.
@@ -1610,8 +1611,9 @@ pub(crate) fn apply_type_guard_narrowing_truthy(
 pub(crate) fn apply_type_guard_narrowing_inverse(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
 ) {
-    apply_type_guard_on_operands(condition, scope, false);
+    apply_type_guard_on_operands(condition, scope, false, ctx);
 }
 
 /// Shared implementation for truthy and inverse type-guard narrowing.
@@ -1623,6 +1625,7 @@ pub(crate) fn apply_type_guard_on_operands(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
     truthy: bool,
+    ctx: &ForwardWalkCtx<'_>,
 ) {
     // Decompose `&&` chains so that `is_object($x) && is_string($y)`
     // applies both guards.
@@ -1670,9 +1673,17 @@ pub(crate) fn apply_type_guard_on_operands(
                     continue;
                 }
                 if effective_truthy {
-                    narrowing::apply_type_guard_inclusion(kind, &mut results);
+                    narrowing::apply_type_guard_inclusion(
+                        kind,
+                        &mut results,
+                        Some(ctx.class_loader),
+                    );
                 } else {
-                    narrowing::apply_type_guard_exclusion(kind, &mut results);
+                    narrowing::apply_type_guard_exclusion(
+                        kind,
+                        &mut results,
+                        Some(ctx.class_loader),
+                    );
                 }
                 if !results.is_empty() {
                     scope.set(var_name, results);
@@ -1750,11 +1761,18 @@ enum ExactValue {
 impl PropertyTest {
     /// Report whether a member declaring `prop_type` for the property
     /// could have reached the branch this check guards.
-    fn admits(&self, prop_type: &PhpType) -> bool {
+    fn admits(
+        &self,
+        prop_type: &PhpType,
+        class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    ) -> bool {
         match self {
-            PropertyTest::Guard { kind, expect_match } => {
-                narrowing::guard_outcome_possible(prop_type, *kind, *expect_match)
-            }
+            PropertyTest::Guard { kind, expect_match } => narrowing::guard_outcome_possible(
+                prop_type,
+                *kind,
+                *expect_match,
+                Some(class_loader),
+            ),
             PropertyTest::Value {
                 value,
                 value_type,
@@ -1868,7 +1886,7 @@ fn narrow_union_by_property_check(
                 &check.property,
                 ctx.class_loader,
             )
-            .is_none_or(|hint| check.test.admits(&hint)),
+            .is_none_or(|hint| check.test.admits(&hint, ctx.class_loader)),
             None => true,
         };
         if admitted {

@@ -2859,9 +2859,9 @@ pub(crate) fn process_assert_narrowing<'b>(
         // and `assertIsNotObject` drops the class.
         if let Some((kind, exclude)) = type_guard {
             if exclude {
-                narrowing::apply_type_guard_exclusion(kind, &mut results);
+                narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
             } else {
-                narrowing::apply_type_guard_inclusion(kind, &mut results);
+                narrowing::apply_type_guard_inclusion(kind, &mut results, Some(ctx.class_loader));
             }
         }
 

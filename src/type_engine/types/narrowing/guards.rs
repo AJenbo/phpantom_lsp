@@ -730,6 +730,9 @@ pub(crate) enum TypeGuardKind {
     Null,
     Scalar,
     Resource,
+    /// `is_iterable` / `@phpstan-assert iterable`: an array or anything
+    /// `foreach` can walk, i.e. a `Traversable`.
+    Iterable,
 }
 
 /// Return the canonical `PhpType` that a type-guard narrows `mixed` to.
@@ -756,8 +759,14 @@ pub(crate) fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
             PhpType::bool(),
         ]),
         TypeGuardKind::Resource => PhpType::named(atom("resource")),
+        // `iterable` is PHP's own name for exactly this union, so keeping
+        // the keyword says more than spelling it out would.
+        TypeGuardKind::Iterable => PhpType::named(atom("iterable")),
     }
 }
+
+/// The interface every non-array iterable implements.
+const TRAVERSABLE_FQN: &str = "Traversable";
 
 /// Try to extract a type-guard function call on a variable.
 ///
@@ -794,6 +803,7 @@ pub(crate) fn try_extract_type_guard(
                 "is_null" => TypeGuardKind::Null,
                 "is_scalar" => TypeGuardKind::Scalar,
                 "is_resource" => TypeGuardKind::Resource,
+                "is_iterable" => TypeGuardKind::Iterable,
                 _ => return None,
             };
             let args = &fc.argument_list.arguments;
@@ -815,11 +825,25 @@ pub(crate) fn try_extract_type_guard(
     }
 }
 
+/// Resolution `type_matches_guard` needs for the kinds whose answer is
+/// nominal rather than structural.
+///
+/// Only `Iterable` uses it: whether a class is `foreach`-able is a
+/// question about its interfaces, which the type alone cannot answer.
+/// `None` means no loader was available, in which case a class type is
+/// assumed iterable — a guard that has already passed at runtime is
+/// better evidence than an unresolvable name.
+pub(crate) type GuardClassLoader<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
+
 /// Check whether a `PhpType` matches a given type-guard kind.
 ///
 /// For `TypeGuardKind::Array`, returns `true` for array-like types
 /// (`array`, `list<T>`, `T[]`, `array{…}`, `iterable`, etc.).
-fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
+fn type_matches_guard(
+    ty: &PhpType,
+    kind: TypeGuardKind,
+    class_loader: GuardClassLoader<'_>,
+) -> bool {
     match kind {
         TypeGuardKind::Array => ty.is_array_like(),
         TypeGuardKind::String => ty.is_subtype_of(&PhpType::string()),
@@ -843,6 +867,42 @@ fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
         // declared `closed-resource` is still in the resource domain, so the
         // subtype check covers both refinements.
         TypeGuardKind::Resource => ty.is_subtype_of(&PhpType::named(atom("resource"))),
+        TypeGuardKind::Iterable => type_is_iterable(ty, class_loader),
+    }
+}
+
+/// Whether `foreach` can walk a value of `ty`: an array (in any of its
+/// spellings, `iterable` included) or an object implementing
+/// `Traversable`.
+///
+/// A `Generator`, an `ArrayIterator`, and a collection declaring
+/// `IteratorAggregate` all qualify through the interface walk, which
+/// follows transitive extension, so `Traversable` need not be named
+/// directly.
+fn type_is_iterable(ty: &PhpType, class_loader: GuardClassLoader<'_>) -> bool {
+    if ty.is_array_like() {
+        return true;
+    }
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
+        TypeKind::Generic(g) => g.name.as_str(),
+        TypeKind::Nullable(inner) => return type_is_iterable(inner, class_loader),
+        // An object shape is a `stdClass`-alike, which is not traversable.
+        _ => return false,
+    };
+    if !ty.is_object_like() {
+        return false;
+    }
+    if name
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(TRAVERSABLE_FQN)
+    {
+        return true;
+    }
+    match class_loader {
+        Some(loader) => loader(name)
+            .is_some_and(|cls| crate::class_lookup::is_subtype_of(&cls, TRAVERSABLE_FQN, loader)),
+        None => true,
     }
 }
 
@@ -852,10 +912,14 @@ fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
 /// For example, when `kind` is `Array` and the type string is
 /// `null|list<Request>|Request`, the result is narrowed to
 /// `list<Request>`.
-pub(crate) fn apply_type_guard_inclusion(kind: TypeGuardKind, results: &mut Vec<ResolvedType>) {
+pub(crate) fn apply_type_guard_inclusion(
+    kind: TypeGuardKind,
+    results: &mut Vec<ResolvedType>,
+    class_loader: GuardClassLoader<'_>,
+) {
     let had_types = !results.is_empty();
     for rt in results.iter_mut() {
-        let filtered = filter_type_by_guard(&rt.type_string, kind, true);
+        let filtered = filter_type_by_guard(&rt.type_string, kind, true, class_loader);
         if let Some(narrowed) = filtered {
             rt.replace_type(narrowed);
         }
@@ -880,9 +944,13 @@ pub(crate) fn apply_type_guard_inclusion(kind: TypeGuardKind, results: &mut Vec<
 
 /// Narrow `results` to only the union members that do NOT match the
 /// given type-guard kind (inverse / else-body narrowing).
-pub(crate) fn apply_type_guard_exclusion(kind: TypeGuardKind, results: &mut Vec<ResolvedType>) {
+pub(crate) fn apply_type_guard_exclusion(
+    kind: TypeGuardKind,
+    results: &mut Vec<ResolvedType>,
+    class_loader: GuardClassLoader<'_>,
+) {
     for rt in results.iter_mut() {
-        let filtered = filter_type_by_guard(&rt.type_string, kind, false);
+        let filtered = filter_type_by_guard(&rt.type_string, kind, false, class_loader);
         if let Some(narrowed) = filtered {
             rt.replace_type(narrowed);
         }
@@ -901,8 +969,9 @@ pub(crate) fn guard_outcome_possible(
     ty: &PhpType,
     kind: TypeGuardKind,
     expect_match: bool,
+    class_loader: GuardClassLoader<'_>,
 ) -> bool {
-    match filter_type_by_guard(ty, kind, expect_match) {
+    match filter_type_by_guard(ty, kind, expect_match, class_loader) {
         Some(filtered) => !filtered.is_empty_sentinel(),
         None => true,
     }
@@ -919,13 +988,18 @@ pub(crate) fn guard_outcome_possible(
 /// Returns `None` when no filtering is needed (non-union type that
 /// already satisfies the predicate).  Returns `Some(Named("__empty"))`
 /// when all members are filtered out.
-fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) -> Option<PhpType> {
+fn filter_type_by_guard(
+    ty: &PhpType,
+    kind: TypeGuardKind,
+    keep_matching: bool,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<PhpType> {
     // Expand compound pseudo-types into their constituent unions so
     // that type guards can filter individual members.  For example,
     // `array-key` → `int|string`, so `is_string()` on `array-key`
     // correctly narrows to `string`.
     if let Some(expanded) = expand_pseudo_type_for_guard(ty) {
-        return filter_type_by_guard(&expanded, kind, keep_matching);
+        return filter_type_by_guard(&expanded, kind, keep_matching, class_loader);
     }
 
     // `is_numeric()` also returns true for numeric strings, not just
@@ -941,7 +1015,7 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
         TypeKind::Union(members) => {
             let filtered: Vec<PhpType> = members
                 .iter()
-                .filter(|m| type_matches_guard(m, kind) == keep_matching)
+                .filter(|m| type_matches_guard(m, kind, class_loader) == keep_matching)
                 .cloned()
                 .collect();
             if filtered.len() == members.len() {
@@ -959,8 +1033,8 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
             // `?T` is `T|null`.  For `is_array`, null doesn't match,
             // so we keep only the inner type (if it matches) or only
             // null (if it doesn't).
-            let inner_matches = type_matches_guard(inner, kind);
-            let null_matches = type_matches_guard(&PhpType::null(), kind);
+            let inner_matches = type_matches_guard(inner, kind, class_loader);
+            let null_matches = type_matches_guard(&PhpType::null(), kind, class_loader);
             match (
                 inner_matches == keep_matching,
                 null_matches == keep_matching,
@@ -986,7 +1060,7 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
                 };
             }
             // Non-union type: if it matches the predicate, keep it.
-            if type_matches_guard(ty, kind) == keep_matching {
+            if type_matches_guard(ty, kind, class_loader) == keep_matching {
                 None // no change needed
             } else {
                 Some(PhpType::empty_sentinel())
@@ -1061,7 +1135,7 @@ fn narrow_single_type_to_numeric(ty: &PhpType) -> Option<PhpType> {
             PhpType::parse("numeric-string"),
         ]));
     }
-    if type_matches_guard(ty, TypeGuardKind::Numeric) {
+    if type_matches_guard(ty, TypeGuardKind::Numeric, None) {
         return Some(ty.clone());
     }
     // An exact non-numeric literal cannot become numeric merely because its
@@ -1085,18 +1159,19 @@ mod tests {
         let float = PhpType::literal_float("1.5");
         let int = PhpType::literal_int("1");
 
-        assert!(type_matches_guard(&float, TypeGuardKind::Float));
+        assert!(type_matches_guard(&float, TypeGuardKind::Float, None));
         assert!(type_matches_guard(
             &PhpType::parse("real"),
-            TypeGuardKind::Float
+            TypeGuardKind::Float,
+            None
         ));
-        assert!(!type_matches_guard(&int, TypeGuardKind::Float));
+        assert!(!type_matches_guard(&int, TypeGuardKind::Float, None));
         assert_eq!(
-            filter_type_by_guard(&float, TypeGuardKind::Float, true),
+            filter_type_by_guard(&float, TypeGuardKind::Float, true, None),
             None
         );
         assert_eq!(
-            filter_type_by_guard(&float, TypeGuardKind::Float, false),
+            filter_type_by_guard(&float, TypeGuardKind::Float, false, None),
             Some(PhpType::empty_sentinel())
         );
     }
@@ -1108,11 +1183,11 @@ mod tests {
         let union = PhpType::union(vec![float.clone(), int.clone()]);
 
         assert_eq!(
-            filter_type_by_guard(&union, TypeGuardKind::Float, true),
+            filter_type_by_guard(&union, TypeGuardKind::Float, true, None),
             Some(float)
         );
         assert_eq!(
-            filter_type_by_guard(&union, TypeGuardKind::Float, false),
+            filter_type_by_guard(&union, TypeGuardKind::Float, false, None),
             Some(int)
         );
     }
@@ -1124,27 +1199,31 @@ mod tests {
         // `\x31` decodes to `"1"`, a numeric string, once escapes are decoded.
         let escaped = PhpType::literal_string_raw("\"\\x31\"");
 
-        assert!(type_matches_guard(&numeric_string, TypeGuardKind::Numeric));
-        assert!(!type_matches_guard(&text, TypeGuardKind::Numeric));
-        assert!(type_matches_guard(&escaped, TypeGuardKind::Numeric));
+        assert!(type_matches_guard(
+            &numeric_string,
+            TypeGuardKind::Numeric,
+            None
+        ));
+        assert!(!type_matches_guard(&text, TypeGuardKind::Numeric, None));
+        assert!(type_matches_guard(&escaped, TypeGuardKind::Numeric, None));
         assert_eq!(
-            filter_type_by_guard(&numeric_string, TypeGuardKind::Numeric, true),
+            filter_type_by_guard(&numeric_string, TypeGuardKind::Numeric, true, None),
             None
         );
         assert_eq!(
-            filter_type_by_guard(&text, TypeGuardKind::Numeric, true),
+            filter_type_by_guard(&text, TypeGuardKind::Numeric, true, None),
             Some(PhpType::empty_sentinel())
         );
         assert_eq!(
-            filter_type_by_guard(&numeric_string, TypeGuardKind::Numeric, false),
+            filter_type_by_guard(&numeric_string, TypeGuardKind::Numeric, false, None),
             Some(PhpType::empty_sentinel())
         );
         assert_eq!(
-            filter_type_by_guard(&text, TypeGuardKind::Numeric, false),
+            filter_type_by_guard(&text, TypeGuardKind::Numeric, false, None),
             None
         );
         assert_eq!(
-            filter_type_by_guard(&escaped, TypeGuardKind::Numeric, true),
+            filter_type_by_guard(&escaped, TypeGuardKind::Numeric, true, None),
             None
         );
     }

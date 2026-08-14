@@ -198,6 +198,12 @@ function runDemoAssertions(): void
     $pens = Scaffolding\loadPensOrFail();
     assert($pens !== false && $pens[0] instanceof Scaffolding\Pen, 'Scaffolding\loadPensOrFail() returns array<int, Scaffolding\Pen> on success');
 
+    // ── is_iterable() keeps arrays and \Traversable objects ─────────────
+    assert(is_iterable(new Scaffolding\ItemIterableCollection()), 'an IteratorAggregate is iterable, so the guard keeps it');
+    assert(!is_iterable(new Scaffolding\Pen()), 'a plain object is not iterable, so the guard drops it');
+    assert(is_iterable([new Scaffolding\Pen()]), 'an array is iterable');
+    assert(!is_iterable('ink'), 'a string is not iterable');
+
     // ── @phpstan-require-extends base members on $this ──────────────────
     $consumer = new RequireExtendsConsumer();
     assert($consumer->mockPath() === '/tmp/mock', 'trait method reaches base class member via @phpstan-require-extends');
