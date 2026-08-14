@@ -1600,38 +1600,6 @@ pub(super) fn extract_nested_array_access_chain<'a, 'b>(
     }
 }
 
-/// Merge a chain of string keys into a (possibly nested) array shape.
-///
-/// For keys `["a", "b"]` and value type `string`, produces:
-///   `array{a: array{b: string}}`
-///
-/// When the base already contains entries, they are preserved and the
-/// nested key path is merged in.  For example, merging `["a", "c"]`
-/// with value `int` into `array{a: array{b: string}}` produces:
-///   `array{a: array{b: string, c: int}}`
-pub(super) fn merge_nested_shape_keys(
-    base: &PhpType,
-    keys: &[String],
-    value_type: &PhpType,
-) -> PhpType {
-    debug_assert!(!keys.is_empty());
-    if keys.len() == 1 {
-        return merge_shape_key(base, &keys[0], value_type);
-    }
-
-    // For nested keys, we need to:
-    // 1. Look up the existing inner type for the first key
-    // 2. Recursively merge the remaining keys into that inner type
-    // 3. Merge the result back at the first key level
-    let first_key = &keys[0];
-    let inner_base = base
-        .shape_value_type(first_key)
-        .cloned()
-        .unwrap_or_else(PhpType::array);
-    let inner_merged = merge_nested_shape_keys(&inner_base, &keys[1..], value_type);
-    merge_shape_key(base, first_key, &inner_merged)
-}
-
 /// A single key segment in a (possibly nested) array write like
 /// `$var['a'][$i]['b'] = …`.
 pub(super) enum ArrayWriteKey {
@@ -1640,6 +1608,9 @@ pub(super) enum ArrayWriteKey {
     /// A dynamic (variable / expression / numeric) key tracked as a
     /// generic `array<K, V>` level. Carries the inferred key type.
     Keyed(PhpType),
+    /// A trailing `[]` append, as in `$var['a'][] = …`. Only ever the
+    /// last segment of a chain.
+    Append,
 }
 
 /// Merge a nested array write with a mix of literal-string and dynamic
@@ -1655,6 +1626,10 @@ pub(super) enum ArrayWriteKey {
 /// A dynamic write onto an existing non-empty shape leaves the shape
 /// unchanged (the literal keys already tracked are worth more than a
 /// widened `array<K, V>`), matching the single-segment behaviour.
+///
+/// A trailing [`ArrayWriteKey::Append`] appends to the innermost level,
+/// so `$rows[$id][] = $name` starting from `array{}` produces
+/// `array<int, list<string>>`.
 pub(super) fn merge_nested_array_write(
     base: &PhpType,
     keys: &[ArrayWriteKey],
@@ -1666,10 +1641,7 @@ pub(super) fn merge_nested_array_write(
             if keys.len() == 1 {
                 merge_shape_key(base, key, value_type)
             } else {
-                let inner_base = base
-                    .shape_value_type(key)
-                    .cloned()
-                    .unwrap_or_else(PhpType::array);
+                let inner_base = shape_slot_base(base, key);
                 let inner_merged = merge_nested_array_write(&inner_base, &keys[1..], value_type);
                 merge_shape_key(base, key, &inner_merged)
             }
@@ -1683,11 +1655,45 @@ pub(super) fn merge_nested_array_write(
             let inner_merged = if keys.len() == 1 {
                 value_type.clone()
             } else {
-                let inner_base = base.iterable_element_type().unwrap_or_else(PhpType::array);
+                let inner_base = keyed_slot_base(base);
                 merge_nested_array_write(&inner_base, &keys[1..], value_type)
             };
             merge_keyed_type(base, key_type, &inner_merged)
         }
+        ArrayWriteKey::Append => {
+            debug_assert_eq!(keys.len(), 1, "`[]` is only valid as the last segment");
+            // Appending to a tracked shape would have to add a positional
+            // entry, so the shape is left alone — its literal keys are
+            // worth more than a widened `list<T>`. An empty shape
+            // (`$var = []`) tracks no keys worth keeping.
+            if base.shape_entries().is_some_and(|e| !e.is_empty()) {
+                return base.clone();
+            }
+            merge_push_type(base, value_type)
+        }
+    }
+}
+
+/// The type an inner write should build on for the shape entry `key`.
+///
+/// A missing entry auto-vivifies: PHP creates an empty array there, so an
+/// empty shape (rather than an unconstrained `array`) is the honest
+/// starting point — it lets the nested merge below build a precise type
+/// instead of unioning against `mixed`.
+fn shape_slot_base(base: &PhpType, key: &str) -> PhpType {
+    base.shape_value_type(key)
+        .cloned()
+        .unwrap_or_else(|| PhpType::array_shape(Vec::new()))
+}
+
+/// The type an inner write should build on below a dynamic key segment.
+///
+/// Like [`shape_slot_base`], an unknown element type auto-vivifies to an
+/// empty shape rather than an unconstrained `array`.
+fn keyed_slot_base(base: &PhpType) -> PhpType {
+    match base.iterable_element_type() {
+        Some(elem) if !elem.is_empty() && !elem.is_mixed() => elem,
+        _ => PhpType::array_shape(Vec::new()),
     }
 }
 
@@ -1859,6 +1865,57 @@ pub(super) fn merge_keyed_type(
         let k_type = PhpType::join_runtime_value_types(key_types);
         PhpType::generic_array(k_type, val_type)
     }
+}
+
+/// Merge the operands of an array `+` / `+=`.
+///
+/// PHP's array union keeps every key already present on the left and adds
+/// only the keys the right side contributes. Two tracked shapes therefore
+/// merge into a single shape; anything looser keeps whatever key/value
+/// information both sides carry instead of collapsing to a bare `array`.
+pub(super) fn merge_array_plus(lhs: &PhpType, rhs: &PhpType) -> PhpType {
+    if let (TypeKind::ArrayShape(lhs_entries), TypeKind::ArrayShape(rhs_entries)) =
+        (lhs.kind(), rhs.kind())
+        // Positional entries carry no key to match on, so their union is
+        // not decidable from the shapes alone.
+        && lhs_entries.iter().chain(rhs_entries).all(|e| e.key.is_some())
+    {
+        let mut entries: Vec<ShapeEntry> = Vec::with_capacity(lhs_entries.len());
+        for entry in lhs_entries {
+            let rhs_match = rhs_entries
+                .iter()
+                .find(|other| other.key == entry.key)
+                .filter(|_| entry.optional);
+            match rhs_match {
+                // An optional left key may be absent at runtime, in which
+                // case the right side's value for it wins.
+                Some(other) => entries.push(ShapeEntry {
+                    key: entry.key.clone(),
+                    value_type: PhpType::union(vec![
+                        entry.value_type.clone(),
+                        other.value_type.clone(),
+                    ]),
+                    optional: other.optional,
+                }),
+                None => entries.push(entry.clone()),
+            }
+        }
+        entries.extend(
+            rhs_entries
+                .iter()
+                .filter(|entry| !lhs_entries.iter().any(|left| left.key == entry.key))
+                .cloned(),
+        );
+        return PhpType::array_shape(entries);
+    }
+
+    let Some(rhs_value) = rhs.iterable_element_type().filter(|v| !v.is_empty()) else {
+        return PhpType::array();
+    };
+    let rhs_key = rhs
+        .iterable_key_type()
+        .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
+    merge_keyed_type(lhs, &rhs_key, &rhs_value)
 }
 
 /// Infer the source type of an array-access index expression.

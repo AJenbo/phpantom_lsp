@@ -1212,6 +1212,19 @@ function runDemoAssertions(): void
     assert($branchedRows[1]['pencil'] instanceof Scaffolding\Pencil,
         'The Scaffolding\Pencil branch must write the pencil shape at its slot');
 
+    // ── Append below a key ──────────────────────────────────────────────
+    $appended = $shapeDemo->appendsBelowAKey([new Scaffolding\Pen(), new Scaffolding\Pen()]);
+    assert($appended[0][0] instanceof Scaffolding\Pen,
+        'An append below a dynamic key must read back the pushed value');
+    assert(count($appended) === 2, 'Each iterated slot gets its own list');
+
+    // ── Array union with += ─────────────────────────────────────────────
+    $unioned = $shapeDemo->unionsTwoShapes();
+    assert($unioned['tool'] instanceof Scaffolding\Pen,
+        '+= keeps the key the left side already holds');
+    assert($unioned['spare'] instanceof Scaffolding\Pencil,
+        '+= adds the key only the right side contributes');
+
     // ── Ambiguous variables ─────────────────────────────────────────────
     if (rand(0, 1)) {
         $ambiguous = new Scaffolding\Lamp();

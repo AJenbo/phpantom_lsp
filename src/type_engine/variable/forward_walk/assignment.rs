@@ -1397,32 +1397,9 @@ pub(crate) fn process_assignment_expr<'b>(
             return;
         }
 
-        // Array push: `$var[] = expr;`
+        // Array push: `$var[] = expr;` and `$var['a'][$i][] = expr;`
         if let Expression::ArrayAppend(array_append) = assignment.lhs {
-            if let Expression::Variable(Variable::Direct(dv)) = array_append.array {
-                let var_name = bytes_to_str(dv.name).to_string();
-                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                if !rhs_types.is_empty() {
-                    let value_type = ResolvedType::types_joined(&rhs_types);
-                    let base_type = scope
-                        .get(&var_name)
-                        .last()
-                        .map(|rt| rt.type_string.clone())
-                        .unwrap_or_else(PhpType::array);
-                    // Pushing onto a tracked shape would have to append a
-                    // positional entry, so the shape is left alone. An
-                    // empty shape (`$var = []`) tracks no keys worth
-                    // keeping, so the push builds a list as usual.
-                    let onto_tracked_shape = base_type
-                        .shape_entries()
-                        .is_some_and(|entries| !entries.is_empty());
-                    if !onto_tracked_shape {
-                        let merged =
-                            super::super::resolution::merge_push_type(&base_type, &value_type);
-                        scope.set(&var_name, vec![ResolvedType::from_type_string(merged)]);
-                    }
-                }
-            }
+            process_array_append(array_append, assignment, scope, ctx);
             return;
         }
 
@@ -1634,11 +1611,15 @@ pub(crate) fn process_compound_assignment<'b>(
             // If either operand is array-like, the result is array.
             let lhs_types = scope.get(&var_name).to_vec();
             let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-            let either_is_array = lhs_types
-                .iter()
-                .chain(rhs_types.iter())
-                .any(|rt| rt.type_string.is_array_like());
-            if either_is_array {
+            let lhs_is_array = lhs_types.iter().any(|rt| rt.type_string.is_array_like());
+            let rhs_is_array = rhs_types.iter().any(|rt| rt.type_string.is_array_like());
+            if lhs_is_array && rhs_is_array {
+                // Both sides are arrays: `+=` unions their keys.
+                super::super::resolution::merge_array_plus(
+                    &ResolvedType::types_joined(&lhs_types),
+                    &ResolvedType::types_joined(&rhs_types),
+                )
+            } else if lhs_is_array || rhs_is_array {
                 PhpType::named(atom("array"))
             } else {
                 infer_arithmetic_result_type(&lhs_types, &rhs_types, false)
@@ -2357,94 +2338,123 @@ pub(crate) fn bind_destructured_pattern<'b>(
 
 /// Process array key assignment: `$var['key'] = expr;`
 pub(crate) fn process_array_key_assignment<'b>(
-    _array_access: &'b ArrayAccess<'b>,
+    array_access: &'b ArrayAccess<'b>,
     assignment: &'b Assignment<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Extract the base variable and the chain of array-access keys, then
-    // merge the RHS value type into the base variable's type.  Handles
-    // both string-keyed shape building and generic element tracking.
     if let Some((base_name, key_chain)) =
-        super::super::resolution::extract_nested_array_access_chain(_array_access)
+        super::super::resolution::extract_nested_array_access_chain(array_access)
     {
-        // Resolve the RHS value type.
-        let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-        let value_php_type = if !rhs_types.is_empty() {
-            ResolvedType::types_joined(&rhs_types)
-        } else {
-            PhpType::mixed()
-        };
-        let base_type = scope
-            .get(&base_name)
-            .last()
-            .map(|rt| rt.type_string.clone())
-            .unwrap_or_else(PhpType::array);
-
-        // If the base variable is an object (e.g. SplObjectStorage, ArrayAccess),
-        // array-access syntax invokes offsetSet, not actual array mutation.
-        // Preserve the original object type instead of overwriting it with an array shape.
-        if base_type.is_object_like() && !base_type.is_array_like() {
-            return;
-        }
-
-        // If the base variable is a string, bracket-indexed assignment
-        // (`$str[0] = 'z'`) modifies the string in-place — the variable
-        // remains a string, it does NOT become an array.
-        if base_type.is_string_subtype() {
-            scope.set(
-                &base_name,
-                vec![ResolvedType::from_type_string(PhpType::string())],
-            );
-            return;
-        }
-
-        // Extract all keys in the chain.
-        let all_string_keys: Option<Vec<String>> = key_chain
-            .iter()
-            .map(|idx| super::super::resolution::extract_array_key_for_shape(idx))
-            .collect();
-
-        if let Some(keys) = all_string_keys {
-            let merged = super::super::resolution::merge_nested_shape_keys(
-                &base_type,
-                &keys,
-                &value_php_type,
-            );
-            scope.set(&base_name, vec![ResolvedType::from_type_string(merged)]);
-        } else {
-            // The chain contains at least one dynamic (non-literal) key,
-            // e.g. `$sums[$id] = …` or `$return['data'][$count]['earnings']
-            // = …`.  Literal segments are tracked as shape entries and
-            // dynamic segments as generic `array<K, V>` levels.
-            let rhs_offset = assignment.span().start.offset;
-            let scope_locals = &scope.locals;
-            let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-                scope_locals
-                    .get(&atom(var_name))
-                    .cloned()
-                    .unwrap_or_default()
-            };
-            let rhs_ctx = ctx.var_ctx_for_with_scope("$__idx", rhs_offset, &scope_resolver);
-            let write_keys: Vec<super::super::resolution::ArrayWriteKey> = key_chain
-                .iter()
-                .map(
-                    |idx| match super::super::resolution::extract_array_key_for_shape(idx) {
-                        Some(key) => super::super::resolution::ArrayWriteKey::Shape(key),
-                        None => super::super::resolution::ArrayWriteKey::Keyed(
-                            super::super::resolution::infer_array_key_type(idx, &rhs_ctx),
-                        ),
-                    },
-                )
-                .collect();
-            let merged = super::super::resolution::merge_nested_array_write(
-                &base_type,
-                &write_keys,
-                &value_php_type,
-            );
-            scope.set(&base_name, vec![ResolvedType::from_type_string(merged)]);
-        }
+        apply_array_write(&base_name, &key_chain, false, assignment, scope, ctx);
     }
+}
+
+/// Process array append: `$var[] = expr;` and `$var['a'][$i][] = expr;`
+pub(crate) fn process_array_append<'b>(
+    array_append: &'b ArrayAppend<'b>,
+    assignment: &'b Assignment<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match array_append.array {
+        Expression::Variable(Variable::Direct(dv)) => {
+            let base_name = bytes_to_str(dv.name).to_string();
+            apply_array_write(&base_name, &[], true, assignment, scope, ctx);
+        }
+        // `$var['a'][$i][] = …` — the append lands on the innermost level
+        // of an array-access chain rather than on the variable itself.
+        Expression::ArrayAccess(inner) => {
+            if let Some((base_name, key_chain)) =
+                super::super::resolution::extract_nested_array_access_chain(inner)
+            {
+                apply_array_write(&base_name, &key_chain, true, assignment, scope, ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Merge the RHS of an element write into the base variable's type.
+///
+/// `key_chain` holds the array-access keys from outermost to innermost;
+/// `append` marks a trailing `[]` past the last key. Literal-string keys
+/// become shape entries, dynamic keys become generic `array<K, V>`
+/// levels, and missing intermediate levels auto-vivify.
+fn apply_array_write<'b>(
+    base_name: &str,
+    key_chain: &[&Expression<'b>],
+    append: bool,
+    assignment: &'b Assignment<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+    // An append with no inferable element type leaves the variable alone
+    // rather than widening a tracked `list<T>` with `mixed`. A keyed write
+    // records `mixed` so the key itself still shows up in the shape.
+    if append && rhs_types.is_empty() {
+        return;
+    }
+    let value_php_type = if rhs_types.is_empty() {
+        PhpType::mixed()
+    } else {
+        ResolvedType::types_joined(&rhs_types)
+    };
+    let base_type = scope
+        .get(base_name)
+        .last()
+        .map(|rt| rt.type_string.clone())
+        .unwrap_or_else(PhpType::array);
+
+    // If the base variable is an object (e.g. SplObjectStorage, ArrayAccess),
+    // array-access syntax invokes offsetSet, not actual array mutation.
+    // Preserve the original object type instead of overwriting it with an array shape.
+    if base_type.is_object_like() && !base_type.is_array_like() {
+        return;
+    }
+
+    // If the base variable is a string, bracket-indexed assignment
+    // (`$str[0] = 'z'`) modifies the string in-place — the variable
+    // remains a string, it does NOT become an array.
+    if base_type.is_string_subtype() {
+        scope.set(
+            base_name,
+            vec![ResolvedType::from_type_string(PhpType::string())],
+        );
+        return;
+    }
+
+    let rhs_offset = assignment.span().start.offset;
+    let scope_locals = &scope.locals;
+    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
+        scope_locals
+            .get(&atom(var_name))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let rhs_ctx = ctx.var_ctx_for_with_scope("$__idx", rhs_offset, &scope_resolver);
+    let mut write_keys: Vec<super::super::resolution::ArrayWriteKey> = key_chain
+        .iter()
+        .map(
+            |idx| match super::super::resolution::extract_array_key_for_shape(idx) {
+                Some(key) => super::super::resolution::ArrayWriteKey::Shape(key),
+                None => super::super::resolution::ArrayWriteKey::Keyed(
+                    super::super::resolution::infer_array_key_type(idx, &rhs_ctx),
+                ),
+            },
+        )
+        .collect();
+    if append {
+        write_keys.push(super::super::resolution::ArrayWriteKey::Append);
+    }
+
+    let merged = super::super::resolution::merge_nested_array_write(
+        &base_type,
+        &write_keys,
+        &value_php_type,
+    );
+    scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
 }
 
 /// Process pass-by-reference parameter type inference.

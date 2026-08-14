@@ -80,13 +80,13 @@ fix above, so both should be implemented together.
 ---
 
 ## T4. Non-empty-* type narrowing and propagation
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Effort: Medium**
 
 PHPStan tracks `non-empty-string` and `non-empty-array` through
 built-in functions. These narrowings don't directly enable
 class-based completion, but they improve hover type display and
-would catch bugs if we add diagnostics. All three sub-items share
-the same implementation pattern (function-name-triggered type
+would catch bugs if we add diagnostics. The first three sub-items
+share the same implementation pattern (function-name-triggered type
 narrowing in conditions or return types) and should be implemented
 together.
 
@@ -108,6 +108,26 @@ range types against `count()` / `sizeof()` calls. See
 `escapeshellarg()`, `escapeshellcmd()`, `preg_quote()`,
 `rawurlencode()`, or `rawurldecode()` should return
 `non-empty-string`. See `NonEmptyStringFunctionsReturnTypeExtension`.
+
+**Element writes produce a non-empty array.** After `$a[$k] = $v` or
+`$a[] = $v` the array holds at least one element, so PHPStan reports
+`non-empty-array<K, V>` / `non-empty-list<V>`. We report the
+possibly-empty spellings, which loses the guarantee that `reset()`,
+`array_pop()` and friends return a value rather than `false`.
+
+Emitting the non-empty spelling from the write helpers
+(`merge_push_type`, `merge_keyed_type` in
+`type_engine/variable/resolution.rs`) is a two-line change, but it is
+only half the work: every place that joins branches has to relax the
+guarantee again when one side never ran. A `foreach` whose body writes
+a key merges the pre-loop scope back in at exit, and today that join
+either drops the `array{}` alternative outright (reporting
+`non-empty-array` after a loop that may not have iterated at all) or
+keeps it as a separate union member (`array{}|non-empty-list<string>`,
+whose offset reads then carry a spurious `null`). Both spellings are
+wrong; the join has to widen `non-empty-X` to `X` instead. So the work
+is a possibly-empty widening at each join point, not a change to the
+write helpers.
 
 ---
 

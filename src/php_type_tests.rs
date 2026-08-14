@@ -2768,6 +2768,34 @@ mod subtype_tests {
     }
 
     #[test]
+    fn array_like_generics_compare_across_arities() {
+        // `list<V>` is `array<int, V>` spelled at a different arity, so the
+        // key/value pair has to be compared rather than the argument lists.
+        assert!(
+            PhpType::parse("list<string>").is_subtype_of(&PhpType::parse("array<int, string>"))
+        );
+        assert!(
+            PhpType::parse("list<array{item: string, qty: int}>")
+                .is_subtype_of(&PhpType::parse("array<int, array<string, mixed>>"))
+        );
+        // `array<V>` keys on `array-key`, which a `string` key cannot accept.
+        assert!(PhpType::parse("array<string, int>").is_subtype_of(&PhpType::parse("array<int>")));
+        assert!(!PhpType::parse("array<int>").is_subtype_of(&PhpType::parse("array<string, int>")));
+        // A one-argument `iterable` says nothing about its key type.
+        assert!(
+            PhpType::parse("array<int, string>").is_subtype_of(&PhpType::parse("iterable<string>"))
+        );
+    }
+
+    #[test]
+    fn generic_array_is_not_subtype_of_list_across_arities() {
+        // A `list` supertype demands sequential integer keys.
+        assert!(
+            !PhpType::parse("array<int, string>").is_subtype_of(&PhpType::parse("list<string>"))
+        );
+    }
+
+    #[test]
     fn array_slice_covariance() {
         // int[] <: int[] — reflexive
         assert!(PhpType::parse("int[]").is_subtype_of(&PhpType::parse("int[]")));

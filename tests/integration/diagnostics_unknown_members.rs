@@ -12723,3 +12723,88 @@ class Host extends Base
         "extra() is not declared on Host, got: {diags:?}"
     );
 }
+
+/// A builder method chained onto an Eloquent relation keeps the chain
+/// resolvable: `Relation::__call` forwards to the query builder and
+/// returns the relation, so `->withTrashed()->first()` continues through
+/// the relation's inherited `@mixin Builder<Author>` to the model.
+///
+/// `Relation::__call` is declared `@return mixed`, so a chain step whose
+/// type cannot be pinned down falls through to it and resolves to
+/// nothing, which is what this guards against.
+#[test]
+fn chained_builder_method_on_a_relation_keeps_the_chain_resolvable() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace Illuminate\Support\Traits {
+    trait ForwardsCalls {}
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /**
+         * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+         * @param class-string<TRelatedModel> $related
+         * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<TRelatedModel, $this>
+         */
+        protected function belongsTo(string $related, string $foreign = '', string $owner = '') {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {
+        /** @return TModel|null */
+        public function first() {}
+    }
+    /**
+     * @method static \Illuminate\Database\Eloquent\Builder<static> withTrashed()
+     */
+    trait SoftDeletes {}
+}
+namespace Illuminate\Database\Eloquent\Relations {
+    use Illuminate\Support\Traits\ForwardsCalls;
+    /**
+     * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     * @mixin \Illuminate\Database\Eloquent\Builder<TRelatedModel>
+     */
+    abstract class Relation {
+        use ForwardsCalls;
+
+        /** @return mixed */
+        public function __call($method, $parameters) {}
+    }
+    /**
+     * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     * @extends Relation<TRelatedModel, TDeclaringModel>
+     */
+    class BelongsTo extends Relation {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Model;
+    use Illuminate\Database\Eloquent\SoftDeletes;
+
+    class Author extends Model {
+        use SoftDeletes;
+
+        public function displayName(): string { return ''; }
+    }
+
+    class Post extends Model {
+        public function authorName(): string
+        {
+            return $this->belongsTo(Author::class)->withTrashed()->first()->displayName();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "belongsTo()->withTrashed()->first()->displayName() should resolve end to end, got: {diags:?}"
+    );
+}

@@ -27,7 +27,7 @@ within the same impact tier.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 | B144 | [`preg_match` `$matches` is shapeless](todo/bugs.md#b144-preg_match-matches-is-shapeless) (depends on B147)                                | Medium-High | Medium      |
-| B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state) (depends on B147)                   | Medium      | Medium-High |
+| B149 | [A `$this`/`static` return is lost on members injected at instantiation time](todo/bugs.md#b149-a-thisstatic-return-is-lost-on-members-injected-at-instantiation-time) | Medium | Medium |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -89,7 +89,7 @@ unlikely to move the needle for most users.
 | T26 | [Globbed constant unions (`Foo::BAR_*`)](todo/type-inference.md#t26-globbed-constant-unions-foobar_)                                                                        | Low-Medium  | Medium      |
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium      |
 | T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Low-Medium  |
-| T4  | Non-empty-\* type narrowing and propagation                                                                                                                                 | Low         | Low         |
+| T4  | [Non-empty-\* type narrowing and propagation](todo/type-inference.md#t4-non-empty--type-narrowing-and-propagation)                                                          | Low-Medium  | Medium      |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Low         |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium  |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Low-Medium  |

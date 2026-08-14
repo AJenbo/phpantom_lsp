@@ -92,7 +92,3 @@ Several forms of the same weakness (~7 sites):
 **Fix:** refine the per-key state on nested writes (including
 auto-vivification), merge `+=` like an array-shape union, and make
 constant shapes satisfy their generic supertypes.
-
-## Narrowing
-
-No outstanding items.

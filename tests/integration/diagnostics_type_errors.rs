@@ -1966,6 +1966,26 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_list_of_shapes_to_array_int_of_generic_arrays() {
+    let php = r#"<?php
+/** @param array<int, array<string, mixed>> $rows */
+function takes_rows(array $rows): void {}
+
+function test(): void {
+    $rows = [];
+    $rows[] = ['item' => 'a', 'qty' => 1];
+    takes_rows($rows);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag a list of array shapes passed to \
+         array<int, array<string, mixed>>, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_array_int_to_list() {
     let php = r#"<?php
 /** @param list<string> $items */

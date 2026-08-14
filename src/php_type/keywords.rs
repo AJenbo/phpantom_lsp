@@ -254,6 +254,15 @@ pub fn is_array_like_name(name: &str) -> bool {
     )
 }
 
+/// Returns `true` for array-like type names that guarantee sequential
+/// integer keys starting at zero.
+pub fn is_list_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "list" | "non-empty-list"
+    )
+}
+
 /// Public wrapper around [`is_scalar_name`] for use by other modules
 /// (e.g. type-guard narrowing in `narrowing.rs`).
 pub fn is_scalar_name_pub(name: &str) -> bool {

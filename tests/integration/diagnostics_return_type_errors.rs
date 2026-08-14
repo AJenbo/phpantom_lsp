@@ -3641,6 +3641,207 @@ function badList(string $text): array { return words($text); }
     );
 }
 
+/// Eloquent relation scaffolding for the `Relation::__call` forwarding
+/// tests below: a `Relation` that uses `ForwardsCalls` and inherits
+/// `@mixin Builder<TRelatedModel>`, plus an `Author` model carrying every
+/// shape of Builder-typed member that gets injected onto a relation
+/// (a trait `@method` tag, a scope, a scope returning a custom builder
+/// subclass, and a `where{Column}` column).
+const RELATION_FORWARDING_SCAFFOLD: &str = r#"
+namespace Illuminate\Support\Traits {
+    trait ForwardsCalls {}
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /**
+         * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+         * @param class-string<TRelatedModel> $related
+         * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<TRelatedModel, $this>
+         */
+        protected function belongsTo(string $related, string $foreign = '', string $owner = '') {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {
+        /** @return $this */
+        public function where($column, $value = null) {}
+        /** @return TModel|null */
+        public function first() {}
+    }
+    /**
+     * @method static \Illuminate\Database\Eloquent\Builder<static> withTrashed()
+     */
+    trait SoftDeletes {}
+}
+namespace Illuminate\Database\Eloquent\Relations {
+    use Illuminate\Support\Traits\ForwardsCalls;
+    /**
+     * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     * @mixin \Illuminate\Database\Eloquent\Builder<TRelatedModel>
+     */
+    abstract class Relation {
+        use ForwardsCalls;
+
+        /** @return mixed */
+        public function __call($method, $parameters) {}
+    }
+    /**
+     * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     * @extends Relation<TRelatedModel, TDeclaringModel>
+     */
+    class BelongsTo extends Relation {}
+    /**
+     * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
+     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
+     * @extends Relation<TRelatedModel, TDeclaringModel>
+     */
+    class HasMany extends Relation {}
+}
+namespace App\Models {
+    use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Model;
+    use Illuminate\Database\Eloquent\SoftDeletes;
+
+    /**
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     * @extends Builder<TModel>
+     */
+    class AuthorBuilder extends Builder {}
+
+    /**
+     * @property string $name
+     * @method static Builder<static>|null maybeTrashed()
+     */
+    class Author extends Model {
+        use SoftDeletes;
+
+        /**
+         * @param Builder<static> $query
+         * @return Builder<static>
+         */
+        public function scopeActive($query) { return $query; }
+
+        /**
+         * @param AuthorBuilder<static> $query
+         * @return AuthorBuilder<static>
+         */
+        public function scopeFeatured($query) { return $query; }
+    }
+}
+"#;
+
+/// Wrap a `Post` method body in the relation scaffolding above.
+fn relation_forwarding_php(declared_return: &str, body: &str) -> String {
+    format!(
+        "<?php\n{RELATION_FORWARDING_SCAFFOLD}\nnamespace App {{\n\
+         \x20   use App\\Models\\Author;\n\
+         \x20   use Illuminate\\Database\\Eloquent\\Model;\n\
+         \x20   use Illuminate\\Database\\Eloquent\\Relations\\BelongsTo;\n\
+         \x20   use Illuminate\\Database\\Eloquent\\Relations\\HasMany;\n\n\
+         \x20   class Post extends Model {{\n\
+         \x20       public function author(): {declared_return}\n\
+         \x20       {{\n\
+         \x20           return {body};\n\
+         \x20       }}\n\
+         \x20   }}\n}}\n"
+    )
+}
+
+/// Chaining a builder method onto an Eloquent relation (e.g.
+/// `$this->belongsTo(Author::class)->withTrashed()`) should not produce a
+/// `type_mismatch_return` diagnostic.  At runtime, `Relation::__call`
+/// uses `ForwardsCalls::forwardDecoratedCallTo`, which returns `$this`
+/// (the Relation) when the forwarded method returns the builder.
+///
+/// Closes #354
+#[test]
+fn relation_chained_builder_method_returns_relation_not_builder() {
+    for body in [
+        // A `@method` tag inherited from a trait (SoftDeletes).
+        "$this->belongsTo(Author::class)->withTrashed()",
+        // A scope method.
+        "$this->belongsTo(Author::class)->active()",
+        // A scope method returning a custom builder subclass, which
+        // forwards the same way as the base Builder.
+        "$this->belongsTo(Author::class)->featured()",
+        // A synthesized `where{Column}` method.
+        "$this->belongsTo(Author::class)->whereName('a')",
+        // Two forwarded calls in a row.
+        "$this->belongsTo(Author::class)->withTrashed()->active()",
+    ] {
+        let diags = collect(&relation_forwarding_php("BelongsTo", body));
+        assert!(
+            !has_return_error(&diags),
+            "`{body}` should return BelongsTo, not a Builder; got: {}",
+            return_error_messages(&diags).join("; ")
+        );
+    }
+}
+
+/// The relation type the chain lands on is still checked: a forwarded
+/// call keeps the relation it was made on, so declaring a *different*
+/// relation is still a mismatch.
+#[test]
+fn relation_chained_builder_method_still_reports_a_wrong_relation() {
+    let diags = collect(&relation_forwarding_php(
+        "HasMany",
+        "$this->belongsTo(Author::class)->withTrashed()",
+    ));
+    let messages = return_error_messages(&diags).join("; ");
+    assert!(
+        messages.contains("BelongsTo") && messages.contains("HasMany"),
+        "belongsTo()->withTrashed() declared as HasMany should still be reported; got: {messages}"
+    );
+}
+
+/// The chain continues past a forwarded call: `->first()` on the relation
+/// resolves through the inherited `@mixin Builder<Author>` to `?Author`,
+/// so declaring the model satisfies it and declaring the relation does
+/// not.  (That the chain resolves at all is guarded in
+/// `diagnostics_unknown_members`.)
+#[test]
+fn relation_chain_continues_past_a_forwarded_builder_method() {
+    let body = "$this->belongsTo(Author::class)->withTrashed()->first()";
+
+    let diags = collect(&relation_forwarding_php("?Author", body));
+    assert!(
+        !has_return_error(&diags),
+        "belongsTo()->withTrashed()->first() should resolve to ?Author; got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+
+    let diags = collect(&relation_forwarding_php("BelongsTo", body));
+    let messages = return_error_messages(&diags).join("; ");
+    assert!(
+        messages.contains("App\\Models\\Author"),
+        "belongsTo()->withTrashed()->first() should be reported as Author, not a relation; \
+         got: {messages}"
+    );
+}
+
+/// A nullable Builder-typed return keeps its nullability when it is
+/// rewritten to the relation: `Builder<static>|null` forwards as
+/// `BelongsTo<Author, Post>|null`, which is not a `BelongsTo`.
+#[test]
+fn relation_forwarded_builder_return_keeps_its_nullability() {
+    let body = "$this->belongsTo(Author::class)->maybeTrashed()";
+
+    let diags = collect(&relation_forwarding_php("BelongsTo", body));
+    let messages = return_error_messages(&diags).join("; ");
+    assert!(
+        messages.contains("BelongsTo") && messages.contains("null"),
+        "a nullable forwarded return should stay nullable; got: {messages}"
+    );
+
+    let diags = collect(&relation_forwarding_php("?BelongsTo", body));
+    assert!(
+        !has_return_error(&diags),
+        "a nullable forwarded return satisfies `?BelongsTo`; got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
 /// A `$format` that isn't a literal decides nothing, so the call keeps every
 /// branch it could return instead of committing to one.
 #[test]

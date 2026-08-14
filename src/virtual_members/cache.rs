@@ -596,6 +596,9 @@ pub(crate) mod transform_flags {
     pub const MIXIN_VIRTUAL_DECORATED: u8 = 4 | 8;
     /// Model scope method rewritten to its public Builder-instance form.
     pub const SCOPE_INSTANCE: u8 = 16;
+    /// Builder-typed return rewritten to the `ForwardsCalls` decorator
+    /// that the method was injected onto (an Eloquent relation).
+    pub const FORWARDS_CALLS_SELF: u8 = 32;
 }
 
 /// Return a transformed copy of `origin`, shared through the active

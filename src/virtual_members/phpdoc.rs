@@ -950,7 +950,7 @@ fn collect_mixin_members(
 }
 
 /// Whether `class` (or an ancestor) uses Laravel's `ForwardsCalls` trait.
-fn uses_forwards_calls(
+pub(super) fn uses_forwards_calls(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {

@@ -287,6 +287,23 @@ impl PhpType {
                     .zip(sup.args.iter())
                     .all(|(s, t)| s.is_subtype_of(t));
             }
+
+            // Array-like containers spell the same type at different
+            // arities: `list<V>` is `array<int, V>`, `array<V>` is
+            // `array<array-key, V>`. Compare the implied key/value pair so
+            // that a `list<T>` still satisfies a declared `array<int, T>`.
+            if is_array_like_name(&sub.name)
+                && is_array_like_name(&sup.name)
+                && let Some((sub_key, sub_val)) = array_like_key_value(sub)
+                && let Some((sup_key, sup_val)) = array_like_key_value(sup)
+            {
+                // A `list` supertype demands sequential integer keys,
+                // which a plain `array` cannot promise.
+                if is_list_name(&sup.name) && !is_list_name(&sub.name) {
+                    return false;
+                }
+                return sub_key.is_subtype_of(&sup_key) && sub_val.is_subtype_of(sup_val);
+            }
         }
 
         // Generic array-like <: bare `array` / `iterable`
@@ -373,6 +390,35 @@ impl PhpType {
         }
 
         false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Array-like arity normalisation (private)
+// ---------------------------------------------------------------------------
+
+/// The `(key, value)` pair an array-like generic implies, whichever arity
+/// it was written at.
+///
+/// `list<V>` and `non-empty-list<V>` key on `int`, `array<V>` on
+/// `array-key`, and a one-argument `iterable<V>` on `mixed` (a
+/// `Traversable` may yield any key type). Returns `None` for arities that
+/// carry no key/value meaning.
+fn array_like_key_value(generic: &GenericType) -> Option<(PhpType, &PhpType)> {
+    match generic.args.as_slice() {
+        [value] => {
+            let name = generic.name.to_ascii_lowercase();
+            let key = match name.as_str() {
+                "list" | "non-empty-list" => PhpType::int(),
+                "iterable" => PhpType::mixed(),
+                // `array-key`, spelled as the union the checks above
+                // normalise it to anyway.
+                _ => PhpType::union(vec![PhpType::int(), PhpType::string()]),
+            };
+            Some((key, value))
+        }
+        [key, value] => Some((key.clone(), value)),
+        _ => None,
     }
 }
 

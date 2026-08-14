@@ -2686,6 +2686,48 @@ class ShapeMethodDemo
 
         return $rows;                     // array<int, array{pen: Scaffolding\Pen}|array{pencil: Scaffolding\Pencil}>
     }
+
+    /**
+     * A trailing `[]` appends to the level the key chain reaches, and the
+     * levels above it are created as the write walks through them, so the
+     * pushed values are still known when they are read back.
+     *
+     * @param list<Scaffolding\Pen> $pens
+     * @return array<int, list<Scaffolding\Pen>>
+     */
+    public function appendsBelowAKey(array $pens): array
+    {
+        $bySlot = [];
+        $byName = [];
+        foreach ($pens as $slot => $pen) {
+            $bySlot[$slot][] = $pen;      // array<int, list<Scaffolding\Pen>>
+            $byName['all'][] = $pen;      // array{all?: list<Scaffolding\Pen>}
+        }
+
+        foreach ($byName['all'] ?? [] as $named) {
+            $named->write();              // Scaffolding\Pen — the push is what it holds
+        }
+
+        return $bySlot;
+    }
+
+    /**
+     * PHP's `+` on two arrays keeps every key the left side already holds
+     * and adds only the ones the right side contributes, so the merged
+     * shape still knows what sits under each key.
+     *
+     * @return array{tool: Scaffolding\Pen, spare: Scaffolding\Pencil}
+     */
+    public function unionsTwoShapes(): array
+    {
+        $kit = ['tool' => new Scaffolding\Pen()];
+        $kit += ['spare' => new Scaffolding\Pencil(), 'tool' => new Scaffolding\Pencil()];
+
+        $kit['tool']->write();            // Scaffolding\Pen — the left key wins
+        $kit['spare']->sketch();          // Scaffolding\Pencil — added by the right
+
+        return $kit;
+    }
 }
 
 

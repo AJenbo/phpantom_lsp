@@ -18,7 +18,7 @@ use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, MethodInfo};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_maybe_cached};
 
 use super::helpers::{extends_eloquent_builder, extends_eloquent_model};
@@ -61,7 +61,35 @@ pub(crate) fn try_inject_builder_scopes(
         None => return,
     };
 
-    inject_scopes_and_model_methods(result, model_name, class_loader, None);
+    inject_scopes_and_model_methods(result, model_name, class_loader, None, None);
+}
+
+/// The type an injected Builder-typed return becomes when the methods are
+/// grafted onto a class that forwards through
+/// `ForwardsCalls::forwardDecoratedCallTo` (an Eloquent relation).
+///
+/// At runtime `Relation::__call` delegates to the query builder and returns
+/// `$this` (the relation) whenever the forwarded call returned the builder,
+/// so a chain like `$this->belongsTo(Author::class)->withTrashed()` stays on
+/// the relation.  This mirrors Larastan's `RelationForwardsCallsExtension`,
+/// which rewrites any return the Builder is a supertype of to a `ThisType`.
+///
+/// The concrete relation type is stored rather than the `$this` keyword
+/// because a self-like return only resolves through a receiver that carries
+/// the method itself, and these methods live on the instantiated relation
+/// alone (see the self-like fast path in
+/// `type_engine::call_resolution::return_types`).
+struct ForwardedSelf {
+    ty: PhpType,
+    /// `ty` in display form, to key the interning fingerprint by.
+    fp_key: String,
+}
+
+impl ForwardedSelf {
+    fn new(ty: PhpType) -> Self {
+        let fp_key = ty.to_string();
+        Self { ty, fp_key }
+    }
 }
 
 /// Inject scope methods and model virtual methods onto a class that has
@@ -122,7 +150,22 @@ pub(crate) fn try_inject_mixin_builder_scopes(
         if let Some(model_name) =
             find_builder_mixin_model(&current, &active_subs, raw_cls, class_loader)
         {
-            inject_scopes_and_model_methods(result, &model_name, class_loader, None);
+            // A Relation forwards through `ForwardsCalls`, so a call that
+            // returns the builder returns the relation instead.  The
+            // injected methods carry Builder-typed returns (they are
+            // written for the Builder), so they are rewritten to the
+            // relation type as they are grafted on.
+            let forwarded =
+                crate::virtual_members::phpdoc::uses_forwards_calls(raw_cls, class_loader).then(
+                    || ForwardedSelf::new(PhpType::generic(result.fqn(), generic_args.to_vec())),
+                );
+            inject_scopes_and_model_methods(
+                result,
+                &model_name,
+                class_loader,
+                None,
+                forwarded.as_ref(),
+            );
             return;
         }
 
@@ -223,6 +266,7 @@ fn inject_scopes_and_model_methods(
     model_arg: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
+    forwarded: Option<&ForwardedSelf>,
 ) {
     // 1. Inject scope methods.
     let scope_methods = build_scope_methods_for_builder(model_arg, class_loader);
@@ -232,12 +276,14 @@ fn inject_scopes_and_model_methods(
             .iter()
             .any(|m| m.name == method.name && m.is_static == method.is_static);
         if !already_exists {
-            result.methods.push(method);
+            result
+                .methods
+                .push(forward_builder_return(&method, forwarded, class_loader));
         }
     }
 
     // 2. Inject @method virtual methods from the model.
-    inject_model_virtual_methods(result, model_arg, class_loader, cache);
+    inject_model_virtual_methods(result, model_arg, class_loader, cache, forwarded);
 
     // 3. Inject where{PropertyName}() dynamic methods from the model's
     //    known columns.  These are instance methods on the Builder so
@@ -245,16 +291,123 @@ fn inject_scopes_and_model_methods(
     if let Some(model_class) = class_loader(model_arg) {
         let existing = lowercase_method_names(&result.methods);
         let where_methods = build_where_property_methods_for_class(&model_class, &existing);
-        for method in where_methods {
+        for mut method in where_methods {
             if !result
                 .methods
                 .iter()
                 .any(|m| m.name.eq_ignore_ascii_case(&method.name))
             {
+                // These are built fresh rather than interned, so the
+                // forwarded return is applied in place.
+                if let Some(forwarded) = forwarded
+                    && let Some(ref ret) = method.return_type
+                    && let Some(rewritten) =
+                        forwarded_builder_return(ret, &forwarded.ty, class_loader)
+                {
+                    method.return_type = Some(rewritten);
+                }
                 result.methods.push(Arc::new(method));
             }
         }
     }
+}
+
+/// Rewrite an injected method's Builder-typed return to the
+/// `ForwardsCalls` decorator it is being grafted onto, sharing the
+/// rewritten copy through the interning store.
+///
+/// Returns `method` untouched when nothing forwards (the methods are
+/// landing on a Builder) or when the return type is not Builder-typed
+/// (`restoreOrCreate()` returns the model, `count()` returns `int`, and
+/// both are returned as-is by `forwardDecoratedCallTo`).
+fn forward_builder_return(
+    method: &Arc<MethodInfo>,
+    forwarded: Option<&ForwardedSelf>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Arc<MethodInfo> {
+    let Some(forwarded) = forwarded else {
+        return Arc::clone(method);
+    };
+    let Some(rewritten) = method
+        .return_type
+        .as_ref()
+        .and_then(|ret| forwarded_builder_return(ret, &forwarded.ty, class_loader))
+    else {
+        return Arc::clone(method);
+    };
+
+    // The rewrite is identified by the decorator type alone: the origin
+    // already carries the model-specific substitution, so every relation
+    // variant of the same model and decorator shares one allocation.
+    let fp = crate::virtual_members::TransformFingerprint::new(
+        None,
+        Some(forwarded.fp_key.as_str()),
+        crate::virtual_members::cache::transform_flags::FORWARDS_CALLS_SELF,
+    );
+    crate::virtual_members::intern_transformed_method(method, fp, || {
+        let mut m = (**method).clone();
+        m.return_type = Some(rewritten);
+        m
+    })
+}
+
+/// Map a Builder-typed return to `self_ty`, preserving the surrounding
+/// nullable / union structure.
+///
+/// Returns `None` when the type names nothing that forwards as the
+/// builder, so callers can keep the original allocation.
+fn forwarded_builder_return(
+    ret: &PhpType,
+    self_ty: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    use crate::php_type::TypeKind;
+
+    match ret.kind() {
+        TypeKind::Nullable(inner) => {
+            forwarded_builder_return(inner, self_ty, class_loader).map(PhpType::nullable)
+        }
+        TypeKind::Union(members) => {
+            let mut rewritten = false;
+            let mapped: Vec<PhpType> = members
+                .iter()
+                .map(
+                    |m| match forwarded_builder_return(m, self_ty, class_loader) {
+                        Some(new) => {
+                            rewritten = true;
+                            new
+                        }
+                        None => m.clone(),
+                    },
+                )
+                .collect();
+            rewritten.then(|| PhpType::union(mapped))
+        }
+        // `base_name` filters out scalars and the `self`/`static`/`$this`
+        // keywords, so only class-named returns reach the lookup.
+        _ => ret
+            .base_name()
+            .is_some_and(|name| forwards_as_builder(name, class_loader))
+            .then(|| self_ty.clone()),
+    }
+}
+
+/// Whether a return type naming `class_name` is returned as the query
+/// builder at runtime, and so comes back out of
+/// `forwardDecoratedCallTo` as the decorator.
+///
+/// Covers the Eloquent Builder itself and any subclass of it, which is
+/// what a model with a custom builder (`newEloquentBuilder()`) returns
+/// from its scopes.
+fn forwards_as_builder(
+    class_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    let stripped = class_name.strip_prefix('\\').unwrap_or(class_name);
+    if stripped == ELOQUENT_BUILDER_FQN {
+        return true;
+    }
+    class_loader(stripped).is_some_and(|cls| extends_eloquent_builder(&cls, class_loader))
 }
 
 /// Inject `@method`-declared virtual methods from a model onto a Builder.
@@ -281,6 +434,7 @@ fn inject_model_virtual_methods(
     model_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
+    forwarded: Option<&ForwardedSelf>,
 ) {
     let model_class = match class_loader(model_name) {
         Some(c) => c,
@@ -330,18 +484,22 @@ fn inject_model_virtual_methods(
             continue;
         }
 
-        let forwarded = crate::virtual_members::intern_transformed_method(method, fp, || {
-            let mut forwarded = (**method).clone();
-            forwarded.is_static = false;
+        let transformed = crate::virtual_members::intern_transformed_method(method, fp, || {
+            let mut transformed = (**method).clone();
+            transformed.is_static = false;
 
             // Substitute self-referencing return types.
-            if let Some(ref mut ret) = forwarded.return_type {
+            if let Some(ref mut ret) = transformed.return_type {
                 *ret = ret.substitute(&subs);
             }
 
-            forwarded
+            transformed
         });
-        builder.methods.push(forwarded);
+        builder.methods.push(forward_builder_return(
+            &transformed,
+            forwarded,
+            class_loader,
+        ));
     }
 }
 

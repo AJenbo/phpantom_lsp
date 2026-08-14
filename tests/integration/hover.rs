@@ -451,6 +451,86 @@ function test(bool $flag): void {
 }
 
 #[test]
+fn hover_tracks_an_append_through_a_nested_key() {
+    let backend = create_test_backend();
+    let uri = "file:///nested-append.php";
+    let content = r#"<?php
+/** @param list<string> $words */
+function test(array $words): void {
+    $grouped = [];
+    $byLetter = [];
+    foreach ($words as $index => $word) {
+        $grouped[$index][] = $word;
+        $byLetter['all'][] = $word;
+    }
+    echo $grouped, $byLetter;
+}
+"#;
+
+    let grouped = hover_at(&backend, uri, content, 9, 10).expect("hover on $grouped");
+    assert!(
+        hover_text(&grouped).contains("$grouped = array<int, list<string>>"),
+        "an append below a dynamic key should refine the inner element type: {}",
+        hover_text(&grouped)
+    );
+
+    // The key is optional because a zero-iteration loop never writes it.
+    let by_letter = hover_at(&backend, uri, content, 9, 20).expect("hover on $byLetter");
+    assert!(
+        hover_text(&by_letter).contains("$byLetter = array{all?: list<string>}"),
+        "an append below a literal key should refine that shape entry: {}",
+        hover_text(&by_letter)
+    );
+}
+
+#[test]
+fn hover_keeps_an_array_access_object_across_an_append() {
+    let backend = create_test_backend();
+    let uri = "file:///append-offset-set.php";
+    let content = r#"<?php
+class Bag implements ArrayAccess {
+    public function offsetExists(mixed $offset): bool { return true; }
+    public function offsetGet(mixed $offset): mixed { return null; }
+    public function offsetSet(mixed $offset, mixed $value): void {}
+    public function offsetUnset(mixed $offset): void {}
+}
+function test(): void {
+    $bag = new Bag();
+    $bag[] = 'item';
+    echo $bag;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 10, 10).expect("hover on $bag");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$bag = Bag"),
+        "`[] =` on an ArrayAccess object calls offsetSet rather than making it a list: {text}"
+    );
+}
+
+#[test]
+fn hover_unions_array_shapes_across_plus_equals() {
+    let backend = create_test_backend();
+    let uri = "file:///array-plus.php";
+    let content = r#"<?php
+class Slot {}
+function test(): void {
+    $config = ['first' => 1];
+    $config += ['slot' => new Slot(), 'first' => 'ignored'];
+    echo $config;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 10).expect("hover on $config");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$config = array{first: 1, slot: Slot}"),
+        "`+=` should keep the left key and add only what the right side contributes: {text}"
+    );
+}
+
+#[test]
 fn hover_widens_existing_literal_at_typed_pass_by_reference_boundary() {
     let backend = create_test_backend();
     let uri = "file:///literal-by-ref.php";
