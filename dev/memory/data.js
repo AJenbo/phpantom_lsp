@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786727910459,
+  "lastUpdate": 1786729736714,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21045,6 +21045,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "819ebfa735bd9e44898990b801b77b1b66b7ef8e",
+          "message": "Unquoted array keys in string interpolation are no longer resolved as\nclass names",
+          "timestamp": "2026-08-14T19:31:53+02:00",
+          "tree_id": "fd5f9f6a90b3e8b128a4520c806d042ed8d8eabe",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/819ebfa735bd9e44898990b801b77b1b66b7ef8e"
+        },
+        "date": 1786729730794,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.9,
             "unit": "MiB"
           }
         ]
