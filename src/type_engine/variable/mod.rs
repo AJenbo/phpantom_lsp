@@ -31,9 +31,11 @@ pub(crate) mod rhs_resolution;
 
 /// Known array functions whose output preserves the input array's
 /// element type (the first positional argument).
+// `array_values` is deliberately absent: it renumbers the keys, so it
+// preserves the element type but not the key type. Its `list<TValue>`
+// result comes from the stub patch in `crate::stub_patches` instead.
 pub(crate) const ARRAY_PRESERVING_FUNCS: &[&str] = &[
     "array_filter",
-    "array_values",
     "array_unique",
     "array_reverse",
     "array_slice",

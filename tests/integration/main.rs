@@ -1,5 +1,6 @@
 mod common;
 
+mod array_func_generics;
 mod blade;
 mod blade_backing_class;
 mod blade_call_site_inference;

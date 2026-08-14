@@ -290,6 +290,10 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         )
     }
 
+    fn has_arg(&self, index: usize) -> bool {
+        super::resolution::nth_arg_expr(self.args, index).is_some()
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         match super::resolution::nth_arg_expr(self.args, index)? {
             Expression::Closure(closure) => closure

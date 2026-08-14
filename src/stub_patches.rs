@@ -75,7 +75,19 @@
 //!    branch stops carrying the others. An argument whose value cannot be
 //!    pinned down keeps the union, which is all the call can promise.
 //!
-//! 8. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//! 8. **Key/value array builtins** -- `array_keys`, `array_values`,
+//!    `array_search`, `array_key_first`/`array_key_last` and `key` all
+//!    answer in terms of the *caller's* key or value type, which the stubs
+//!    spell out as `int[]|string[]`, `string|int|false` or a bare `array`
+//!    because a signature without generics cannot say it. Each gets a
+//!    `@template TKey of array-key` / `@template TValue` pair bound from the
+//!    array argument. `array_flip` is the counter-example that shows why
+//!    these belong here: it already ships the annotations and already
+//!    resolves. The value-inspecting rules that cannot be written this way
+//!    (`array_filter`'s falsy strip, `array_sum`'s element check) stay in
+//!    `type_engine::variable::array_func_rules`.
+//!
+//! 9. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
 //!    `mktime` and the rest of [`crate::benevolent_builtins`] declare a
 //!    failure branch that idiomatic PHP never checks. Their return type is
 //!    tagged so the diagnostics stop enforcing that branch. Unlike the
@@ -119,7 +131,7 @@
 //!    with one they report whether the write succeeded. Each gets a
 //!    conditional return type keyed on `$filename`.
 //!
-//! 8. **Benevolent methods** -- the class-level half of function patch 8,
+//! 8. **Benevolent methods** -- the class-level half of function patch 9,
 //!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
 //!    `DateTime::modify` and `Closure::bind`.
 //!
@@ -151,6 +163,13 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
+        "array_keys" => patch_array_key_value_generics(func, "$array", "list<TKey>"),
+        "array_values" => patch_array_key_value_generics(func, "$array", "list<TValue>"),
+        "array_search" => patch_array_key_value_generics(func, "$haystack", "TKey|false"),
+        "array_key_first" | "array_key_last" => {
+            patch_array_key_value_generics(func, "$array", "TKey|null")
+        }
+        "key" => patch_array_key_value_generics(func, "$array", "TKey|null"),
         "pathinfo" => patch_pathinfo(func),
         "print_r" => patch_print_r(func),
         "hrtime" => patch_hrtime(func),
@@ -276,6 +295,51 @@ fn link_callback_to_array_element(
     // (an unannotated closure) can't bind it, and listing it would just
     // add a no-op binding attempt.
     func.template_bindings = vec![(atom(TVALUE), array_name)];
+}
+
+/// Give a key- or value-returning array builtin the `@template` pair the
+/// stubs leave off, so its return substitutes the caller's own generics.
+///
+/// phpstorm-stubs spell these out as concrete unions (`array_keys` returns
+/// `int[]|string[]`, `array_search` returns `string|int|false`) or as a
+/// bare `array`, which is the widest thing the signature can say without
+/// generics. `array_flip` is the counter-example that shows the machinery
+/// already works: it ships a real `@template` pair and resolves correctly
+/// today, so the fix for the rest is to annotate them the same way rather
+/// than to add per-function logic in Rust.
+///
+/// `array_param` is the parameter the generics bind from (`$haystack` for
+/// `array_search`, `$array` for everything else) and `return_type` is
+/// written in terms of `TKey`/`TValue`.
+fn patch_array_key_value_generics(func: &mut FunctionInfo, array_param: &str, return_type: &str) {
+    const TKEY: &str = "TKey";
+    const TVALUE: &str = "TValue";
+
+    let array_name = match func
+        .parameters
+        .iter()
+        .find(|p| p.name.as_str() == array_param)
+    {
+        Some(p) => p.name,
+        None => return,
+    };
+
+    let array_hint = PhpType::parse(&format!("array<{TKEY}, {TVALUE}>"));
+    for param in func.parameters.make_mut() {
+        if param.name == array_name {
+            param.type_hint = Some(array_hint.clone());
+        }
+    }
+
+    func.return_type = Some(PhpType::parse(return_type));
+    func.template_params = vec![atom(TKEY), atom(TVALUE)];
+    // A bare `array` argument binds neither param. `TKey` still has PHP's
+    // own answer to fall back on — an array key is an `array-key` — which
+    // beats the `mixed` an undeclared bound would leave behind.
+    func.template_param_bounds = [(atom(TKEY), PhpType::parse("array-key"))]
+        .into_iter()
+        .collect();
+    func.template_bindings = vec![(atom(TKEY), array_name), (atom(TVALUE), array_name)];
 }
 
 /// Patch `range()` to have a conditional return type.

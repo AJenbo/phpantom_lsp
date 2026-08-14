@@ -18,37 +18,6 @@ per-project inventory. Entries filed later say where they came from.
 
 ## Conditional and argument-dependent return types
 
-### B176. A `@template` bound through a union `@param` never binds
-
-**Impact: Low-Medium · Effort: Medium**
-
-A template parameter is bound from the argument whose `@param` names
-it, but only when the annotation names it plainly (`@param T $x`),
-inside an array (`@param T[] $x`), or as one generic wrapper
-(`@param array<TKey, TValue> $x`). A *union* of shapes binds nothing:
-
-```php
-/**
- * @param Collection<TKey, TValue>|EloquentCollection<TKey, TValue>|array<TKey, TValue> $items
- * @return array<TKey, TValue>
- */
-function pick($items) {}
-
-pick($rows);   // array<int, string> in, reported array<array-key, mixed>
-```
-
-Each alternative is a binding site of its own, and the one whose shape
-the argument matches is the one that should bind. spatie's
-`Data::collect()` is the case that surfaced it: the branch its
-arguments select is right, but its key type falls back to the declared
-`array-key` bound. A method binds the *whole* argument type instead,
-which is worse: `array<TKey, …>` with a `list<string>` argument reports
-`array<array<int, string>, …>`.
-
-**Fix:** in `classify_template_binding`, treat a union `@param` as the
-set of binding sites it names and match the argument against each,
-binding from the alternative it satisfies.
-
 ### B141. A `never` conditional branch does not assert the condition
 
 **Impact: Medium-High · Effort: Medium**
@@ -73,49 +42,44 @@ subtype* of an argument is `never`, subtract that subtype from the
 argument expression in the following scope — the same subtraction the
 `if (!$x) { throw … }` form already gets.
 
-### B142. Builtins with argument-dependent return types, round two
-
-**Impact: Low-Medium · Effort: Medium**
-
-The T38 work covered the replace family and `json_encode`; the
-conditional-signature round covered `pathinfo`, `print_r`, `hrtime`,
-`microtime`, `getenv`, `mb_convert_encoding`, `abs` and
-`SimpleXMLElement::asXML()`/`saveXML()`. What is left needs the
-*element* type of an array argument rather than the argument's own
-category, which the conditional evaluator cannot express (`array<int>`
-and `array<string>` both read as "array"):
-
-- `array_sum(array<int>)` is `int` (`array_product` likewise). 2 sites.
-
-**Fix:** a per-function rule in
-`type_engine/variable/array_func_rules.rs`, which already has the
-argument's raw type at hand. Blocked behind the same
-`resolve_arg_raw_type` gap as [B146](#b146-array-builtins-lose-key-and-element-generics).
-
-`ReflectionClass<T>::newInstance()`/`newInstanceArgs()`/
-`newInstanceWithoutConstructor()` were listed here too but do not
-reproduce: all three substitute `T` when the receiver carries a type
-argument, and `object` is the honest answer for a bare
-`ReflectionClass`.
-
-### B143. Conditional-return arguments written as expressions still read as nothing
+### B143. A constant built from another constant does not fold to its value
 
 **Impact: Medium · Effort: Medium**
 
-The successor to B124. The replace-family conditional keys on
-`$subject`, but the subject's type is only read for simple argument
-shapes, so `str_replace(NS, '', $class)` on a `string` parameter, or
-`preg_replace($pats, $reps, file_get_contents($f) ?: '')`, still
-returns `array|string` (5 sites). Same story for flag arguments built
-from expressions: `json_encode($v, $options | self::FLAGS)` and
-`json_encode($v, $encodeOptions)` where the local was assigned a
-constant `|` chain never strip `false` even though the
-`JSON_THROW_ON_ERROR` bit is provably set (3 sites).
+A flags argument is bit-tested by resolving each `|` operand to a
+literal integer, so it reads `json_encode($v, 4194304)` and
+`json_encode($v, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)` but stops at
+one level of indirection. A constant whose *value* is itself a constant
+expression resolves to plain `int`, and every form built on one is
+missed:
 
-**Fix:** resolve conditional-return argument types through the shared
-`resolve_expression_type` pipeline rather than a call-site text reader,
-and evaluate flag bits against an integer range ("bit definitely set")
-instead of requiring a literal constant.
+```php
+class Foo {
+    const FLAGS = JSON_THROW_ON_ERROR;              // resolves to `int`
+    const COMBO = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
+}
+json_encode($v, self::FLAGS);                       // reported string|false
+json_encode($v, $options | self::FLAGS);            // reported string|false
+$local = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
+json_encode($v, $local);                            // reported string|false
+```
+
+The same gap is why a `match` on a constant alias, or a comparison
+against one, cannot be decided either — the flags case is just where it
+was measured (3 sites).
+
+**Fix:** fold a constant initialiser that names other constants (and
+`|`/`&`/`<<` chains of them) to its literal value during constant
+resolution, with a visited set so a cyclic initialiser terminates, and
+carry the same folding onto a variable assigned such a chain. The bit
+test in `type_engine::types::flag_returns` then needs no change: it
+already asks the shared resolver for a literal and would start getting
+one.
+
+The other half of this entry — the replace family reading its `$subject`
+through the shared pipeline — is fixed; `str_replace(self::NS, '',
+$class)` and `preg_replace($p, $r, file_get_contents($f) ?: '')` both
+resolve to `string` now.
 
 ## preg_match
 
@@ -153,37 +117,6 @@ non-null after the call; add a literal-pattern group-shape analysis
 (port the capture-group walk from PHPStan's `RegexArrayShapeMatcher`).
 
 ## Array types
-
-### B146. Array builtins lose key and element generics
-
-**Impact: High · Effort: Medium**
-
-~20 sites across six projects, all the same underlying gap — the
-signature's `int[]|string[]`/`array-key` placeholders are returned
-verbatim instead of substituting the input's generics:
-
-- `array_keys(array<K, V>)` → `list<K>` (10 sites; the stub-literal
-  `array<int>|array<string>` union then fails against
-  `array<string>`/`list<int>` on the wrong branch).
-- `array_search($needle, array<K, V>)` → `K|false`; `key()`,
-  `array_key_first/last(array<K, V>)` → `K|null`.
-- `array_values(array<K, V>)` → `list<V>`.
-- `array_filter`/`array_map` (single-array form) preserve the key
-  type; `array_filter` with no callback also strips falsy members
-  from the value type (`array<string, string|null>` →
-  `array<string, non-falsy-string>`).
-- `array_flip(array<K, V>)` → `array<V, K>`.
-
-**Fix:** the rules themselves are not the gap — `array_func_rules.rs`
-already computes `array_values(array<string, int>) → array<string, int>`
-correctly, and `array_flip` resolves through the stub's own `@template`.
-The gap is that on the forward-walker path `resolve_arg_raw_type`
-returns `None` for a docblock-typed parameter, so the rule never fires
-and the stub's bare `array` wins; only the text-driven call resolver
-reaches it. Fix that first, then add the per-function rules above
-(`array_values` → `list<V>` rather than the input type it preserves
-today, plus `array_keys`, `array_search`, `key`,
-`array_key_first`/`last`, and `array_filter`'s falsy strip).
 
 ### B147. Array literals are not tuples: slot reads return the union of all elements
 

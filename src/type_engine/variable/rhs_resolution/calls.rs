@@ -20,13 +20,210 @@ use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
 use super::array_access::{class_string_inner_binding, insert_or_union};
 use super::instantiation::{
-    TemplateBindingMode, classify_template_binding, extract_array_position,
-    extract_generic_arg_from_ancestor,
+    TemplateBindingMode, candidate_binding_modes, classify_template_binding,
+    extract_array_position, extract_generic_arg_from_ancestor,
 };
 use super::{
     extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
     resolved_type_with_lookup,
 };
+
+/// Apply one binding mode for `tpl_name`, recording whatever it resolves
+/// into `subs`.
+///
+/// Returns without touching `subs` when the mode cannot bind the argument
+/// it was given, which is what lets a union `@param` try its alternatives
+/// in turn (see [`candidate_binding_modes`]).
+#[allow(clippy::too_many_arguments)]
+fn apply_template_binding_mode(
+    subs: &mut HashMap<String, PhpType>,
+    binding_mode: &TemplateBindingMode,
+    tpl_name: &str,
+    arg_text: &str,
+    param_hint: Option<&PhpType>,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) {
+    match *binding_mode {
+        TemplateBindingMode::Direct => {
+            if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
+                // An array-literal argument resolves only to the bare
+                // `array` keyword, which erases its own keys. Bound
+                // directly (no wrapping hint to unify against), that
+                // erased shape is all downstream `key-of<T>`/
+                // `value-of<T>` would have to work with, so build the
+                // literal's real key/value shape instead.
+                let bound_type = if resolved_type.is_bare_array() {
+                    crate::type_engine::call_resolution::array_literal_shape_type(arg_text, rctx)
+                        .unwrap_or(resolved_type)
+                } else {
+                    resolved_type
+                };
+                insert_or_union(subs, tpl_name.to_string(), bound_type);
+            }
+        }
+        TemplateBindingMode::CallableReturnType => {
+            if let Some(bound) = crate::type_engine::call_resolution::bind_callable_return_template(
+                arg_text, param_hint, tpl_name, rctx,
+            ) {
+                insert_or_union(subs, tpl_name.to_string(), bound);
+            }
+        }
+        TemplateBindingMode::CallableReturnArrayPosition(position) => {
+            // `@param callable(...): array<TKey, TValue> $cb` — bind
+            // from the key/value of the callback's array-shaped
+            // return, not the whole return type.
+            if let Some(extracted) = Backend::infer_closure_return_type(arg_text, rctx)
+                .and_then(|ret_type| extract_array_position(&ret_type, position))
+            {
+                insert_or_union(subs, tpl_name.to_string(), extracted);
+            }
+        }
+        TemplateBindingMode::CallableParamType(position) => {
+            // `@param Closure(T): void $cb` — extract the closure's
+            // parameter type annotation at the given position.
+            if let Some(param_type) =
+                crate::type_engine::call_resolution::bind_callable_param_template(
+                    arg_text, position, rctx,
+                )
+            {
+                insert_or_union(subs, tpl_name.to_string(), param_type);
+            }
+        }
+        TemplateBindingMode::ArrayElement => {
+            // `@param T[] $items` — resolve individual array elements.
+            if arg_text.starts_with('[') && arg_text.ends_with(']') {
+                let inner = arg_text[1..arg_text.len() - 1].trim();
+                if inner.is_empty() {
+                    // Empty array `[]` → element type is `never`.
+                    insert_or_union(subs, tpl_name.to_string(), PhpType::never());
+                } else {
+                    let first_elem =
+                        crate::type_engine::conditional_resolution::split_text_args(inner);
+                    if let Some(elem) = first_elem.first()
+                        && let Some(resolved_type) =
+                            Backend::resolve_arg_text_to_type(elem.trim(), rctx)
+                    {
+                        insert_or_union(subs, tpl_name.to_string(), resolved_type);
+                    }
+                }
+            } else if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
+                .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
+            {
+                // Extract the element type from array-like types
+                // so we bind T to the element, not the whole array.
+                // The call-expression fallback covers arguments whose
+                // declared return type is an array (`getConfigs()`
+                // returning `array<string, Config>`) — those carry no
+                // class info, so the general resolver yields nothing.
+                if let Some(elem_type) = resolved_type.extract_value_type(false) {
+                    insert_or_union(subs, tpl_name.to_string(), elem_type.clone());
+                } else if !resolved_type.is_array_like() {
+                    // The argument resolved to a genuine (non-array)
+                    // type — bind it directly.  A bare array-like
+                    // container whose element type can't be extracted
+                    // is left unbound so `T` falls back to its bound
+                    // (or `mixed`) rather than binding `T` to `array`.
+                    insert_or_union(subs, tpl_name.to_string(), resolved_type);
+                }
+            }
+        }
+        TemplateBindingMode::ClassStringInner => {
+            if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
+                insert_or_union(subs, tpl_name.to_string(), binding);
+            }
+        }
+        TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
+            // When the argument is a closure and the param hint
+            // union contains a Callable variant, try yield inference
+            // before array-like or hierarchy extraction.
+            if let Some(concrete) = Backend::try_closure_return_type_for_template(
+                arg_text,
+                tpl_name,
+                tpl_position,
+                param_hint,
+                rctx,
+            ) {
+                insert_or_union(subs, tpl_name.to_string(), concrete);
+                return;
+            }
+            // For `@param array<TKey, TValue> $value`, resolve the
+            // argument's raw iterable type — from a variable's
+            // annotations/assignments (`$users` as `array<int, User>`)
+            // or from a call expression's declared return type
+            // (`$this->getUsers()` returning `array<int, User>`) —
+            // and extract the positional generic argument.
+            if is_array_like_wrapper(wrapper_name)
+                && let Some(resolved) = resolve_arg_iterable_raw_type(arg_text, rctx)
+                && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
+            {
+                insert_or_union(subs, tpl_name.to_string(), concrete);
+                return;
+            }
+            // Array literal argument for array-like wrappers:
+            // `[1, 2, 3]` for `@param array<T>` → infer T from elements.
+            if is_array_like_wrapper(wrapper_name)
+                && arg_text.starts_with('[')
+                && arg_text.ends_with(']')
+            {
+                let inner = arg_text[1..arg_text.len() - 1].trim();
+                if inner.is_empty() {
+                    // Empty array `[]` → element type is `never`.
+                    insert_or_union(subs, tpl_name.to_string(), PhpType::never());
+                    return;
+                } else {
+                    let elems = crate::type_engine::conditional_resolution::split_text_args(inner);
+                    // For `array<T>` (position 0 with 1 generic arg) or
+                    // `array<K, V>` (position 1 = value), infer from
+                    // element values.  For position 0 in a 2-arg generic
+                    // (the key), infer from keys if available.
+                    if let Some(elem) = elems.first()
+                        && let Some(resolved_type) =
+                            Backend::resolve_arg_text_to_type(elem.trim(), rctx)
+                    {
+                        insert_or_union(subs, tpl_name.to_string(), resolved_type);
+                        return;
+                    }
+                }
+            }
+            // Special case: unwrap class-string<class-string<T>> to class-string<T>
+            if wrapper_name == "class-string"
+                && tpl_position == 0
+                && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
+            {
+                if let Some(inner) = resolved_type.unwrap_class_string_inner() {
+                    insert_or_union(subs, tpl_name.to_string(), inner.clone());
+                } else {
+                    insert_or_union(subs, tpl_name.to_string(), resolved_type);
+                }
+            }
+            // ── Class generic wrapper resolution ────────────────
+            // For `@param Container<TItem> $c` where the argument
+            // is a subclass like `FooContainer extends Container<Foo>`,
+            // resolve the argument type and walk its @extends chain
+            // to find the wrapper class's generic arg at the right
+            // position.
+            if !is_array_like_wrapper(wrapper_name)
+                && wrapper_name != "class-string"
+                && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
+                && let Some(concrete) = extract_generic_arg_from_ancestor(
+                    &resolved_type,
+                    wrapper_name,
+                    tpl_position,
+                    rctx,
+                )
+            {
+                insert_or_union(subs, tpl_name.to_string(), concrete);
+            }
+            // When array-type extraction fails (e.g. bare `array`
+            // property without generic annotation), do NOT fall back
+            // to a Direct resolve — that would bind the template
+            // param to the whole argument type instead of its
+            // positional generic arg.  Leave it unbound so the
+            // "fill in unbound" code below maps it to its declared
+            // upper bound or `mixed`.
+        }
+    }
+}
 
 /// Build a template substitution map for a function-level `@template` call.
 ///
@@ -125,191 +322,17 @@ pub(crate) fn build_function_template_subs(
             continue;
         }
 
-        match binding_mode {
-            TemplateBindingMode::Direct => {
-                if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-                    // An array-literal argument resolves only to the bare
-                    // `array` keyword, which erases its own keys. Bound
-                    // directly (no wrapping hint to unify against), that
-                    // erased shape is all downstream `key-of<T>`/
-                    // `value-of<T>` would have to work with, so build the
-                    // literal's real key/value shape instead.
-                    let bound_type = if resolved_type.is_bare_array() {
-                        crate::type_engine::call_resolution::array_literal_shape_type(
-                            arg_text, rctx,
-                        )
-                        .unwrap_or(resolved_type)
-                    } else {
-                        resolved_type
-                    };
-                    insert_or_union(&mut subs, tpl_name.to_string(), bound_type);
-                }
-            }
-            TemplateBindingMode::CallableReturnType => {
-                if let Some(bound) =
-                    crate::type_engine::call_resolution::bind_callable_return_template(
-                        arg_text, param_hint, tpl_name, rctx,
-                    )
-                {
-                    insert_or_union(&mut subs, tpl_name.to_string(), bound);
-                }
-            }
-            TemplateBindingMode::CallableReturnArrayPosition(position) => {
-                // `@param callable(...): array<TKey, TValue> $cb` — bind
-                // from the key/value of the callback's array-shaped
-                // return, not the whole return type.
-                if let Some(extracted) = Backend::infer_closure_return_type(arg_text, rctx)
-                    .and_then(|ret_type| extract_array_position(&ret_type, position))
-                {
-                    insert_or_union(&mut subs, tpl_name.to_string(), extracted);
-                }
-            }
-            TemplateBindingMode::CallableParamType(position) => {
-                // `@param Closure(T): void $cb` — extract the closure's
-                // parameter type annotation at the given position.
-                if let Some(param_type) =
-                    crate::type_engine::call_resolution::bind_callable_param_template(
-                        arg_text, position, rctx,
-                    )
-                {
-                    insert_or_union(&mut subs, tpl_name.to_string(), param_type);
-                }
-            }
-            TemplateBindingMode::ArrayElement => {
-                // `@param T[] $items` — resolve individual array elements.
-                if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                    let inner = arg_text[1..arg_text.len() - 1].trim();
-                    if inner.is_empty() {
-                        // Empty array `[]` → element type is `never`.
-                        insert_or_union(&mut subs, tpl_name.to_string(), PhpType::never());
-                    } else {
-                        let first_elem =
-                            crate::type_engine::conditional_resolution::split_text_args(inner);
-                        if let Some(elem) = first_elem.first()
-                            && let Some(resolved_type) =
-                                Backend::resolve_arg_text_to_type(elem.trim(), rctx)
-                        {
-                            insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
-                        }
-                    }
-                } else if let Some(resolved_type) =
-                    Backend::resolve_arg_text_to_type(arg_text, rctx)
-                        .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
-                {
-                    // Extract the element type from array-like types
-                    // so we bind T to the element, not the whole array.
-                    // The call-expression fallback covers arguments whose
-                    // declared return type is an array (`getConfigs()`
-                    // returning `array<string, Config>`) — those carry no
-                    // class info, so the general resolver yields nothing.
-                    if let Some(elem_type) = resolved_type.extract_value_type(false) {
-                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                    } else if !resolved_type.is_array_like() {
-                        // The argument resolved to a genuine (non-array)
-                        // type — bind it directly.  A bare array-like
-                        // container whose element type can't be extracted
-                        // is left unbound so `T` falls back to its bound
-                        // (or `mixed`) rather than binding `T` to `array`.
-                        insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
-                    }
-                }
-            }
-            TemplateBindingMode::ClassStringInner => {
-                if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
-                    insert_or_union(&mut subs, tpl_name.to_string(), binding);
-                }
-            }
-            TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
-                // When the argument is a closure and the param hint
-                // union contains a Callable variant, try yield inference
-                // before array-like or hierarchy extraction.
-                if let Some(concrete) = Backend::try_closure_return_type_for_template(
-                    arg_text,
-                    tpl_name,
-                    tpl_position,
-                    param_hint,
-                    rctx,
-                ) {
-                    insert_or_union(&mut subs, tpl_name.to_string(), concrete);
-                    continue;
-                }
-                // For `@param array<TKey, TValue> $value`, resolve the
-                // argument's raw iterable type — from a variable's
-                // annotations/assignments (`$users` as `array<int, User>`)
-                // or from a call expression's declared return type
-                // (`$this->getUsers()` returning `array<int, User>`) —
-                // and extract the positional generic argument.
-                if is_array_like_wrapper(wrapper_name)
-                    && let Some(resolved) = resolve_arg_iterable_raw_type(arg_text, rctx)
-                    && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
-                {
-                    insert_or_union(&mut subs, tpl_name.to_string(), concrete);
-                    continue;
-                }
-                // Array literal argument for array-like wrappers:
-                // `[1, 2, 3]` for `@param array<T>` → infer T from elements.
-                if is_array_like_wrapper(wrapper_name)
-                    && arg_text.starts_with('[')
-                    && arg_text.ends_with(']')
-                {
-                    let inner = arg_text[1..arg_text.len() - 1].trim();
-                    if inner.is_empty() {
-                        // Empty array `[]` → element type is `never`.
-                        insert_or_union(&mut subs, tpl_name.to_string(), PhpType::never());
-                        continue;
-                    } else {
-                        let elems =
-                            crate::type_engine::conditional_resolution::split_text_args(inner);
-                        // For `array<T>` (position 0 with 1 generic arg) or
-                        // `array<K, V>` (position 1 = value), infer from
-                        // element values.  For position 0 in a 2-arg generic
-                        // (the key), infer from keys if available.
-                        if let Some(elem) = elems.first()
-                            && let Some(resolved_type) =
-                                Backend::resolve_arg_text_to_type(elem.trim(), rctx)
-                        {
-                            insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
-                            continue;
-                        }
-                    }
-                }
-                // Special case: unwrap class-string<class-string<T>> to class-string<T>
-                if wrapper_name == "class-string"
-                    && tpl_position == 0
-                    && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-                {
-                    if let Some(inner) = resolved_type.unwrap_class_string_inner() {
-                        insert_or_union(&mut subs, tpl_name.to_string(), inner.clone());
-                    } else {
-                        insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
-                    }
-                }
-                // ── Class generic wrapper resolution ────────────────
-                // For `@param Container<TItem> $c` where the argument
-                // is a subclass like `FooContainer extends Container<Foo>`,
-                // resolve the argument type and walk its @extends chain
-                // to find the wrapper class's generic arg at the right
-                // position.
-                if !is_array_like_wrapper(wrapper_name)
-                    && wrapper_name != "class-string"
-                    && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-                    && let Some(concrete) = extract_generic_arg_from_ancestor(
-                        &resolved_type,
-                        wrapper_name,
-                        tpl_position,
-                        rctx,
-                    )
-                {
-                    insert_or_union(&mut subs, tpl_name.to_string(), concrete);
-                    continue;
-                }
-                // When array-type extraction fails (e.g. bare `array`
-                // property without generic annotation), do NOT fall back
-                // to a Direct resolve — that would bind the template
-                // param to the whole argument type instead of its
-                // positional generic arg.  Leave it unbound so the
-                // "fill in unbound" code below maps it to its declared
-                // upper bound or `mixed`.
+        // A union `@param` names one binding site per alternative
+        // (`Collection<TKey, TValue>|array<TKey, TValue>`), and the one the
+        // argument's own shape matches is the one that should bind. Try
+        // them in order and stop at the first that resolves; a non-union
+        // hint yields a single mode, which is the path every other
+        // parameter takes.
+        let before = subs.get(tpl_name.as_str()).cloned();
+        for mode in candidate_binding_modes(tpl_name, param_hint) {
+            apply_template_binding_mode(&mut subs, &mode, tpl_name, arg_text, param_hint, rctx);
+            if subs.get(tpl_name.as_str()) != before.as_ref() {
+                break;
             }
         }
     }
@@ -566,8 +589,35 @@ pub(super) fn resolve_arg_iterable_raw_type(
 /// - `array<User>` at position 0 → `"User"`
 pub(super) fn extract_array_type_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
     match position {
-        0 => ty.extract_key_type(false).cloned(),
+        // A `list<V>` writes no key argument but is not silent about its
+        // keys: PHP defines a list as sequentially `int`-indexed from 0.
+        // Without this, `array_keys(list<User>)` binds `TKey` to nothing
+        // and reports `list<mixed>`. A single-argument `array<V>` is a
+        // different case and deliberately absent: its key is `array-key`,
+        // which is what the unbound declaration already says.
+        0 => ty
+            .extract_key_type(false)
+            .cloned()
+            .or_else(|| implicit_list_key_type(ty)),
         1 => ty.extract_value_type(false).cloned(),
+        _ => None,
+    }
+}
+
+/// The `int` key type a `list<V>` implies, or `None` for any other type.
+fn implicit_list_key_type(ty: &PhpType) -> Option<PhpType> {
+    match ty.kind() {
+        TypeKind::Generic(g)
+            if g.args.len() == 1
+                && matches!(
+                    g.name.to_ascii_lowercase().as_str(),
+                    "list" | "non-empty-list"
+                ) =>
+        {
+            Some(PhpType::int())
+        }
+        TypeKind::Nullable(inner) => implicit_list_key_type(inner),
+        TypeKind::Union(members) => members.iter().find_map(implicit_list_key_type),
         _ => None,
     }
 }

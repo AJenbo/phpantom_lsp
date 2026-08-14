@@ -1539,7 +1539,9 @@ function test() {
     );
 }
 
-/// `array_sum` should resolve to `int|float`.
+/// `array_sum` over an all-`int` array resolves to `int`, not the
+/// declared `int|float`: the float half is only reachable when a
+/// non-integer member can be summed in.
 #[test]
 fn resolve_var_array_sum() {
     let content = r#"<?php
@@ -1580,13 +1582,10 @@ function test() {
 
     assert!(!results.is_empty(), "Should resolve $result to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert!(
-        ts.contains("int") && ts.contains("float"),
-        "array_sum should return int|float, got: {ts}"
-    );
+    assert_eq!(ts, "int", "array_sum over int literals should return int");
 }
 
-/// `array_product` should resolve to `int|float`.
+/// `array_product` narrows the same way [`resolve_var_array_sum`] does.
 #[test]
 fn resolve_var_array_product() {
     let content = r#"<?php
@@ -1624,9 +1623,9 @@ function test() {
 
     assert!(!results.is_empty(), "Should resolve $result to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    assert!(
-        ts.contains("int") && ts.contains("float"),
-        "array_product should return int|float, got: {ts}"
+    assert_eq!(
+        ts, "int",
+        "array_product over int literals should return int"
     );
 }
 

@@ -2886,6 +2886,66 @@ class ArrayFuncDemo
             $src->pairs()
         );
     }
+
+    /**
+     * The key- and value-reading builtins answer in terms of the array they
+     * were handed, rather than in the widest thing their signature can say.
+     *
+     * Try: trigger completion after each `->` below.
+     */
+    public function keysAndValues(Scaffolding\ScaffoldingArrayFunc $src): void
+    {
+        $names = array_keys($src->byName());
+        strtoupper($names[0]);            // list<string>: the key type, no int branch
+
+        $indices = array_keys($src->labels());
+        intdiv($indices[0], 1);           // list<int>: a list is int-keyed
+
+        $pens = array_values($src->byName());
+        $pens[0]->write();                // list<Scaffolding\Pen>: renumbered, not keyed
+
+        // int|false, since the haystack is a list: no string branch to rule out.
+        $found = array_search('gel', $src->labels());
+        if ($found !== false) {
+            intdiv($found, 1);            // int
+        }
+
+        // string|null: the key type again, never int.
+        $firstName = array_key_first($src->byName());
+        if ($firstName !== null) {
+            strtoupper($firstName);       // string
+        }
+
+        // A scalar element survives the preserving family the same way a
+        // Scaffolding\Pen does.
+        $unique = array_unique($src->labels());
+        strtoupper($unique[0]);           // list<string>
+
+        $labels = $src->labels();
+        $label = array_pop($labels);
+        strtoupper($label);               // string, not mixed
+
+        // With no callback, array_filter keeps only the truthy entries, so
+        // the null half of the value type is gone.
+        $present = array_filter($src->optionalLabels());
+        strtoupper($present['ink']);      // array<string, string>
+
+        // An all-int array cannot sum to a float.
+        $total = array_sum($src->weights());
+        intdiv($total, 1);                // int
+    }
+
+    /** @return array{names: list<string>, first: string, total: int} */
+    public function keyValueSummary(Scaffolding\ScaffoldingArrayFunc $src): array
+    {
+        $present = array_filter($src->optionalLabels());
+
+        return [
+            'names' => array_keys($src->byName()),
+            'first' => array_values($present)[0],
+            'total' => array_sum($src->weights()),
+        ];
+    }
 }
 
 

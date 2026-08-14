@@ -111,6 +111,10 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             .is_some_and(|arg| arg.eq_ignore_ascii_case("false"))
     }
 
+    fn has_arg(&self, index: usize) -> bool {
+        self.arg_text(index).is_some_and(|arg| !arg.is_empty())
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         crate::completion::source::helpers::extract_closure_return_type_from_text(
             self.arg_text(index)?,

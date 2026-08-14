@@ -755,6 +755,18 @@ class ScaffoldingArrayFunc
 
     /** @return list<array{Pen, string}> */
     public function pairs(): array { return [[new Pen('blue'), 'ink'], [new Pen('red'), 'ink']]; }
+
+    /** @return array<string, Pen> */
+    public function byName(): array { return ['blue' => new Pen('blue'), 'red' => new Pen('red')]; }
+
+    /** @return list<string> */
+    public function labels(): array { return ['ink', 'gel']; }
+
+    /** @return array<string, string|null> */
+    public function optionalLabels(): array { return ['ink' => 'ink', 'gel' => null]; }
+
+    /** @return list<int> */
+    public function weights(): array { return [2, 3, 4]; }
 }
 
 class ScaffoldingException

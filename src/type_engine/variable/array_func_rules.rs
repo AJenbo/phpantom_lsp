@@ -17,7 +17,7 @@
 /// the handful of questions the rules ask about an argument, and the
 /// rules stay in one place so a fix to `array_map`'s element type
 /// reaches every consumer.
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -29,6 +29,14 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
 
     /// Whether the argument at `index` is the literal `false`.
     fn is_false_literal(&self, index: usize) -> bool;
+
+    /// Whether an argument was written at `index`.
+    ///
+    /// Distinguishes an omitted argument from one that is present but
+    /// unresolvable, which [`arg_raw_type`](Self::arg_raw_type) cannot:
+    /// both come back as `None`. `array_filter($a)` and
+    /// `array_filter($a, $cb)` differ only in this.
+    fn has_arg(&self, index: usize) -> bool;
 
     /// The return type declared on the closure or arrow function at
     /// `index`.  `None` when the argument is not an inline function or
@@ -56,11 +64,25 @@ pub(in crate::type_engine) fn array_func_raw_type(
         .any(|f| f.eq_ignore_ascii_case(func_name))
     {
         let raw = args.arg_raw_type(0)?;
-        // If the raw type already has generic params, return it as-is
-        // so downstream `PhpType::extract_value_type` can extract the
-        // element type.  Otherwise it's a plain class name and we
-        // can't infer element type.
-        if raw.extract_value_type(true).is_some() {
+        // Only a parameterised iterable carries an element type worth
+        // preserving; a bare `array`/`iterable` is a `Named` kind with no
+        // value argument to extract, so the rule declines and the stub's
+        // own return type stands.
+        //
+        // `skip_scalar` must stay off here. It asks "is the element
+        // non-scalar", which is not the question: a `list<string>` is
+        // every bit as worth preserving as a `list<User>`, and answering
+        // it with `true` silently dropped every scalar-element array back
+        // to a bare `array`.
+        if raw.extract_value_type(false).is_some() {
+            // `array_filter($a)` with no callback keeps exactly the
+            // members that survive a truthiness test, so the element type
+            // drops `null`, `false`, `0`, `''` and friends. With a
+            // callback the kept members are whatever it approves of, which
+            // says nothing about their type.
+            if func_name.eq_ignore_ascii_case("array_filter") && !args.has_arg(1) {
+                return Some(filter_element_type(&raw).unwrap_or(raw));
+            }
             return Some(raw);
         }
     }
@@ -119,10 +141,70 @@ pub(in crate::type_engine) fn array_func_element_type(
         .iter()
         .any(|f| f.eq_ignore_ascii_case(func_name))
     {
-        return args.arg_raw_type(0)?.extract_value_type(true).cloned();
+        // A scalar element is the honest answer for `array_pop(list<string>)`
+        // just as `User` is for `list<User>`, so the element type is read
+        // without `skip_scalar`.
+        return args.arg_raw_type(0)?.extract_value_type(false).cloned();
+    }
+
+    // `array_sum`/`array_product` are declared `int|float` because the
+    // result follows PHP's numeric promotion, but an all-`int` array can
+    // only sum to an `int`. The element type decides it, which is why this
+    // cannot be expressed as a `@template` on the stub: `array<TValue>` with
+    // `@return TValue` would answer `string` for `array_sum(list<string>)`
+    // rather than the `int|float` PHP actually produces.
+    if matches!(func_name, "array_sum" | "array_product") {
+        let element = args.arg_raw_type(0)?.extract_value_type(false)?.clone();
+        let members: Vec<&PhpType> = match element.kind() {
+            TypeKind::Union(m) => m.iter().collect(),
+            _ => vec![&element],
+        };
+        let (int_ty, float_ty) = (PhpType::int(), PhpType::float());
+        let all_int = members.iter().all(|m| m.is_subtype_of(&int_ty));
+        if all_int {
+            return Some(int_ty);
+        }
+        // `int` is a subtype of `float` here (PHP widens it silently), so
+        // a member has to be tested against both to tell `list<float>`
+        // apart from `list<int|float>` — the latter really can sum to
+        // either and keeps the declared union.
+        if members
+            .iter()
+            .all(|m| m.is_subtype_of(&float_ty) && !m.is_subtype_of(&int_ty))
+        {
+            return Some(float_ty);
+        }
+        return None;
     }
 
     None
+}
+
+/// Rebuild an iterable type with its element narrowed to the members that
+/// pass a truthiness test.
+///
+/// Returns `None` when the element type has no falsy member to remove (so
+/// the caller keeps the type it already has) or when every member is falsy,
+/// since `array<string, never>` is a worse answer than the original.
+fn filter_element_type(raw: &PhpType) -> Option<PhpType> {
+    let element = raw.extract_value_type(false)?;
+    let truthy = element.truthy_type()?;
+    if truthy == *element {
+        return None;
+    }
+    match raw.kind() {
+        TypeKind::Array(_) => Some(PhpType::array_of(truthy)),
+        TypeKind::Generic(g) if !g.args.is_empty() => {
+            let mut args = g.args.clone();
+            // Same `<TKey, TValue>` convention `extract_value_type` reads:
+            // the value is the second argument when there are two or more,
+            // and the lone argument otherwise (`list<V>`).
+            let value_idx = if args.len() >= 2 { 1 } else { args.len() - 1 };
+            args[value_idx] = truthy;
+            Some(PhpType::generic_atom(g.name, args))
+        }
+        _ => None,
+    }
 }
 
 /// Extract the output element type for `array_map($callback, $array)`.

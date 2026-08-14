@@ -1,4 +1,4 @@
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, create_test_backend_with_full_stubs};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -801,7 +801,7 @@ async fn test_array_func_call_as_argument_keeps_element_type() {
     // An array function nested as another call's argument goes through
     // the same text-driven path; its element type must survive so the
     // outer call's own rules can read it.
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_full_stubs();
     let uri = Url::parse("file:///test_nested_array_func_arg.php").unwrap();
     let text = concat!(
         "<?php\n",

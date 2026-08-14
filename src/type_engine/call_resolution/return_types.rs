@@ -1004,12 +1004,22 @@ impl Backend {
                             // `@return T[]` the fallback below would
                             // write: an unbound template param is
                             // useless to a caller reading the hint.
-                            if substituted != *ret
-                                && let Some(ref mut hint_out) = return_type_hint_out
-                            {
+                            let bound = substituted != *ret;
+                            if bound && let Some(ref mut hint_out) = return_type_hint_out {
                                 **hint_out = Some(substituted);
                             }
                             if !classes.is_empty() {
+                                return classes;
+                            }
+                            // A bound return that names no class of its own
+                            // (`array_values(array<int, Product>)` is
+                            // `list<Product>`; `array_keys(…)` is
+                            // `list<int>`) still answers for the whole call.
+                            // Falling through would overwrite the hint just
+                            // set with the declared `list<TValue>`, handing
+                            // the caller an unbound template parameter in
+                            // place of the type it resolved.
+                            if bound {
                                 return classes;
                             }
                         }

@@ -181,6 +181,15 @@ function runDemoAssertions(): void
     $pairColors = (new ArrayFuncDemo())->pairColors(new Scaffolding\ScaffoldingArrayFunc());
     assert($pairColors === ['blue', 'red'], 'array_map callback reads Scaffolding\Pen::color() through a declared `array` parameter');
 
+    // ── Array builtins answer in terms of the array they were handed ────
+    $keyValue = (new ArrayFuncDemo())->keyValueSummary(new Scaffolding\ScaffoldingArrayFunc());
+    assert($keyValue['names'] === ['blue', 'red'], 'array_keys() over array<string, Scaffolding\Pen> yields the string keys');
+    assert($keyValue['first'] === 'ink', 'array_filter() with no callback drops the null entry, so array_values()[0] is the surviving string');
+    assert($keyValue['total'] === 9, 'array_sum() over a list<int> is an int');
+    assert(array_keys((new Scaffolding\ScaffoldingArrayFunc())->labels()) === [0, 1], 'array_keys() over a list yields int keys');
+    assert(array_search('gel', (new Scaffolding\ScaffoldingArrayFunc())->labels()) === 1, 'array_search() over a list yields an int key');
+    assert(array_key_first((new Scaffolding\ScaffoldingArrayFunc())->byName()) === 'blue', 'array_key_first() over a string-keyed array yields a string');
+
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = Scaffolding\loadPensOrFail();
     assert($pens !== false && $pens[0] instanceof Scaffolding\Pen, 'Scaffolding\loadPensOrFail() returns array<int, Scaffolding\Pen> on success');

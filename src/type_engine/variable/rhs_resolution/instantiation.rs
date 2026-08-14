@@ -705,7 +705,7 @@ pub(super) fn build_constructor_template_subs(
 }
 
 /// How a template parameter is referenced in a `@param` type annotation.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum TemplateBindingMode {
     /// `@param T $bar` — the whole type is the template param.
     Direct,
@@ -752,6 +752,70 @@ pub(crate) fn classify_template_binding(
     };
 
     classify_from_php_type(tpl_name, hint)
+}
+
+/// Every binding site a `@param` annotation offers for `tpl_name`, most
+/// likely first.
+///
+/// [`classify_template_binding`] has to answer with a single mode, so for a
+/// union it picks one alternative and the rest are lost. But each
+/// alternative of
+/// `Collection<TKey, TValue>|EloquentCollection<TKey, TValue>|array<TKey, TValue>`
+/// is a binding site in its own right, and which one applies is decided by
+/// the argument, not by the order they were written in. The caller tries
+/// these in turn and keeps the first that resolves.
+///
+/// Alternatives that do not name `tpl_name` at all are left out: they would
+/// classify as [`Direct`](TemplateBindingMode::Direct) by default and bind
+/// the *whole* argument type, which is worse than not binding — an
+/// `array<TKey, …>` handed a `list<string>` would report
+/// `array<array<int, string>, …>`.
+pub(crate) fn candidate_binding_modes(
+    tpl_name: &str,
+    param_hint: Option<&PhpType>,
+) -> Vec<TemplateBindingMode> {
+    let primary = classify_template_binding(tpl_name, param_hint);
+    let Some(hint) = param_hint else {
+        return vec![primary];
+    };
+    let TypeKind::Union(members) = hint.kind() else {
+        return vec![primary];
+    };
+
+    let mut modes = vec![primary];
+    for member in members {
+        if member.is_null() || !mentions_template(tpl_name, member) {
+            continue;
+        }
+        let mode = classify_from_php_type(tpl_name, member);
+        if !modes.contains(&mode) {
+            modes.push(mode);
+        }
+    }
+    modes
+}
+
+/// Whether `ty` names `tpl_name` anywhere inside it.
+fn mentions_template(tpl_name: &str, ty: &PhpType) -> bool {
+    if ty.is_named(tpl_name) {
+        return true;
+    }
+    match ty.kind() {
+        TypeKind::Nullable(inner) | TypeKind::Array(inner) => mentions_template(tpl_name, inner),
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
+            members.iter().any(|m| mentions_template(tpl_name, m))
+        }
+        TypeKind::Generic(g) => g.args.iter().any(|a| mentions_template(tpl_name, a)),
+        TypeKind::Callable(c) => {
+            c.return_type
+                .as_ref()
+                .is_some_and(|r| mentions_template(tpl_name, r))
+                || c.params
+                    .iter()
+                    .any(|p| mentions_template(tpl_name, &p.type_hint))
+        }
+        _ => false,
+    }
 }
 
 /// Recursively classify how a template parameter name appears in a parsed

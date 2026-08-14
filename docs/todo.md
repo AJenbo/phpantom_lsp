@@ -27,18 +27,15 @@ within the same impact tier.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B167 | [Factory `create()`/`make()` keep the collection half on single-model chains](todo/bugs.md#b167-factory-createmake-keep-the-collection-half-on-single-model-chains) | Medium-High | Low-Medium |
 | B144 | [`preg_match` `$matches` is nullable and shapeless](todo/bugs.md#b144-preg_match-matches-is-nullable-and-shapeless)                                        | High        | Medium      |
-| B146 | [Array builtins lose key and element generics](todo/bugs.md#b146-array-builtins-lose-key-and-element-generics)                                             | High        | Medium      |
 | B141 | [A `never` conditional branch does not assert the condition](todo/bugs.md#b141-a-never-conditional-branch-does-not-assert-the-condition) | Medium-High | Medium      |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 | B150 | [Branch-local reassignment and narrowing are wrong at the join point](todo/bugs.md#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point) | Medium-High | Medium    |
 | B157 | [`@phpstan-assert` tags on called methods are ignored](todo/bugs.md#b157-phpstan-assert-tags-on-called-methods-are-ignored)                                | Medium-High | Medium      |
 | B168 | [`Request` input accessors deserve precise per-argument types](todo/bugs.md#b168-request-input-accessors-deserve-precise-per-argument-types)               | Medium-High | Medium      |
 | B169 | [Blade `@if` narrowing does not reach `@include`d variables](todo/bugs.md#b169-blade-if-narrowing-does-not-reach-included-variables)                       | Medium-High | Medium      |
-| B143 | [Conditional-return arguments written as expressions still read as nothing](todo/bugs.md#b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing) | Medium | Medium |
+| B143 | [A constant built from another constant does not fold to its value](todo/bugs.md#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value) | Medium | Medium |
 | B159 | [An inline `@var` re-pins the variable on every read](todo/bugs.md#b159-an-inline-var-re-pins-the-variable-on-every-read)                                  | Medium      | Medium      |
 | B174 | [A `break` that leaves a loop early is missing from the post-loop join](todo/bugs.md#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join) | Medium      | Medium      |
-| B142 | [Builtins with argument-dependent return types, round two](todo/bugs.md#b142-builtins-with-argument-dependent-return-types-round-two) (depends on B146) | Low-Medium  | Medium      |
-| B176 | [A `@template` bound through a union `@param` never binds](todo/bugs.md#b176-a-template-bound-through-a-union-param-never-binds)                          | Low-Medium  | Medium      |
 | B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
 | B177 | [A branch-local proof about an untyped subject escapes the join](todo/bugs.md#b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join)         | Low-Medium  | Medium      |
 | B155 | [A checked call expression is forgotten by the next identical call](todo/bugs.md#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call)   | Medium-High | Medium-High |

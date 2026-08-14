@@ -1,6 +1,6 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_exception_stubs, create_test_backend,
-    create_test_backend_with_exception_stubs,
+    create_test_backend_with_exception_stubs, create_test_backend_with_full_stubs,
 };
 
 use tower_lsp::LanguageServer;
@@ -14223,7 +14223,7 @@ async fn test_completion_array_filter_preserves_element_type() {
 /// should preserve the element type.
 #[tokio::test]
 async fn test_completion_array_values_preserves_element_type() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_full_stubs();
 
     let uri = Url::parse("file:///array_values.php").unwrap();
     let text = concat!(
@@ -14728,7 +14728,7 @@ async fn test_completion_array_map_fallback_to_input_element_type() {
 /// `[$a] = array_values($users)` → `$a` resolves to User.
 #[tokio::test]
 async fn test_completion_destructuring_from_array_values() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_full_stubs();
 
     let uri = Url::parse("file:///destruct_array_values.php").unwrap();
     let text = concat!(
@@ -15121,7 +15121,7 @@ async fn test_completion_array_filter_this_property_arg() {
 /// element type via the property's `@var` annotation.
 #[tokio::test]
 async fn test_completion_array_values_this_property_arg() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_full_stubs();
 
     let uri = Url::parse("file:///av_this_prop.php").unwrap();
     let text = concat!(
@@ -16954,7 +16954,7 @@ async fn test_completion_array_filter_var_property_arg() {
 /// should preserve the element type.
 #[tokio::test]
 async fn test_completion_array_values_var_property_arg() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_full_stubs();
 
     let uri = Url::parse("file:///av_var_prop.php").unwrap();
     let text = concat!(
