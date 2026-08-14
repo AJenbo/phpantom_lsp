@@ -25,7 +25,6 @@ within the same impact tier.
 
 | #    | Item                                                                                                                                                      | Impact      | Effort      |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -100,6 +99,7 @@ unlikely to move the needle for most users.
 | D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B151 | [`?T` and `T\|null` are judged by different rules](todo/bugs.md#b151-t-and-tnull-are-judged-by-different-rules)                                                            | High        | Low-Medium  |
+| B152 | [`array_filter` with `ARRAY_FILTER_USE_KEY` does not narrow the key type](todo/bugs.md#b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type)           | Low-Medium  | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

@@ -63,7 +63,10 @@ pub(in crate::type_engine) fn array_func_raw_type(
         .iter()
         .any(|f| f.eq_ignore_ascii_case(func_name))
     {
-        let raw = args.arg_raw_type(0)?;
+        // Every one of these rearranges the array (reorders, renumbers,
+        // drops or chunks entries), so a constant shape does not survive
+        // the call and is generalized to the container it describes.
+        let raw = args.arg_raw_type(0)?.generalized_array();
         // Only a parameterised iterable carries an element type worth
         // preserving; a bare `array`/`iterable` is a `Named` kind with no
         // value argument to extract, so the rule declines and the stub's
@@ -144,7 +147,7 @@ pub(in crate::type_engine) fn array_func_element_type(
         // A scalar element is the honest answer for `array_pop(list<string>)`
         // just as `User` is for `list<User>`, so the element type is read
         // without `skip_scalar`.
-        return args.arg_raw_type(0)?.extract_value_type(false).cloned();
+        return args.arg_raw_type(0)?.iterable_element_type();
     }
 
     // `array_sum`/`array_product` are declared `int|float` because the
@@ -154,7 +157,7 @@ pub(in crate::type_engine) fn array_func_element_type(
     // `@return TValue` would answer `string` for `array_sum(list<string>)`
     // rather than the `int|float` PHP actually produces.
     if matches!(func_name, "array_sum" | "array_product") {
-        let element = args.arg_raw_type(0)?.extract_value_type(false)?.clone();
+        let element = args.arg_raw_type(0)?.iterable_element_type()?;
         let members: Vec<&PhpType> = match element.kind() {
             TypeKind::Union(m) => m.iter().collect(),
             _ => vec![&element],
@@ -222,7 +225,7 @@ fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         return Some(declared);
     }
 
-    let input_element = args.arg_raw_type(1)?.extract_element_type()?.clone();
+    let input_element = args.arg_raw_type(1)?.iterable_element_type()?;
 
     if let Some(inferred) = args.callback_inferred_return_type(0, &input_element) {
         return Some(inferred);

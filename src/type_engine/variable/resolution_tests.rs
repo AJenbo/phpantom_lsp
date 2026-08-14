@@ -674,7 +674,7 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$list"),
-        "list<'left'|'right'|1|2>"
+        "array{'left'|'right', 1|2}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$nested"),
@@ -691,7 +691,7 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$from_variable"),
-        "list<'draft'>"
+        "array{'draft'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$spread"),
@@ -716,7 +716,7 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$structural"),
-        "list<Box<'draft'>>"
+        "array{Box<'draft'>}"
     );
 }
 

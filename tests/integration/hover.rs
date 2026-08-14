@@ -437,7 +437,7 @@ function test(bool $flag): void {
 
     let collection = hover_at(&backend, uri, content, 7, 28).expect("hover on $collection");
     assert!(
-        hover_text(&collection).contains("$collection = list<'draft'|'asc'|'desc'>"),
+        hover_text(&collection).contains("$collection = array{'draft', 'asc'|'desc'}"),
         "a literal collection should keep the values it was written with: {}",
         hover_text(&collection)
     );
@@ -9978,7 +9978,7 @@ function run(bool $c): void {
     let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $rows");
     let text = hover_text(&hover);
     assert!(
-        text.contains("list<1|2>") && text.contains("list<'a'|'b'>"),
+        text.contains("array{1, 2}") && text.contains("array{'a', 'b'}"),
         "Unrelated array values must stay a union, got: {}",
         text
     );
@@ -13719,9 +13719,9 @@ fn hover_foreach_heterogeneous_tuple_index_with_null_coalesce() {
     );
 }
 
-/// A nested array literal keeps its precise positional (tuple) shape so
-/// that integer-literal indexing resolves the element at that position,
-/// while a top-level literal generalizes to `list<T>`.
+/// An array literal keeps its precise positional (tuple) shape so that
+/// integer-literal indexing resolves the element at that position, at every
+/// level of nesting.
 #[test]
 fn hover_nested_array_literal_keeps_positional_shape() {
     let backend = create_test_backend();
@@ -13737,12 +13737,12 @@ fn hover_nested_array_literal_keeps_positional_shape() {
         "    }\n",
         "}\n",
     );
-    // Top-level `$rows` generalizes to a list of the nested tuple shape.
+    // The outer literal is a one-slot tuple holding the nested tuple shape.
     let h_rows = hover_at(&backend, uri, content, 4, 6).expect("hover $rows");
     let rows = hover_text(&h_rows);
     assert!(
-        rows.contains("list<") && rows.contains("array{Pen, Pencil}"),
-        "top-level literal should be list of the nested tuple shape, got: {rows}"
+        rows.contains("array{array{Pen, Pencil}}"),
+        "outer literal should be a tuple of the nested tuple shape, got: {rows}"
     );
     // The foreach element is the nested tuple shape itself.
     let h_row = hover_at(&backend, uri, content, 6, 9).expect("hover $row");
@@ -13779,6 +13779,108 @@ fn hover_array_literal_mixed_positional_and_keyed_entries() {
     assert!(
         second.contains("1"),
         "$row['b'] should still resolve to the keyed entry's value, got: {second}"
+    );
+}
+
+/// Rows pushed into a collection as tuples come back out as tuples, so
+/// destructuring one selects the value written at each position instead of
+/// the union of everything the row holds.
+#[test]
+fn hover_destructuring_a_pushed_tuple_selects_the_slot() {
+    let backend = create_test_backend();
+    let uri = "file:///pushed_tuple.php";
+    let content = concat!(
+        "<?php\n",                                             // 0
+        "class Violation {}\n",                                // 1
+        "function demo(Violation $v, string $file): void {\n", // 2
+        "    $rows = [];\n",                                   // 3
+        "    $rows[] = [$v, $file];\n",                        // 4
+        "    foreach ($rows as $row) {\n",                     // 5
+        "        [$violation, $location] = $row;\n",           // 6
+        "        $violation;\n",                               // 7
+        "        $location;\n",                                // 8
+        "    }\n",                                             // 9
+        "}\n",                                                 // 10
+    );
+    let violation = hover_at(&backend, uri, content, 7, 10).expect("hover $violation");
+    assert!(
+        hover_text(&violation).contains("$violation = Violation"),
+        "slot 0 should be the violation alone, got: {}",
+        hover_text(&violation)
+    );
+    let location = hover_at(&backend, uri, content, 8, 10).expect("hover $location");
+    assert!(
+        hover_text(&location).contains("$location = string"),
+        "slot 1 should be the string alone, got: {}",
+        hover_text(&location)
+    );
+}
+
+/// A key PHP only knows at runtime names no shape field, so the literal
+/// falls back to the key and value types it does know rather than
+/// inventing a field named after the key's type.
+#[test]
+fn hover_array_literal_with_a_runtime_key_is_a_generic_array() {
+    let backend = create_test_backend();
+    let uri = "file:///runtime_key.php";
+    let content = concat!(
+        "<?php\n",
+        "function demo(string $key, int $n): void {\n",
+        "    $byKey = [$key => $n];\n",
+        "    $byKey;\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $byKey");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$byKey = array<string, int>"),
+        "a runtime key should produce a generic array, got: {text}"
+    );
+    assert!(
+        !text.contains("mixed"),
+        "the key's type must not become a shape field name, got: {text}"
+    );
+}
+
+/// `(object) []` is a property-less `stdClass`, which is what PHP builds
+/// and what every other empty-object expression in the engine reports.
+#[test]
+fn hover_object_cast_of_an_empty_array_is_stdclass() {
+    let backend = create_test_backend();
+    let uri = "file:///object_cast.php";
+    let content = concat!(
+        "<?php\n",
+        "function demo(): void {\n",
+        "    $obj = (object) [];\n",
+        "    $obj;\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $obj");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("stdClass"),
+        "an empty array cast to object should be stdClass, got: {text}"
+    );
+}
+
+/// PHP's array union keeps the left side's keys and adds the right side's,
+/// so `+` between two literals merges their shapes the same way `+=` does.
+#[test]
+fn hover_array_union_operator_merges_both_shapes() {
+    let backend = create_test_backend();
+    let uri = "file:///array_union.php";
+    let content = concat!(
+        "<?php\n",
+        "function demo(): void {\n",
+        "    $merged = ['a' => 1] + ['b' => 2];\n",
+        "    $merged;\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $merged");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array{a: 1, b: 2}"),
+        "the union should keep both operands' keys, got: {text}"
     );
 }
 

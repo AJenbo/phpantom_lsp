@@ -2841,6 +2841,38 @@ class DestructuringShapeDemo
             $tool = new $toolClass();
             $tool->label();               // Scaffolding\Pen|Scaffolding\Pencil created from the class-string
         }
+
+        // A literal written straight into a variable keeps its arity too,
+        // so a row pushed into a collection destructures back into the
+        // values it was written with rather than the union of all of them.
+        $entries = [];
+        $entries[] = [new Scaffolding\Pen(), 'sketchbook'];
+        foreach ($entries as $entry) {
+            [$writer, $surface] = $entry;
+            $writer->write();             // Scaffolding\Pen (slot 0, not Pen|string)
+            strlen($surface);             // string (slot 1, not Pen|string)
+        }
+    }
+
+    public function runtimeArrayKeys(string $slot): void
+    {
+        // A key PHP only works out at runtime names no shape field, so the
+        // literal is described by the key and value types it does have.
+        $bySlot = [$slot => new Scaffolding\Pen()];   // array<string, Scaffolding\Pen>
+        foreach ($bySlot as $held) {
+            $held->write();               // Scaffolding\Pen
+        }
+
+        // `+` keeps the left side's keys and adds the right side's, the
+        // same union `+=` performs.
+        $merged = ['pen' => new Scaffolding\Pen()] + ['pencil' => new Scaffolding\Pencil()];
+        $merged['pen']->write();          // Scaffolding\Pen from the left operand
+        $merged['pencil']->sketch();      // Scaffolding\Pencil from the right operand
+
+        // Casting an empty array gives the property-less stdClass PHP
+        // builds, not an object shape.
+        $bare = (object) [];              // stdClass
+        echo get_class($bare);
     }
 }
 

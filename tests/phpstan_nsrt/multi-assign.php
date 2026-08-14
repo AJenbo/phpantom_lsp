@@ -83,8 +83,8 @@ function reassignAfterChain(): void {
 
 function multiAssignArray(): void {
 	$a = $b = [1, 2, 3];
-	assertType('list<1|2|3>', $a);
-	assertType('list<1|2|3>', $b);
+	assertType('array{1, 2, 3}', $a);
+	assertType('array{1, 2, 3}', $b);
 }
 
 /**

@@ -298,6 +298,32 @@ function runDemoAssertions(): void
         assert($tool instanceof Scaffolding\Pen || $tool instanceof Scaffolding\Pencil, 'class-string must instantiate Scaffolding\Pen|Scaffolding\Pencil');
     }
 
+    // A row pushed as a literal destructures back into the values it was
+    // written with, one per position.
+    $entries = [];
+    $entries[] = [new Scaffolding\Pen(), 'sketchbook'];
+    foreach ($entries as $entry) {
+        [$writer, $surface] = $entry;
+        assert($writer instanceof Scaffolding\Pen, 'pushed tuple slot 0 must be Scaffolding\Pen');
+        assert(is_string($surface), 'pushed tuple slot 1 must be a string');
+    }
+
+    // A key worked out at runtime still holds the value that was written
+    // against it.
+    $slot = 'ink';
+    $bySlot = [$slot => new Scaffolding\Pen()];
+    assert($bySlot['ink'] instanceof Scaffolding\Pen, 'a runtime key must hold the value written against it');
+
+    // `+` keeps the left operand's keys and adds the right operand's.
+    $merged = ['pen' => new Scaffolding\Pen()] + ['pencil' => new Scaffolding\Pencil()];
+    assert($merged['pen'] instanceof Scaffolding\Pen, 'array union must keep the left key');
+    assert($merged['pencil'] instanceof Scaffolding\Pencil, 'array union must add the right key');
+
+    // Casting an empty array produces a property-less stdClass.
+    $bare = (object) [];
+    assert($bare instanceof \stdClass, '(object) [] must be a stdClass');
+    assert(get_object_vars($bare) === [], '(object) [] must have no properties');
+
     // ── Indexing an ArrayAccess Object ───────────────────────────────────
     $penAccess = new Scaffolding\ScaffoldingPenArrayAccess();
     assert($penAccess[0] instanceof Scaffolding\Pen, 'ArrayAccess[0] must resolve via offsetGet(): Scaffolding\Pen');

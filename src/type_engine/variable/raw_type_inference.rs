@@ -21,7 +21,6 @@ use crate::types::ResolvedType;
 pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
-    nested: bool,
 ) -> Option<PhpType> {
     // Maximum number of positional entries to record as a tuple-style
     // shape. Beyond this the array is almost certainly a homogeneous
@@ -37,7 +36,9 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     const MAX_ELEMENT_ALTERNATIVES: usize = 32;
 
     let mut types: Vec<PhpType> = Vec::new();
+    let mut key_types: Vec<PhpType> = Vec::new();
     let mut has_string_keys = false;
+    let mut non_constant_key = false;
     let mut saw_spread = false;
     let mut saw_element = false;
     let mut shape_entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
@@ -47,13 +48,26 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
         match elem {
             ArrayElement::KeyValue(kv) => {
                 has_string_keys = true;
-                let key_text = extract_array_key_text(kv.key);
                 let value_type = infer_element_type(kv.value, ctx).unwrap_or_else(PhpType::mixed);
-                shape_entries.push(crate::php_type::ShapeEntry {
-                    key: Some(key_text),
-                    value_type,
-                    optional: false,
-                });
+                match extract_array_key_text(kv.key) {
+                    Some(key_text) => {
+                        push_unique(&mut key_types, constant_key_type(kv.key));
+                        shape_entries.push(crate::php_type::ShapeEntry {
+                            key: Some(key_text),
+                            value_type: value_type.clone(),
+                            optional: false,
+                        });
+                    }
+                    // A key that is not a literal has no name to record, and
+                    // naming the entry after the key's *type* would invent a
+                    // shape field nobody wrote. The whole literal falls back
+                    // to `array<K, V>` instead.
+                    None => {
+                        non_constant_key = true;
+                        push_unique(&mut key_types, dynamic_key_type(kv.key, ctx));
+                    }
+                }
+                push_unique(&mut types, value_type);
             }
             ArrayElement::Value(v) => {
                 let resolved = infer_element_type(v.value, ctx);
@@ -70,6 +84,7 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                     value_type: resolved.clone().unwrap_or_else(PhpType::mixed),
                     optional: false,
                 });
+                push_unique(&mut key_types, PhpType::int());
                 if let Some(t) = resolved
                     && !types.contains(&t)
                 {
@@ -82,7 +97,14 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                 // element type carries over as written, the same as a value
                 // element beside it.
                 saw_spread = true;
-                if let Some(raw) = super::foreach_resolution::resolve_expression_type(v.value, ctx)
+                let raw = super::foreach_resolution::resolve_expression_type(v.value, ctx);
+                push_unique(
+                    &mut key_types,
+                    raw.as_ref()
+                        .and_then(PhpType::iterable_key_type)
+                        .unwrap_or_else(array_key_type),
+                );
+                if let Some(raw) = raw
                     && let Some(elem) = raw.iterable_element_type()
                     && !types.contains(&elem)
                 {
@@ -102,6 +124,15 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
         return Some(PhpType::array_shape(Vec::new()));
     }
 
+    // At least one key is only known at runtime, so the literal has no
+    // fixed set of fields: describe it by its key and value types instead.
+    if non_constant_key {
+        let key_type = join_key_types(key_types);
+        let value_type =
+            join_alternatives(types, MAX_ELEMENT_ALTERNATIVES).unwrap_or_else(PhpType::mixed);
+        return Some(PhpType::generic_array(key_type, value_type));
+    }
+
     if has_string_keys && !shape_entries.is_empty() {
         return Some(PhpType::array_shape(shape_entries));
     }
@@ -110,24 +141,13 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
         return None;
     }
 
-    // Nested value-only literal with a fixed set of elements: record it
-    // as a positional (tuple-style) array shape so that integer-literal
-    // indexing (`$pair[1]`) resolves the element at that position and
-    // out-of-bounds indices are known to be absent. A spread element or
-    // an over-long literal makes the arity indeterminate, so those widen
-    // to `list<T>` instead.
-    //
-    // A top-level literal (one assigned or returned directly) is
-    // generalized to `list<T>` because that is what most consumers
-    // expect for a freshly constructed array (return-type inference,
-    // push tracking via `$arr[] = …`, and hover). Nested literals keep
-    // their precise arity because they are typically fixed tuples read
-    // back by position.
-    if nested
-        && !saw_spread
-        && !shape_entries.is_empty()
-        && shape_entries.len() <= MAX_POSITIONAL_SHAPE_LEN
-    {
+    // A value-only literal with a fixed set of elements is recorded as a
+    // positional (tuple-style) array shape so that integer-literal indexing
+    // (`$pair[1]`) and list destructuring select the element at that
+    // position, and out-of-bounds indices are known to be absent. A spread
+    // element or an over-long literal makes the arity indeterminate, so
+    // those widen to `list<T>` instead.
+    if !saw_spread && !shape_entries.is_empty() && shape_entries.len() <= MAX_POSITIONAL_SHAPE_LEN {
         return Some(PhpType::array_shape(shape_entries));
     }
 
@@ -141,36 +161,109 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     // Element sets with no literal in them keep the plain union: the join
     // also rewrites `?T` into `T|null`, and that spelling change alone
     // moves types that were never imprecise to begin with.
-    let elem_type = if types.iter().any(|t| t.as_literal().is_some()) {
-        if types.len() > MAX_ELEMENT_ALTERNATIVES {
-            types = types.iter().map(PhpType::widen_scalar_literals).collect();
-        }
-        PhpType::join_runtime_value_types(types)
-    } else if types.len() == 1 {
-        types.into_iter().next().unwrap()
-    } else {
-        PhpType::union(types)
-    };
+    let elem_type =
+        join_alternatives(types, MAX_ELEMENT_ALTERNATIVES).unwrap_or_else(PhpType::mixed);
     Some(PhpType::list(elem_type))
 }
 
-/// Extract a string representation of an array key expression.
-fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> String {
+/// Collapse a set of alternatives into one type, or `None` when empty.
+fn join_alternatives(mut types: Vec<PhpType>, max_alternatives: usize) -> Option<PhpType> {
+    if types.is_empty() {
+        return None;
+    }
+    if types.iter().any(|t| t.as_literal().is_some()) {
+        if types.len() > max_alternatives {
+            types = types.iter().map(PhpType::widen_scalar_literals).collect();
+        }
+        return Some(PhpType::join_runtime_value_types(types));
+    }
+    if types.len() == 1 {
+        return types.into_iter().next();
+    }
+    Some(PhpType::union(types))
+}
+
+/// Append `ty` unless an equal member is already recorded.
+fn push_unique(types: &mut Vec<PhpType>, ty: PhpType) {
+    if !types.contains(&ty) {
+        types.push(ty);
+    }
+}
+
+/// The `array-key` pseudo-type, used where a key is neither known to be
+/// `int` nor `string`.
+fn array_key_type() -> PhpType {
+    PhpType::named(atom("array-key"))
+}
+
+/// Collapse the key types an array literal's entries contribute.
+///
+/// `array-key` covers every legal key, so one unplaceable key makes the
+/// whole union `array-key` rather than leaving the redundant
+/// `array-key|string` a plain union would produce.
+fn join_key_types(key_types: Vec<PhpType>) -> PhpType {
+    if key_types.iter().any(PhpType::is_array_key) {
+        return array_key_type();
+    }
+    // Unlike a value union, the alternatives here are worth keeping as
+    // written: a `Foo::class` key is a `class-string<Foo>`, and widening it
+    // to `string` costs a `array<class-string, …>` parameter its match.
+    match key_types.len() {
+        0 => array_key_type(),
+        1 => key_types.into_iter().next().unwrap(),
+        _ => PhpType::union(key_types),
+    }
+}
+
+/// The type an array takes on for a key PHP evaluates at runtime.
+///
+/// PHP coerces every array key to `int` or `string`, so anything that does
+/// not resolve to one of those (`mixed`, a union spanning both, a value the
+/// walker could not place) is reported as `array-key`.
+fn dynamic_key_type<'b>(key: &'b Expression<'b>, ctx: &VarResolutionCtx<'_>) -> PhpType {
+    match infer_element_type(key, ctx) {
+        Some(resolved) if resolved.is_int_subtype() || resolved.is_string_subtype() => resolved,
+        _ => array_key_type(),
+    }
+}
+
+/// The key type an array literal takes on from a constant key expression.
+fn constant_key_type<'b>(key: &'b Expression<'b>) -> PhpType {
+    match key {
+        Expression::Literal(Literal::Integer(_) | Literal::True(_) | Literal::False(_)) => {
+            PhpType::int()
+        }
+        _ => PhpType::string(),
+    }
+}
+
+/// The name a constant array key contributes to an array shape, or `None`
+/// when the key is only known at runtime.
+///
+/// PHP coerces a non-string, non-int key before using it, so the booleans
+/// and `null` land on the `1`, `0` and `''` keys they index at runtime
+/// rather than on a key named after the type they were written as.
+fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> Option<String> {
     match key {
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to unquoting `raw`,
             // which is also where a value that is not UTF-8 (`"\x8b"`) lands.
-            s.value
-                .and_then(literal_bytes_to_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    crate::text_scan::unquote_php_string(bytes_to_str(s.raw))
-                        .unwrap_or(bytes_to_str(s.raw))
-                        .to_string()
-                })
+            Some(
+                s.value
+                    .and_then(literal_bytes_to_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        crate::text_scan::unquote_php_string(bytes_to_str(s.raw))
+                            .unwrap_or(bytes_to_str(s.raw))
+                            .to_string()
+                    }),
+            )
         }
-        Expression::Literal(Literal::Integer(i)) => bytes_to_str(i.raw).to_string(),
-        _ => PhpType::mixed().to_string(),
+        Expression::Literal(Literal::Integer(i)) => Some(bytes_to_str(i.raw).to_string()),
+        Expression::Literal(Literal::True(_)) => Some("1".to_string()),
+        Expression::Literal(Literal::False(_)) => Some("0".to_string()),
+        Expression::Literal(Literal::Null(_)) => Some(String::new()),
+        _ => None,
     }
 }
 
@@ -191,12 +284,10 @@ fn infer_element_type<'b>(
 ) -> Option<PhpType> {
     match value {
         // ── Nested array literals ──
-        Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx, true)
+        Expression::Array(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx)
             .or_else(|| Some(PhpType::array())),
-        Expression::LegacyArray(arr) => {
-            infer_array_literal_raw_type(arr.elements.iter(), ctx, true)
-                .or_else(|| Some(PhpType::array()))
-        }
+        Expression::LegacyArray(arr) => infer_array_literal_raw_type(arr.elements.iter(), ctx)
+            .or_else(|| Some(PhpType::array())),
         // ── Object instantiation ──
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {

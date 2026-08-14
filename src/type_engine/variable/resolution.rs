@@ -1662,11 +1662,19 @@ pub(super) fn merge_nested_array_write(
         }
         ArrayWriteKey::Append => {
             debug_assert_eq!(keys.len(), 1, "`[]` is only valid as the last segment");
-            // Appending to a tracked shape would have to add a positional
-            // entry, so the shape is left alone — its literal keys are
-            // worth more than a widened `list<T>`. An empty shape
-            // (`$var = []`) tracks no keys worth keeping.
-            if base.shape_entries().is_some_and(|e| !e.is_empty()) {
+            // Appending under a named key would have to invent a
+            // positional entry beside it, so a shape that tracks literal
+            // keys is left alone — those keys are worth more than a
+            // widened `list<T>`. A positional shape (`[$a, $b]`) has no
+            // such keys and takes the general mutation treatment: the
+            // arity a literal spelled out stops describing an array that
+            // is still being appended to, all the more so from inside a
+            // loop, where the number of appends is not the number of
+            // times the walker sees the statement.
+            if base
+                .shape_entries()
+                .is_some_and(|e| e.iter().any(|entry| entry.key.is_some()))
+            {
                 return base.clone();
             }
             merge_push_type(base, value_type)

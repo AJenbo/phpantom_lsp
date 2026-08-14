@@ -821,21 +821,15 @@ fn resolve_rhs_expression_inner<'b>(
         }
         // ── Array literals ──────────────────────────────────────────
         Expression::Array(arr) => {
-            let pt = super::raw_type_inference::infer_array_literal_raw_type(
-                arr.elements.iter(),
-                ctx,
-                false,
-            )
-            .unwrap_or_else(PhpType::array);
+            let pt =
+                super::raw_type_inference::infer_array_literal_raw_type(arr.elements.iter(), ctx)
+                    .unwrap_or_else(PhpType::array);
             vec![ResolvedType::from_type_string(pt)]
         }
         Expression::LegacyArray(arr) => {
-            let pt = super::raw_type_inference::infer_array_literal_raw_type(
-                arr.elements.iter(),
-                ctx,
-                false,
-            )
-            .unwrap_or_else(PhpType::array);
+            let pt =
+                super::raw_type_inference::infer_array_literal_raw_type(arr.elements.iter(), ctx)
+                    .unwrap_or_else(PhpType::array);
             vec![ResolvedType::from_type_string(pt)]
         }
         Expression::Instantiation(inst) => resolve_rhs_instantiation(inst, ctx),
@@ -1188,6 +1182,11 @@ fn object_cast_type(operand: Vec<ResolvedType>) -> PhpType {
     let inner =
         (!operand.is_empty()).then(|| ResolvedType::types_joined(&operand).widen_scalar_literals());
     match inner.as_ref().map(PhpType::kind) {
+        // `(object) []` is a `stdClass` with no properties; an `object{}`
+        // shape would say the same thing in a spelling nothing else uses.
+        Some(TypeKind::ArrayShape(entries)) if entries.is_empty() => {
+            PhpType::named(atom("stdClass"))
+        }
         Some(TypeKind::ArrayShape(entries)) => PhpType::object_shape(
             entries
                 .iter()

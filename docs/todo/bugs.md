@@ -76,46 +76,22 @@ have been guarded out) rather than removing it outright.
 
 ## Array types
 
-### B147. Array literals are not tuples: slot reads return the union of all elements
+### B152. `array_filter` with `ARRAY_FILTER_USE_KEY` does not narrow the key type
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Low-Medium · Effort: Medium**
 
 ```php
-$rows[] = [$violation, $location, $name];        // RuleViolation, string, string
-foreach ($rows as $row) {
-    [$violation, $location, $name] = $row;       // each: RuleViolation|string
-    $writer->write($location);                   // reported: RuleViolation|string
-}
+/** @return array<string> $data */
+$data = array_filter($data, fn (string|int $k): bool => is_string($k), ARRAY_FILTER_USE_KEY);
+$data = $this->viewData($view) + $data;    // reported: array<string|int, string>
 ```
 
-A list literal collapses to `array<union-of-values>`, so list
-destructuring and constant-offset reads cannot select a slot (6 sites
-in PHPMD/PDepend). Two adjacent literal defects: a literal with a
-*non-constant* key renders as the bogus shape `array{mixed: int}`
-(stringifying the key's type as a field name) instead of falling back
-to `array<K, V>`, and `(object) []` is not recognised as `stdClass`.
+`array_filter` preserves its input type verbatim, so the callback's
+proof about the keys is dropped. That is invisible on its own, but the
+key type surfaces the moment the result is merged with `+` or passed to
+a parameter declared `array<string, …>` (2 sites in Bladestan). The
+`ARRAY_FILTER_USE_BOTH` mode has the same gap for the key half.
 
-**Fix:** keep constant-array shapes for literals (ordered slots +
-known keys), select slots on destructure/offset reads, fall back to a
-generic array only for non-constant keys.
-
-### B148. Element writes do not refine tracked array state
-
-**Impact: Medium · Effort: Medium-High**
-
-Several forms of the same weakness (~7 sites):
-
-- `$a[$k][] = $v` never updates the inner element type: a value
-  initialised as `[]` stays `array{}` in the outgoing type even
-  though every loop iteration appends strings.
-- A key written on every path through a loop body leaves
-  `array<int, string>` where PHPStan reports
-  `non-empty-array<int, string>`.
-- `$a += ['slot' => $obj]` degrades to unconstrained `array`.
-- A constant shape `array{item: string, qty: int}` fails the subtype
-  check against `array<string, mixed>`, so shaped rows are rejected
-  by a declared `array<int, array<string, mixed>>`.
-
-**Fix:** refine the per-key state on nested writes (including
-auto-vivification), merge `+=` like an array-shape union, and make
-constant shapes satisfy their generic supertypes.
+**Fix:** read the callback's assertions about its key parameter (the
+same reconciliation an `if (is_string($k))` body already gets) and
+rebuild the result's key type from what survives.

@@ -1913,6 +1913,36 @@ impl PhpType {
         }
     }
 
+    /// The generic array type a constant shape describes, dropping the
+    /// per-key detail: `array{a: int, b: string}` → `array<string,
+    /// int|string>`, `array{User, Order}` → `list<User|Order>`.
+    ///
+    /// Anything that is not an array shape is returned unchanged, so a
+    /// caller that only needs a container it can read a key and value type
+    /// off can pass any type through. An empty shape has no key or value
+    /// type to name and becomes a bare `array`.
+    pub fn generalized_array(&self) -> PhpType {
+        let TypeKind::ArrayShape(entries) = self.kind() else {
+            return self.clone();
+        };
+        if entries.is_empty() {
+            return PhpType::array();
+        }
+        let Some(value) = self.iterable_element_type() else {
+            return PhpType::array();
+        };
+        // Only an all-positional shape promises the `0, 1, 2, …` keys a
+        // `list` does; the moment one entry is named the result has to
+        // spell its key type out.
+        if entries.iter().all(|e| e.key.is_none()) {
+            return PhpType::list(value);
+        }
+        match self.iterable_key_type() {
+            Some(key) => PhpType::generic_array(key, value),
+            None => PhpType::generic_array_val(value),
+        }
+    }
+
     /// Extract the element (value) type from an iterable, including
     /// scalar element types.
     ///

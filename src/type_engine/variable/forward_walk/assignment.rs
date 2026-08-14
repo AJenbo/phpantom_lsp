@@ -1607,23 +1607,9 @@ pub(crate) fn process_compound_assignment<'b>(
         | AssignmentOperator::BitwiseOr(_)
         | AssignmentOperator::BitwiseXor(_) => PhpType::int(),
         AssignmentOperator::Addition(_) => {
-            // PHP overloads `+` / `+=` for array union vs numeric addition.
-            // If either operand is array-like, the result is array.
             let lhs_types = scope.get(&var_name).to_vec();
             let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-            let lhs_is_array = lhs_types.iter().any(|rt| rt.type_string.is_array_like());
-            let rhs_is_array = rhs_types.iter().any(|rt| rt.type_string.is_array_like());
-            if lhs_is_array && rhs_is_array {
-                // Both sides are arrays: `+=` unions their keys.
-                super::super::resolution::merge_array_plus(
-                    &ResolvedType::types_joined(&lhs_types),
-                    &ResolvedType::types_joined(&rhs_types),
-                )
-            } else if lhs_is_array || rhs_is_array {
-                PhpType::named(atom("array"))
-            } else {
-                infer_arithmetic_result_type(&lhs_types, &rhs_types, false)
-            }
+            infer_addition_result_type(&lhs_types, &rhs_types)
         }
         AssignmentOperator::Subtraction(_)
         | AssignmentOperator::Multiplication(_)
@@ -1761,6 +1747,33 @@ pub(crate) fn infer_arithmetic_result_type(
     }
 }
 
+/// Infer the result type of `+` / `+=`, which PHP overloads for the array
+/// union as well as numeric addition.
+///
+/// Two arrays union their keys, which
+/// [`merge_array_plus`](super::super::resolution::merge_array_plus) works
+/// out from whatever both sides know. Only a mix of an array and a number
+/// has no meaningful result type: PHP raises a `TypeError` for it, so a
+/// bare `array` stands in rather than a number the operation cannot
+/// produce.
+pub(crate) fn infer_addition_result_type(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+) -> PhpType {
+    let lhs_is_array = lhs_types.iter().any(|rt| rt.type_string.is_array_like());
+    let rhs_is_array = rhs_types.iter().any(|rt| rt.type_string.is_array_like());
+    if lhs_is_array && rhs_is_array {
+        return super::super::resolution::merge_array_plus(
+            &ResolvedType::types_joined(lhs_types),
+            &ResolvedType::types_joined(rhs_types),
+        );
+    }
+    if lhs_is_array || rhs_is_array {
+        return PhpType::array();
+    }
+    infer_arithmetic_result_type(lhs_types, rhs_types, false)
+}
+
 /// The bitwise operator `operator` is, or `None` for every other binary
 /// operator.
 fn bitwise_op(operator: &mago_syntax::cst::binary::BinaryOperator<'_>) -> Option<BitwiseOp> {
@@ -1827,22 +1840,13 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
             | AssignmentOperator::BitwiseOr(_)
             | AssignmentOperator::BitwiseXor(_) => Some(PhpType::int()),
             AssignmentOperator::Addition(_) => {
-                // PHP overloads `+` / `+=` for array union vs numeric addition.
                 let lhs_types = if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
                     scope.get(bytes_to_str(dv.name)).to_vec()
                 } else {
                     vec![]
                 };
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                let either_is_array = lhs_types
-                    .iter()
-                    .chain(rhs_types.iter())
-                    .any(|rt| rt.type_string.is_array_like());
-                if either_is_array {
-                    Some(PhpType::named(atom("array")))
-                } else {
-                    Some(infer_arithmetic_result_type(&lhs_types, &rhs_types, false))
-                }
+                Some(infer_addition_result_type(&lhs_types, &rhs_types))
             }
             AssignmentOperator::Subtraction(_)
             | AssignmentOperator::Multiplication(_)
@@ -2023,23 +2027,13 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         }
 
         // Addition (+): PHP overloads this for array union vs numeric
-        // addition.  If either operand resolves to an array type, the
-        // result is array; otherwise apply numeric type promotion.
+        // addition.
         if matches!(binary.operator, BinaryOperator::Addition(_)) {
             let lhs_types = resolve_rhs_with_scope(binary.lhs, scope, ctx);
             let rhs_types = resolve_rhs_with_scope(binary.rhs, scope, ctx);
-            let either_is_array = lhs_types
-                .iter()
-                .chain(rhs_types.iter())
-                .any(|rt| rt.type_string.is_array_like());
-            if either_is_array {
-                return vec![ResolvedType::from_type_string(PhpType::named(atom(
-                    "array",
-                )))];
-            }
-            return vec![ResolvedType::from_type_string(
-                infer_arithmetic_result_type(&lhs_types, &rhs_types, false),
-            )];
+            return vec![ResolvedType::from_type_string(infer_addition_result_type(
+                &lhs_types, &rhs_types,
+            ))];
         }
 
         // Arithmetic: -, *, /, **.
