@@ -18,30 +18,6 @@ per-project inventory. Entries filed later say where they came from.
 
 ## Conditional and argument-dependent return types
 
-### B141. A `never` conditional branch does not assert the condition
-
-**Impact: Medium-High · Effort: Medium**
-
-```php
-/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */
-function throw_unless($condition, ...$args) {}
-
-$dispatcher = Model::getEventDispatcher();      // Dispatcher|null
-throw_unless($dispatcher, 'Exception', '…');
-Model::setEventDispatcher($dispatcher);         // reported Dispatcher|null
-```
-
-When a call's conditional return resolves to `never` for some subtype
-of an argument, that subtype cannot survive the call; PHPStan derives
-an implicit assertion from it. PHPantom keeps the argument unchanged,
-so every `throw_unless`/`throw_if`/`abort_unless` guard is invisible
-(7 sites in one test file alone).
-
-**Fix:** when the branch selected by a *falsy/truthy
-subtype* of an argument is `never`, subtract that subtype from the
-argument expression in the following scope — the same subtraction the
-`if (!$x) { throw … }` form already gets.
-
 ### B143. A constant built from another constant does not fold to its value
 
 **Impact: Medium · Effort: Medium**

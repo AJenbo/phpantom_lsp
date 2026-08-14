@@ -1719,6 +1719,25 @@ class ResponseCollection extends TypedCollection {}
 
 // ─── Container (conditional return types) ───────────────────────────────────
 
+/**
+ * Throws unless the value is truthy, and says so in its return type: a
+ * falsy `$condition` selects `never`, so nothing that reached the caller
+ * afterwards could have been falsy.
+ *
+ * @template TValue
+ * @param TValue $condition
+ * @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never))
+ */
+function throwUnless($condition, string $message = 'unexpected falsy value')
+{
+    if (!$condition) {
+        throw new \RuntimeException($message);
+    }
+
+    return $condition;
+}
+
+
 class Container
 {
     /** @var array<string, object> */
@@ -2152,6 +2171,11 @@ function makePen(): Pen
 }
 
 function pickPenOrPencil(): Pen|Pencil
+{
+    return new Pen();
+}
+
+function pickPenOrNull(): ?Pen
 {
     return new Pen();
 }

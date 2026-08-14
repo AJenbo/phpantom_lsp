@@ -627,6 +627,19 @@ function runDemoAssertions(): void
     $appSelf = Scaffolding\app();
     assert($appSelf instanceof Scaffolding\Container, 'Scaffolding\app() with no args must return Scaffolding\Container');
 
+    // ── `never` branch of a conditional return type ─────────────────────
+    $maybePen = Scaffolding\pickPenOrNull();
+    Scaffolding\throwUnless($maybePen, 'no pen');
+    assert($maybePen instanceof Scaffolding\Pen,
+        'a value that got past Scaffolding\throwUnless() cannot be the falsy half');
+    $throwUnlessRejected = false;
+    try {
+        Scaffolding\throwUnless(null, 'no pen');
+    } catch (\RuntimeException) {
+        $throwUnlessRejected = true;
+    }
+    assert($throwUnlessRejected, 'Scaffolding\throwUnless(null) throws, so `never` is the honest return type');
+
     // ── Named-argument conditional return type ──────────────────────────
     $mapper = new Scaffolding\TreeMapperImpl();
     $named = $mapper->map(source: 'bar', signature: 'foo');

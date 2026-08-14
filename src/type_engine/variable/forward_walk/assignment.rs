@@ -2801,6 +2801,10 @@ pub(crate) fn process_assert_narrowing<'b>(
         }
     }
 
+    // A conditional return type whose `never` branch some argument value
+    // would have selected proves that value never reached the call.
+    apply_never_branch_narrowing(unwrapped, scope, ctx);
+
     // `assert(<condition>)` proves its argument true for everything that
     // follows in the same scope, exactly the way entering `if (<condition>)`
     // proves it for the block body.  Feeding the argument into the same
@@ -3046,6 +3050,101 @@ pub(crate) fn resolved_types_differ(a: &[ResolvedType], b: &[ResolvedType]) -> b
         }
     }
     false
+}
+
+/// Subtract from each argument the values a `never` branch of the callee's
+/// conditional return type rules out.
+///
+/// `throw_unless()`, `throw_if()`, `abort_unless()` and their family carry
+/// no `@phpstan-assert` tag; they declare their effect in the return type
+/// itself:
+///
+/// ```text
+/// @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never))
+/// ```
+///
+/// A `null` argument lands on a `never` branch there, so a run that gets
+/// past the call did not pass one, and the following scope can drop it.
+/// This is the same subtraction the `if (!$x) { throw …; }` form already
+/// gets, derived from the declaration instead of from a body.
+fn apply_never_branch_narrowing<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let Expression::Call(call) = expr else {
+        return;
+    };
+
+    let snapshot = scope.locals.clone();
+    let resolver =
+        |vn: &str| -> Vec<ResolvedType> { snapshot.get(&atom(vn)).cloned().unwrap_or_default() };
+    let var_ctx = build_var_ctx("", ctx, &resolver);
+    let Some(info) = narrowing::extract_conditional_return_call(call, &var_ctx) else {
+        return;
+    };
+
+    // A subject named by an argument is keyed the same way a condition's
+    // subject is, so a property path or a call argument narrows too.
+    seed_assert_arg_subject_keys(expr, scope, ctx);
+
+    for (index, parameter) in info.parameters.iter().enumerate() {
+        let Some(argument) = info.argument_list.arguments.iter().nth(index) else {
+            continue;
+        };
+        let arg_expr = narrowing::argument_value(argument);
+        let Some(key) = narrowing::expr_to_subject_key(arg_expr) else {
+            continue;
+        };
+        let current = scope.get(&key).to_vec();
+        if current.is_empty() {
+            continue;
+        }
+        let joined = ResolvedType::types_joined(&current);
+        let ruled_out = narrowing::never_ruled_out_members(
+            &info.return_type,
+            &parameter.name,
+            &joined,
+            ctx.class_loader,
+        );
+        if ruled_out.is_empty() {
+            continue;
+        }
+        let kept: Vec<ResolvedType> = current
+            .into_iter()
+            .filter(|rt| !ruled_out.iter().any(|out| out.equivalent(&rt.type_string)))
+            .map(|mut rt| {
+                if let Some(narrowed) = subtract_members(&rt.type_string, &ruled_out) {
+                    rt.type_string = narrowed;
+                }
+                rt
+            })
+            .collect();
+        if !kept.is_empty() {
+            scope.set(&key, kept);
+        }
+    }
+}
+
+/// `ty` with every alternative `ruled_out` names removed, or `None` when
+/// it names none of them.
+///
+/// A type with a single alternative is left alone: removing its only
+/// member would leave nothing to describe the value with.
+fn subtract_members(ty: &PhpType, ruled_out: &[PhpType]) -> Option<PhpType> {
+    let members = narrowing::split_into_runtime_members(ty);
+    if members.len() < 2 {
+        return None;
+    }
+    let kept: Vec<PhpType> = members
+        .iter()
+        .filter(|member| !ruled_out.iter().any(|out| out.equivalent(member)))
+        .cloned()
+        .collect();
+    if kept.is_empty() || kept.len() == members.len() {
+        return None;
+    }
+    Some(PhpType::union(kept))
 }
 
 #[cfg(test)]

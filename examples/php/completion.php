@@ -1361,6 +1361,13 @@ class ConditionalReturnDemo
         $wordList = str_word_count('two words', 1);
         strtoupper($wordList[0]);                 // format 1 → list<string>
 
+        // A `never` branch is an assertion in disguise: the falsy half of
+        // the argument cannot have survived the call, so it is subtracted
+        // from what follows without an `if` or a `@phpstan-assert` tag.
+        $maybePen = Scaffolding\pickPenOrNull();
+        Scaffolding\throwUnless($maybePen, 'no pen');
+        $maybePen->write();                       // narrowed to Scaffolding\Pen
+
         // The replace family returns the shape it was handed, so a string
         // subject rules out the array branch its signature also names.
         $swapped = str_replace('a', 'b', 'banana');

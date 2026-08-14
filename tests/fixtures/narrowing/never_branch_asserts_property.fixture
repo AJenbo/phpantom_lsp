@@ -1,0 +1,38 @@
+// test: a never branch subtracts from a property argument, not just a variable
+// feature: hover
+// The inverse polarity too: `throw_if()` throws when its argument is
+// truthy, so what is left after it is the falsy half.
+// expect: $kept = Dispatcher
+// expect_hover: $gone => null
+---
+<?php
+
+class Dispatcher {}
+
+class Holder {
+    public ?Dispatcher $maybe = null;
+    public ?Dispatcher $other = null;
+}
+
+/**
+ * @template TValue
+ * @param TValue $condition
+ * @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never))
+ */
+function throw_unless($condition, ...$args) { return $condition; }
+
+/**
+ * @template TValue
+ * @param TValue $condition
+ * @return ($condition is false ? TValue : ($condition is non-empty-mixed ? never : TValue))
+ */
+function throw_if($condition, ...$args) { return $condition; }
+
+function run(Holder $holder): void
+{
+    throw_unless($holder->maybe, 'Exception');
+    $kept = $holder->maybe;
+    throw_if($holder->other, 'Exception');
+    $gone = $holder->other;
+    echo $ke<>pt;
+}

@@ -978,6 +978,16 @@ fn condition_category(condition: &PhpType) -> Option<&'static str> {
 /// when it cannot be proven either way (`mixed`, an unresolved type, or a
 /// mixed union). The caller uses `None` to fall back to a union of both
 /// branches rather than committing to the wrong one.
+/// Whether a value of `arg_ty` satisfies `condition`, for callers outside
+/// this module that need to walk a conditional's branches themselves.
+pub(in crate::type_engine) fn condition_holds_for_type(
+    arg_ty: &PhpType,
+    condition: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<bool> {
+    type_condition_result(arg_ty, condition, class_loader)
+}
+
 fn type_condition_result(
     arg_ty: &PhpType,
     condition: &PhpType,

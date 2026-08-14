@@ -1,0 +1,25 @@
+// test: a never branch of a conditional return type subtracts the argument value that selects it
+// feature: hover
+// `throw_unless()` declares its effect in the return type rather than
+// with a `@phpstan-assert` tag: a null argument lands on `never`, so a
+// run that got past the call did not pass one.
+// expect: $kept = Dispatcher
+// expect_absent: ?Dispatcher
+---
+<?php
+
+class Dispatcher {}
+
+/**
+ * @template TValue
+ * @param TValue $condition
+ * @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never))
+ */
+function throw_unless($condition, ...$args) { return $condition; }
+
+function run(?Dispatcher $dispatcher): void
+{
+    throw_unless($dispatcher, 'Exception', 'no dispatcher');
+    $kept = $dispatcher;
+    echo $ke<>pt;
+}

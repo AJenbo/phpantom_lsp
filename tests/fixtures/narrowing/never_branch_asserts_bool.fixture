@@ -1,0 +1,20 @@
+// test: a never branch splits a bool argument into the half that survives
+// feature: hover
+// expect: $kept = true
+// expect_absent: bool
+---
+<?php
+
+/**
+ * @template TValue
+ * @param TValue $condition
+ * @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never))
+ */
+function throw_unless($condition, ...$args) { return $condition; }
+
+function run(bool $flag): void
+{
+    throw_unless($flag, 'Exception');
+    $kept = $flag;
+    echo $ke<>pt;
+}

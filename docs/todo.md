@@ -26,7 +26,6 @@ within the same impact tier.
 | #    | Item                                                                                                                                                      | Impact      | Effort      |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B167 | [Factory `create()`/`make()` keep the collection half on single-model chains](todo/bugs.md#b167-factory-createmake-keep-the-collection-half-on-single-model-chains) | Medium-High | Low-Medium |
-| B141 | [A `never` conditional branch does not assert the condition](todo/bugs.md#b141-a-never-conditional-branch-does-not-assert-the-condition) | Medium-High | Medium      |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 | B144 | [`preg_match` `$matches` is shapeless](todo/bugs.md#b144-preg_match-matches-is-shapeless) (depends on B147)                                | Medium-High | Medium      |
 | B168 | [`Request` input accessors deserve precise per-argument types](todo/bugs.md#b168-request-input-accessors-deserve-precise-per-argument-types)               | Medium-High | Medium      |
