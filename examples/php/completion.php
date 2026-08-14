@@ -3163,6 +3163,11 @@ class ArrayFuncDemo
         $present = array_filter($src->optionalLabels());
         strtoupper($present['ink']);      // array<string, string>
 
+        // ARRAY_FILTER_USE_KEY hands the callback the key, so what the
+        // callback proves about it describes the keys that survive.
+        $stringKeyed = array_filter($src->mixedKeys(), fn($key) => is_string($key), ARRAY_FILTER_USE_KEY);
+        strtoupper(array_keys($stringKeyed)[0]);   // list<string>: the int key is gone
+
         // An all-int array cannot sum to a float.
         $total = array_sum($src->weights());
         intdiv($total, 1);                // int

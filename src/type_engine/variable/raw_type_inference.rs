@@ -405,6 +405,31 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         let expr = super::resolution::nth_arg_expr(self.args, index)?;
         infer_callback_return_type(expr, param_type, self.ctx)
     }
+
+    fn arg_atom_text(&self, index: usize) -> Option<String> {
+        match super::resolution::nth_arg_expr(self.args, index)? {
+            Expression::ConstantAccess(ca) => {
+                Some(crate::util::strip_fqn_prefix(bytes_to_str(ca.name.value())).to_string())
+            }
+            Expression::Literal(Literal::Integer(i)) => Some(bytes_to_str(i.raw).to_string()),
+            _ => None,
+        }
+    }
+
+    fn callback_param_narrowing(
+        &self,
+        index: usize,
+        param_index: usize,
+        subject: &PhpType,
+    ) -> Option<PhpType> {
+        let expr = super::resolution::nth_arg_expr(self.args, index)?;
+        super::callback_narrowing::narrow_callback_param(
+            expr,
+            param_index,
+            subject,
+            Some(&self.ctx.class_loader),
+        )
+    }
 }
 
 /// For known array-producing functions, resolve the **raw output type**

@@ -768,6 +768,112 @@ pub(crate) fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
 /// The interface every non-array iterable implements.
 const TRAVERSABLE_FQN: &str = "Traversable";
 
+/// The domain a `is_*()` builtin tests its argument against.
+///
+/// Returns `None` for any other function name.
+pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
+    Some(match name.trim_start_matches('\\') {
+        "is_array" => TypeGuardKind::Array,
+        "is_string" => TypeGuardKind::String,
+        "is_int" | "is_integer" | "is_long" => TypeGuardKind::Int,
+        "is_float" | "is_double" | "is_real" => TypeGuardKind::Float,
+        "is_bool" => TypeGuardKind::Bool,
+        "is_object" => TypeGuardKind::Object,
+        "is_numeric" => TypeGuardKind::Numeric,
+        "is_callable" => TypeGuardKind::Callable,
+        "is_null" => TypeGuardKind::Null,
+        "is_scalar" => TypeGuardKind::Scalar,
+        "is_resource" => TypeGuardKind::Resource,
+        "is_iterable" => TypeGuardKind::Iterable,
+        _ => return None,
+    })
+}
+
+/// Narrow `ty` to the values the `is_*()` builtin named by `name`
+/// accepts.
+///
+/// Returns `None` when `name` is not a type guard, when every value of
+/// `ty` already passes it, and when none can.
+pub(crate) fn narrow_type_by_guard_name(
+    name: &str,
+    ty: &PhpType,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<PhpType> {
+    let kind = type_guard_kind_from_name(name)?;
+    let narrowed = filter_type_by_guard(ty, kind, true, class_loader)?;
+    (!narrowed.is_empty_sentinel()).then_some(narrowed)
+}
+
+/// Narrow `ty` to the values of `var_name` that can make `condition`
+/// truthy.
+///
+/// `&&` chains narrow through each operand in turn, `||` chains join what
+/// each branch admits, and a negated guard narrows by exclusion. Returns
+/// `None` when the condition says nothing about `var_name` (so the caller
+/// keeps the type it has) and when it admits no value at all, since an
+/// empty type is never a useful answer for a caller that only knows the
+/// condition held.
+pub(crate) fn narrow_type_by_condition(
+    condition: &Expression<'_>,
+    var_name: &str,
+    ty: &PhpType,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<PhpType> {
+    let narrowed = narrow_by_condition_inner(condition, var_name, ty, class_loader)?;
+    (!narrowed.is_empty_sentinel()).then_some(narrowed)
+}
+
+fn narrow_by_condition_inner(
+    condition: &Expression<'_>,
+    var_name: &str,
+    ty: &PhpType,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<PhpType> {
+    match condition {
+        Expression::Parenthesized(inner) => {
+            return narrow_by_condition_inner(inner.expression, var_name, ty, class_loader);
+        }
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+            ) =>
+        {
+            // Both operands hold, so the right-hand one narrows whatever
+            // the left-hand one left behind.
+            let lhs = narrow_by_condition_inner(bin.lhs, var_name, ty, class_loader);
+            let base = lhs.as_ref().unwrap_or(ty);
+            return narrow_by_condition_inner(bin.rhs, var_name, base, class_loader).or(lhs);
+        }
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+            ) =>
+        {
+            // Either operand may be what let the value through, so the
+            // answer is what they admit between them. An operand that says
+            // nothing about `var_name` admits everything, which makes the
+            // whole condition uninformative.
+            let lhs = narrow_by_condition_inner(bin.lhs, var_name, ty, class_loader)?;
+            let rhs = narrow_by_condition_inner(bin.rhs, var_name, ty, class_loader)?;
+            let members: Vec<PhpType> = [lhs, rhs]
+                .into_iter()
+                .filter(|m| !m.is_empty_sentinel())
+                .collect();
+            return match members.len() {
+                0 => Some(PhpType::empty_sentinel()),
+                1 => members.into_iter().next(),
+                _ => Some(PhpType::join_runtime_value_types(members)),
+            };
+        }
+        _ => {}
+    }
+
+    let (kind, negated) = try_extract_type_guard(condition, var_name)?;
+    filter_type_by_guard(ty, kind, !negated, class_loader)
+}
+
 /// Try to extract a type-guard function call on a variable.
 ///
 /// Matches `is_array($var)`, `is_string($var)`, etc. (with optional
@@ -791,21 +897,7 @@ pub(crate) fn try_extract_type_guard(
                 }
                 _ => return None,
             };
-            let kind = match func_name {
-                "is_array" => TypeGuardKind::Array,
-                "is_string" => TypeGuardKind::String,
-                "is_int" | "is_integer" | "is_long" => TypeGuardKind::Int,
-                "is_float" | "is_double" | "is_real" => TypeGuardKind::Float,
-                "is_bool" => TypeGuardKind::Bool,
-                "is_object" => TypeGuardKind::Object,
-                "is_numeric" => TypeGuardKind::Numeric,
-                "is_callable" => TypeGuardKind::Callable,
-                "is_null" => TypeGuardKind::Null,
-                "is_scalar" => TypeGuardKind::Scalar,
-                "is_resource" => TypeGuardKind::Resource,
-                "is_iterable" => TypeGuardKind::Iterable,
-                _ => return None,
-            };
+            let kind = type_guard_kind_from_name(func_name)?;
             let args = &fc.argument_list.arguments;
             if args.len() != 1 {
                 return None;

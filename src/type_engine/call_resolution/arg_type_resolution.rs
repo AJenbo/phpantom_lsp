@@ -124,6 +124,28 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
         Backend::infer_closure_return_type_from_body(self.arg_text(index)?, param_type, self.ctx)
     }
+
+    fn arg_atom_text(&self, index: usize) -> Option<String> {
+        let text = self.arg_text(index)?.trim();
+        let atom = crate::util::strip_fqn_prefix(text);
+        let is_atom =
+            !atom.is_empty() && atom.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        is_atom.then(|| atom.to_string())
+    }
+
+    fn callback_param_narrowing(
+        &self,
+        index: usize,
+        param_index: usize,
+        subject: &PhpType,
+    ) -> Option<PhpType> {
+        crate::type_engine::variable::callback_narrowing::narrow_callback_param_text(
+            self.arg_text(index)?,
+            param_index,
+            subject,
+            Some(&self.ctx.class_loader),
+        )
+    }
 }
 
 impl Backend {

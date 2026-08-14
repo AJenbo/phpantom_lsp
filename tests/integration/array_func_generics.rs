@@ -286,3 +286,64 @@ function probe(array $rows, array $names): void {
         ],
     );
 }
+
+/// `array_filter` in one of the two modes that hand the callback the key
+/// keeps only the keys the callback approves of, so what its body asserts
+/// about them describes the result's key type.
+#[test]
+fn array_filter_narrows_the_key_type_from_its_callback() {
+    let content = r#"<?php
+/**
+ * @param array<string|int, string> $data
+ */
+function probe(array $data): void {
+    $keyed = array_filter($data, fn (string|int $k): bool => is_string($k), ARRAY_FILTER_USE_KEY);
+    $both = array_filter($data, fn (string $v, string|int $k): bool => is_string($k), ARRAY_FILTER_USE_BOTH);
+    $closure = array_filter($data, function ($k) { return is_int($k); }, ARRAY_FILTER_USE_KEY);
+    $negated = array_filter($data, fn ($k) => !is_int($k), ARRAY_FILTER_USE_KEY);
+    $conjunction = array_filter($data, fn ($k) => is_string($k) && $k !== '', ARRAY_FILTER_USE_KEY);
+    $named = array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
+    $inline = array_keys(array_filter($data, fn ($k) => is_string($k), ARRAY_FILTER_USE_KEY));
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$keyed", "array<string, string>"),
+            ("$both", "array<string, string>"),
+            ("$closure", "array<int, string>"),
+            ("$negated", "array<string, string>"),
+            ("$conjunction", "array<string, string>"),
+            ("$named", "array<string, string>"),
+            ("$inline", "list<string>"),
+        ],
+    );
+}
+
+/// A callback that proves nothing about the key it is handed leaves the
+/// key type alone, and so does one whose key never reaches it.
+#[test]
+fn array_filter_keeps_the_key_type_a_callback_says_nothing_about() {
+    let content = r#"<?php
+/**
+ * @param array<string|int, string> $data
+ */
+function probe(array $data): void {
+    $plain = array_filter($data, fn (string $v): bool => $v !== '');
+    $value_mode = array_filter($data, fn (string $v): bool => is_string($v));
+    $unrelated = array_filter($data, fn ($k) => strlen((string) $k) > 2, ARRAY_FILTER_USE_KEY);
+    $either = array_filter($data, fn ($v, $k) => is_int($k) || is_string($k), ARRAY_FILTER_USE_BOTH);
+    $branching = array_filter($data, function ($k) { if ($k === 0) { return true; } return is_string($k); }, ARRAY_FILTER_USE_KEY);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$plain", "array<string|int, string>"),
+            ("$value_mode", "array<string|int, string>"),
+            ("$unrelated", "array<string|int, string>"),
+            ("$either", "array<string|int, string>"),
+            ("$branching", "array<string|int, string>"),
+        ],
+    );
+}

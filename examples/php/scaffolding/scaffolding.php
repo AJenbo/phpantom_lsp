@@ -765,6 +765,9 @@ class ScaffoldingArrayFunc
     /** @return array<string, string|null> */
     public function optionalLabels(): array { return ['ink' => 'ink', 'gel' => null]; }
 
+    /** @return array<string|int, string> */
+    public function mixedKeys(): array { return ['ink' => 'gel', 7 => 'nib']; }
+
     /** @return list<int> */
     public function weights(): array { return [2, 3, 4]; }
 }

@@ -209,6 +209,8 @@ function runDemoAssertions(): void
     assert(array_keys((new Scaffolding\ScaffoldingArrayFunc())->labels()) === [0, 1], 'array_keys() over a list yields int keys');
     assert(array_search('gel', (new Scaffolding\ScaffoldingArrayFunc())->labels()) === 1, 'array_search() over a list yields an int key');
     assert(array_key_first((new Scaffolding\ScaffoldingArrayFunc())->byName()) === 'blue', 'array_key_first() over a string-keyed array yields a string');
+    $stringKeyed = array_filter((new Scaffolding\ScaffoldingArrayFunc())->mixedKeys(), fn($key) => is_string($key), ARRAY_FILTER_USE_KEY);
+    assert(array_keys($stringKeyed) === ['ink'], 'array_filter() with ARRAY_FILTER_USE_KEY keeps only the keys its callback approves of');
 
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = Scaffolding\loadPensOrFail();

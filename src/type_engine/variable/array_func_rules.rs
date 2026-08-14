@@ -17,7 +17,7 @@
 /// the handful of questions the rules ask about an argument, and the
 /// rules stay in one place so a fix to `array_map`'s element type
 /// reaches every consumer.
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -47,6 +47,21 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// function at `index`, with its first parameter seeded to
     /// `param_type`.
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType>;
+
+    /// The argument at `index` written as a bare constant name or integer
+    /// literal (`ARRAY_FILTER_USE_KEY`, `2`), with any namespace prefix
+    /// stripped.  `None` for any other expression.
+    fn arg_atom_text(&self, index: usize) -> Option<String>;
+
+    /// `subject` narrowed to the values that make the closure or arrow
+    /// function at `index` accept them through its `param_index`th
+    /// parameter.  `None` when the callback asserts nothing about it.
+    fn callback_param_narrowing(
+        &self,
+        index: usize,
+        param_index: usize,
+        subject: &PhpType,
+    ) -> Option<PhpType>;
 }
 
 /// For known array-producing functions, resolve the **raw output type**
@@ -83,8 +98,15 @@ pub(in crate::type_engine) fn array_func_raw_type(
             // drops `null`, `false`, `0`, `''` and friends. With a
             // callback the kept members are whatever it approves of, which
             // says nothing about their type.
-            if func_name.eq_ignore_ascii_case("array_filter") && !args.has_arg(1) {
-                return Some(filter_element_type(&raw).unwrap_or(raw));
+            if func_name.eq_ignore_ascii_case("array_filter") {
+                if !args.has_arg(1) {
+                    return Some(filter_element_type(&raw).unwrap_or(raw));
+                }
+                // A callback handed the key decides which keys survive, so
+                // what it asserts about them describes the result.
+                if let Some(narrowed) = filter_key_type(&raw, args) {
+                    return Some(narrowed);
+                }
             }
             return Some(raw);
         }
@@ -206,6 +228,50 @@ fn filter_element_type(raw: &PhpType) -> Option<PhpType> {
             args[value_idx] = truthy;
             Some(PhpType::generic_atom(g.name, args))
         }
+        _ => None,
+    }
+}
+
+/// Rebuild an `array_filter` result with its key type narrowed to what
+/// the callback asserts about the key it was handed.
+///
+/// Returns `None` unless the call runs in one of the two modes that pass
+/// the key (`ARRAY_FILTER_USE_KEY`, `ARRAY_FILTER_USE_BOTH`), the callback
+/// proves something about it, and the input carries a key type the proof
+/// can narrow.
+fn filter_key_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let param_index = filter_key_param_index(args)?;
+    let key = raw.iterable_key_type()?;
+    let narrowed = args.callback_param_narrowing(1, param_index, &key)?;
+    // A callback that admits every key it could receive (`is_int($k) ||
+    // is_string($k)`) leaves nothing to say, and answering with the
+    // rebuilt union would only reorder its members.
+    if key.is_subtype_of(&narrowed) {
+        return None;
+    }
+    let value = raw.extract_value_type(false)?.clone();
+    // A filter can drop every entry, so the result is a plain `array`
+    // whatever refinement (`non-empty-array`, `list`) the input carried.
+    match raw.kind() {
+        TypeKind::Array(_) => Some(PhpType::generic_array(narrowed, value)),
+        TypeKind::Generic(g) if is_array_like_name(g.name.as_str()) => {
+            Some(PhpType::generic_array(narrowed, value))
+        }
+        _ => None,
+    }
+}
+
+/// Which of the callback's parameters receives the key, from
+/// `array_filter`'s mode argument.
+///
+/// The default mode passes only the value, so the callback says nothing
+/// about the keys and this returns `None`.
+fn filter_key_param_index(args: &dyn ArrayFuncArgs) -> Option<usize> {
+    match args.arg_atom_text(2)?.as_str() {
+        "ARRAY_FILTER_USE_KEY" | "2" => Some(0),
+        // `ARRAY_FILTER_USE_BOTH` passes the value first and the key
+        // second.
+        "ARRAY_FILTER_USE_BOTH" | "1" => Some(1),
         _ => None,
     }
 }

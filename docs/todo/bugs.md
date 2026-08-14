@@ -76,22 +76,4 @@ have been guarded out) rather than removing it outright.
 
 ## Array types
 
-### B152. `array_filter` with `ARRAY_FILTER_USE_KEY` does not narrow the key type
-
-**Impact: Low-Medium · Effort: Medium**
-
-```php
-/** @return array<string> $data */
-$data = array_filter($data, fn (string|int $k): bool => is_string($k), ARRAY_FILTER_USE_KEY);
-$data = $this->viewData($view) + $data;    // reported: array<string|int, string>
-```
-
-`array_filter` preserves its input type verbatim, so the callback's
-proof about the keys is dropped. That is invisible on its own, but the
-key type surfaces the moment the result is merged with `+` or passed to
-a parameter declared `array<string, …>` (2 sites in Bladestan). The
-`ARRAY_FILTER_USE_BOTH` mode has the same gap for the key half.
-
-**Fix:** read the callback's assertions about its key parameter (the
-same reconciliation an `if (is_string($k))` body already gets) and
-rebuild the result's key type from what survives.
+No outstanding items.

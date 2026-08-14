@@ -1,6 +1,7 @@
 /// Variable type-resolution sub-modules.
 ///
 /// - **array_func_rules**: Return-type rules for the array-producing standard library functions
+/// - **callback_narrowing**: What a filter callback's body proves about the argument it is handed
 /// - **resolution**: Entry points and shared helpers; delegates to the forward walker
 /// - **rhs_resolution**: Right-hand-side expression resolution for variable assignments
 /// - **forward_walk**: The forward walker shared by all type-resolution consumers
@@ -9,6 +10,7 @@
 /// - **foreach_resolution**: Iterable element/key type extraction from generic annotations
 /// - **closure_resolution**: Closure `$this` binding and callable parameter inference helpers
 pub(crate) mod array_func_rules;
+pub(crate) mod callback_narrowing;
 pub(crate) mod class_string_resolution;
 pub(crate) mod closure_resolution;
 pub(crate) mod foreach_resolution;
