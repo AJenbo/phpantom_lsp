@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786726143090,
+  "lastUpdate": 1786727910459,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21011,6 +21011,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e4446d1da1839f3cb8a8d2a52e97f147cf03c4a9",
+          "message": "[Fix][Laravel] Model Factories make/create return generic Model (#356)",
+          "timestamp": "2026-08-14T19:02:20+02:00",
+          "tree_id": "a1f489584f9c8e9868e66b1deb0ae4c41755bf15",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e4446d1da1839f3cb8a8d2a52e97f147cf03c4a9"
+        },
+        "date": 1786727904260,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.1,
             "unit": "MiB"
           }
         ]
