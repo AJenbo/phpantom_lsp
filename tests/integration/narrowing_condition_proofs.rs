@@ -520,3 +520,103 @@ function f(): void {
         "the reassignment replaces the annotated type, got: {text}"
     );
 }
+
+// ─── A truthy test rules out the members that are always falsy ─────────────
+
+/// `?? []` on a nullable value leaves `string|array{}`, and `array{}` is
+/// the empty array, which PHP always treats as false.  A truthy guard
+/// therefore proves the value is the string half, and passing it on to a
+/// function that wants a `string` is not a mistake.
+#[test]
+fn a_truthy_guard_rules_out_the_empty_array_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///truthy_empty_shape.php";
+    let content = r#"<?php
+function f(?string $s): void {
+    $value = $s ?? [];
+    if ($value) {
+        $value; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+    assert!(
+        !text.contains("array"),
+        "an empty array shape cannot survive a truthy test, got: {text}"
+    );
+}
+
+/// `!empty()` reaches the same rule through the same narrowing, so the
+/// two spellings of the guard agree.
+#[test]
+fn a_not_empty_guard_rules_out_the_empty_array_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///not_empty_empty_shape.php";
+    let content = r#"<?php
+function f(?string $s): void {
+    $value = $s ?? [];
+    if (!empty($value)) {
+        $value; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+    assert!(
+        !text.contains("array"),
+        "an empty array shape cannot survive a truthy test, got: {text}"
+    );
+}
+
+/// A shape with a required field is a non-empty array, so it is truthy and
+/// must survive the same guard the empty one is dropped by.
+#[test]
+fn a_truthy_guard_keeps_a_shape_that_has_a_required_field() {
+    let backend = create_test_backend();
+    let uri = "file:///truthy_filled_shape.php";
+    let content = r#"<?php
+/** @return array{id: int}|null */
+function load(): ?array { return null; }
+function f(): void {
+    $row = load();
+    if ($row) {
+        $row; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("id"),
+        "a shape with a required field is truthy, got: {text}"
+    );
+}
+
+/// The falsy string and int literals go the same way: `'0'` and `0` are
+/// false in PHP, so a truthy branch cannot be holding either.
+#[test]
+fn a_truthy_guard_rules_out_the_falsy_literals() {
+    let backend = create_test_backend();
+    let uri = "file:///truthy_literals.php";
+    let content = r#"<?php
+/** @return 'yes'|'0'|0|7 */
+function pick() { return 7; }
+function f(): void {
+    $picked = pick();
+    if ($picked) {
+        $picked; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("yes"), "the truthy string stays, got: {text}");
+    assert!(text.contains('7'), "the truthy int stays, got: {text}");
+    assert!(
+        !text.contains("'0'") && !text.contains('0'),
+        "`'0'` and `0` are falsy in PHP, got: {text}"
+    );
+}

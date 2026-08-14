@@ -5,18 +5,18 @@ type narrowing, PHP version features, and stub attribute handling.
 Items that are purely about *completion UX* or *stub metadata
 extraction* live in [completion.md](completion.md).
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
 ## T3. Property hooks (PHP 8.4)
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 PHP 8.4 introduced property hooks (`get` / `set`):
 
@@ -80,7 +80,7 @@ fix above, so both should be implemented together.
 ---
 
 ## T4. Non-empty-* type narrowing and propagation
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: High**
 
 PHPStan tracks `non-empty-string` and `non-empty-array` through
 built-in functions. These narrowings don't directly enable
@@ -132,7 +132,7 @@ write helpers.
 ---
 
 ## T5. Fiber type resolution
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 `Generator<TKey, TValue, TSend, TReturn>` has dedicated support for
 extracting each type parameter (value type for foreach, send type
@@ -147,7 +147,7 @@ Generator extraction in `docblock/types.rs`.
 ---
 
 ## T6. `Closure::bind()` / `Closure::fromCallable()` return type preservation
-**Impact: Low · Effort: Low-Medium**
+**Impact: Low · Complexity: Medium-High**
 
 Variables holding closure literals, arrow functions, and first-class
 callables now resolve to the `Closure` class, so `$fn->bindTo()`,
@@ -165,7 +165,7 @@ See `ClosureBindDynamicReturnTypeExtension` and
 
 
 ## T10. Ternary expression as RHS of list destructuring
-**Impact: Low · Effort: Low-Medium**
+**Impact: Low · Complexity: Medium**
 
 List destructuring (`[$a, $b] = expr`) resolves element types when
 the RHS is a function call returning an array shape, or a simple
@@ -187,7 +187,7 @@ $a->  // should see Foo|Bar members
 ---
 
 ## T11. Nested list destructuring
-**Impact: Low · Effort: Low-Medium**
+**Impact: Low · Complexity: Medium**
 
 Nested destructuring like `[[$one, $two]] = $source` is not resolved.
 When the RHS has a type like `array{array{Foo, Bar}}`, the outer
@@ -211,7 +211,7 @@ $one->  // should see Foo members
 ---
 
 ## T13. Closure variables lose callable signature detail
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 When a variable holds a closure or arrow function, the resolution
 pipeline resolves it to the `Closure` class name. The callable
@@ -263,7 +263,7 @@ emits the concrete callable signature in the `@param` tag.
 ---
 
 ## T20. Type narrowing reconciliation engine
-**Impact: Medium-High · Effort: High**
+**Impact: Medium-High · Complexity: Very High**
 
 PHPantom's type narrowing in `type_engine/types/narrowing/` handles
 basic patterns (instanceof, is_* calls, null checks) but lacks the
@@ -344,7 +344,7 @@ raw strings.
 
 ## T26. Globbed constant unions (`Foo::BAR_*`)
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 Resolve wildcard constant patterns like `Foo::BAR_*` to the union of
 all matching constant types on the class. PHPStan supports this syntax
@@ -377,7 +377,7 @@ it should:
 
 ## T28. Template inference depth priority (shallowest bound wins)
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 When a generic type parameter is inferred from multiple argument
 positions at a call site, all inferred types are currently unioned.
@@ -423,7 +423,7 @@ When selecting the final type for a template param:
 
 ## T29. Definite vs possible variable existence tracking
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: High**
 
 PHPantom currently treats all assigned variables as definitely in
 scope. This causes false negatives: a variable assigned only inside
@@ -469,7 +469,7 @@ intentional).
 
 ## T30. Literal type collapse limit
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 When combining union types, if the number of literal type variants
 (literal strings, literal ints) exceeds a threshold, collapse them to
@@ -495,7 +495,7 @@ blowup.
 
 ## T31. Closure literal-return shape inference
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 A closure whose native return hint is just `array` but whose body
 returns a literal array should get the literal shape as its
@@ -527,7 +527,7 @@ unresolved. Depends on nothing else in this file.
 
 ## T32. Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: High**
 
 `is_type_compatible` (`src/diagnostics/type_errors/compatibility.rs`,
 moved there from `type_errors.rs` as part of a refactor split) is the
@@ -632,7 +632,7 @@ Everything else tagged `MAYBE` in the source, notably:
 ---
 
 ## T33. Class constant on an expression (`$obj::CONST`) resolves to nothing
-**Impact: Low-Medium · Effort: Low-Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 A class constant reached through a variable produces no type at all, so
 hover is blank and anything downstream of it loses the value. The same
@@ -662,7 +662,7 @@ a `$foo::INTEGER_CONSTANT` block that was dropped when
 ---
 
 ## T34. `static::CONST` over-narrows to the declaring class's value
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 Late static binding is ignored for class constants: `static::CONST`
 resolves to the value declared on the *current* class, even though a
@@ -703,7 +703,7 @@ upstream's `nsrt/class-constant-types.php` were dropped when
 ---
 
 ## T40. `pathinfo()` returns a shape or a string depending on the flags argument
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 ```php
 $parts = pathinfo($path);                      // array{dirname: …, basename: …, extension?: …, filename: …}
@@ -733,7 +733,7 @@ else keeps the declared union. Left over from the work that took the
 that accounted for the bulk of the volume.
 
 ## T41. `@param-out` is parsed but never read
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Medium · Complexity: Medium**
 
 ```php
 /**

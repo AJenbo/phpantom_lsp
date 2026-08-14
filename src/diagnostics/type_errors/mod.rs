@@ -105,7 +105,8 @@ pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
 ///
 /// A single entry written without a key, or spread in with `...`, is
 /// enough to disqualify the literal, because the shape inference drops
-/// positional entries as soon as the array has string keys.
+/// positional entries as soon as the array has string keys. `[]` itself
+/// enumerates all (zero) of its keys, so it is not disqualified.
 fn enumerates_all_keys(expr: &Expression<'_>) -> bool {
     use mago_syntax::cst::array::ArrayElement;
 
@@ -115,14 +116,13 @@ fn enumerates_all_keys(expr: &Expression<'_>) -> bool {
         _ => return false,
     };
 
-    !elements.is_empty()
-        && elements.iter().all(|elem| match elem {
-            ArrayElement::KeyValue(kv) => matches!(
-                kv.key,
-                Expression::Literal(Literal::String(_) | Literal::Integer(_))
-            ),
-            _ => false,
-        })
+    elements.iter().all(|elem| match elem {
+        ArrayElement::KeyValue(kv) => matches!(
+            kv.key,
+            Expression::Literal(Literal::String(_) | Literal::Integer(_))
+        ),
+        _ => false,
+    })
 }
 
 /// Extract string literal values from array expression elements.

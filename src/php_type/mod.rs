@@ -2433,6 +2433,52 @@ impl PhpType {
         }
     }
 
+    /// Whether every value of this type is truthy, or none of them is.
+    ///
+    /// `None` for the types that span both (`string` holds `''`, `int`
+    /// holds `0`, `array` holds `[]`), which leaves a caller reasoning
+    /// about a truthiness test undecided rather than guessing.
+    ///
+    /// This is a single atomic member's truthiness: a union or nullable
+    /// spans its members and is therefore undecided.
+    pub fn truthiness(&self) -> Option<bool> {
+        if self.is_null() || self.is_false() {
+            return Some(false);
+        }
+        if self.is_true() {
+            return Some(true);
+        }
+        match self.kind() {
+            // PHP's own cast-to-bool rules, read off the literal's value
+            // rather than its source text: `''` and `'0'` are the only falsy
+            // strings, so `'0.0'` and `' '` are truthy.  A number the parsers
+            // cannot read is one no `0` spelling produces, so it counts as
+            // truthy rather than leaving the whole branch undecided.
+            TypeKind::Literal(value) => Some(match value.as_ref() {
+                LiteralValue::String(_) => value
+                    .string_content()
+                    .is_none_or(|text| !text.is_empty() && text != "0"),
+                LiteralValue::Int(_) => value.parse_i64().is_none_or(|value| value != 0),
+                LiteralValue::Float(_) => value.parse_f64().is_none_or(|value| value != 0.0),
+            }),
+            TypeKind::Named(name) => match name.to_ascii_lowercase().as_str() {
+                "object" | "non-empty-string" | "non-empty-array" | "non-empty-list"
+                | "positive-int" | "negative-int" | "callable" | "closure" => Some(true),
+                other if is_keyword_type(other) => None,
+                // A class instance is always truthy in PHP.
+                _ => Some(true),
+            },
+            // An object shape or an intersection is an object, and an object
+            // is always truthy.  A shape with at least one required field is
+            // a non-empty array; an empty one (`array{}`) is falsy.
+            TypeKind::Intersection(_) | TypeKind::ObjectShape(_) => Some(true),
+            TypeKind::ArrayShape(_) | TypeKind::ListShape(_) => self
+                .shape_entries()
+                .map(|entries| entries.iter().any(|entry| !entry.optional)),
+            _ => None,
+        }
+    }
+
     /// Return the part of a type that can be truthy.
     ///
     /// For `string|false` returns `Some(Named("string"))`, for `?User`
@@ -2445,7 +2491,7 @@ impl PhpType {
     /// but that PHP has no plain spelling for are left alone: `int` stays
     /// `int` rather than becoming a range excluding `0`.
     pub fn truthy_type(&self) -> Option<PhpType> {
-        let is_falsy = |t: &PhpType| t.is_null() || t.is_false();
+        let is_falsy = |t: &PhpType| t.truthiness() == Some(false);
         // A `bool` that survives a truthy test can only have been `true`,
         // and keeping it as `bool` makes the check unfalsifiable: a
         // variable seeded `false` and reassigned in one branch would go on

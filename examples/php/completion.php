@@ -526,6 +526,41 @@ class ScalarGuardNarrowingDemo
             : (is_int($value) ? (string) $value : 'none');
     }
 
+    /**
+     * A truthy check rules out every value that can only ever be false,
+     * not just `null` and `false`.
+     *
+     * The `?? []` is the usual way a union like this appears: the default
+     * is not of the value's own type, so what comes out spans both. An
+     * empty array is false in PHP, so the guard below leaves only the
+     * string half and `explode()` is handed what it asks for.
+     *
+     * @return list<string>
+     */
+    public function onlyWhatCanBeTrue(): array
+    {
+        $markets = Scaffolding\scaffoldingReadSetting('markets') ?? [];
+
+        if ($markets) {
+            return explode(',', $markets);         // string, no array{} left
+        }
+
+        return [];
+    }
+
+    /**
+     * What is only *sometimes* false is kept: a plain `string` still holds
+     * `''`, so the guard narrows it no further than the declaration does.
+     */
+    public function whatMayStillBeEither(string $label): string
+    {
+        if ($label) {
+            return Scaffolding\takesGradeString($label);   // still string
+        }
+
+        return 'unlabelled';
+    }
+
     /** An assignment in an `elseif` condition narrows what it wrote. */
     public function fromElseif(bool $skip, string|array|null $raw): string
     {

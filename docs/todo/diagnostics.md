@@ -1,12 +1,12 @@
 # PHPantom — Diagnostics
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
@@ -25,7 +25,7 @@ PHPantom assigns diagnostic severity based on runtime consequences:
 
 ## D5. External tool diagnostic suppression actions
 
-**Impact: Low · Effort: Low (per tool, after proxy exists)**
+**Impact: Low · Complexity: Low (per tool, after proxy exists)**
 
 PHPantom's own inline suppression (`// @phpantom-ignore code`) has
 shipped. PHPStan suppression is also implemented ("Ignore PHPStan
@@ -45,7 +45,7 @@ proxies:
 
 ## D6. Unreachable code diagnostic
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 Dim code that appears after unconditional control flow exits:
 `return`, `throw`, `exit`, `die`, `continue`, `break`. This is a
@@ -88,7 +88,7 @@ the call becomes visible, signalling the bug.
 
 ## D10. PHPMD diagnostic proxy
 
-**Impact: Low · Effort: Medium**
+**Impact: Low · Complexity: Medium**
 
 Proxy PHPMD (PHP Mess Detector) diagnostics into the editor, following
 the same pattern as the existing PHPStan proxy. PHPMD 3.0 (once
@@ -119,7 +119,7 @@ with `command`, `timeout`, and tool-specific options mirroring the
 
 ## D14. Tighten argument type mismatch diagnostic (Phase 2)
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Complexity: High**
 
 `is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
 still silences two cases that are genuine bugs at runtime. Two other
@@ -146,7 +146,7 @@ site clearly misunderstands the API. Should be **Error** severity.
 
 ## D15. Unused parameter diagnostic
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 Flag function and method parameters that are never read inside the
 body. This was intentionally excluded from D4 (unused variable
@@ -173,7 +173,7 @@ all parameters are used. Users can now silence false positives with
 
 ## D16. `unreachable_match_arm` ignores literal subject types
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 `scalar_type_label` in `src/diagnostics/match_type_errors.rs` answers
 `None` for a literal type (`'exception'`, `42`), so a subject the
@@ -200,7 +200,7 @@ now resolves to `mixed` rather than to the surviving literal.
 
 ## D17. `docblock_native_mismatch` only judges nullability
 
-**Impact: Low · Effort: Medium**
+**Impact: Low · Complexity: Medium-High**
 
 ```php
 /** @param int $name */

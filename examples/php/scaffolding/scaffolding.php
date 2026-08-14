@@ -2305,6 +2305,12 @@ function scaffoldingReadPayload($raw)
     return $raw;
 }
 
+/** A setting that may not have been supplied at all. */
+function scaffoldingReadSetting(string $name): ?string
+{
+    return $name === 'markets' ? 'dk,se' : null;
+}
+
 /** @param 'a'|'b'|'c' $mark
  *  @return 'a'|'b'|'c' */
 function scaffoldingGradeOnOpeningLine(string $mark): string

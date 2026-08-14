@@ -5,19 +5,19 @@ and lock contention on the hot paths. These items are sequenced so
 that structural fixes land before features that would amplify the
 underlying costs (parallel file processing, full background indexing).
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
 ## P3. Parallel pre-filter in `find_implementors`
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 `find_implementors` Phase 3 reads every unloaded classmap file
 sequentially: `fs::read_to_string`, string pre-filter for the target
@@ -58,7 +58,7 @@ threshold (e.g. 8 files).
 
 ## P15. Two-phase stub index construction (eliminate `RwLock` on stub maps)
 
-**Impact: Low · Effort: Medium**
+**Impact: Low · Complexity: Medium-High**
 
 The three stub indexes (`stub_index`, `stub_function_index`,
 `stub_constant_index`) are write-once-read-many maps. They are
@@ -120,7 +120,7 @@ is restructured for other reasons.
 
 ## P16. Pre-parsed stub format (eliminate raw PHP embedding)
 
-**Impact: High · Effort: Medium-High**
+**Impact: High · Complexity: Very High**
 
 The ~530 phpstorm-stubs PHP files are embedded as raw source via
 `include_str!` (~9.8 MB in `.rodata`). This has three costs:
@@ -260,7 +260,7 @@ essentially free for both eager and deferred indexing paths.
 
 ## P17. `mago-names` resolution on the parse hot path
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Complexity: High**
 
 The `mago-names` name resolver runs synchronously inside
 `update_ast_inner`, adding a full AST walk plus an owned `HashMap`
@@ -307,7 +307,7 @@ significantly reduced.
 
 ## P18. Subtype result caching
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Complexity: High**
 
 PHPStan caches subtype check results (`isSuperTypeOf()`) in a static
 `HashMap` keyed by type description strings. This avoids redundant
@@ -390,7 +390,7 @@ like:
 
 ## P20. Content-hash gated resolution cache persistence
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Very High**
 
 The resolved-class cache (`resolved_class_cache`) is ephemeral — it
 lives only for the duration of the process. On LSP restart or cold
@@ -454,7 +454,7 @@ isn't needed.
 
 ## P21. Offset-shifting for cached diagnostics on partial edits
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Very High**
 
 When a user edits one method in a file, PHPantom currently re-runs
 diagnostics on the entire file. For large files (500+ lines), this
@@ -499,7 +499,7 @@ diagnostic layer.
 
 ## P30. Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`
 
-**Impact: Medium-High · Effort: High**
+**Impact: Medium-High · Complexity: Very High**
 
 `mago-hir` is an intermediate representation that lowers the CST plus
 PHPDoc comments into a single flat,
@@ -611,7 +611,7 @@ waiting on the triggers above.
 
 ## P47. The resolved-class cache lock caps concurrent class resolution
 
-**Impact: Medium · Effort: Medium-High**
+**Impact: Medium · Complexity: Very High**
 
 `ResolvedClassCache` is a single `RwLock<ResolvedCacheInner>`, and every
 resolution takes its write lock several times: twice per
@@ -699,7 +699,7 @@ acquisitions per site during a population run: the sweep above proves
 
 ## P35. Diagnostic passes reach only a fraction of available cores
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Medium-High · Complexity: Very High**
 
 Measured on a 32-core machine against large Laravel projects (release
 build): the `analyze` Phase 2 diagnostic pass spawns one worker per
@@ -844,7 +844,7 @@ real ceiling than the hashing was.
 
 ## P48. Higher-order collection proxy injection repeats work
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 Grafting the item type's members onto a
 `HigherOrderCollectionProxy<TKey, TValue, 'method', Collection>` runs
@@ -882,7 +882,7 @@ most of the repetition.
 
 ## P49. A very long method chain costs superlinear time to analyse
 
-**Impact: Low · Effort: Medium**
+**Impact: Low · Complexity: Medium**
 
 Resolving a receiver spine no longer recurses per link, so a fluent chain
 of any length parses, hovers, and analyses without overflowing the stack.
@@ -915,7 +915,7 @@ lengths where it shows.
 
 ## P50. Cache the top-level scope for `global` keyword resolution
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: High**
 
 Every `resolve_variable_types` call on a file containing `global `
 rebuilds the top-level scope by forward-walking every top-level

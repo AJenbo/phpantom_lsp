@@ -1,18 +1,18 @@
 # PHPantom — LSP Features
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
 ## F2. Partial result streaming via `$/progress`
 
-**Impact: Medium · Effort: Medium-High**
+**Impact: Medium · Complexity: Medium-High**
 
 The LSP spec (3.17) allows requests that return arrays — such as
 `textDocument/implementation`, `textDocument/references`,
@@ -93,7 +93,7 @@ developer arrive before vendor matches, even within a single phase.
 
 ## F5. Call hierarchy
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium**
 
 Implement `callHierarchy/incomingCalls` and
 `callHierarchy/outgoingCalls` to answer "who calls this function?" and
@@ -146,7 +146,7 @@ Find References uses on its own.
 
 ## F7. Evaluatable expression support (DAP integration)
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Low**
 
 Implement `textDocument/evaluatableExpression` so debuggers (Xdebug
 via DAP) can evaluate expressions under the cursor during a debug
@@ -188,7 +188,7 @@ debugger.
 | Field      | Value                    |
 | ---------- | ------------------------ |
 | **Impact** | High                     |
-| **Effort** | Medium (2-5 days)        |
+| **Complexity** | Medium-High          |
 
 Create a VS Code extension that bundles PHPantom and publishes it to
 the VS Code Marketplace.
@@ -250,7 +250,7 @@ Gatekeeper or SmartScreen warnings).
 | Field      | Value                    |
 | ---------- | ------------------------ |
 | **Impact** | High                     |
-| **Effort** | Medium (2-5 days)        |
+| **Complexity** | Medium-High          |
 
 Create an IntelliJ plugin that depends on
 [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) and
@@ -301,7 +301,7 @@ IDEs, not just PHPStorm.
 | Field      | Value                    |
 | ---------- | ------------------------ |
 | **Impact** | Medium                   |
-| **Effort** | Low (≤ 1 day)            |
+| **Complexity** | Low                  |
 
 Create a Homebrew formula for PHPantom so users on macOS and Linux
 can install it with `brew install phpantom_lsp`.
@@ -336,7 +336,7 @@ downloading).
 | Field      | Value                    |
 | ---------- | ------------------------ |
 | **Impact** | Low-Medium               |
-| **Effort** | Low (≤ 1 day)            |
+| **Complexity** | Low                  |
 
 **Depends on:** F13 (Homebrew formula).
 
@@ -365,7 +365,7 @@ command = "phpantom_lsp"
 
 ## F15. Go-to-declaration
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Low**
 
 Implement `textDocument/declaration` to jump from a concrete method to
 its abstract or interface prototype, complementing the existing
@@ -397,7 +397,7 @@ handler that delegates to the existing infrastructure.
 
 ## F16. On-type `}` brace de-indent
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Low**
 
 Extend the existing on-type formatting handler (currently triggered on
 `\n` for docblock generation) to also trigger on `}`, automatically
@@ -421,7 +421,7 @@ existing `\n`.
 
 ## F17. Wire class move to `workspace/willRenameFiles`
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium**
 
 Renaming a class's FQN via `textDocument/rename` already moves the file
 and rewrites references across the project: renaming a class's
@@ -454,7 +454,7 @@ machinery to produce the `WorkspaceEdit`. The companion
 
 ## F19. Connect to a remote/TCP language server (VS Code extension)
 
-**Impact: Low · Effort: Low-Medium**
+**Impact: Low · Complexity: Medium**
 
 This task is for the VS Code extension package, not the `phpantom_lsp`
 server itself. The server can already speak LSP over a TCP socket; the

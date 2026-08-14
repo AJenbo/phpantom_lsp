@@ -1,12 +1,12 @@
 # PHPantom — Code Actions
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 **Refactoring code actions overview:** A2 (Extract Function) depends on
 forward-pass variable usage tracking with byte offsets across function
@@ -14,7 +14,7 @@ scopes.
 
 ## A34. Unified code action handler architecture
 
-**Impact: Medium · Effort: Medium-High**
+**Impact: Medium · Complexity: Very High**
 
 Refactor the code action system to use a unified handler architecture
 inspired by rust-analyzer's assist system. Currently each code action
@@ -62,7 +62,7 @@ cheaper to add: write one function, append it to an array.
 
 ## A16. Snippet Placeholder for Extracted Method Name
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Medium · Complexity: Medium**
 
 > **Blocked:** Requires `SnippetTextEdit` support in `lsp-types`.
 > Upstream issue: [gluon-lang/lsp-types#310](https://github.com/gluon-lang/lsp-types/issues/310).
@@ -133,7 +133,7 @@ competing with CLI transformers.
 
 ### A25. `strpos` → `str_contains` (PHP 8.0+)
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Complexity: Medium**
 
 Convert `strpos($haystack, $needle) !== false` to
 `str_contains($haystack, $needle)` and the negated form
@@ -154,7 +154,7 @@ offset has different semantics).
 
 ### A28. Explicit nullable parameter type (PHP 8.4 deprecation)
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Complexity: Low**
 
 Convert implicit nullable parameters to explicit nullable syntax:
 `function foo(string $p = null)` → `function foo(?string $p = null)`.
@@ -174,7 +174,7 @@ in a union).
 
 ### A29. Simplify boolean return
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 Convert if-return-boolean patterns to direct boolean returns:
 
@@ -195,7 +195,7 @@ Guard conditions:
 
 ### A31. Remove always-else (extract guard clause)
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 When an if-body ends with a flow-breaking statement (`return`, `throw`,
 `continue`, `exit`), the `else` keyword is redundant. Promote the else
@@ -212,7 +212,7 @@ these eagerly, removing the else changes semantics).
 
 ### A37. Simplify with `?->` (nullsafe operator)
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 Replace null-checked method/property chains with PHP 8.0's nullsafe
 operator:
@@ -270,7 +270,7 @@ $city = $user?->getAddress()?->getCity();
 
 ### A38. Convert if/elseif chain to switch
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 Convert an if/elseif chain that compares the same variable or
 expression against different values into a `switch` statement:
@@ -336,7 +336,7 @@ switch ($status) {
 
 ### A40. Generate method from call
 
-**Impact: High · Effort: Medium**
+**Impact: High · Complexity: Medium-High**
 
 When invoking an undefined method (e.g. `$foo->newMethod($a, $b)`),
 offer a code action to generate a method stub on the target class
@@ -360,7 +360,7 @@ High-impact rapid-prototyping workflow. Phpactor has this.
 
 ### A41. Create class from non-existing name
 
-**Impact: High · Effort: Medium**
+**Impact: High · Complexity: Medium-High**
 
 When a class name cannot be resolved, offer a code action to
 generate a new class file with the correct namespace based on PSR-4
@@ -382,7 +382,7 @@ Phpactor has this.
 
 ### A43. Update docblock generics
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium**
 
 Auto-update or add `@extends`/`@implements` tags to match the actual
 class hierarchy when a class extends a generic parent. Phpactor has
@@ -404,7 +404,7 @@ this as a transformer.
 
 ### A45. Simplify with `?:` (Elvis operator)
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 Replace `$x ? $x : $y` with `$x ?: $y` (PHP's short ternary / "Elvis"
 operator), the mirror image of the null-coalescing simplifications

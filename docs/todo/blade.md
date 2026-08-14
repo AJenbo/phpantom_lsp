@@ -11,14 +11,14 @@ existing pipeline (parser, resolver, completion, definition), and map
 response positions back to the original Blade file through a source
 map. Every item below builds on that pipeline.
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier, with a dependent item placed after its
 dependency.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
@@ -72,7 +72,7 @@ dependency.
 
 ## BL11. Custom directive discovery
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Medium · Complexity: Medium**
 
 `Blade::directive('datetime', …)` and `Blade::if('env', …)`
 registrations in app and package service providers declare
@@ -96,7 +96,7 @@ directive-registration half.) Scan literal directive registrations too
 
 ## BL1. Blade-aware code actions
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 Code actions are currently disabled for `.blade.php` files because
 text edits target virtual PHP coordinates and actions like "Import
@@ -113,7 +113,7 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 
 ## BL23. Unbalanced component tag diagnostics
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 `src/blade/balance.rs` pairs up block *directives*, but a component tag
 body is a block too: `<x-alert>` … `</x-alert>`, `<x-slot:title>` …
@@ -143,7 +143,7 @@ In `tests/integration/diagnostics_blade.rs`:
 
 ## BL14. Folding ranges for Blade files
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 `textDocument/foldingRange` on a `.blade.php` file currently returns
 ranges in virtual-PHP coordinates, which don't line up with the
@@ -172,7 +172,7 @@ New file `tests/integration/folding_blade.rs`:
 
 ## BL15. Document outline (symbols) for Blade files
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 A `.blade.php` file today reports no outline, or an outline positioned
 in virtual-PHP coordinates, because `document_symbols.rs` never
@@ -199,7 +199,7 @@ New file `tests/integration/document_symbols_blade.rs`:
 
 ## BL24. Named slot variables scoped to the component that receives them
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 Deferred from the component-tag work: `<x-slot:title>` and its legacy
 `<x-slot name="title">` form become a comment in the virtual PHP, so
@@ -235,7 +235,7 @@ template's variables.
 
 ## BL16. Blade-aware formatting
 
-**Impact: Low-Medium · Effort: High**
+**Impact: Low-Medium · Complexity: High**
 
 `formatting.rs` has no Blade awareness. `mago`'s formatter runs against
 the virtual PHP buffer generated for `.blade.php` files, and its output
@@ -364,7 +364,7 @@ reaches that bar.
 
 ## BL17. `format --check` CLI subcommand for CI
 
-**Impact: Low-Medium · Effort: Low-Medium** (depends on BL16)
+**Impact: Low-Medium · Complexity: Medium** (depends on BL16)
 
 Filed while researching BL16: once the native Blade formatter (and,
 more generally, PHPantom's resolved formatting strategy — external

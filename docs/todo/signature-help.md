@@ -10,18 +10,18 @@ parameter labels.
 
 The remaining work requires new extraction or deeper protocol support.
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
 ## S2. Closure / arrow function parameter signature help
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium**
 
 Signature help should work when invoking a variable that holds a closure
 or arrow function:
@@ -73,7 +73,7 @@ don't end with `(...)`.
 ---
 
 ## S3. Multiple overloaded signatures
-**Impact: Low · Effort: Medium-High**
+**Impact: Low · Complexity: Medium-High**
 
 Some PHP functions have multiple signatures depending on argument count
 or types.  For example, `array_map` can be called as:
@@ -111,7 +111,7 @@ This is a deeper change:
 ---
 
 ## S4. Named argument awareness in active parameter
-**Impact: Low · Effort: Medium**
+**Impact: Low · Complexity: Medium**
 
 When the user types a named argument (`callback: ` in `array_map(callback: `),
 the active parameter should highlight the `$callback` parameter regardless
@@ -140,7 +140,7 @@ the parameter list.
 ---
 
 ## S5. Language construct signature help and hover
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 PHP language constructs that use parentheses (`unset()`, `isset()`, `empty()`,
 `eval()`, `exit()`, `die()`, `print()`, `list()`) are not function calls in the

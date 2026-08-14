@@ -5,13 +5,13 @@ definitions across the workspace. The goal is to remain fast and
 lightweight by default while offering progressively richer modes for
 users who want exhaustive workspace intelligence.
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
@@ -271,7 +271,7 @@ better.
 
 ## X7. Recency tracking
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 The current lazy-loading design provides an implicit recency signal:
 classes in `uri_classes_index` were loaded because the developer interacted with
@@ -321,7 +321,7 @@ ready to implement.
 
 ## X9. Honor editor file excludes and PHP associations during indexing
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 This task spans both the server and the IDE plugins. The server side
 teaches the directory walkers to honor a generic list of exclude globs

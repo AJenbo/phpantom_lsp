@@ -9,127 +9,162 @@ scheduled.
 Cross-file navigation → Diagnostics → Code actions → Performance.
 
 Items inside each sprint are ordered by priority (top = do first):
-quick wins (low effort) before heavy lifts, dependencies before their
-dependents, and within the same effort tier by impact descending.
-The backlog is ordered by impact (descending), then effort (ascending)
-within the same impact tier.
+low-complexity items (easiest to assign, least implementation risk)
+before heavy lifts, dependencies before their dependents, and within
+the same complexity tier by impact descending. The backlog is ordered
+by impact (descending), then complexity (ascending) within the same
+impact tier.
+
+**Complexity measures how hard the task is to implement correctly,
+not how long it takes** (time estimates are consistently wrong; skill
+required is not). Use it to decide who to assign: a **Low**-complexity
+item (e.g. adding a hundred repetitive docblock tags) is safe for a
+low-skill contributor even if it's tedious; a **High**-complexity item
+(e.g. a 50-line change to the forward walker) needs an experienced
+contributor even though it's short.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 # Scheduled Sprints
 
 ## Sprint 6 — 0.10.0 release, full indexing
 
-| #    | Item                                                                                                                                                      | Impact      | Effort      |
+| #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| B49  | [Short-circuit `&&`/`\|\|` narrowing does not reach the second operand](todo/bugs.md#b49-short-circuit--narrowing-does-not-reach-the-second-operand)        | High        | High        |
+| B51  | [`instanceof` does not eliminate a class from a union in the guarded branch](todo/bugs.md#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch) | High        | High        |
+| B59  | [`max()`/`min()` with scalar arguments return `mixed`](todo/bugs.md#b59-maxmin-with-scalar-arguments-return-mixed-instead-of-the-arguments-common-type)      | Medium      | Medium      |
+| B57  | [A typed class constant loses its literal value](todo/bugs.md#b57-a-typed-class-constant-loses-its-literal-value)                                           | Medium      | Medium      |
+| B58  | [The array union operator (`+`) does not preserve a previously narrowed key type](todo/bugs.md#b58-the-array-union-operator--does-not-preserve-a-previously-narrowed-key-type) | Medium      | High        |
+| B62  | [PHPUnit's `assertNotNull`/`assertNotFalse` are not recognized as narrowing assertions](todo/bugs.md#b62-phpunits-assertnotnullassertnotfalse-are-not-recognized-as-narrowing-assertions) | Medium      | Medium      |
+| B70  | [`is_array()` does not narrow a union-typed parameter before an array-dimension fetch](todo/bugs.md#b70-is_array-does-not-narrow-a-union-typed-parameter-before-an-array-dimension-fetch) | Medium      | High        |
+| B52  | [A reassigned-in-guard variable is not merged as excluding its bad value](todo/bugs.md#b52-a-variable-reassigned-inside-a-guard-that-catches-its-bad-value-is-not-merged-as-excluding-that-value) | Medium      | High        |
+| B54  | [A nullsafe-chain guard does not narrow a later plain dereference of the same chain](todo/bugs.md#b54-a-nullsafe-chain-guard-does-not-narrow-a-later-plain-dereference-of-the-same-chain) | Medium      | High        |
+| B60  | [Array keys built from loop-index arithmetic or `array_keys()` still widen to `int\|string`](todo/bugs.md#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring) | Medium      | High        |
+| B63  | [`assertInstanceOf`-narrowed return types leak across unrelated call sites](todo/bugs.md#b63-assertinstanceof-narrowed-return-types-leak-across-unrelated-call-sites-of-a-shared-helper) | Medium      | High        |
+| B56  | [`array_key_first`/`array_key_last` are not narrowed non-null after a non-empty guard](todo/bugs.md#b56-array_key_firstarray_key_last-are-not-narrowed-non-null-after-a-non-empty-guard) | Low-Medium  | Medium-High |
+| B64  | [A `@template` bound that includes `null` is dropped by the call site](todo/bugs.md#b64-a-template-bound-that-includes-null-is-dropped-by-the-call-site)   | Low-Medium  | Medium-High |
+| B67  | [`str_replace()`'s return type ignores the `$subject` argument](todo/bugs.md#b67-str_replaces-return-type-ignores-the-subject-argument)                     | Low-Medium  | Medium      |
+| B68  | [`array_chunk()`'s return element type resolves to the source array's element type](todo/bugs.md#b68-array_chunks-return-element-type-resolves-to-the-source-arrays-element-type) | Low-Medium  | Medium      |
+| B69  | [`array_map()` with a builtin function-name callback loses the source array's key type](todo/bugs.md#b69-array_map-with-a-builtin-function-name-string-callback-does-not-preserve-the-source-arrays-key-type) | Low-Medium  | Medium      |
+| B72  | [`!== null` narrowing on a `@var`-annotated variable is not applied before a builtin call](todo/bugs.md#b72--null-narrowing-on-a-var-annotated-variable-is-not-applied-before-a-builtin-call) | Low-Medium  | Medium-High |
+| B50  | [Ternary-branch narrowing is not applied to property/array-element reads](todo/bugs.md#b50-ternary-branch-narrowing-is-not-applied-to-propertyarray-element-reads) | Low-Medium  | Medium-High |
+| B53  | [A repeated identical no-argument call is not recognized as consistent within a scope](todo/bugs.md#b53-a-repeated-identical-no-argument-call-is-not-recognized-as-consistent-within-the-same-truthy-guarded-scope) | Low-Medium  | Medium-High |
+| B61  | [`isset()` narrowing is not propagated through a multi-level chained array-dimension fetch](todo/bugs.md#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch) | Low-Medium  | High        |
+| B71  | [A `continue`-discarded falsy union member is not carried into a variable it's copied into](todo/bugs.md#b71-a-continue-discarded-falsy-union-member-is-not-carried-into-a-variable-the-value-is-copied-into) | Low-Medium  | High        |
+| B66  | [A closure parameter passed to `spl_autoload_register()` is not inferred from the callback's type](todo/bugs.md#b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type) | Low         | Medium      |
+| B65  | [`ReflectionClass<T>`'s generic argument is not carried through `newInstanceArgs()`](todo/bugs.md#b65-reflectionclastts-generic-argument-is-not-carried-through-newinstanceargs) | Low         | Medium      |
+| B73  | [`array_sum()` on a `@var`-annotated `list<int>` from a method call still returns `int\|float`](todo/bugs.md#b73-array_sum-on-a-var-annotated-listint-from-a-method-call-still-returns-intfloat) | Low         | Medium-High |
+| B74  | [`Scope::isInClass()` paired with `getClassReflection()` is not recognized as an assert-if-true pair](todo/bugs.md#b74-scopeisinclass-paired-with-getclassreflection-is-not-recognized-as-an-assert-if-true-pair) | Low         | Medium      |
+| B55  | [A ternary's self-referencing true branch loses truthy narrowing when compiled from a Blade component attribute](todo/bugs.md#b55-a-ternarys-self-referencing-true-branch-loses-truthy-narrowing-when-compiled-from-a-blade-component-attribute) | Low         | Medium-High |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 
-| #   | Item                                                                                                                                                            | Impact      | Effort      |
+| #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
-| L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | Medium      |
+| E1  | [External stub packages (ide-helper, etc.)](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                                     | Medium-High | Low         |
 | E5  | [Extension stub coverage audit](todo/external-stubs.md#e5-extension-stub-selection-stubs-extensions)                                                            | Medium      | Low         |
-| E1  | [External stub packages (ide-helper, etc.)](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                                     | Medium-High | Medium      |
-| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | Medium      |
+| E4  | [Embedded stub override with external stubs](todo/external-stubs.md#e4-embedded-stub-override-with-external-stubs) (depends on E1)                              | Medium      | Low         |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
-| E4  | [Embedded stub override with external stubs](todo/external-stubs.md#e4-embedded-stub-override-with-external-stubs) (depends on E1)                              | Medium      | Medium      |
+| D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
+| L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
+| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | High        |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 ## Sprint 8 — Blade support
 
-| #    | Item                                                                                                                       | Impact     | Effort     |
+| #    | Item                                                                                                                       | Impact     | Complexity |
 | ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------- |
 |      | Clear [refactoring gate](todo/refactor.md)                                                                                | —          | —          |
-| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium     |
-| BL23 | [Unbalanced component tag diagnostics](todo/blade.md#bl23-unbalanced-component-tag-diagnostics)                            | Low-Medium | Low        |
-| BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
-| BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
+| BL23 | [Unbalanced component tag diagnostics](todo/blade.md#bl23-unbalanced-component-tag-diagnostics)                            | Low-Medium | Medium     |
+| BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Medium     |
 | BL24 | [Named slot variables scoped to the component that receives them](todo/blade.md#bl24-named-slot-variables-scoped-to-the-component-that-receives-them) | Low-Medium | Medium |
+| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Medium     |
+| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
+| BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium-High |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
-| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
 
 # Backlog
 
 Items not yet assigned to a sprint. Worth doing eventually but
 unlikely to move the needle for most users.
 
-| #   | Item                                                                                                                                                                        | Impact      | Effort      |
+| #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | **[Completion](todo/completion.md)**                                                                                                                                        |             |             |
 | C1  | Array functions needing new code paths                                                                                                                                      | Medium      | High        |
-| C11 | [Smarter member ordering after `->` / `::`](todo/completion.md#c11-smarter-member-ordering-after-)                                                                       | Medium      | Medium      |
-| C8  | [Filesystem proximity as an affinity tiebreaker](todo/completion.md#c8-filesystem-proximity-as-an-affinity-tiebreaker)                                                      | Low-Medium  | Low         |
+| C11 | [Smarter member ordering after `->` / `::`](todo/completion.md#c11-smarter-member-ordering-after-)                                                                       | Medium      | High        |
+| C8  | [Filesystem proximity as an affinity tiebreaker](todo/completion.md#c8-filesystem-proximity-as-an-affinity-tiebreaker)                                                      | Low-Medium  | Medium      |
 | C3  | Go-to-definition for array shape keys via bracket access                                                                                                                    | Low-Medium  | Medium      |
-| C7  | `class_alias()` support                                                                                                                                                     | Low-Medium  | Medium      |
-| C4  | Non-array functions with dynamic return types                                                                                                                               | Low         | High        |
-| C5  | `#[ReturnTypeContract]` parameter-dependent return types                                                                                                                    | Low         | Low         |
+| C7  | `class_alias()` support                                                                                                                                                     | Low-Medium  | Medium-High |
+| C5  | `#[ReturnTypeContract]` parameter-dependent return types                                                                                                                    | Low         | Medium      |
 | C6  | `#[ExpectedValues]` parameter value suggestions                                                                                                                             | Low         | Medium      |
-| C10 | [Deprecation markers on class-name completions from all sources](todo/completion.md#c10-deprecation-markers-on-class-name-completions-from-all-sources)                     | Low         | Low         |
+| C10 | [Deprecation markers on class-name completions from all sources](todo/completion.md#c10-deprecation-markers-on-class-name-completions-from-all-sources)                     | Low         | Medium      |
+| C4  | Non-array functions with dynamic return types                                                                                                                               | Low         | High        |
 |     | **[Type Inference](todo/type-inference.md)**                                                                                                                                |             |             |
-| T20 | [Type narrowing reconciliation engine](todo/type-inference.md#t20-type-narrowing-reconciliation-engine) (CNF clause algebra, sure/sureNot tracking)                         | Medium-High | High        |
-| T28 | [Template inference depth priority (shallowest bound wins)](todo/type-inference.md#t28-template-inference-depth-priority-shallowest-bound-wins)                             | Medium      | Low-Medium  |
-| T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | Medium      |
-| T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium      |
-| T32 | [Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps](todo/type-inference.md#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps)    | Medium      | Medium      |
-| T41 | [`@param-out` is parsed but never read](todo/type-inference.md#t41-param-out-is-parsed-but-never-read)                                                                      | Medium      | Low-Medium  |
-| T34 | [`static::CONST` over-narrows to the declaring class's value](todo/type-inference.md#t34-staticconst-over-narrows-to-the-declaring-classs-value)                            | Medium      | Medium      |
-| T30 | [Literal type collapse limit](todo/type-inference.md#t30-literal-type-collapse-limit)                                                                                       | Low-Medium  | Low         |
-| T40 | [`pathinfo()` returns a shape or a string depending on the flags argument](todo/type-inference.md#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument) | Low-Medium  | Low         |
-| T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Low-Medium  |
-| T13 | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail)                                             | Low-Medium  | Medium      |
+| T20 | [Type narrowing reconciliation engine](todo/type-inference.md#t20-type-narrowing-reconciliation-engine) (CNF clause algebra, sure/sureNot tracking)                         | Medium-High | Very High   |
+| T41 | [`@param-out` is parsed but never read](todo/type-inference.md#t41-param-out-is-parsed-but-never-read)                                                                      | Medium      | Medium      |
+| T28 | [Template inference depth priority (shallowest bound wins)](todo/type-inference.md#t28-template-inference-depth-priority-shallowest-bound-wins)                             | Medium      | Medium-High |
+| T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium-High |
+| T34 | [`static::CONST` over-narrows to the declaring class's value](todo/type-inference.md#t34-staticconst-over-narrows-to-the-declaring-classs-value)                            | Medium      | Medium-High |
+| T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | High        |
+| T32 | [Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps](todo/type-inference.md#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps)    | Medium      | High        |
+| T30 | [Literal type collapse limit](todo/type-inference.md#t30-literal-type-collapse-limit)                                                                                       | Low-Medium  | Medium      |
+| T40 | [`pathinfo()` returns a shape or a string depending on the flags argument](todo/type-inference.md#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument) | Low-Medium  | Medium      |
 | T26 | [Globbed constant unions (`Foo::BAR_*`)](todo/type-inference.md#t26-globbed-constant-unions-foobar_)                                                                        | Low-Medium  | Medium      |
-| T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium      |
-| T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Low-Medium  |
-| T4  | [Non-empty-\* type narrowing and propagation](todo/type-inference.md#t4-non-empty--type-narrowing-and-propagation)                                                          | Low-Medium  | Medium      |
-| T5  | Fiber type resolution                                                                                                                                                       | Low         | Low         |
-| T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium  |
-| T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Low-Medium  |
+| T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Medium      |
+| T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Medium-High |
+| T13 | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail)                                             | Low-Medium  | Medium-High |
+| T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium-High |
+| T4  | [Non-empty-\* type narrowing and propagation](todo/type-inference.md#t4-non-empty--type-narrowing-and-propagation)                                                          | Low-Medium  | High        |
+| T5  | Fiber type resolution                                                                                                                                                       | Low         | Medium      |
+| T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
+| T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
-| D14 | [Tighten argument type mismatch diagnostic (Phase 2)](todo/diagnostics.md#d14-tighten-argument-type-mismatch-diagnostic-phase-2)                                            | Medium      | Low         |
-| D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Low         |
-| D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Low         |
-| D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low-Medium  |
-| D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
-| D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
+| D14 | [Tighten argument type mismatch diagnostic (Phase 2)](todo/diagnostics.md#d14-tighten-argument-type-mismatch-diagnostic-phase-2)                                            | Medium      | High        |
+| D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
+| D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
+| D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
+| D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
+| D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium-High |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
-| A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
-| A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
-| A16 | [Snippet placeholder for extracted method name](todo/actions.md#a16-snippet-placeholder-for-extracted-method-name) (lets the user type over the generated name immediately) | Medium      | Low-Medium  |
-| A25 | [`strpos` → `str_contains`](todo/actions.md#a25-strpos-str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Low         |
+| A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium-High |
 | A28 | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low         |
+| A16 | [Snippet placeholder for extracted method name](todo/actions.md#a16-snippet-placeholder-for-extracted-method-name) (lets the user type over the generated name immediately) | Medium      | Medium      |
+| A25 | [`strpos` → `str_contains`](todo/actions.md#a25-strpos-str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Medium      |
+| A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium-High |
+| A34 | [Unified code action handler architecture](todo/actions.md#a34-unified-code-action-handler-architecture) (closure-based resolve, unified fix type)                          | Medium      | Very High   |
 | A29 | [Simplify boolean return](todo/actions.md#a29-simplify-boolean-return) (`if (cond) return true; return false;` → `return cond;`)                                            | Low-Medium  | Medium      |
-| A31 | [Remove always-else](todo/actions.md#a31-remove-always-else-extract-guard-clause) (extract guard clause)                                                                    | Low-Medium  | Medium      |
-| A34 | [Unified code action handler architecture](todo/actions.md#a34-unified-code-action-handler-architecture) (closure-based resolve, unified fix type)                          | Medium      | Medium-High |
-| A37 | [Simplify with `?->`](todo/actions.md#a37-simplify-with-nullsafe-operator) (replace null-checked chains with the nullsafe operator)                                       | Low-Medium  | Medium      |
-| A38 | [Convert if/elseif chain to switch](todo/actions.md#a38-convert-ifelseif-chain-to-switch)                                                                                   | Low-Medium  | Medium      |
-| A43 | [Update docblock generics](todo/actions.md#a43-update-docblock-generics)                                                                                                    | Low         | Low-Medium  |
-| A45 | [Simplify with `?:`](todo/actions.md#a45-simplify-with-elvis-operator) (replace `$x ? $x : $y` with `$x ?: $y`)                                                             | Low-Medium  | Low         |
+| A45 | [Simplify with `?:`](todo/actions.md#a45-simplify-with-elvis-operator) (replace `$x ? $x : $y` with `$x ?: $y`)                                                             | Low-Medium  | Medium      |
+| A31 | [Remove always-else](todo/actions.md#a31-remove-always-else-extract-guard-clause) (extract guard clause)                                                                    | Low-Medium  | Medium-High |
+| A37 | [Simplify with `?->`](todo/actions.md#a37-simplify-with-nullsafe-operator) (replace null-checked chains with the nullsafe operator)                                       | Low-Medium  | Medium-High |
+| A38 | [Convert if/elseif chain to switch](todo/actions.md#a38-convert-ifelseif-chain-to-switch)                                                                                   | Low-Medium  | Medium-High |
+| A43 | [Update docblock generics](todo/actions.md#a43-update-docblock-generics)                                                                                                    | Low         | Medium      |
 |     | **[PHPStan Code Actions](todo/phpstan-actions.md)**                                                                                                                         |             |             |
 | H4  | `assign.byRefForeachExpr` — unset by-reference foreach variable                                                                                                             | Medium      | Medium      |
 | H13 | `property.notFound` — declare missing property (same-class)                                                                                                                 | Medium      | Medium      |
 | H15 | Template bound from tip — add `@template T of X`                                                                                                                            | Medium      | Medium      |
-| H16 | `match.unhandled` — add missing match arms                                                                                                                                  | Medium      | Medium      |
+| H16 | `match.unhandled` — add missing match arms                                                                                                                                  | Medium      | Medium-High |
 | H19 | `property.unused` / `method.unused` — remove unused member                                                                                                                  | Low         | Low         |
-| H20 | `generics.callSiteVarianceRedundant` — remove redundant variance annotation                                                                                                 | Low         | Low         |
 | H23 | `instanceof.alwaysTrue` — remove redundant instanceof check                                                                                                                 | Low         | Low         |
 | H24 | `catch.neverThrown` — remove unnecessary catch clause                                                                                                                       | Low         | Low         |
+| H20 | `generics.callSiteVarianceRedundant` — remove redundant variance annotation                                                                                                 | Low         | Medium      |
 |     | **[CLI Fix Rules](todo/fix-cli.md)**                                                                                                                                        |             |             |
-| FX1 | [`deprecated` — replace deprecated symbol usage](todo/fix-cli.md#fx1-deprecated-replace-deprecated-symbol-usage)                                                           | Medium      | Medium      |
+| FX7 | [`add_return_type` — generate `@return` docblocks from function bodies](todo/fix-cli.md#fx7-add_return_type-generate-return-docblocks-from-function-bodies)                | Medium-High | Medium-High |
+| FX1 | [`deprecated` — replace deprecated symbol usage](todo/fix-cli.md#fx1-deprecated-replace-deprecated-symbol-usage)                                                           | Medium      | Low         |
+| FX3 | [`phpstan.return.unusedType` — remove unused type from return union](todo/fix-cli.md#fx3-phpstanreturnunusedtype-remove-unused-type-from-return-union)                     | Medium      | Low         |
+| FX4 | [`phpstan.missingType.iterableValue` — add `@return` with iterable type](todo/fix-cli.md#fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type)                | Medium      | Low         |
 | FX2 | [`unused_variable` — remove unused variables](todo/fix-cli.md#fx2-unused_variable-remove-unused-variables)                                                                 | Medium      | Medium      |
-| FX3 | [`phpstan.return.unusedType` — remove unused type from return union](todo/fix-cli.md#fx3-phpstanreturnunusedtype-remove-unused-type-from-return-union)                     | Medium      | Medium      |
-| FX4 | [`phpstan.missingType.iterableValue` — add `@return` with iterable type](todo/fix-cli.md#fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type)                | Medium      | Medium      |
 | FX5 | [`phpstan.property.unused` / `phpstan.method.unused` — remove unused member](todo/fix-cli.md#fx5-phpstanpropertyunused-phpstanmethodunused-remove-unused-member)          | Low         | Low         |
-| FX6 | [`phpstan.generics.callSiteVarianceRedundant` — remove redundant variance](todo/fix-cli.md#fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance)         | Low         | Low         |
-| FX7 | [`add_return_type` — generate `@return` docblocks from function bodies](todo/fix-cli.md#fx7-add_return_type-generate-return-docblocks-from-function-bodies)                | Medium-High | Medium      |
+| FX6 | [`phpstan.generics.callSiteVarianceRedundant` — remove redundant variance](todo/fix-cli.md#fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance)         | Low         | Medium      |
 |     | **[LSP Features](todo/lsp-features.md)**                                                                                                                                    |             |             |
-| F11 | [VS Code extension](todo/lsp-features.md#f11-vs-code-extension)                                                                                                              | High        | Medium      |
-| F12 | [IntelliJ / PHPStorm plugin](todo/lsp-features.md#f12-intellij-phpstorm-plugin)                                                                                            | High        | Medium      |
+| F11 | [VS Code extension](todo/lsp-features.md#f11-vs-code-extension)                                                                                                              | High        | Medium-High |
+| F12 | [IntelliJ / PHPStorm plugin](todo/lsp-features.md#f12-intellij-phpstorm-plugin)                                                                                            | High        | Medium-High |
 | F13 | [Homebrew formula](todo/lsp-features.md#f13-homebrew-formula)                                                                                                                | Medium      | Low         |
 | F17 | [Wire class move to `workspace/willRenameFiles`](todo/lsp-features.md#f17-wire-class-move-to-workspacewillrenamefiles)                                                       | Medium      | Medium      |
 | F5  | [Call hierarchy](todo/lsp-features.md#f5-call-hierarchy) (incoming/outgoing calls)                                                                                          | Medium      | Medium      |
@@ -138,63 +173,63 @@ unlikely to move the needle for most users.
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr) (depends on F13)                                                                                            | Low-Medium  | Low         |
 | F16 | [On-type `}` brace de-indent](todo/lsp-features.md#f16-on-type-brace-de-indent)                                                                                            | Low         | Low         |
-| F19 | [Connect to a remote/TCP language server](todo/lsp-features.md#f19-connect-to-a-remotetcp-language-server-vs-code-extension)                                               | Low         | Low-Medium  |
+| F19 | [Connect to a remote/TCP language server](todo/lsp-features.md#f19-connect-to-a-remotetcp-language-server-vs-code-extension)                                               | Low         | Medium      |
 |     | **[Signature Help](todo/signature-help.md)**                                                                                                                                |             |             |
 | S2  | [Closure / arrow function parameter signature help](todo/signature-help.md#s2-closure-arrow-function-parameter-signature-help)                                             | Medium      | Medium      |
 | S3  | Multiple overloaded signatures                                                                                                                                              | Medium      | Medium-High |
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low-Medium  | Medium      |
-| S5  | Language construct signature help and hover                                                                                                                                 | Low         | Low         |
+| S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 |     | **[Laravel](todo/laravel.md)**                                                                                                                                              |             |             |
-| L22 | [Broaden recognized call sites for Laravel string keys](todo/laravel.md#l22-broaden-recognized-call-sites-for-laravel-string-keys)                                          | High        | Low-Medium  |
-| L5  | [`abort_if`/`abort_unless` type narrowing](todo/laravel.md#l5-abort_ifabort_unless-type-narrowing)                                                                          | High        | Medium      |
-| L24 | [Translation depth: JSON lang files, locales, placeholders](todo/laravel.md#l24-translation-depth-json-lang-files-locales-placeholders)                                     | Medium-High | Medium      |
-| L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium      |
-| L48 | [A factory's `$model` property is ignored](todo/laravel.md#l48-a-factorys-model-property-is-ignored)                                                                        | Medium      | Low         |
-| L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Low-Medium  |
-| L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Low-Medium  |
-| L41 | [Conditional return types on `url()` and its sibling helpers](todo/laravel.md#l41-conditional-return-types-on-url-and-its-sibling-helpers)                                  | Medium      | Low         |
-| L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium      |
+| L22 | [Broaden recognized call sites for Laravel string keys](todo/laravel.md#l22-broaden-recognized-call-sites-for-laravel-string-keys)                                          | High        | Medium      |
+| L5  | [`abort_if`/`abort_unless` type narrowing](todo/laravel.md#l5-abort_ifabort_unless-type-narrowing)                                                                          | High        | Medium-High |
+| L24 | [Translation depth: JSON lang files, locales, placeholders](todo/laravel.md#l24-translation-depth-json-lang-files-locales-placeholders)                                     | Medium-High | Medium-High |
+| L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
+| L48 | [A factory's `$model` property is ignored](todo/laravel.md#l48-a-factorys-model-property-is-ignored)                                                                        | Medium      | Medium      |
+| L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Medium      |
+| L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Medium      |
+| L41 | [Conditional return types on `url()` and its sibling helpers](todo/laravel.md#l41-conditional-return-types-on-url-and-its-sibling-helpers)                                  | Medium      | Medium      |
+| L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium-High |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
-| L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |
-| L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Low-Medium  |
-| L47 | [Morph aliases in `*_type` column comparisons](todo/laravel.md#l47-morph-aliases-in-_type-column-comparisons)                                                               | Low-Medium  | Medium      |
-| L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Low         |
-| L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Low         |
-| L8  | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | Medium-High |
-| L45 | [`*_count` properties are offered on every relationship](todo/laravel.md#l45-_count-properties-are-offered-on-every-relationship)                                           | Low-Medium  | Medium-High |
-| L44 | [Sibling resource registrations and degenerate resource names](todo/laravel.md#l44-sibling-resource-registrations-and-degenerate-resource-names)                             | Low-Medium  | Low-Medium  |
+| L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
+| L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Medium      |
+| L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Medium      |
+| L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Medium      |
+| L44 | [Sibling resource registrations and degenerate resource names](todo/laravel.md#l44-sibling-resource-registrations-and-degenerate-resource-names)                             | Low-Medium  | Medium      |
+| L47 | [Morph aliases in `*_type` column comparisons](todo/laravel.md#l47-morph-aliases-in-_type-column-comparisons)                                                               | Low-Medium  | Medium-High |
+| L8  | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | High        |
+| L45 | [`*_count` properties are offered on every relationship](todo/laravel.md#l45-_count-properties-are-offered-on-every-relationship)                                           | Low-Medium  | High        |
 | L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names) (Livewire projects only)                                                          | Low         | Low         |
 | L36 | [Container binding registrations from service providers](todo/laravel.md#l36-container-binding-registrations-from-service-providers)                                        | Low         | Low         |
-| L10 | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Low         |
 | L27 | [Legacy `Controller@method` action strings](todo/laravel.md#l27-legacy-controllermethod-action-strings)                                                                     | Low         | Low         |
 | L28 | [Path helper links and completion](todo/laravel.md#l28-path-helper-links-and-completion)                                                                                    | Low         | Low         |
+| L10 | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Medium      |
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
-| BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Low-Medium  |
+| BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Medium      |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
-| E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
-| E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
+| E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
+| E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Medium      |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P35 | [Diagnostic passes reach only a fraction of available cores](todo/performance.md#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores)                            | Medium-High | Medium      |
-| P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.46.0, still no `mago-hir` consumers upstream) | Medium-High | High        |
-| P47 | [The resolved-class cache lock caps concurrent class resolution](todo/performance.md#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution)                     | Medium      | Medium-High |
-| P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
-| P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium      |
-| P6  | O(n²) transitive eviction in `evict_fqn`                                                                                                                                    | Low         | Low         |
-| P15 | [Two-phase stub index construction (eliminate `RwLock` on stub maps)](todo/performance.md#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps)              | Low         | Medium      |
-| P17 | [`mago-names` resolution on the parse hot path](todo/performance.md#p17-mago-names-resolution-on-the-parse-hot-path)                                                        | Medium      | Low         |
-| P18 | [Subtype result caching](todo/performance.md#p18-subtype-result-caching) (per-request HashMap for hierarchy walks)                                                          | Medium      | Low         |
-| P20 | [Content-hash gated resolution cache persistence](todo/performance.md#p20-content-hash-gated-resolution-cache-persistence)                                                  | Medium      | Medium      |
-| P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Medium      |
-| P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Low         |
+| P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Very High   |
+| P35 | [Diagnostic passes reach only a fraction of available cores](todo/performance.md#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores)                            | Medium-High | Very High   |
+| P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.46.0, still no `mago-hir` consumers upstream) | Medium-High | Very High   |
+| P17 | [`mago-names` resolution on the parse hot path](todo/performance.md#p17-mago-names-resolution-on-the-parse-hot-path)                                                        | Medium      | High        |
+| P18 | [Subtype result caching](todo/performance.md#p18-subtype-result-caching) (per-request HashMap for hierarchy walks)                                                          | Medium      | High        |
+| P47 | [The resolved-class cache lock caps concurrent class resolution](todo/performance.md#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution)                     | Medium      | Very High   |
+| P20 | [Content-hash gated resolution cache persistence](todo/performance.md#p20-content-hash-gated-resolution-cache-persistence)                                                  | Medium      | Very High   |
+| P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
+| P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium-High |
+| P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | High        |
+| P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |
 | P49 | [A very long method chain costs superlinear time to analyse](todo/performance.md#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse)                              | Low         | Medium      |
-| P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | Medium      |
+| P15 | [Two-phase stub index construction (eliminate `RwLock` on stub maps)](todo/performance.md#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps)              | Low         | Medium-High |
+| P6  | O(n²) transitive eviction in `evict_fqn`                                                                                                                                    | Low         | High        |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
-| X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium      |
-| X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium      |
-| X9  | [Honor editor file excludes and PHP associations during indexing](todo/indexing.md#x9-honor-editor-file-excludes-and-php-associations-during-indexing)                      | Low-Medium  | Medium      |
-| X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | High        |
+| X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
+| X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | Very High   |
+| X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
+| X9  | [Honor editor file excludes and PHP associations during indexing](todo/indexing.md#x9-honor-editor-file-excludes-and-php-associations-during-indexing)                      | Low-Medium  | Medium-High |
 |     | **[Inline Completion](todo/inline-completion.md)**                                                                                                                          |             |             |
-| N1  | Template engine (type-aware snippets)                                                                                                                                       | Medium      | High        |
+| N1  | Template engine (type-aware snippets)                                                                                                                                       | Medium      | Medium      |
 | N2  | N-gram prediction from PHP corpus                                                                                                                                           | Medium      | Very High   |
 | N3  | Fine-tuned GGUF sidecar model                                                                                                                                               | Medium      | Very High   |

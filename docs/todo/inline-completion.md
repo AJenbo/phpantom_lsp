@@ -98,7 +98,7 @@ artifact, not bundled in the main LSP binary.
 
 ## N1. Template Engine
 
-**Effort:** Medium (2-5 days per pattern group)
+**Complexity:** Medium (per pattern group)
 **Dependencies:** None beyond existing type resolution
 
 The template engine is pattern matching on the current AST node and
@@ -426,7 +426,7 @@ wrong.
 
 ## N2. N-gram Engine
 
-**Effort:** Medium-High (1-2 weeks including training)
+**Complexity:** Very High (novel statistical model and training pipeline, no existing pattern to follow)
 **Dependencies:** Training corpus, PHP tokenizer
 
 The n-gram engine handles the cases where the template engine has no
@@ -528,7 +528,7 @@ and `$id`.
 
 ## N3. Fine-Tuned GGUF Model
 
-**Effort:** High (2-4 weeks including training and integration)
+**Complexity:** Very High (model selection, fine-tuning, and a new sidecar architecture, well outside the existing codebase's patterns)
 **Dependencies:** Phase 1 and 2 complete, training infrastructure
 
 This is the "eventually" phase. A small language model fine-tuned

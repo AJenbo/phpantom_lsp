@@ -5,19 +5,19 @@ extraction, and argument-level intelligence. Items that are about
 _type resolution infrastructure_ (generics, narrowing, conditional
 types) live in [type-inference.md](type-inference.md).
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
 ## C1. Array functions needing new code paths
 
-**Impact: Medium · Effort: High**
+**Impact: Medium · Complexity: High**
 
 These functions have return type semantics that don't fit into either
 `ARRAY_PRESERVING_FUNCS` (same array type out) or `ARRAY_ELEMENT_FUNCS`
@@ -49,7 +49,7 @@ These functions have return type semantics that don't fit into either
 
 ## C3. Go-to-definition for array shape keys via bracket access
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 Array shape keys accessed via bracket notation (`$status['code']`)
 have no go-to-definition support. The type comes from a
@@ -69,7 +69,7 @@ key inside the matching `array{…}` annotation.
 
 ## C4. Non-array functions with dynamic return types
 
-**Impact: Low · Effort: High**
+**Impact: Low · Complexity: High**
 
 PHPStan also provides dynamic return type extensions for many non-array
 functions. These are lower priority because they mostly refine scalar
@@ -101,7 +101,7 @@ return types (less impactful for class-based completion).
 
 ## C5. `#[ReturnTypeContract]` parameter-dependent return types
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 phpstorm-stubs use `#[ReturnTypeContract]` on 4 functions to express
 return type narrowing based on a parameter's value or presence. These
@@ -146,7 +146,7 @@ type. This integrates into the call return type resolution path.
 
 ## C6. `#[ExpectedValues]` parameter value suggestions
 
-**Impact: Low · Effort: Medium**
+**Impact: Low · Complexity: Medium**
 
 phpstorm-stubs annotate ~62 parameters and return values with
 `#[ExpectedValues]` to declare the set of valid constant values or
@@ -193,7 +193,7 @@ combinations.
 
 ## C7. `class_alias()` support
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 Resolve `class_alias('OriginalClass', 'AliasName')` so that the alias
 name works for completion, go-to-definition, and hover. PHP's
@@ -235,7 +235,7 @@ and no go-to-definition because PHPantom has no record of the alias.
 
 ## C8. Filesystem proximity as an affinity tiebreaker
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 The affinity table is built from the file's `use` imports and namespace
 declaration, which works well when the file already has imports. In
@@ -269,7 +269,7 @@ candidate file.
 
 ## C10. Deprecation markers on class-name completions from all sources
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 Same-namespace classes (source tier 2) already carry deprecation info
 because `ClassInfo` is available. Classes from `fqn_uri_index`
@@ -289,7 +289,7 @@ not just same-namespace ones.
 
 ## C11. Smarter member ordering after `->` / `::`
 
-**Impact: Medium · Effort: needs planning**
+**Impact: Medium · Complexity: High**
 
 Members after `->` and `::` are now sorted by kind (constants and
 `::class` first, then properties, then methods, with implemented magic

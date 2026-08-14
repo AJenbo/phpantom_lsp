@@ -4,13 +4,13 @@ Known gaps and missing features in PHPantom's Laravel Eloquent support.
 For the general architecture and virtual member provider design, see
 `ARCHITECTURE.md`.
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
@@ -187,7 +187,7 @@ So split the upstream work:
    or propose it as a `@phpstan-method` line that coexists with the
    plain `@method` so tools that choke keep reading the flattened one.
 
-**Impact: High · Effort: Medium (upstream PRs)**
+**Impact: High · Complexity: High (upstream PRs)**
 
 ---
 
@@ -215,7 +215,7 @@ today and what is still missing.
 
 #### L5. `abort_if`/`abort_unless` type narrowing
 
-**Impact: High · Effort: Medium**
+**Impact: High · Complexity: Medium-High**
 
 These are the standard guard patterns in Laravel controllers and
 middleware. Without narrowing, variables keep their wider type,
@@ -260,7 +260,7 @@ by specific function names rather than `if` + early return.
 
 #### L45. `*_count` properties are offered on every relationship
 
-**Impact: Low-Medium · Effort: Medium-High**
+**Impact: Low-Medium · Complexity: High**
 
 For each relationship method we synthesize a `{snake_name}_count`
 property typed `int`, unconditionally. At runtime the attribute only
@@ -285,7 +285,7 @@ than a missing feature. Reported as a follow-up on
 
 #### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
-**Impact: Low-Medium · Effort: Medium-High**
+**Impact: Low-Medium · Complexity: High**
 
 Less common than `withCount`; only affects codebases using aggregate
 eager-loading. Cannot be inferred declaratively from the model alone;
@@ -302,7 +302,7 @@ The `@property` workaround applies here too.
 
 #### L10. `View::withX()` and `RedirectResponse::withX()` dynamic methods
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 Most code uses `->with('key', $value)` instead of the dynamic
 `->withKey($value)` form. Explicitly declared methods (`withErrors`,
@@ -337,7 +337,7 @@ methods, or document this as a known limitation.
 
 #### L12. `HasUuids` / `HasUlids` trait — `$id` typed as `string`
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 Models that use `Illuminate\Database\Eloquent\Concerns\HasUuids` or
 `HasUlids` have their primary key (`$id` by default) typed as
@@ -362,7 +362,7 @@ automatically once the traits are loaded.
 
 #### L47. Morph aliases in `*_type` column comparisons
 
-**Impact: Low-Medium · Effort: Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 The morph-map index (`virtual_members/laravel/morph_map.rs`) recognizes
 alias strings in the positions Eloquent resolves through the map by
@@ -390,7 +390,7 @@ dispatch on the `LaravelStringKind::MorphAlias` span kind.
 
 #### L42. Morph alias completion in array positions
 
-**Impact: Low-Medium · Effort: Low-Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 Morph aliases complete inside `Relation::getMorphedModel('|')` and
 `Model::getActualClassNameForMorph('|')`, but not in the two array
@@ -509,7 +509,7 @@ endpoints rather than building new analysis.
 
 #### L17. Additional string contexts without booting
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 Constructs the extension and the Laravel LSP cover that we don't, and
 that are statically recoverable (no booting):
@@ -571,7 +571,7 @@ choosing not to ship.
 
 #### L22. Broaden recognized call sites for Laravel string keys
 
-**Impact: High · Effort: Low-Medium**
+**Impact: High · Complexity: Medium**
 
 Detection breadth multiplies everything else in this section: the
 symbol-map spans already feed go-to-definition, references, hover, and
@@ -606,7 +606,7 @@ name), `Lang::has()`, and the typed config accessors (`Config::string()`,
 
 #### L24. Translation depth: JSON lang files, locales, placeholders
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Medium-High · Complexity: Medium-High**
 
 Statically recoverable translation features the Laravel LSP has and we
 still partially lack:
@@ -628,7 +628,7 @@ still partially lack:
 
 #### L25. Storage disk name strings
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Low**
 
 `Storage::disk('...')` and the `#[Storage]` container attribute already
 complete against `filesystems.disks.*`, navigate to the disk's entry in
@@ -640,7 +640,7 @@ diagnostic.
 
 #### L27. Legacy `Controller@method` action strings
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Low**
 
 We already complete and resolve the modern `[Controller::class,
 'method']` array form (which the Laravel LSP does *not* complete), and
@@ -653,7 +653,7 @@ discouraged since Laravel 8.
 
 #### L28. Path helper links and completion
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Low**
 
 `base_path('...')`, `app_path()`, `config_path()`, `database_path()`,
 `lang_path()`, `public_path()`, `resource_path()`, and `storage_path()`
@@ -666,7 +666,7 @@ same statically, and we can also handle directories.
 
 #### L29. Livewire and Volt component names
 
-**Impact: Low (Livewire projects only) · Effort: Low**
+**Impact: Low (Livewire projects only) · Complexity: Low**
 
 The component index (class components under `app/Livewire/`, nested
 names, and view-based Volt / Livewire v4 single-file components), the
@@ -678,7 +678,7 @@ completion, go-to-definition, or unknown-component diagnostic.
 
 #### L30. Eloquent attribute-array key completion
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Medium · Complexity: Medium**
 
 Our Eloquent string completion covers where-style column arguments and
 relation names, but not **attribute-array keys**: `User::create(['name'
@@ -696,7 +696,7 @@ accessors, `@property` tags) — no database needed.
 
 #### L31. String-key rename, highlight, and semantic tokens
 
-**Impact: Low-Medium · Effort: Low-Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 References and go-to-definition already work for the four indexed
 string kinds, but the rename, document-highlight, and semantic-token
@@ -709,7 +709,7 @@ moving the Blade file — defer that one until the rest is in place.
 
 #### L32. Config-backed named-resource strings
 
-**Impact: Medium · Effort: Low-Medium**
+**Impact: Medium · Complexity: Medium**
 
 L25 (storage disks) is one instance of a general pattern: a method
 argument names an entry under a known config subtree, and the config
@@ -746,7 +746,7 @@ config entry), hover, diagnostics, and references.
 
 #### L36. Container binding registrations from service providers
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Low**
 
 `$this->app->bind('payments', StripeGateway::class)`, `bindIf()`,
 `singleton()`, `singletonIf()`, `scoped()`, `scopedIf()`, `instance()`,
@@ -772,7 +772,7 @@ interface.
 
 #### L39. Unused view and translation key detection
 
-**Impact: Low · Effort: Medium**
+**Impact: Low · Complexity: Medium**
 
 The reverse of the invalid-key diagnostics: keys that are *declared*
 but never referenced. The references machinery already finds all
@@ -787,7 +787,7 @@ reference found," never as an error.
 
 #### L41. Conditional return types on `url()` and its sibling helpers
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Complexity: Medium**
 
 `url()` returns the generator or a string depending on whether it got a
 path:
@@ -814,7 +814,7 @@ Application : mixed)`).
 
 #### L44. Sibling resource registrations and degenerate resource names
 
-**Impact: Low-Medium · Effort: Low-Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 `Route::resource()` and `Route::apiResource()` are recognized, but the
 registrations that generate route names the same way are not, so every
@@ -847,7 +847,7 @@ existing `resource_registration` handling.
 
 #### L46. `->can()` on a user model the receiver does not name
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Medium-High · Complexity: Medium-High**
 
 Authorization abilities are recognized on `Gate::allows()`,
 `$this->authorize()`, the `can:` middleware parameter, and Blade's `@can`,
@@ -881,7 +881,7 @@ resolution at all.
 
 #### L48. A factory's `$model` property is ignored
 
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Complexity: Medium**
 
 `Factory::modelName()` reads `protected $model` before it reaches for the
 naming convention, and a factory whose name does not match its model is

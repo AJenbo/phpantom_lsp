@@ -165,6 +165,12 @@ function runDemoAssertions(): void
         $scalarGuards->numberedLines() === [1 => 'first', 2 => 'second'],
         'a pre-incremented counter really produces integer keys',
     );
+    assert(
+        $scalarGuards->onlyWhatCanBeTrue() === ['dk', 'se'],
+        'the truthy branch really is reached with the string, never the empty array',
+    );
+    assert($scalarGuards->whatMayStillBeEither('b') === 'b', 'a non-empty label is truthy');
+    assert($scalarGuards->whatMayStillBeEither('') === 'unlabelled', "'' is falsy, so a plain string spans both branches");
 
     // ── class-string guard keeps its type argument ─────────────────────
     $guarded = (new ClassStringVarDemo())->guardedInstantiation(Scaffolding\Pen::class);

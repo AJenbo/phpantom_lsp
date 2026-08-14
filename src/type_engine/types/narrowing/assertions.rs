@@ -939,7 +939,7 @@ fn condition_result_for_member(
     if let TypeKind::Named(name) = condition.kind()
         && name == "non-empty-mixed"
     {
-        return member_is_truthy(member);
+        return member.truthiness();
     }
     super::super::conditional::condition_holds_for_type(member, condition, class_loader)
 }
@@ -955,42 +955,5 @@ fn can_hold_a_bool(ty: &PhpType) -> bool {
             "bool" | "boolean" | "true" | "false" | "scalar"
         ),
         _ => false,
-    }
-}
-
-/// Whether every value of this type is truthy, or none of them is.
-///
-/// `None` for the types that span both (`string` holds `''`, `int` holds
-/// `0`), which leaves the branch undecided rather than guessed.
-fn member_is_truthy(ty: &PhpType) -> Option<bool> {
-    if ty.is_null() || ty.is_false() {
-        return Some(false);
-    }
-    if ty.is_true() {
-        return Some(true);
-    }
-    match ty.kind() {
-        TypeKind::Literal(value) => Some(match value.as_ref() {
-            crate::php_type::LiteralValue::String(text) => !text.is_empty(),
-            crate::php_type::LiteralValue::Int(text) => text.as_ref() != "0",
-            crate::php_type::LiteralValue::Float(text) => {
-                text.parse::<f64>().is_ok_and(|value| value != 0.0)
-            }
-        }),
-        TypeKind::Named(name) => match name.to_ascii_lowercase().as_str() {
-            "object" | "non-empty-string" | "non-empty-array" | "non-empty-list"
-            | "positive-int" | "negative-int" | "callable" | "closure" => Some(true),
-            other if crate::php_type::is_keyword_type(other) => None,
-            // A class instance is always truthy in PHP.
-            _ => Some(true),
-        },
-        // An object shape or an intersection is an object, and an object is
-        // always truthy.  A shape with at least one required field is a
-        // non-empty array; an empty one (`array{}`) is falsy.
-        TypeKind::Intersection(_) | TypeKind::ObjectShape(_) => Some(true),
-        TypeKind::ArrayShape(_) | TypeKind::ListShape(_) => ty
-            .shape_entries()
-            .map(|entries| entries.iter().any(|entry| !entry.optional)),
-        _ => None,
     }
 }

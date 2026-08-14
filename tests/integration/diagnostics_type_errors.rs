@@ -8850,6 +8850,24 @@ takesConfig(['host' => 'localhost']);
     );
 }
 
+/// An empty array literal enumerates all (zero) of its keys just as
+/// completely as a non-empty one, so every required key is absent.
+#[test]
+fn empty_array_literal_missing_required_shape_keys_is_reported() {
+    let php = r#"<?php
+/** @param array{host: string, port: int} $config */
+function takesConfig(array $config): void {}
+
+takesConfig([]);
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required keys 'host', 'port'"),
+        "got {messages:?}"
+    );
+}
+
 #[test]
 fn array_literal_missing_several_required_shape_keys_names_all_of_them() {
     let php = r#"<?php

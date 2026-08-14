@@ -6,13 +6,13 @@ stubs let users get type information for PHP extensions, framework
 helpers, and IDE-specific annotations that the bundled stubs don't
 cover or that the user wants to override.
 
-Items are ordered by **impact** (descending), then **effort** (ascending)
+Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
 | Label      | Scale                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
-| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
+| **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
 
 ---
 
@@ -237,7 +237,7 @@ file, parse it, find the symbol by name/offset).
 - No scanning of stub files at init (just parsing the map file, which
   is a single fast text scan).
 
-### Effort
+### Complexity
 
 Low. The map-parsing logic already exists in `build.rs` and can be
 extracted into a shared helper. The GTD fallback is a small addition
@@ -368,17 +368,18 @@ in the embedded stubs (e.g. `wordpress-stubs` redefining `wpdb`),
 the external package wins. This is the correct behaviour: the
 project-specific definition is more accurate than the generic one.
 
-### Effort
+### Complexity
 
-Medium. The scanning infrastructure this needs (byte-level
-class/function/constant scanning) already shipped as part of
-indexing.md's full-scan path, so this item is no longer blocked on
-it — it only needs to be pointed at stub directories and to populate
-the three new indices above instead of the project's own symbol
-tables. The resolution changes are straightforward (one new phase in
-each lookup chain). The `PhpStormStubsMap.php` parser for
-project-level phpstorm-stubs is already written in `build.rs` and
-just needs to be available at runtime.
+High. This inserts a new phase directly into `find_or_load_class`,
+`find_or_load_function`, and the constant lookup chain — the shared
+resolution paths every consumer (diagnostics, completion, hover, GTD)
+goes through — so a mistake in priority ordering or the skip-if-present
+merge logic silently misresolves symbols for all of them. It also adds
+three new indices to `Backend` and a package-detection heuristic. The
+byte-level scanning infrastructure this needs already shipped as part
+of indexing.md's full-scan path, so this item is no longer blocked on
+it, but wiring the new phase into the core resolver chains correctly
+still requires real familiarity with how those chains are structured.
 
 ---
 
@@ -456,7 +457,7 @@ skip-if-present, so higher-priority sources win:
   annotation can place a corrected stub in their `.phpantom.toml`
   paths and it wins over everything.
 
-### Effort
+### Complexity
 
 Low (once Phase 2 is done). The scanning is identical. The new work
 is reading `initializationOptions` during `initialize`, reading
@@ -506,7 +507,7 @@ base stubs are. They go into a separate `STUB_OVERLAY_CLASS_MAP`
 array. At resolution time, when `find_or_load_class` reaches Phase 3
 (embedded stubs), it checks the overlay map first, then the base map.
 
-### Effort
+### Complexity
 
 Low. The overlay stubs are small hand-written PHP files. The build
 and resolution changes are minor additions to the existing
@@ -590,13 +591,13 @@ embedded stubs, built-in symbols would be invisible.
 
 ## Summary
 
-| #   | Goal                                                      | Effort | Dependencies                                       |
-| --- | --------------------------------------------------------- | ------ | -------------------------------------------------- |
-| E1  | GTD for built-in symbols via project-level phpstorm-stubs | Low    | None                                               |
-| E2  | Project-level stubs as a type resolution source           | Medium | None (byte-level scanner already shipped)          |
-| E3  | IDE-provided and `.phpantom.toml` stub paths              | Low    | E2                                                 |
-| E4  | Ship SPL overlay stubs, let external stubs override       | Low    | E2                                                 |
-| E7  | Stub-based framework patches (replace Rust patch system)  | Medium | E2 or E3                                           |
+| #   | Goal                                                      | Complexity  | Dependencies                                       |
+| --- | --------------------------------------------------------- | ----------- | -------------------------------------------------- |
+| E1  | GTD for built-in symbols via project-level phpstorm-stubs | Low         | None                                               |
+| E2  | Project-level stubs as a type resolution source           | High        | None (byte-level scanner already shipped)          |
+| E3  | IDE-provided and `.phpantom.toml` stub paths              | Low         | E2                                                 |
+| E4  | Ship SPL overlay stubs, let external stubs override       | Low         | E2                                                 |
+| E7  | Stub-based framework patches (replace Rust patch system)  | Medium-High | E2 or E3                                           |
 
 E1 can be done immediately and independently. It provides
 immediate value (GTD on `array_map`, `PDO`, `Iterator`, etc.) with
@@ -619,7 +620,7 @@ on top.
 
 ## E5. Extension stub selection (`[stubs] extensions`)
 
-**Impact: Low-Medium · Effort: Low**
+**Impact: Low-Medium · Complexity: Low**
 
 Override which PHP extension stubs are loaded. By default PHPantom
 loads core + all commonly bundled extensions, plus any declared in
@@ -660,7 +661,7 @@ relative path from `STUB_CLASS_MAP`.
 
 ## E6. Stub install prompt for non-Composer projects
 
-**Impact: Low · Effort: Low**
+**Impact: Low · Complexity: Medium**
 
 For non-Composer projects, offer to install phpstorm-stubs into the
 project so that go-to-definition works for built-in symbols. The
@@ -675,7 +676,7 @@ prerequisite.
 
 ## E7. Stub-based framework patches
 
-**Impact: Medium · Effort: Medium · Dependencies: E2 or E3**
+**Impact: Medium · Complexity: Medium-High · Dependencies: E2 or E3**
 
 Replace the Rust-coded Laravel class patch system
 (`virtual_members/laravel/patches.rs`) with plain PHP stub files that

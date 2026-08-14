@@ -903,3 +903,72 @@ class OverridingCommand extends Command
         "the command's own return type wins over the signature, got: {text}"
     );
 }
+
+/// The `?? []` an `option()` call is so often given leaves `string|array{}`,
+/// and the truthy guard that follows proves the string half.  Reporting the
+/// empty array against a `string` parameter inside that guard is a false
+/// positive on the everyday shape of a console command.
+#[tokio::test]
+async fn a_single_value_option_survives_a_default_and_a_truthy_guard() {
+    const GUARDED_COMMAND: &str = "\
+<?php
+namespace App\\Console\\Commands;
+use Illuminate\\Console\\Command;
+class GuardedCommand extends Command
+{
+    protected $signature = 'app:guarded {--markets=}';
+    public function handle(): void
+    {
+        $markets = $this->option('markets') ?? [];
+        if ($markets) {
+            $ids = explode(',', $markets);
+        }
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[("src/Console/Commands/GuardedCommand.php", GUARDED_COMMAND)],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Console/Commands/GuardedCommand.php"))
+        .unwrap()
+        .to_string();
+    open(&backend, &uri, GUARDED_COMMAND).await;
+
+    let position = position_after(GUARDED_COMMAND, "        if ($markets");
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse(&uri).unwrap(),
+                },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    let text = match hover.map(|h| h.contents) {
+        Some(HoverContents::Markup(markup)) => markup.value,
+        _ => String::new(),
+    };
+    assert!(
+        text.contains("$markets = string"),
+        "the guard proves the string half of `?string ?? []`, got: {text}"
+    );
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uri, GUARDED_COMMAND, &mut diags);
+    let mismatches: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(
+            |d| matches!(&d.code, Some(NumberOrString::String(c)) if c == "type_mismatch_argument"),
+        )
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "explode() is handed a string inside the guard, got {mismatches:?}"
+    );
+}
