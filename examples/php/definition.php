@@ -15,6 +15,9 @@
 
 namespace Demo;
 
+// Ctrl+Click the name below to jump to the function it imports — a
+// `use function` (and `use const`) import is the symbol it names, so
+// find-references and rename reach it like any other mention.
 use function Demo\Scaffolding\coverageTaxRate; // needed for the bare `::coverageTaxRate` @covers demo below, though never named directly
 
 // ── Go-to-Definition ────────────────────────────────────────────────────────
