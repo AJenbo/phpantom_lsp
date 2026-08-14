@@ -231,29 +231,6 @@ constant shapes satisfy their generic supertypes.
 
 ## Narrowing
 
-### B149. `instanceof` narrowing extends the union instead of filtering it
-
-**Impact: High · Effort: Medium**
-
-```php
-$obj = $container->get('config');       // object|null
-assert($obj instanceof Configuration);
-return $obj;                            // reported object|null|Configuration
-```
-
-`assert($x instanceof T)` (and the `if (!$x instanceof T) { throw }`
-guard) *adds* `T` to the union instead of replacing it (5 sites in
-PDepend alone). Related `instanceof` defects seen in the same sweep:
-the fall-through of `if (!$v instanceof C) { return; }` removes other
-classes but not scalar/array members of the union (2 sites); negated
-`instanceof` inside a branch doesn't narrow the branch at all
-(3 sites); and a successful check on an interface produces the bare
-interface instead of `Receiver&Interface`, which then fails the
-declared return type (2 sites).
-
-**Fix:** implement `instanceof` as union filtering/intersection in
-both polarities, for `assert()` and guard forms alike.
-
 ### B150. Branch-local reassignment and narrowing are wrong at the join point
 
 **Impact: Medium-High · Effort: Medium**
@@ -272,27 +249,33 @@ Two inverse defects at `if`/`else` merges (~5 sites):
 type transformed by that branch's assignments/narrowings), and the
 join is the union of branch end-states — nothing more, nothing less.
 
-### B154. A check on a nullsafe chain does not narrow the receiver
+### B177. A branch-local proof about an untyped subject escapes the join
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Low-Medium · Effort: Medium**
 
 ```php
-$image = Productimage::where(…)->first();       // Productimage|null
-if ($image?->file_id !== null) {
-    $this->scheduleDeletion($image->file_id);
-    $this->repo->delete($image);                // reported Productimage|null
-}
+$version = $row->version;      // stdClass property: no type
+if ($version instanceof Foo) { }
+$version;                      // reported Foo, should stay untyped
 ```
 
-If `$image` were null the chain yields `null` and the comparison
-fails, so inside the branch the receiver is non-null. The same holds
-for a truthy check (`if (!$product?->translation?->is_live) return;`
-proves `$product` non-null afterwards) and for `===` against a
-non-nullable RHS. 5 sites in four projects.
+Narrowing a subject the scope has no type for *establishes* that type
+(this is what lets `assert($x instanceof Foo)` and
+`if (!is_string($x)) { return; }` work at all), but the branch merge
+cannot tell the resulting entry apart from a branch-local assignment:
+a name absent on one incoming path and present on the other is adopted
+wholesale, so the proof survives a join it should not. The negated form
+leaks the same way, from the implicit-else path back into the body.
 
-**Fix:** when a condition proves a nullsafe chain's result non-null
-(or compares it to a type that excludes the short-circuit `null`),
-narrow every receiver in the chain to non-null in that branch.
+Harmless while the alternative is no information at all, and long-standing
+— it predates the `instanceof`/type-guard narrowing work that made it
+visible. Found while fixing the condition-proof handling, not by a sample
+project.
+
+**Fix:** distinguish "no entry" from "unknown" in `ScopeState` so the merge
+can widen a narrowed-from-nothing entry back to unknown, rather than
+adopting it. Overlaps [T29](type-inference.md#t29-definite-vs-possible-variable-existence-tracking),
+which needs the same distinction for variable existence.
 
 ### B155. A checked call expression is forgotten by the next identical call
 
@@ -314,21 +297,6 @@ identity.
 **Fix:** key the narrowing store by a canonical expression form
 (receiver chain + arguments) for deterministic/pure calls, and
 invalidate entries when a statement could change their inputs.
-
-### B156. `assert()` still misses some provable conditions
-
-**Impact: Medium · Effort: Medium**
-
-Follow-ups to the shipped `assert()` work, each reproduced in the
-sweep: `assert(is_string($version))` on a value read from a
-`stdClass` property inside a `foreach` leaves `mixed`;
-`assert($weights !== [])` does not produce `non-empty-array` (so a
-subsequent `array_key_last` keeps `null`); `assert(isset($m[0]))`
-does not remove `null` from the following offset read.
-
-**Fix:** route these condition shapes through the same reconciler the
-`if` forms use; the gaps are in subject kinds (property-of-mixed,
-array offset) and in the `!== []` → non-empty rule.
 
 ### B157. `@phpstan-assert` tags on called methods are ignored
 
@@ -375,20 +343,6 @@ nothing here — and a later reassignment (`$x = []; … $x = narrow();`)
 is also overridden by the annotation. The `@var` should seed the
 assignment it documents and then submit to normal flow narrowing
 (3 sites).
-
-### B163. An `int` assigned to a `float` property is reported
-
-**Impact: Low · Effort: Low-Medium**
-
-A leftover from the shipped arithmetic-precision work: an `int` value
-assigned to a `float`-typed property is reported instead of accepting
-the standard numeric widening PHP performs even under
-`declare(strict_types=1)`.
-
-No site for this reproduces any more — not in the ten-project sweep,
-and not in the promoted-constructor, static-property, `+=`,
-`@var`-only, nullable, and array-element forms. Confirm it still
-happens before working on it.
 
 ### B174. A `break` that leaves a loop early is missing from the post-loop join
 

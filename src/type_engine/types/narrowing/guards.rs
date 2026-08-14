@@ -739,7 +739,7 @@ pub(crate) enum TypeGuardKind {
 /// succeeds, the variable should narrow to `object` (not stay `mixed`
 /// and not become empty).  This function maps each guard kind to the
 /// PHP type it asserts.
-fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
+pub(crate) fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
     match kind {
         TypeGuardKind::Array => PhpType::array(),
         TypeGuardKind::String => PhpType::string(),

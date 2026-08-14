@@ -537,148 +537,21 @@ pub(crate) fn apply_condition_narrowing<'b>(
     }
 
     // Apply the accumulated instanceof narrowing results to the scope.
-    for (var_name, mut narrowed) in instanceof_results {
+    for (var_name, narrowed) in instanceof_results {
         // `$x instanceof A && $x instanceof B` proves both at once, so the
         // classes gathered across the operands are members of `A&B`
         // rather than alternatives a consumer may pick one of.
         let intersected = conjuncts
             .get(&var_name)
             .is_some_and(Conjuncts::is_intersection);
-        if intersected {
-            ResolvedType::tag_as_intersection(&mut narrowed);
-        }
-        if !narrowed.is_empty() {
-            let existing = scope.get(&var_name);
-            if existing.is_empty() {
-                // Untyped variable — instanceof provides the type.
-                scope.set(&var_name, narrowed);
-            } else {
-                // When the existing type is entirely `mixed` or
-                // `object`, instanceof replaces it — there is no
-                // useful information to preserve or intersect.
-                let all_broad = existing.iter().all(|rt| {
-                    rt.class_info.is_none()
-                        && matches!(
-                            rt.type_string.unwrap_nullable().kind(),
-                            TypeKind::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
-                        )
-                });
-                if all_broad {
-                    scope.set(&var_name, narrowed);
-                    continue;
-                }
-
-                // Typed variable — filter the existing union to only
-                // types present in the narrowed set.  This correctly
-                // handles both single instanceof (`Dog|Cat` → `Dog`)
-                // and OR instanceof (`Dog|Cat|Other` → `Dog|Cat`).
-                //
-                // When the narrowed type is NOT in the existing union
-                // (e.g. `MockInterface` narrowed to `MolliePayment`),
-                // this is an intersection case — apply via
-                // apply_instanceof_inclusion which has interface
-                // intersection logic.
-                let narrowed_fqns: Vec<String> = narrowed
-                    .iter()
-                    .filter_map(|rt| rt.class_info.as_ref().map(|c| c.fqn().to_string()))
-                    .collect();
-
-                // Try filtering: keep existing entries whose class is
-                // in the narrowed set.  A kept entry's own type_string
-                // may still be the whole pre-check union (a conditional
-                // return type resolves to one entry naming a class and
-                // listing an array alternative beside it), so restrict
-                // it to the narrowed classes as well.  Strip null on
-                // top because a successful instanceof check guarantees
-                // the value is non-null (e.g. `?Foo` → `Foo`).
-                let survives = |name: &str| {
-                    narrowed.iter().any(|rt| {
-                        rt.class_info
-                            .as_ref()
-                            .is_some_and(|c| c.name == name || c.fqn() == name)
-                    })
-                };
-                let filtered: Vec<ResolvedType> = existing
-                    .iter()
-                    .filter(|rt| {
-                        rt.class_info
-                            .as_ref()
-                            .is_some_and(|c| narrowed_fqns.contains(&c.fqn().to_string()))
-                    })
-                    .map(|rt| {
-                        let mut rt = rt.clone();
-                        rt.restrict_type_string_to_classes(&survives);
-                        if let Some(non_null) = rt.type_string.non_null_type() {
-                            rt.type_string = non_null;
-                        }
-                        rt
-                    })
-                    .collect();
-
-                if !filtered.is_empty() {
-                    // Filter matched — use the filtered results
-                    // (preserves richer type info from original resolution).
-                    // Also strip bare `null` entries: a successful
-                    // instanceof check guarantees non-null, so `null`
-                    // entries added by `from_classes_with_hint` must
-                    // be removed.
-                    let mut filtered: Vec<ResolvedType> = filtered
-                        .into_iter()
-                        .filter(|rt| !rt.type_string.is_null())
-                        .collect();
-                    if intersected {
-                        ResolvedType::tag_as_intersection(&mut filtered);
-                    }
-                    if filtered.is_empty() {
-                        scope.set(&var_name, narrowed);
-                    } else {
-                        scope.set(&var_name, filtered);
-                    }
-                } else {
-                    // No overlap between existing and narrowed types.
-                    // This is the intersection case (e.g. MockInterface
-                    // narrowed to MolliePayment).  Use
-                    // apply_instanceof_inclusion which produces the
-                    // intersection when one side is an interface.
-                    let mut results = existing.to_vec();
-                    // Apply all narrowed classes as a single group by
-                    // building a union type.
-                    let union_type = if narrowed_fqns.len() == 1 {
-                        PhpType::named(atom(&narrowed_fqns[0]))
-                    } else {
-                        PhpType::union(
-                            narrowed_fqns
-                                .iter()
-                                .map(|n| PhpType::named(atom(n)))
-                                .collect(),
-                        )
-                    };
-                    let var_ctx = build_var_ctx(&var_name, ctx, &scope_resolver);
-                    ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_inclusion(&union_type, false, &var_ctx, classes)
-                    });
-                    // Instanceof guarantees non-null — strip bare
-                    // `null` entries that were preserved by
-                    // `apply_narrowing`'s `None => true` rule.
-                    results.retain(|rt| !rt.type_string.is_null());
-                    // `apply_instanceof_inclusion` merging in an
-                    // unrelated interface (the branch this call site
-                    // exists for) leaves both classes in `results` as
-                    // separate entries, which describe one value that is
-                    // both at once.
-                    ResolvedType::tag_as_intersection(&mut results);
-                    if !results.is_empty() {
-                        scope.set(&var_name, results);
-                    } else {
-                        // Fallback: use the narrowed types directly.
-                        scope.set(&var_name, narrowed);
-                    }
-                }
-            }
-        } else {
-            // Empty narrowed list means the target was unresolvable.
-            scope.locals.insert(atom(&var_name), vec![]);
-        }
+        commit_instanceof_narrowing(
+            &var_name,
+            narrowed,
+            intersected,
+            scope,
+            ctx,
+            &scope_resolver,
+        );
     }
 
     // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
@@ -695,6 +568,9 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // Null narrowing: `if ($x !== null)` — remove null from scope.
     apply_null_narrowing_truthy(condition, scope, ctx);
 
+    // A proof about a `?->` chain's value is a proof about its receivers.
+    apply_nullsafe_receiver_narrowing(condition, scope, ctx, true);
+
     // @phpstan-assert-if-true / -if-false narrowing.
     apply_phpstan_assert_condition_narrowing(condition, scope, ctx, false);
 
@@ -703,6 +579,164 @@ pub(crate) fn apply_condition_narrowing<'b>(
 
     // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
     apply_member_exists_narrowing(condition, scope, false);
+}
+
+/// Write the outcome of a *successful* `instanceof` check on `var_name`
+/// into the scope.
+///
+/// `narrowed` holds the classes the check proves the value is; the
+/// variable's current types decide how they combine with what was already
+/// known.  Both polarities of the check reach this: a positive
+/// `instanceof` in a truthy branch, and the fall-through of a
+/// `if (!$x instanceof T) { return; }` guard, which proves exactly the
+/// same thing.  Keeping one implementation is what stops the guard form
+/// from drifting back into *adding* `T` to the union instead of
+/// filtering it down to `T`.
+fn commit_instanceof_narrowing(
+    var_name: &str,
+    mut narrowed: Vec<ResolvedType>,
+    intersected: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    scope_resolver: &dyn Fn(&str) -> Vec<ResolvedType>,
+) {
+    if intersected {
+        ResolvedType::tag_as_intersection(&mut narrowed);
+    }
+    if narrowed.is_empty() {
+        // Empty narrowed list means the target was unresolvable.
+        scope.locals.insert(atom(var_name), vec![]);
+        return;
+    }
+
+    let existing = scope.get(var_name);
+    if existing.is_empty() {
+        // Untyped variable — instanceof provides the type.
+        scope.set(var_name, narrowed);
+        return;
+    }
+
+    // When the existing type says no more than `mixed` or `object`,
+    // instanceof replaces it — there is no useful information to preserve
+    // or intersect.  `null` members count as broad too: a successful check
+    // rules them out, so `object|null` is as uninformative as bare
+    // `object`.
+    let is_broad_atom = |ty: &PhpType| {
+        ty.is_null()
+            || matches!(
+                ty.kind(),
+                TypeKind::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
+            )
+    };
+    let all_broad = existing.iter().all(|rt| {
+        rt.class_info.is_none()
+            && match rt.type_string.non_null_type() {
+                Some(non_null) => is_broad_atom(&non_null),
+                None => is_broad_atom(&rt.type_string),
+            }
+    });
+    if all_broad {
+        scope.set(var_name, narrowed);
+        return;
+    }
+
+    // Typed variable — filter the existing union to only types present in
+    // the narrowed set.  This correctly handles both single instanceof
+    // (`Dog|Cat` → `Dog`) and OR instanceof (`Dog|Cat|Other` → `Dog|Cat`).
+    //
+    // When the narrowed type is NOT in the existing union (e.g.
+    // `MockInterface` narrowed to `MolliePayment`), this is an
+    // intersection case — apply via apply_instanceof_inclusion which has
+    // interface intersection logic.
+    let narrowed_fqns: Vec<String> = narrowed
+        .iter()
+        .filter_map(|rt| rt.class_info.as_ref().map(|c| c.fqn().to_string()))
+        .collect();
+
+    // Try filtering: keep existing entries whose class is in the narrowed
+    // set.  A kept entry's own type_string may still be the whole
+    // pre-check union (a conditional return type resolves to one entry
+    // naming a class and listing an array alternative beside it), so
+    // restrict it to the narrowed classes as well.  Strip null on top
+    // because a successful instanceof check guarantees the value is
+    // non-null (e.g. `?Foo` → `Foo`).
+    let survives = |name: &str| {
+        narrowed.iter().any(|rt| {
+            rt.class_info
+                .as_ref()
+                .is_some_and(|c| c.name == name || c.fqn() == name)
+        })
+    };
+    let filtered: Vec<ResolvedType> = existing
+        .iter()
+        .filter(|rt| {
+            rt.class_info
+                .as_ref()
+                .is_some_and(|c| narrowed_fqns.contains(&c.fqn().to_string()))
+        })
+        .map(|rt| {
+            let mut rt = rt.clone();
+            rt.restrict_type_string_to_classes(&survives);
+            if let Some(non_null) = rt.type_string.non_null_type() {
+                rt.type_string = non_null;
+            }
+            rt
+        })
+        .collect();
+
+    if !filtered.is_empty() {
+        // Filter matched — use the filtered results (preserves richer type
+        // info from original resolution).  Also strip bare `null` entries:
+        // a successful instanceof check guarantees non-null, so `null`
+        // entries added by `from_classes_with_hint` must be removed.
+        let mut filtered: Vec<ResolvedType> = filtered
+            .into_iter()
+            .filter(|rt| !rt.type_string.is_null())
+            .collect();
+        if intersected {
+            ResolvedType::tag_as_intersection(&mut filtered);
+        }
+        if filtered.is_empty() {
+            scope.set(var_name, narrowed);
+        } else {
+            scope.set(var_name, filtered);
+        }
+        return;
+    }
+
+    // No overlap between existing and narrowed types.  This is the
+    // intersection case (e.g. MockInterface narrowed to MolliePayment).
+    // Use apply_instanceof_inclusion which produces the intersection when
+    // one side is an interface.
+    let mut results = existing.to_vec();
+    // Apply all narrowed classes as a single group by building a union type.
+    let union_type = if narrowed_fqns.len() == 1 {
+        PhpType::named(atom(&narrowed_fqns[0]))
+    } else {
+        PhpType::union(
+            narrowed_fqns
+                .iter()
+                .map(|n| PhpType::named(atom(n)))
+                .collect(),
+        )
+    };
+    let var_ctx = build_var_ctx(var_name, ctx, scope_resolver);
+    ResolvedType::apply_narrowing(&mut results, |classes| {
+        narrowing::apply_instanceof_inclusion(&union_type, false, &var_ctx, classes)
+    });
+    // Instanceof guarantees non-null — strip bare `null` entries that were
+    // preserved by `apply_narrowing`'s `None => true` rule.
+    results.retain(|rt| !rt.type_string.is_null());
+    // `apply_instanceof_inclusion` merging in an unrelated interface (the
+    // branch this call site exists for) leaves both classes in `results` as
+    // separate entries, which describe one value that is both at once.
+    ResolvedType::tag_as_intersection(&mut results);
+    if !results.is_empty() {
+        scope.set(var_name, results);
+    } else {
+        // Fallback: use the narrowed types directly.
+        scope.set(var_name, narrowed);
+    }
 }
 
 /// Apply inverse narrowing for a single condition expression (not
@@ -774,11 +808,15 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             })
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            let mut results = scope.get(var_name).to_vec();
             if extraction.negated {
-                // Inverse of negated instanceof → positive instanceof.
-                // Instanceof guarantees non-null, so strip null entries.
-                ResolvedType::apply_narrowing(&mut results, |classes| {
+                // Inverse of negated instanceof → positive instanceof,
+                // which proves exactly what the truthy branch of the
+                // un-negated check proves.  Resolve the asserted classes
+                // on their own and hand them to the shared commit so the
+                // existing union is *filtered* down to them rather than
+                // extended with them.
+                let mut narrowed = Vec::new();
+                ResolvedType::apply_narrowing(&mut narrowed, |classes| {
                     narrowing::apply_instanceof_inclusion(
                         &extraction.class_type,
                         extraction.exact,
@@ -786,17 +824,18 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                         classes,
                     )
                 });
-                results.retain(|rt| !rt.type_string.is_null());
+                commit_instanceof_narrowing(var_name, narrowed, false, scope, ctx, &scope_resolver);
             } else {
                 // Inverse of positive instanceof → exclusion.
                 // Exclusion does NOT strip null (`!instanceof` is
                 // true for null values).
+                let mut results = scope.get(var_name).to_vec();
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_exclusion(&extraction.class_type, &var_ctx, classes)
                 });
-            }
-            if !results.is_empty() {
-                scope.set(var_name, results);
+                if !results.is_empty() {
+                    scope.set(var_name, results);
+                }
             }
         }
     }
@@ -943,6 +982,9 @@ fn apply_condition_narrowing_inverse_operand<'b>(
 
     // Inverse null narrowing: `if ($x === null)` after guard → remove null.
     apply_null_narrowing_inverse(condition, scope, ctx);
+
+    // A proof about a `?->` chain's value is a proof about its receivers.
+    apply_nullsafe_receiver_narrowing(condition, scope, ctx, false);
 
     // Inverse @phpstan-assert-if-true / -if-false narrowing.
     apply_phpstan_assert_condition_narrowing(condition, scope, ctx, true);
@@ -1524,6 +1566,16 @@ pub(crate) fn apply_type_guard_on_operands(
             var_names.push(key);
         }
     }
+    // Include plain variables the condition names but the scope has no
+    // type for — a guard on a value read from an unknown source (a
+    // `stdClass` property, an untyped array offset) is the only thing
+    // that says what it is, so it must not be skipped for want of a
+    // prior type.
+    for name in collect_condition_var_names(condition) {
+        if !var_names.contains(&name) {
+            var_names.push(name);
+        }
+    }
     for operand in &operands {
         for var_name in &var_names {
             if let Some((kind, negated)) = narrowing::try_extract_type_guard(operand, var_name) {
@@ -1533,15 +1585,28 @@ pub(crate) fn apply_type_guard_on_operands(
                 // guarded type, and vice versa.
                 let effective_truthy = if negated { !truthy } else { truthy };
                 let mut results = scope.get(var_name).to_vec();
-                if !results.is_empty() {
+                if results.is_empty() {
+                    // Nothing known about the subject.  A guard that
+                    // holds still proves its type outright; one that
+                    // fails only rules a type out, which says nothing
+                    // on its own.
                     if effective_truthy {
-                        narrowing::apply_type_guard_inclusion(kind, &mut results);
-                    } else {
-                        narrowing::apply_type_guard_exclusion(kind, &mut results);
+                        scope.set(
+                            var_name,
+                            vec![ResolvedType::from_type_string(
+                                narrowing::guard_kind_to_narrowed_type(kind),
+                            )],
+                        );
                     }
-                    if !results.is_empty() {
-                        scope.set(var_name, results);
-                    }
+                    continue;
+                }
+                if effective_truthy {
+                    narrowing::apply_type_guard_inclusion(kind, &mut results);
+                } else {
+                    narrowing::apply_type_guard_exclusion(kind, &mut results);
+                }
+                if !results.is_empty() {
+                    scope.set(var_name, results);
                 }
             }
         }
@@ -1935,7 +2000,7 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     if let Some(var_name) = extract_non_null_check_var(condition) {
         // For array access keys, narrow the shape on the base variable.
         if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_shape_key(base, key, scope);
+            strip_null_from_array_element(&var_name, base, key, scope, ctx);
         } else {
             seed_synthetic_key_if_needed(&var_name, scope, ctx);
             strip_null_from_scope(&var_name, scope);
@@ -1952,7 +2017,7 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // Handles multiple args: `isset($a, $b)` strips null from both.
     for var_name in extract_isset_vars(condition) {
         if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_shape_key(base, key, scope);
+            strip_null_from_array_element(&var_name, base, key, scope, ctx);
         } else {
             seed_synthetic_key_if_needed(&var_name, scope, ctx);
             strip_null_from_scope(&var_name, scope);
@@ -2019,7 +2084,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         // synthetic scope entry.  This ensures the narrowed shape
         // survives scope merges.
         if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_shape_key(base, key, scope);
+            strip_null_from_array_element(&var_name, base, key, scope, ctx);
         } else {
             seed_synthetic_key_if_needed(&var_name, scope, ctx);
             strip_null_from_scope(&var_name, scope);
@@ -2073,11 +2138,133 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // is not null: strip null.
     for var_name in extract_not_isset_vars(condition) {
         if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_shape_key(base, key, scope);
+            strip_null_from_array_element(&var_name, base, key, scope, ctx);
         } else {
             seed_synthetic_key_if_needed(&var_name, scope, ctx);
             strip_null_from_scope(&var_name, scope);
         }
+    }
+}
+
+/// Narrow the receivers of every nullsafe chain the condition proves is
+/// not `null`.
+///
+/// `if ($image?->file_id !== null)` can only be entered when `$image`
+/// itself is not null: had it been, the chain would have short-circuited
+/// to `null` and the comparison would have failed.  A truthy test on the
+/// chain and an identity check against a non-null value carry the same
+/// proof, and a chain of several `?->` links proves it for each receiver
+/// along the way.
+///
+/// `truthy` is the polarity the caller establishes: `true` for an `if`
+/// body, `false` for an else branch or the fall-through of a guard clause
+/// that leaves the scope.
+pub(crate) fn apply_nullsafe_receiver_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let mut proven: Vec<&Expression<'_>> = Vec::new();
+    collect_proven_non_null_exprs(condition, truthy, &mut proven);
+    for expr in proven {
+        let mut node = expr;
+        while let Some(receiver) = nullsafe_receiver(node) {
+            if let Some(key) = narrowing::expr_to_subject_key(receiver) {
+                seed_synthetic_key_if_needed(&key, scope, ctx);
+                strip_null_from_scope(&key, scope);
+            }
+            node = receiver;
+        }
+    }
+}
+
+/// The receiver a nullsafe access short-circuits on, when `expr` is one.
+fn nullsafe_receiver<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+    match expr {
+        Expression::Parenthesized(inner) => nullsafe_receiver(inner.expression),
+        Expression::Access(Access::NullSafeProperty(pa)) => Some(pa.object),
+        Expression::Call(Call::NullSafeMethod(mc)) => Some(mc.object),
+        _ => None,
+    }
+}
+
+/// Collect the expressions `condition` proves are not `null` under the
+/// given polarity.
+///
+/// Callers filter the result for the shapes they can act on, so a bare
+/// truthy test contributes its whole subject rather than nothing.
+fn collect_proven_non_null_exprs<'b>(
+    condition: &'b Expression<'b>,
+    truthy: bool,
+    out: &mut Vec<&'b Expression<'b>>,
+) {
+    match condition {
+        Expression::Parenthesized(inner) => {
+            collect_proven_non_null_exprs(inner.expression, truthy, out);
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            collect_proven_non_null_exprs(prefix.operand, !truthy, out);
+        }
+        Expression::Binary(bin) => {
+            // `A && B` proves both when true; `A || B` proves neither
+            // operand held when false.  Either way each operand carries
+            // the parent's polarity.
+            let decomposes = match bin.operator {
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => truthy,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => !truthy,
+                _ => false,
+            };
+            if decomposes {
+                collect_proven_non_null_exprs(bin.lhs, truthy, out);
+                collect_proven_non_null_exprs(bin.rhs, truthy, out);
+                return;
+            }
+
+            let inequality = matches!(
+                bin.operator,
+                BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_)
+            );
+            let equality = matches!(
+                bin.operator,
+                BinaryOperator::Identical(_) | BinaryOperator::Equal(_)
+            );
+            if !inequality && !equality {
+                return;
+            }
+
+            // `$x !== null` proves non-null when true, `$x === null` when
+            // false.
+            let proves_non_null = if inequality { truthy } else { !truthy };
+            if is_null_expr(bin.rhs) {
+                if proves_non_null {
+                    out.push(bin.lhs);
+                }
+                return;
+            }
+            if is_null_expr(bin.lhs) {
+                if proves_non_null {
+                    out.push(bin.rhs);
+                }
+                return;
+            }
+
+            // A match against a value that is not null proves the other
+            // side is not null either.  Only identity qualifies: `null ==
+            // false` and `null == 0` are both true, so a loose comparison
+            // against a falsy value proves nothing.
+            if matches!(bin.operator, BinaryOperator::Identical(_)) && truthy {
+                if exact_value_of_expr(bin.rhs).is_some_and(|(v, _)| v != ExactValue::Null) {
+                    out.push(bin.lhs);
+                }
+                if exact_value_of_expr(bin.lhs).is_some_and(|(v, _)| v != ExactValue::Null) {
+                    out.push(bin.rhs);
+                }
+            }
+        }
+        // A bare truthy test: anything truthy is non-null.
+        _ if truthy => out.push(condition),
+        _ => {}
     }
 }
 
@@ -2598,6 +2785,26 @@ pub(crate) fn split_array_access_key(key: &str) -> Option<(&str, &str)> {
 /// rewrites the variable's type to `array{test: int}`.  This modifies
 /// the base variable's type directly so the narrowed shape survives
 /// scope merges (unlike synthetic scope entries which are stripped).
+/// Remove `null` from an array element a check proved non-null.
+///
+/// A constant shape records each element's type inline, so the refinement
+/// belongs on the base variable, where it survives scope merges.  A generic
+/// `array<K, V|null>` has no per-key slot to refine — narrowing its value
+/// type would wrongly claim every other key is non-null too — so the proof
+/// is recorded on the synthetic `$a["k"]` scope key that offset reads
+/// consult.
+fn strip_null_from_array_element(
+    access_key: &str,
+    base_var: &str,
+    key_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    strip_null_from_array_shape_key(base_var, key_name, scope);
+    seed_synthetic_key_if_needed(access_key, scope, ctx);
+    strip_null_from_scope(access_key, scope);
+}
+
 pub(crate) fn strip_null_from_array_shape_key(
     base_var: &str,
     key_name: &str,

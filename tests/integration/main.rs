@@ -175,6 +175,7 @@ mod laravel_schema_macro_startup;
 mod laravel_trans_loader;
 mod laravel_validated_shape;
 mod lsp_concurrency;
+mod narrowing_condition_proofs;
 mod parser;
 mod php_version;
 mod references;

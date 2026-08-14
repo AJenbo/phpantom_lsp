@@ -1,0 +1,299 @@
+//! What a condition *proves* about the values it names, and how that
+//! proof reaches the scope.
+//!
+//! A successful `instanceof` filters the subject's union down to the
+//! checked class rather than adding it beside the old members; a proof
+//! about a `?->` chain's result is a proof about every receiver the chain
+//! would have short-circuited on; a type guard is the only thing that
+//! says what a value read from an unknown source is; and a null check on
+//! an array element records the element that was checked, not the whole
+//! array's value type.
+
+use crate::common::create_test_backend;
+use phpantom_lsp::Backend;
+use tower_lsp::lsp_types::*;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+fn hover_at(backend: &Backend, uri: &str, content: &str, line: u32, character: u32) -> Hover {
+    backend.update_ast(uri, content);
+    backend
+        .handle_hover(uri, content, Position { line, character })
+        .expect("expected hover")
+}
+
+fn hover_text(hover: &Hover) -> &str {
+    match &hover.contents {
+        HoverContents::Markup(markup) => &markup.value,
+        _ => panic!("Expected MarkupContent"),
+    }
+}
+
+/// Hover on the variable that the marker line `// <-- here` points at.
+///
+/// Keeps the tests readable when scaffolding shifts: the assertion names
+/// the line by its marker rather than by a literal line number.
+fn hover_marked(backend: &Backend, uri: &str, content: &str) -> String {
+    let line = content
+        .lines()
+        .position(|l| l.contains("// <-- here"))
+        .expect("fixture should carry a `// <-- here` marker") as u32;
+    let text = content.lines().nth(line as usize).unwrap();
+    let column = text.find('$').expect("marked line should name a variable") as u32 + 1;
+    hover_text(&hover_at(backend, uri, content, line, column)).to_string()
+}
+
+const SCAFFOLD: &str = r#"
+class Configuration {}
+class Node {}
+class AbstractNode {
+    public function getNode(): Node { return new Node(); }
+}
+class Container {
+    /** @return object|null */
+    public function get(string $id) { return null; }
+}
+class Image {
+    public ?int $fileId = null;
+    public static function first(): ?Image { return null; }
+}
+"#;
+
+// ─── instanceof filters the union, it does not extend it ────────────────────
+
+/// `assert($x instanceof C)` on an `object|null` subject leaves `C`, not
+/// `object|null|C`: the check rules out everything the class does not
+/// cover, including the null.
+#[test]
+fn assert_instanceof_filters_a_broad_union() {
+    let backend = create_test_backend();
+    let uri = "file:///assert_instanceof.php";
+    let content = format!(
+        r#"<?php
+{SCAFFOLD}
+function f(Container $c): void {{
+    $obj = $c->get('config');
+    assert($obj instanceof Configuration);
+    $obj; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Configuration"),
+        "expected Configuration, got: {text}"
+    );
+    assert!(
+        !text.contains("object") && !text.contains("null"),
+        "the check rules out the rest of the union, got: {text}"
+    );
+}
+
+/// The `if (!$x instanceof C) { throw; }` guard proves exactly what the
+/// `assert()` above does, so its fall-through must narrow the same way.
+#[test]
+fn negated_instanceof_guard_filters_a_broad_union() {
+    let backend = create_test_backend();
+    let uri = "file:///guard_instanceof.php";
+    let content = format!(
+        r#"<?php
+{SCAFFOLD}
+function f(Container $c): void {{
+    $obj = $c->get('config');
+    if (!$obj instanceof Configuration) {{
+        throw new \RuntimeException('missing');
+    }}
+    $obj; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Configuration"),
+        "expected Configuration, got: {text}"
+    );
+    assert!(
+        !text.contains("object") && !text.contains("null"),
+        "the guard rules out the rest of the union, got: {text}"
+    );
+}
+
+// ─── A proof about a `?->` chain is a proof about its receivers ─────────────
+
+/// `$image?->fileId !== null` can only hold when `$image` is not null:
+/// otherwise the chain short-circuits to `null` and the check fails.
+#[test]
+fn nullsafe_non_null_check_narrows_the_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///nullsafe_check.php";
+    let content = format!(
+        r#"<?php
+{SCAFFOLD}
+function f(): void {{
+    $image = Image::first();
+    if ($image?->fileId !== null) {{
+        $image; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Image"), "expected Image, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the receiver cannot be null inside the branch, got: {text}"
+    );
+}
+
+/// The same proof arrives through a guard clause: a falsy chain leaves
+/// the function, so past it the receiver is non-null.
+#[test]
+fn nullsafe_truthy_guard_narrows_the_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///nullsafe_guard.php";
+    let content = format!(
+        r#"<?php
+{SCAFFOLD}
+function f(): void {{
+    $image = Image::first();
+    if (!$image?->fileId) {{
+        return;
+    }}
+    $image; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Image"), "expected Image, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the receiver cannot be null past the guard, got: {text}"
+    );
+}
+
+/// The else branch gets no such proof — a null receiver is exactly one of
+/// the ways the check fails, so the declared type must survive intact.
+#[test]
+fn nullsafe_check_leaves_the_else_branch_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///nullsafe_else.php";
+    let content = format!(
+        r#"<?php
+{SCAFFOLD}
+function f(): void {{
+    $image = Image::first();
+    if ($image?->fileId !== null) {{
+        return;
+    }}
+    $image; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("?Image") || text.contains("null"),
+        "a failing check leaves null in play, got: {text}"
+    );
+}
+
+// ─── A type guard on a value of unknown type establishes it ────────────────
+
+/// `$row->version` on a bare `stdClass` resolves to nothing, and the
+/// `assert(is_string(...))` is then the only statement that says what the
+/// value is.  Skipping the guard for want of a prior type throws away the
+/// one piece of information available.
+#[test]
+fn type_guard_types_a_value_read_from_an_unknown_source() {
+    let backend = create_test_backend();
+    let uri = "file:///guard_unknown.php";
+    let content = r#"<?php
+/** @param list<stdClass> $rows */
+function f(array $rows): void {
+    foreach ($rows as $row) {
+        $version = $row->version;
+        assert(is_string($version));
+        $version; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+}
+
+/// The fall-through of a guard carries the same proof, so an unknown
+/// subject is typed there too.
+#[test]
+fn type_guard_types_an_unknown_subject_past_a_guard_clause() {
+    let backend = create_test_backend();
+    let uri = "file:///guard_fallthrough.php";
+    let content = r#"<?php
+/** @param list<stdClass> $rows */
+function f(array $rows): void {
+    foreach ($rows as $row) {
+        $version = $row->version;
+        if (!is_string($version)) {
+            continue;
+        }
+        $version; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+}
+
+// ─── A null check on an array element refines that element ─────────────────
+
+/// A generic `array<int, string|null>` has no per-key slot to refine, so
+/// the proof has to be recorded against the element the check named.
+#[test]
+fn isset_on_an_array_element_refines_that_element() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_element.php";
+    let content = r#"<?php
+/** @param array<int, string|null> $m */
+function f(array $m): void {
+    if (isset($m[0])) {
+        $x = $m[0];
+        $x; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the isset() rules out null for this element, got: {text}"
+    );
+}
+
+/// The `!== null` and `assert(isset(...))` spellings carry the same proof
+/// and must land in the same place.
+#[test]
+fn non_null_check_on_an_array_element_refines_that_element() {
+    let backend = create_test_backend();
+    let uri = "file:///element_not_null.php";
+    let content = r#"<?php
+/** @param array<int, string|null> $m */
+function f(array $m): void {
+    assert(isset($m[0]));
+    $x = $m[0];
+    $x; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the assertion rules out null for this element, got: {text}"
+    );
+}
