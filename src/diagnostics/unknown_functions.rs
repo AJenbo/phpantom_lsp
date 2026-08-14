@@ -87,7 +87,6 @@ impl Backend {
     ) {
         let symbol_map = &ctx.symbol_map;
         let file_use_map = &ctx.file.use_map;
-        let file_namespace = &ctx.file.namespace;
 
         // ── Compute byte ranges of `use` statement lines ────────────────
         let use_line_ranges = compute_use_line_ranges(content);
@@ -109,7 +108,7 @@ impl Backend {
                     ..
                 } => {
                     let mut names = vec![name.to_string()];
-                    if let Some(ns) = file_namespace {
+                    if let Some(ns) = ctx.file.namespace_at(span.start) {
                         names.push(format!("{}\\{}", ns, name));
                     }
                     Some(names)
@@ -157,8 +156,17 @@ impl Backend {
             }
 
             // ── Attempt resolution through all phases ───────────────────
+            // The offset-aware variant is what makes a call in the second
+            // `namespace` block of a file resolve against that block's
+            // namespace rather than the first block's.
             if self
-                .resolve_function_name(name, file_use_map, file_namespace)
+                .resolve_function_name_at(
+                    name,
+                    ctx.file.resolved_names.as_deref(),
+                    span.start,
+                    file_use_map,
+                    ctx.file.namespace_at(span.start),
+                )
                 .is_some()
             {
                 continue;

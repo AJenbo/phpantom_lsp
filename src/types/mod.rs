@@ -2510,7 +2510,19 @@ pub(crate) struct FileContext {
     /// (from `file_imports`).
     pub use_map: HashMap<String, String>,
     /// The file's declared namespace, if any (from `file_namespaces`).
+    ///
+    /// This is the *first* `namespace` block's name. A file may declare
+    /// several, so consumers that know the byte offset they are resolving
+    /// a name for should ask [`namespace_at`](Self::namespace_at) instead.
     pub namespace: Option<String>,
+    /// Every `namespace` block in the file, but only when there is more
+    /// than one.
+    ///
+    /// `None` for the overwhelmingly common single-namespace (or
+    /// namespace-less) file, where `namespace` is already the right answer
+    /// at every offset — populating it there would cost an allocation on
+    /// every `file_context` call for nothing.
+    pub namespace_spans: Option<Vec<NamespaceSpan>>,
     /// Per-file resolved names from `mago-names` (byte offset → FQN).
     ///
     /// `None` for files that were loaded via `parse_and_cache_content`
@@ -2519,6 +2531,25 @@ pub(crate) struct FileContext {
 }
 
 impl FileContext {
+    /// The namespace in effect at `offset`.
+    ///
+    /// Equals [`namespace`](Self::namespace) for single-namespace files.
+    /// In a file with several `namespace` blocks it returns the one whose
+    /// span contains `offset`, so a name written in the second block is
+    /// not resolved against the first block's namespace.
+    pub fn namespace_at(&self, offset: u32) -> &Option<String> {
+        let Some(spans) = self.namespace_spans.as_ref() else {
+            return &self.namespace;
+        };
+        for span in spans {
+            if offset >= span.start && offset <= span.end {
+                return &span.namespace;
+            }
+        }
+        // Past the last block (e.g. code after its closing brace).
+        spans.last().map_or(&self.namespace, |s| &s.namespace)
+    }
+
     /// Resolve a name to its FQN using the best available data source.
     ///
     /// When `resolved_names` is available and contains an entry at

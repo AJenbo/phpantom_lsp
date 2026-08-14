@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
-use crate::types::{ClassInfo, FileContext};
+use crate::types::{ClassInfo, FileContext, NamespaceSpan};
 
 impl Backend {
     /// Look up a class by its (possibly namespace-qualified) name via
@@ -140,19 +140,14 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
 
-        let namespace = self
-            .file_namespaces
-            .read()
-            .get(uri)
-            .and_then(|spans| spans.first())
-            .and_then(|s| s.namespace.clone());
-
+        let (namespace, namespace_spans) = self.namespace_and_spans(uri);
         let resolved_names = self.resolved_names.read().get(uri).cloned();
 
         FileContext {
             classes,
             use_map,
             namespace,
+            namespace_spans,
             resolved_names,
         }
     }
@@ -177,13 +172,18 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let namespace = self.namespace_at_offset(uri, byte_offset);
+        let (first_namespace, namespace_spans) = self.namespace_and_spans(uri);
+        let namespace = match namespace_spans.as_ref() {
+            Some(_) => self.namespace_at_offset(uri, byte_offset),
+            None => first_namespace,
+        };
         let resolved_names = self.resolved_names.read().get(uri).cloned();
 
         FileContext {
             classes,
             use_map,
             namespace,
+            namespace_spans,
             resolved_names,
         }
     }
@@ -224,6 +224,25 @@ impl Backend {
             .unwrap_or_default();
         let namespace = self.namespace_at_offset(uri, byte_offset);
         (use_map, namespace)
+    }
+
+    /// Return a file's first namespace plus, for files that declare more
+    /// than one `namespace` block, every block's span.
+    ///
+    /// The span list stays `None` for the single-namespace case so that
+    /// building a [`FileContext`] costs no extra allocation there; see
+    /// [`FileContext::namespace_spans`].
+    fn namespace_and_spans(&self, uri: &str) -> (Option<String>, Option<Vec<NamespaceSpan>>) {
+        let nmap = self.file_namespaces.read();
+        let Some(spans) = nmap.get(uri) else {
+            return (None, None);
+        };
+        let first = spans.first().and_then(|s| s.namespace.clone());
+        if spans.len() > 1 {
+            (first, Some(spans.clone()))
+        } else {
+            (first, None)
+        }
     }
 
     /// Return the namespace that contains the given byte offset in a file.

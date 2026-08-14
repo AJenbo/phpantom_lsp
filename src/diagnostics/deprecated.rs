@@ -293,9 +293,13 @@ impl Backend {
                     if *is_definition {
                         continue;
                     }
-                    if let Some(func_info) =
-                        self.resolve_function_name(name, file_use_map, file_namespace)
-                        && let Some(msg) = &func_info.deprecation_message
+                    if let Some(func_info) = self.resolve_function_name_at(
+                        name,
+                        file_resolved_names.as_deref(),
+                        span.start,
+                        file_use_map,
+                        ctx.file.namespace_at(span.start),
+                    ) && let Some(msg) = &func_info.deprecation_message
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,

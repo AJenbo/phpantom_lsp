@@ -58,7 +58,10 @@ impl Backend {
         };
 
         let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        // Every span considered below overlaps the request range, so the
+        // namespace block covering its start is the right one for all of
+        // them — including in a file that declares several blocks.
+        let file_namespace: Option<String> = self.namespace_at_offset(uri, request_start as u32);
         let local_classes: Vec<Arc<ClassInfo>> = self
             .symbols
             .uri_classes_index

@@ -30,35 +30,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B160. A second `namespace` block silences the argument-type check
-
-**Impact: Medium-High · Effort: Low-Medium**
-
-A file with two `namespace` blocks reports no argument type mismatches at
-all. The same code in a single-namespace file reports them:
-
-```php
-<?php
-namespace App\Other;
-
-class Marker {}
-
-namespace App;
-
-function takesInt(int $x): void {}
-
-function plain(string $key): void {
-    takesInt($key);      // not reported; reported without the first block
-}
-```
-
-`FileContext::namespace` is built from the *first* namespace span in the
-file (`file_context` in `backend/file_access.rs`), so every name in the
-second block is resolved against the wrong namespace and the called
-function is never found. `resolve_function_name_at` already takes an
-offset and consults `resolved_names` for exactly this case, so the
-diagnostic collectors need to resolve per call site rather than per file.
-Found while writing tests for namespaced constant resolution.
+No outstanding items.
 
 ## Array types
 

@@ -587,6 +587,7 @@ impl Backend {
                         classes: patched_classes,
                         use_map: ctx.use_map.clone(),
                         namespace: ctx.namespace.clone(),
+                        namespace_spans: ctx.namespace_spans.clone(),
                         resolved_names: ctx.resolved_names.clone(),
                     };
                     if let Some(result) =

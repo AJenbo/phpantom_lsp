@@ -614,4 +614,32 @@ final class QodanaCheckerTest
             diags,
         );
     }
+    /// A file may declare several `namespace` blocks. A call in the second
+    /// block resolves against that block's namespace, so a function defined
+    /// there (in another file) must not be reported as missing.
+    #[test]
+    fn function_from_second_namespace_block_resolves() {
+        let backend = Backend::new_test();
+        backend.update_ast(
+            "file:///other.php",
+            "<?php\nnamespace App;\nfunction helper(int $n): void {}\n",
+        );
+        let php = r#"<?php
+namespace App\Other;
+
+class Marker {}
+
+namespace App;
+
+function run(): void {
+    helper(1);
+    missingFn();
+}
+"#;
+        backend.update_ast("file:///test.php", php);
+        let mut diags = Vec::new();
+        backend.collect_unknown_function_diagnostics("file:///test.php", php, &mut diags);
+        let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(messages, vec!["Function 'missingFn' not found"]);
+    }
 }

@@ -559,8 +559,16 @@ impl Backend {
         file_ctx: &FileContext,
         call_args_text: Option<&str>,
     ) -> Option<ResolvedCallableTarget> {
-        let class_loader = self.class_loader(file_ctx);
-        let function_loader_cl = self.function_loader(file_ctx);
+        // A file may declare several `namespace` blocks, so the namespace
+        // every name here resolves against is the one covering this call
+        // site, not the file's first one.
+        let namespace = file_ctx.namespace_at(cursor_offset);
+        let class_loader = self.class_loader_with(&file_ctx.classes, &file_ctx.use_map, namespace);
+        let function_loader_cl = self.function_loader_with(
+            file_ctx.resolved_names.as_deref(),
+            &file_ctx.use_map,
+            namespace,
+        );
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -630,8 +638,7 @@ impl Backend {
 
             // ── Standalone function call: `functionName(…)` ─────────
             SubjectExpr::FunctionCall(name) => {
-                let func =
-                    self.resolve_function_name(name, &file_ctx.use_map, &file_ctx.namespace)?;
+                let func = self.resolve_function_name(name, &file_ctx.use_map, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -659,8 +666,7 @@ impl Backend {
             // as `ClassName` (since it can't distinguish class names
             // from function names without context).
             SubjectExpr::ClassName(name) => {
-                let func =
-                    self.resolve_function_name(name, &file_ctx.use_map, &file_ctx.namespace)?;
+                let func = self.resolve_function_name(name, &file_ctx.use_map, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,

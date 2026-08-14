@@ -10148,3 +10148,56 @@ function acceptsKey(string $key): void {{
         );
     }
 }
+
+/// A file may declare several `namespace` blocks. A call in the second
+/// block must resolve against that block's namespace, not the first
+/// block's, or the callee is never found and the check goes silent.
+#[test]
+fn second_namespace_block_still_checks_argument_types() {
+    let php = r#"<?php
+namespace App\Other;
+
+class Marker {}
+
+namespace App;
+
+function takesInt(int $x): void {}
+
+function plain(string $key): void {
+    takesInt($key);
+}
+"#;
+    assert_eq!(
+        type_error_messages(&collect(php)),
+        vec!["Argument 1 ($x) expects int, got string"],
+        "a call in the second namespace block should still be checked"
+    );
+}
+
+/// Same file shape, but the callee is a method on a class declared in the
+/// second block and the mismatched value comes from a nested call.
+#[test]
+fn second_namespace_block_checks_method_and_nested_call_arguments() {
+    let php = r#"<?php
+namespace App\Other;
+
+class Marker {}
+
+namespace App;
+
+function giveString(): string { return "x"; }
+
+class Widget {
+    public function takesInt(int $x): void {}
+}
+
+function run(): void {
+    $w = new Widget();
+    $w->takesInt(giveString());
+}
+"#;
+    assert_eq!(
+        type_error_messages(&collect(php)),
+        vec!["Argument 1 ($x) expects int, got string"]
+    );
+}
