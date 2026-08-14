@@ -8,6 +8,11 @@
 //! `(?<name>…)` contributes its name alongside its number, in the order PHP
 //! itself stores them.
 //!
+//! That shape describes a *successful* match. A failed one leaves the empty
+//! array behind, so where the outcome is not known the out-parameter holds
+//! either ([`or_no_match`]), and a condition that decides the outcome says
+//! which of the two a branch is looking at ([`preg_condition`]).
+//!
 //! The walk refuses more than it accepts. Any construct whose effect on
 //! group numbering or group participation it cannot model — branch reset
 //! `(?|`, conditional groups, recursion, `\Q…\E` quoting, the `x` extended
@@ -17,7 +22,10 @@
 
 use std::borrow::Cow;
 
-use mago_syntax::cst::{Argument, ArgumentList, Call, Expression, Literal, Variable};
+use mago_syntax::cst::{
+    Argument, ArgumentList, BinaryOperator, Call, Expression, Literal, UnaryPrefixOperator,
+    Variable,
+};
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, ShapeEntry};
@@ -100,6 +108,109 @@ pub(crate) fn preg_call<'b>(expr: &'b Expression<'b>) -> Option<PregCall<'b>> {
     })
 }
 
+/// Recognise a condition whose truth decides whether a `preg_match` /
+/// `preg_match_all` call found anything.
+///
+/// Returns the call and whether the condition being *true* means it matched,
+/// which is what lets the branch that only runs on a successful match keep the
+/// full shape while the other one gets the empty array.
+///
+/// The comparison forms read the result as the `0|1` the documentation
+/// promises. `false`, which a malformed pattern returns, leaves `$matches`
+/// empty exactly as a failed match does, so folding it into the no-match side
+/// costs nothing.
+pub(crate) fn preg_condition<'b>(expr: &'b Expression<'b>) -> Option<(PregCall<'b>, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => preg_condition(inner.expression),
+        Expression::UnaryPrefix(unary) if matches!(unary.operator, UnaryPrefixOperator::Not(_)) => {
+            let (call, matched) = preg_condition(unary.operand)?;
+            Some((call, !matched))
+        }
+        Expression::Binary(binary) => {
+            let comparison = Comparison::of(&binary.operator)?;
+            // Normalise to the call on the left, so `0 < preg_match(…)` reads
+            // as the `preg_match(…) > 0` it is.
+            let (call, literal, comparison) = match preg_call(binary.lhs) {
+                Some(call) => (call, binary.rhs, comparison),
+                None => (preg_call(binary.rhs)?, binary.lhs, comparison.mirrored()),
+            };
+            Some((call, comparison.means_matched(int_literal(literal)?)?))
+        }
+        _ => Some((preg_call(expr)?, true)),
+    }
+}
+
+/// How a condition compares a `preg_match` result against a literal.
+#[derive(Clone, Copy)]
+enum Comparison {
+    Equal,
+    NotEqual,
+    Greater,
+    GreaterOrEqual,
+    Less,
+    LessOrEqual,
+}
+
+impl Comparison {
+    /// The comparison `operator` performs, or `None` for an operator that is
+    /// not one. Loose and strict spellings agree here: both operands are
+    /// integers.
+    fn of(operator: &BinaryOperator<'_>) -> Option<Self> {
+        Some(match operator {
+            BinaryOperator::Equal(_) | BinaryOperator::Identical(_) => Comparison::Equal,
+            BinaryOperator::NotEqual(_)
+            | BinaryOperator::NotIdentical(_)
+            | BinaryOperator::AngledNotEqual(_) => Comparison::NotEqual,
+            BinaryOperator::GreaterThan(_) => Comparison::Greater,
+            BinaryOperator::GreaterThanOrEqual(_) => Comparison::GreaterOrEqual,
+            BinaryOperator::LessThan(_) => Comparison::Less,
+            BinaryOperator::LessThanOrEqual(_) => Comparison::LessOrEqual,
+            _ => return None,
+        })
+    }
+
+    /// The same comparison with its operands swapped.
+    fn mirrored(self) -> Self {
+        match self {
+            Comparison::Equal => Comparison::Equal,
+            Comparison::NotEqual => Comparison::NotEqual,
+            Comparison::Greater => Comparison::Less,
+            Comparison::GreaterOrEqual => Comparison::LessOrEqual,
+            Comparison::Less => Comparison::Greater,
+            Comparison::LessOrEqual => Comparison::GreaterOrEqual,
+        }
+    }
+
+    /// Whether comparing the result against `value` holds exactly when the
+    /// match succeeded.
+    ///
+    /// `None` for a comparison that separates nothing: `>= 0` holds for both
+    /// outcomes and `> 1` for neither, so a branch guarded by one learns
+    /// nothing about the out-parameter.
+    fn means_matched(self, value: u64) -> Option<bool> {
+        Some(match (self, value) {
+            (Comparison::Equal, 1)
+            | (Comparison::NotEqual, 0)
+            | (Comparison::Greater, 0)
+            | (Comparison::GreaterOrEqual, 1) => true,
+            (Comparison::Equal, 0)
+            | (Comparison::NotEqual, 1)
+            | (Comparison::Less, 1)
+            | (Comparison::LessOrEqual, 0) => false,
+            _ => return None,
+        })
+    }
+}
+
+/// The value of a non-negative integer literal.
+fn int_literal(expr: &Expression<'_>) -> Option<u64> {
+    match expr {
+        Expression::Parenthesized(inner) => int_literal(inner.expression),
+        Expression::Literal(Literal::Integer(integer)) => integer.value,
+        _ => None,
+    }
+}
+
 /// The argument at positional `index`, or the one named `name`.
 fn argument<'b>(
     arguments: &'b ArgumentList<'b>,
@@ -168,6 +279,33 @@ pub(crate) fn opaque_matches_type(flags: i64, matches_all: bool) -> Option<PhpTy
     } else {
         keyed
     })
+}
+
+/// What a failed match leaves in `$matches`, when that differs from what a
+/// successful one leaves: the empty array, which satisfies none of the shapes
+/// [`matches_type`] builds.
+///
+/// `None` where the success type already covers the no-match case, so a branch
+/// that knows the match failed has nothing to narrow to. `preg_match_all`
+/// writes one empty list per group in pattern order and the empty list in set
+/// order, both of which its success type describes; and the keyless
+/// `array<…>` an unreadable pattern falls back to admits the empty array on
+/// its own.
+pub(crate) fn no_match_type(matched: &PhpType, matches_all: bool) -> Option<PhpType> {
+    (!matches_all && !matched.accepts_empty_array()).then(|| PhpType::array_shape(Vec::new()))
+}
+
+/// What `$matches` holds after a call whose outcome is not known: either what
+/// a successful match wrote or what a failed one left.
+///
+/// The success type comes first so that a consumer reading the first shape out
+/// of the union (key completion, a shape-entry lookup) finds the informative
+/// half rather than the empty one.
+pub(crate) fn or_no_match(matched: PhpType, matches_all: bool) -> PhpType {
+    match no_match_type(&matched, matches_all) {
+        Some(no_match) => PhpType::union(vec![matched, no_match]),
+        None => matched,
+    }
 }
 
 /// Assemble the shape from the parsed group list.

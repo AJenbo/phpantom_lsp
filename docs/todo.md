@@ -99,7 +99,8 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 | D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B149 | [`$matches` is typed as though the match succeeded](todo/bugs.md#b149-matches-is-typed-as-though-the-match-succeeded)                                                       | Low         | Medium      |
+| B150 | [A `\xNN` escape in a string literal aborts the process](todo/bugs.md#b150-a-xnn-escape-in-a-string-literal-aborts-the-process)                                            | High        | Low         |
+| B151 | [`?T` and `T\|null` are judged by different rules](todo/bugs.md#b151-t-and-tnull-are-judged-by-different-rules)                                                            | High        | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

@@ -2838,6 +2838,11 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
 /// more: which keys the array has, and which of them a successful match may
 /// leave out.
 ///
+/// The call site is not the place that knows whether the match succeeded, so
+/// what lands in the scope here is what the call leaves either way. A branch
+/// guarded on the outcome narrows it down (see
+/// [`apply_preg_match_narrowing`]).
+///
 /// Returns whether the variable was typed. A pattern the group walk refuses,
 /// or a `$flags` argument that does not resolve to a constant, leaves the
 /// call to the generic path.
@@ -2849,30 +2854,38 @@ fn seed_preg_matches<'b>(
     let Some(call) = crate::type_engine::regex_shape::preg_call(expr) else {
         return false;
     };
+    let Some(matched) = preg_matched_type(&call, scope, ctx) else {
+        return false;
+    };
+    scope.set(
+        call.matches_var,
+        vec![ResolvedType::from_type_string(
+            crate::type_engine::regex_shape::or_no_match(matched, call.matches_all),
+        )],
+    );
+    true
+}
+
+/// The type a *successful* match leaves in the out-parameter of `call`.
+///
+/// `None` when the analysis refuses the call: a pattern whose group list the
+/// walk cannot read, or a `$flags` argument that does not resolve to a
+/// constant whose bits the shape analysis models.
+pub(crate) fn preg_matched_type<'b>(
+    call: &crate::type_engine::regex_shape::PregCall<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
     let flags = match call.flags {
         None => 0,
-        Some(flags) => match preg_flag_bits(flags, scope, ctx) {
-            Some(flags) => flags,
-            None => return false,
-        },
+        Some(flags) => preg_flag_bits(flags, scope, ctx)?,
     };
-    let matches_type = call
-        .pattern
+    call.pattern
         .as_deref()
         .and_then(|pattern| {
             crate::type_engine::regex_shape::matches_type(pattern, flags, call.matches_all)
         })
-        .or_else(|| crate::type_engine::regex_shape::opaque_matches_type(flags, call.matches_all));
-    match matches_type {
-        Some(matches_type) => {
-            scope.set(
-                call.matches_var,
-                vec![ResolvedType::from_type_string(matches_type)],
-            );
-            true
-        }
-        None => false,
-    }
+        .or_else(|| crate::type_engine::regex_shape::opaque_matches_type(flags, call.matches_all))
 }
 
 /// The flag mask a `preg_match` `$flags` argument holds.

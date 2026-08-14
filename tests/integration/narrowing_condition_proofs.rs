@@ -408,6 +408,61 @@ function f(array $m): void {
     );
 }
 
+// ─── An optional shape key may not be there at all ─────────────────────────
+
+/// Reading a key the shape marks optional yields the `null` PHP gives for an
+/// offset an array does not have, so code that has not checked for it sees
+/// that it might be missing. A key the shape requires reads as itself.
+#[test]
+fn reading_an_optional_shape_key_may_yield_null() {
+    let backend = create_test_backend();
+    let uri = "file:///optional_shape_key.php";
+    let content = r#"<?php
+/** @param array{file: string, type?: string} $frame */
+function f(array $frame): void {
+    $required = $frame['file'];
+    $optional = $frame['type'];
+    $optional; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("?string"),
+        "the key may be absent, and reading a missing offset is null: {text}"
+    );
+
+    let required = hover_at(&backend, uri, content, 3, 5);
+    let required = hover_text(&required);
+    assert!(
+        !required.contains("null"),
+        "a required key is always there: {required}"
+    );
+}
+
+/// `!empty($frame['type'])` proves the key is there and truthy, exactly as
+/// `isset()` does — including in an expression position, where the proof has
+/// to travel through the ternary's own narrowing rather than a branch body.
+#[test]
+fn not_empty_on_an_optional_shape_key_proves_it_is_there() {
+    let backend = create_test_backend();
+    let uri = "file:///not_empty_shape_key.php";
+    let content = r#"<?php
+/** @param array{file: string, type?: string} $frame */
+function f(array $frame): void {
+    $type = !empty($frame['type']) ? $frame['type'] : 'fallback';
+    $type; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the check rules out both the missing key and a falsy value: {text}"
+    );
+}
+
 // ─── An inline `@var` seeds the assignment, then flows ─────────────────────
 
 /// The annotation describes what the assignment produced, not what the

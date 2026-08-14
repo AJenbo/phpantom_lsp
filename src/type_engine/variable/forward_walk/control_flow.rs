@@ -136,13 +136,15 @@ pub(crate) fn process_if_statement_body<'b>(
                     }
                     apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
                 }
-                // The assignment runs before the narrowing, exactly as it
-                // does for the leading `if`: `elseif ($x = f())` has to put
-                // `$x` in scope before the truthy test can strip its falsy
-                // members.
+                // The assignment and the by-reference seeding run before the
+                // narrowing, exactly as they do for the leading `if`:
+                // `elseif ($x = f())` has to put `$x` in scope before the
+                // truthy test can strip its falsy members, and
+                // `elseif (preg_match(…, $m))` has to seed `$m` before the
+                // test can rule out the failed match.
                 process_condition_assignment(ei.condition, scope, ctx);
-                apply_condition_narrowing(ei.condition, scope, ctx);
                 seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
+                apply_condition_narrowing(ei.condition, scope, ctx);
                 walk_body_forward(std::iter::once(ei.statement), scope, ctx);
                 return;
             }
@@ -188,8 +190,8 @@ pub(crate) fn process_if_statement_body<'b>(
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
-        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
+        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(std::iter::once(ei.statement), &mut ei_scope, ctx);
         let exits = branch_exits(ei.statement, &ei_scope, ctx);
         elseif_scopes.push((ei_scope, exits));
@@ -393,8 +395,8 @@ pub(crate) fn process_if_colon_body<'b>(
                 apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
             }
             process_condition_assignment(ei.condition, scope, ctx);
-            apply_condition_narrowing(ei.condition, scope, ctx);
             seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
+            apply_condition_narrowing(ei.condition, scope, ctx);
             walk_body_forward(ei.statements.iter(), scope, ctx);
             return;
         }
@@ -446,8 +448,8 @@ pub(crate) fn process_if_colon_body<'b>(
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
-        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
+        apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(ei.statements.iter(), &mut ei_scope, ctx);
         let exits = branch_exits_stmts(ei.statements.iter(), &ei_scope, ctx);
         elseif_scopes.push((ei_scope, exits));

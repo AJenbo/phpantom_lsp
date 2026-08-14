@@ -205,9 +205,20 @@ fn index_segment(
 
     // Try pure-type extraction first (array shapes, generics).
     let extracted = match seg {
+        // An optional entry (`array{0?: string}`, which is what a branch
+        // merge leaves where only one path wrote the key) may not be there,
+        // and an offset read of a key an array lacks is `null` — the same
+        // answer the empty-shape case below gives for a read that is a
+        // guaranteed miss.
         ArrayBracketSegment::StringKey(key) | ArrayBracketSegment::IntKey(key) => base
-            .shape_value_type(key)
-            .cloned()
+            .shape_entry(key)
+            .map(|entry| {
+                if entry.optional {
+                    entry.value_type.clone().or_null()
+                } else {
+                    entry.value_type.clone()
+                }
+            })
             .or_else(|| base.extract_element_type().cloned()),
         // A dynamic (non-literal) key can address any entry, so a shape
         // yields the union of its value types (via

@@ -705,8 +705,12 @@ function runDemoAssertions(): void
     assert($size[0] === '12kg', 'key 0 holds the whole match');
     assert($size['unit'] === 'kg', 'a named group is stored under its name');
     assert($size[1] === '12' && $size[2] === 'kg', 'every group is stored under its number too');
+    assert(preg_match('/(\d+)/', 'kg', $noMatch) === 0, 'a pattern that does not match returns 0');
+    assert($noMatch === [], 'a failed match leaves the empty array behind, so none of the keys are there');
     preg_match_all('/(\d+)/', '1, 2, 3', $numbers);
     assert($numbers[1] === ['1', '2', '3'], 'matching all collects every match of a group under its number');
+    preg_match_all('/(\d+)/', 'none', $noNumbers);
+    assert($noNumbers === [[], []], 'matching all still writes one empty list per group when nothing matches');
 
     // ── Flag-keyed return type (json_encode + JSON_THROW_ON_ERROR) ───────
     assert(json_encode(['ok' => true], JSON_THROW_ON_ERROR) === '{"ok":true}', 'the flag makes the failure branch a JsonException instead of false');

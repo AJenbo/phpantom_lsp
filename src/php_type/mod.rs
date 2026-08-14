@@ -1976,12 +1976,24 @@ impl PhpType {
     ///
     /// Returns `None` if this is not an array shape or the key is not found.
     pub fn shape_value_type(&self, key: &str) -> Option<&PhpType> {
+        self.shape_entry(key).map(|entry| &entry.value_type)
+    }
+
+    /// The shape entry `key` addresses, which [`shape_value_type`] reads the
+    /// value type off.
+    ///
+    /// A caller that has to know whether the entry may be absent (an offset
+    /// read of a missing key is `null`, an argument for it is not required)
+    /// needs the entry itself rather than just its type.
+    ///
+    /// [`shape_value_type`]: PhpType::shape_value_type
+    pub fn shape_entry(&self, key: &str) -> Option<&ShapeEntry> {
         match self.kind() {
             TypeKind::ArrayShape(entries) => {
                 // First try an exact key match (handles named and explicit
                 // numeric keys like `array{0: User, 1: Address}`).
                 if let Some(entry) = entries.iter().find(|e| e.key.as_deref() == Some(key)) {
-                    return Some(&entry.value_type);
+                    return Some(entry);
                 }
                 // Fall back to positional index matching: if the key is a
                 // valid numeric index, match the Nth positional (unkeyed)
@@ -1992,7 +2004,7 @@ impl PhpType {
                     for entry in entries {
                         if entry.key.is_none() {
                             if positional_idx == idx {
-                                return Some(&entry.value_type);
+                                return Some(entry);
                             }
                             positional_idx += 1;
                         }
@@ -2000,8 +2012,8 @@ impl PhpType {
                 }
                 None
             }
-            TypeKind::Nullable(inner) => inner.shape_value_type(key),
-            TypeKind::Union(members) => members.iter().find_map(|m| m.shape_value_type(key)),
+            TypeKind::Nullable(inner) => inner.shape_entry(key),
+            TypeKind::Union(members) => members.iter().find_map(|m| m.shape_entry(key)),
             _ => None,
         }
     }

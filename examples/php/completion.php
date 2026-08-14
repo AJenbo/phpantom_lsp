@@ -1469,6 +1469,11 @@ class ConditionalReturnDemo
             strtoupper($size[0]);                 // the whole match → string
         }
 
+        // Nothing guards this call, and a failed match leaves the empty
+        // array behind, so the same read may find no such key.
+        preg_match('/(\d+)/', '12kg', $maybe);
+        strtoupper($maybe[1] ?? '');              // may be missing → ?string
+
         // `preg_match_all()` collects every match of a group, so the same
         // key holds a list of them rather than one.
         preg_match_all('/(\d+)/', '1, 2, 3', $numbers);

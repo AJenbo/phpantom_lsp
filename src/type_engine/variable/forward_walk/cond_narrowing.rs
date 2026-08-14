@@ -584,6 +584,51 @@ pub(crate) fn apply_condition_narrowing<'b>(
 
     // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
     apply_member_exists_narrowing(condition, scope, false);
+
+    // `if (preg_match(…, $matches))` — the body runs on a successful match,
+    // so `$matches` has the keys the pattern describes.
+    apply_preg_match_narrowing(condition, scope, ctx, true);
+}
+
+/// Narrow the `$matches` out-parameter of a `preg_match`/`preg_match_all`
+/// call that a condition tests the outcome of.
+///
+/// The seeding at the call site writes what the call leaves either way
+/// (`array{0: string, 1: string}|array{}`), because that is all it can know
+/// there. A branch that runs only on a successful match knows the array has
+/// the pattern's keys, and one that runs only on a failed match knows it is
+/// empty. That is what keeps a group read inside the guard a plain `string`,
+/// while the same read on a line either outcome reaches carries the `null` a
+/// missing key yields.
+pub(crate) fn apply_preg_match_narrowing(
+    condition: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    // `preg_match(…, $m) && $m[1] === 'x'` proves the match for the whole
+    // conjunction; an `||` operand proves nothing, and is left whole by the
+    // decomposition below.
+    for operand in collect_and_chain_operands(condition) {
+        let Some((call, matched_when_true)) =
+            crate::type_engine::regex_shape::preg_condition(operand)
+        else {
+            continue;
+        };
+        let Some(matched) = preg_matched_type(&call, scope, ctx) else {
+            continue;
+        };
+        let narrowed = if matched_when_true == truthy {
+            matched
+        } else {
+            crate::type_engine::regex_shape::no_match_type(&matched, call.matches_all)
+                .unwrap_or(matched)
+        };
+        scope.set(
+            call.matches_var,
+            vec![ResolvedType::from_type_string(narrowed)],
+        );
+    }
 }
 
 /// Write the outcome of a *successful* `instanceof` check on `var_name`
@@ -1009,6 +1054,11 @@ fn apply_condition_narrowing_inverse_operand<'b>(
 
     // Inverse in_array narrowing: exclude the element type in the else branch.
     apply_in_array_narrowing(condition, scope, ctx, true);
+
+    // Inverse `preg_match` narrowing: the else branch (and the fall-through of
+    // an `if (!preg_match(…, $matches)) { return; }` guard) knows the opposite
+    // outcome of the one the condition tests for.
+    apply_preg_match_narrowing(condition, scope, ctx, false);
 }
 
 /// Report whether `condition` contains a member-existence proof for any
@@ -2139,6 +2189,12 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // `!empty($x)` — truthy branch means $x is non-empty (truthy):
     // strip null and false from the type.
     if let Some(var_name) = extract_not_empty_var(condition) {
+        // `!empty($arr['key'])` says of the key what `isset` does — it is
+        // there — so the shape drops its `?` as well as the falsy half of
+        // its value type.
+        if let Some((base, key)) = split_array_access_key(&var_name) {
+            strip_null_from_array_shape_key(base, key, scope);
+        }
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_falsy_from_scope(&var_name, scope);
     }
@@ -2463,12 +2519,17 @@ pub(crate) fn extract_null_equality_check_var(expr: &Expression<'_>) -> Option<S
 }
 
 /// Extract variable name from `!empty($x)` (negated empty check).
+///
+/// A member path or an array offset is as much a subject as a bare variable,
+/// the same way it is for `isset($x)` and `empty($x)`: `!empty($row['name'])`
+/// proves that entry is there and truthy.
 pub(crate) fn extract_not_empty_var(expr: &Expression<'_>) -> Option<String> {
     if let Expression::UnaryPrefix(prefix) = expr
         && prefix.operator.is_not()
         && let Expression::Construct(Construct::Empty(empty)) = prefix.operand
     {
-        return expr_to_var_name(empty.value);
+        return expr_to_var_name(empty.value)
+            .or_else(|| narrowing::expr_to_subject_key(empty.value));
     }
     None
 }
