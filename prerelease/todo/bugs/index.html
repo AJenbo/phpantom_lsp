@@ -879,21 +879,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" class="md-nav__link">
+  <a href="#b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B147. Array literals are not tuples: slot reads return the union of all elements
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b148-element-writes-do-not-refine-tracked-array-state" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B148. Element writes do not refine tracked array state
+        B152. <code>array_filter</code> with <code>ARRAY_FILTER_USE_KEY</code> does not narrow the key type
       </span>
     </span>
   </a>
@@ -1424,21 +1413,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" class="md-nav__link">
+  <a href="#b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B147. Array literals are not tuples: slot reads return the union of all elements
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b148-element-writes-do-not-refine-tracked-array-state" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B148. Element writes do not refine tracked array state
+        B152. <code>array_filter</code> with <code>ARRAY_FILTER_USE_KEY</code> does not narrow the key type
       </span>
     </span>
   </a>
@@ -1534,41 +1512,20 @@ change of the two, since a <code>?T</code> argument is common, so it may be wort
 narrowing it first (keep the hatch only where the null could plausibly
 have been guarded out) rather than removing it outright.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">foreach ($rows as $row) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
+<h3 id="b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type">B152. <code>array_filter</code> with <code>ARRAY_FILTER_USE_KEY</code> does not narrow the key type<a class="headerlink" href="#b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @return array&lt;string&gt; $data */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$data = array_filter($data, fn (string|int $k): bool =&gt; is_string($k), ARRAY_FILTER_USE_KEY);</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$data = $this-&gt;viewData($view) + $data;    // reported: array&lt;string|int, string&gt;</span>
 </code></pre></div>
-<p>A list literal collapses to <code>array&lt;union-of-values&gt;</code>, so list
-destructuring and constant-offset reads cannot select a slot (6 sites
-in PHPMD/PDepend). Two adjacent literal defects: a literal with a
-<em>non-constant</em> key renders as the bogus shape <code>array{mixed: int}</code>
-(stringifying the key's type as a field name) instead of falling back
-to <code>array&lt;K, V&gt;</code>, and <code>(object) []</code> is not recognised as <code>stdClass</code>.</p>
-<p><strong>Fix:</strong> keep constant-array shapes for literals (ordered slots +
-known keys), select slots on destructure/offset reads, fall back to a
-generic array only for non-constant keys.</p>
-<h3 id="b148-element-writes-do-not-refine-tracked-array-state">B148. Element writes do not refine tracked array state<a class="headerlink" href="#b148-element-writes-do-not-refine-tracked-array-state" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium-High</strong></p>
-<p>Several forms of the same weakness (~7 sites):</p>
-<ul>
-<li><code>$a[$k][] = $v</code> never updates the inner element type: a value
-  initialised as <code>[]</code> stays <code>array{}</code> in the outgoing type even
-  though every loop iteration appends strings.</li>
-<li>A key written on every path through a loop body leaves
-  <code>array&lt;int, string&gt;</code> where PHPStan reports
-  <code>non-empty-array&lt;int, string&gt;</code>.</li>
-<li><code>$a += ['slot' =&gt; $obj]</code> degrades to unconstrained <code>array</code>.</li>
-<li>A constant shape <code>array{item: string, qty: int}</code> fails the subtype
-  check against <code>array&lt;string, mixed&gt;</code>, so shaped rows are rejected
-  by a declared <code>array&lt;int, array&lt;string, mixed&gt;&gt;</code>.</li>
-</ul>
-<p><strong>Fix:</strong> refine the per-key state on nested writes (including
-auto-vivification), merge <code>+=</code> like an array-shape union, and make
-constant shapes satisfy their generic supertypes.</p>
+<p><code>array_filter</code> preserves its input type verbatim, so the callback's
+proof about the keys is dropped. That is invisible on its own, but the
+key type surfaces the moment the result is merged with <code>+</code> or passed to
+a parameter declared <code>array&lt;string, …&gt;</code> (2 sites in Bladestan). The
+<code>ARRAY_FILTER_USE_BOTH</code> mode has the same gap for the key half.</p>
+<p><strong>Fix:</strong> read the callback's assertions about its key parameter (the
+same reconciliation an <code>if (is_string($k))</code> body already gets) and
+rebuild the result's key type from what survives.</p>
 
 
 
