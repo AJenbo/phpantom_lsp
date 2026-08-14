@@ -299,11 +299,22 @@ check(
 );
 
 // Convention resolves App\Models\BlogAuthor → Database\Factories\BlogAuthorFactory
-// without an @extends Factory<Model> generic on the factory.
+// without a generic annotation, even through the shared BaseFactory parent.
 $authorFactory = \App\Models\BlogAuthor::factory();
 check(
     'BlogAuthor::factory() resolves to BlogAuthorFactory by convention',
     $authorFactory instanceof \Database\Factories\BlogAuthorFactory
+);
+check(
+    'BlogAuthorFactory inherits through the shared BaseFactory',
+    is_subclass_of(
+        \Database\Factories\BlogAuthorFactory::class,
+        \Database\Factories\BaseFactory::class
+    )
+);
+check(
+    'BlogAuthor::factory()->makeOne() builds one BlogAuthor',
+    $authorFactory->makeOne() instanceof \App\Models\BlogAuthor
 );
 
 // has{Relationship} is valid because posts() is a real relationship, and it
