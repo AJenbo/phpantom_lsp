@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786743567279,
+  "lastUpdate": 1786744293785,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21385,6 +21385,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "53eef924d5db9a2ad6512d759c303dd3b328f1cb",
+          "message": "A file with box-drawing characters keeps its diagnostics",
+          "timestamp": "2026-08-14T23:34:29+02:00",
+          "tree_id": "5ba7b2e4902a44f65f4fefaf2c1bd2631d02c533",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/53eef924d5db9a2ad6512d759c303dd3b328f1cb"
+        },
+        "date": 1786744287637,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.3,
             "unit": "MiB"
           }
         ]
