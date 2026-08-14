@@ -1432,6 +1432,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#l48-a-factorys-model-property-is-ignored" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L48. A factory's <code>$model</code> property is ignored
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2130,6 +2141,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L46. <code>-&gt;can()</code> on a user model the receiver does not name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l48-a-factorys-model-property-is-ignored" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L48. A factory's <code>$model</code> property is ignored
       </span>
     </span>
   </a>
@@ -3028,6 +3050,31 @@ resolution at all.</p>
 <code>symbol_map/extraction/laravel.rs</code> and its completion-side twin in
 <code>completion/laravel_string_keys.rs</code>; <code>ViewReceiverSite</code> in
 <code>symbol_map/mod.rs</code> for the confirm-later shape.</p>
+<h4 id="l48-a-factorys-model-property-is-ignored">L48. A factory's <code>$model</code> property is ignored<a class="headerlink" href="#l48-a-factorys-model-property-is-ignored" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><code>Factory::modelName()</code> reads <code>protected $model</code> before it reaches for the
+naming convention, and a factory whose name does not match its model is
+exactly what the property is there for:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">class ArticleFactory extends Factory</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">{</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    protected $model = Draft::class;   // ignored</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">}</span>
+</code></pre></div>
+<p>We read <code>@extends Factory&lt;Model&gt;</code> and the class-name convention only, so
+<code>Draft::factory()-&gt;makeOne()</code> resolves to Eloquent's base <code>Model</code> and
+every member of the real model reads as unknown. The property is also
+what usually pairs with a shared, unannotated factory base: a project
+that centralises helpers in a <code>BaseFactory</code> and names the model on each
+concrete factory gets nothing from either route, and where the name
+happens to look conventional we answer with the conventional model
+rather than the one the factory declares.</p>
+<p>The fix is to read the property's initialiser (a <code>::class</code> constant or a
+string literal) and prefer it over the convention, the way an explicit
+<code>@extends Factory&lt;Model&gt;</code> already wins.</p>
+<p><strong>Where to look:</strong> <code>factory_model_type</code> and
+<code>build_factory_relationship_methods</code> in
+<code>virtual_members/laravel/factory.rs</code>, and the convention fallback in
+<code>inheritance/mod.rs</code>.</p>
 
 
 
