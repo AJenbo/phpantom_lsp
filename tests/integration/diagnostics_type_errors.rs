@@ -1762,11 +1762,11 @@ function test(): void {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// New rules: nullable arg → non-nullable param (MAYBE)
+// Nullable arg → non-nullable param: reported, in either spelling
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn no_diagnostic_for_nullable_arg_to_non_nullable_param() {
+fn nullable_arg_to_non_nullable_param_is_reported() {
     let php = r#"<?php
 class Carbon {}
 
@@ -1776,15 +1776,16 @@ function test(?Carbon $c): void {
     takes_carbon($c);
 }
 "#;
-    let diags = collect(php);
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
-        !has_type_error(&diags),
-        "Should not flag ?Carbon passed to Carbon (developer may have null-checked), got: {diags:?}"
+        messages[0].contains("?Carbon"),
+        "the message should name the type passed, got {messages:?}"
     );
 }
 
 #[test]
-fn no_diagnostic_for_nullable_string_to_string() {
+fn nullable_string_to_string_is_reported() {
     let php = r#"<?php
 function takes_string(string $s): void {}
 
@@ -1792,11 +1793,73 @@ function test(?string $s): void {
     takes_string($s);
 }
 "#;
-    let diags = collect(php);
-    assert!(
-        !has_type_error(&diags),
-        "Should not flag ?string passed to string (MAYBE), got: {diags:?}"
-    );
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+/// The same call written with the union spelling of the same type, which
+/// used to be the only one of the two that was reported: which spelling a
+/// value carries is an accident of how it was produced, so both have to
+/// reach the same verdict.
+#[test]
+fn a_union_spelled_nullable_argument_reads_the_same_as_the_short_one() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+/** @param string|null $s */
+function test($s): void {
+    takes_string($s);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+/// A guard the walker can follow leaves nothing to report, in either
+/// spelling — the check is reading the flow rather than reporting every
+/// nullable argument on sight.
+#[test]
+fn a_guarded_nullable_argument_is_not_reported() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(?string $s): void {
+    if ($s === null) {
+        return;
+    }
+    takes_string($s);
+}
+
+/** @param string|null $s */
+function testUnion($s): void {
+    if (!$s) {
+        return;
+    }
+    takes_string($s);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A nullable argument whose parameter admits null as one of its union
+/// members is fine, and was reported before `?T` was decomposed into the
+/// union it stands for: the whole `?Color` matched no single member of
+/// `Htmlable|BackedEnum|string|null`, while its halves match one each.
+#[test]
+fn a_nullable_argument_satisfies_a_union_parameter_that_admits_null() {
+    let php = r#"<?php
+interface Htmlable {}
+enum Color: string { case Red = 'red'; }
+
+function render(Htmlable|BackedEnum|string|null $value): void {}
+
+function test(?Color $color): void {
+    render($color);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
 }
 
 #[test]

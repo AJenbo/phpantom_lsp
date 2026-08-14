@@ -22,57 +22,144 @@ No outstanding items.
 
 ## Type comparison
 
-### B151. `?T` and `T|null` are judged by different rules
+No outstanding items.
 
-**Impact: High · Effort: Low-Medium**
+## Narrowing
 
-Found on 2026-08-14 while checking why an optional array-shape key read
-was not reported, not in the sample-project sweep. The same type in its
-two spellings gets two different answers from every consumer:
+The five entries below were all found the same way, on 2026-08-14: with
+the nullable escape hatch in `is_type_compatible` retired, a `?T`
+argument is judged like the `T|null` it stands for, and every null the
+walker fails to narrow away now surfaces as a diagnostic. Each one is a
+guard the source really writes and we really lose. Site counts are from
+a sweep of the ten sample projects on the day the hatch went.
+
+### B153. Static properties get no flow tracking at all
+
+**Impact: Medium-High · Effort: Medium**
+
+Nine sites, the largest single group. Neither an assignment nor a check
+is remembered for `self::$x` / `static::$x` / `Foo::$x`, so the lazy-init
+idiom reports a null that cannot reach the read:
 
 ```php
-function f(?string $x): string {
-    trim($x);            // silent
-    return $x;           // silent
-}
+private static ?Repo $repo = null;
 
-/** @param array{a: string|null} $row */
-function g(array $row): void {
-    trim($row['a']);     // reported: null does not satisfy string
+public static function repo(): Repo
+{
+    if (self::$repo === null) {
+        self::$repo = new Repo();
+    }
+
+    return self::$repo;      // reported: ?Repo
 }
 ```
 
-Assigning a `?string` into a `string` property and passing one to a
-user-defined `string` parameter are silent too, so this is not specific
-to the argument check: `type_mismatch_argument`, `type_mismatch_return`
-and the property-assignment check all report the union spelling and none
-of them report the `?T` one.
+`self::$x = 'a'; return self::$x;` is enough on its own — the assignment
+alone is not recorded either. The root is that
+`narrowing::expr_to_subject_key` (`type_engine/types/narrowing/resolve.rs`)
+returns `None` for `Access::StaticProperty`, so a static property is
+never a narrowing subject; the read side (`rhs_resolution/property_access.rs`)
+also resolves straight from the declaration without consulting the scope.
+Both halves have to land together, along with invalidation, for the key
+to mean anything.
 
-The cause is the "Nullable arg → non-nullable param: MAYBE" escape hatch
-in `is_type_compatible` (`diagnostics/type_errors/compatibility.rs`),
-which returns compatible whenever the argument is a `TypeKind::Nullable`
-whose inner type fits, on the grounds that the null may have been guarded
-somewhere the walker could not follow. The hatch matches on the
-*spelling* rather than on the type, so `TypeKind::Union([T, null])` walks
-straight past it. Which spelling a value ends up with is an accident of
-how it was produced: a declared `?string` and a nullable docblock stay
-`Nullable`, while a union built by a branch merge, a `??` chain, or a
-resolver join comes out as `T|null`.
+### B154. An assignment inside a `try` block is lost after the block
 
-This is what makes a read of an optional shape key
-(`array{a?: string}`, and the `array{0?: string, 1?: string}` a
-`preg_match` guard leaves behind where its branches rejoin) resolve
-correctly as `?string` and still go unreported when it is passed to a
-non-nullable parameter.
+**Impact: Medium · Effort: Low-Medium**
 
-**Fix:** decide the policy once and apply it to both spellings. Reading
-the null out of the argument type rather than off its shape is the
-mechanical half (`accepts_null` / `non_null_type` already handle both);
-the judgement is whether the hatch stays at all, and the architecture
-note above it says what retiring one costs. Closing it is the larger
-change of the two, since a `?T` argument is common, so it may be worth
-narrowing it first (keep the hatch only where the null could plausibly
-have been guarded out) rather than removing it outright.
+```php
+if (!$h) {
+    try {
+        $h = new Holder();
+    } catch (RuntimeException) {
+        throw new LogicException('x');
+    }
+}
+
+return $h;                   // reported: ?Holder
+```
+
+Without the `try` the same code is narrowed correctly, so what is lost is
+the assignment's effect on the scope the `try` statement leaves behind,
+not the guard.
+
+### B155. A `&&` chain inside a `match` arm does not narrow its own operands
+
+**Impact: Medium · Effort: Low-Medium**
+
+```php
+return match ($kind) {
+    1       => $this->a && $this->b && $this->same($this->a),  // reported: ?Holder
+    default => true,
+};
+```
+
+The same chain written as a `return` statement narrows. Match arms record
+a scope snapshot per arm, but the arm body's own `&&` operands are not
+narrowed against each other inside it.
+
+### B156. `$x === Enum::Case` does not remove null from `$x`
+
+**Impact: Medium · Effort: Low**
+
+```php
+return $land === Land::Be && $this->takes($land);   // reported: ?Land
+```
+
+Identity against an enum case proves the subject is that case, so
+everything else in its union — `null` included — is ruled out for the
+rest of the chain.
+
+### B157. A `do`/`while` condition does not narrow its own operands
+
+**Impact: Low-Medium · Effort: Low-Medium**
+
+```php
+do {
+    $expr = $this->parseOptionalExpression();
+} while ($expr && $this->addChildToList($list, $expr));   // reported: ?ASTNode
+```
+
+The `&&` narrowing that an `if` condition performs is not applied in a
+loop condition.
+
+## Symbol resolution
+
+### B158. A namespaced constant is only found under its bare name
+
+**Impact: Medium-High · Effort: Medium**
+
+`extract_defines_from_statements` (`parser/functions.rs`) registers a
+namespace-level `const` under the name as written, dropping the
+namespace it sits in, so `Demo\Scaffolding\GRADES` is stored as
+`GRADES`. Every reference that names the namespace therefore finds
+nothing, while the bare reference finds it:
+
+```php
+namespace App;
+
+use App\Config;
+use const App\Config\GRADES;
+
+in_array($g, GRADES, true);          // resolved
+in_array($g, Config\GRADES, true);   // not resolved
+in_array($g, \App\Config\GRADES, true); // not resolved
+```
+
+The value is what the narrowing, hover and completion paths read, so a
+qualified reference silently loses whatever the constant proves. It is
+visible in `examples/php/completion.php`, where the `in_array($grade,
+Scaffolding\GRADES, true)` gate cannot narrow the `?string` away and the
+return is reported as a mismatch — the demo is right and the resolution
+is not.
+
+Storing the fully-qualified name is only half of it: a bare reference
+has to keep resolving, which in PHP means trying the current namespace
+first and the global one after, and a qualified one has to go through
+the file's `use` table the way a class name does. The function index
+made the same choice deliberately (see the comment about short-name
+collisions in `parser/ast_update.rs`), so follow it rather than adding a
+short-name fallback entry.
 
 ## Array types
 

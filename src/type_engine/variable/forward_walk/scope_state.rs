@@ -129,18 +129,28 @@ impl ScopeState {
     }
 
     /// Drop what an impure call on `receiver` could have changed: every
-    /// synthetic key rooted at it, and every check whose subject is one.
+    /// recorded call read through it, and every check whose subject is
+    /// one.
     ///
     /// The receiver keeps its own type — a call does not replace the
-    /// object the variable holds — but anything *read through* it is a
-    /// question the call may now answer differently. That covers a
-    /// property path (`$stmt->row`), an element (`$stmt["id"]`), and a
-    /// recorded call (`$stmt->fetch('id')`), which is the case that
-    /// matters: proving `$stmt->fetch('id') !== false` says nothing about
-    /// what the same call returns once `$stmt->execute()` has run.
+    /// object the variable holds — and so does a property path
+    /// (`$stmt->row`) or an element (`$stmt["id"]`) read through it.
+    /// What goes is the recorded call (`$stmt->fetch('id')`), which is
+    /// the case that matters: proving `$stmt->fetch('id') !== false`
+    /// says nothing about what the same call returns once
+    /// `$stmt->execute()` has run.
+    ///
+    /// Dropping the property paths as well would be sound — the callee
+    /// may write to any of them — but it costs far more than it buys.
+    /// Guard, call, use (`if (!$p->id) { throw; } $o = $p->load(); f($p->id);`)
+    /// is ordinary code, and forgetting the guard there reports a null
+    /// the program has already ruled out. PHPStan keeps property fetches
+    /// across a method call for the same reason, and Psalm keeps them
+    /// across anything it can see is pure.
     pub fn invalidate_receiver_state(&mut self, receiver: &str) {
         let reads_receiver = |key: &str| {
             key != receiver
+                && crate::type_engine::types::narrowing::is_call_key(key)
                 && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
         };
         self.locals.retain(|key, _| !reads_receiver(key));

@@ -422,6 +422,21 @@ pub(crate) fn is_type_compatible(
         return true;
     }
 
+    // ── Nullable argument handling ───────────────────────────────
+    // `?T` is the union `T|null` written short, so it is judged as that
+    // union: both halves have to satisfy the parameter, exactly as the
+    // rule below demands of a union's members.  Which of the two
+    // spellings a value ends up with is an accident of how it was
+    // produced — a declared hint and a nullable docblock stay `?T`,
+    // while a branch merge, a `??` chain or a resolver join comes out as
+    // `T|null` — so judging them by different rules would make the
+    // diagnostic fire on where a type came from rather than on what it
+    // holds.
+    if let TypeKind::Nullable(inner) = arg_type.kind() {
+        return is_type_compatible(inner, param_type, class_loader, strict_types)
+            && is_type_compatible(&PhpType::null(), param_type, class_loader, strict_types);
+    }
+
     // ── Union argument handling ───────────────────────────────────
     // The runtime value can be any member of the union, so every
     // member must independently satisfy the parameter type for the
@@ -497,16 +512,6 @@ pub(crate) fn is_type_compatible(
     // (The reverse — typed array <: bare array — is a strict YES
     // handled by the `is_subtype_of_typed` fallback.)
     if is_bare_array(arg_type) && is_any_array_type(param_type) {
-        return true;
-    }
-
-    // ── Nullable arg → non-nullable param: MAYBE ────────────────
-    // The developer may have guarded against null before this call
-    // (instanceof, assert, if-check).  We can't prove the null
-    // path actually reaches here, so stay silent.
-    if let TypeKind::Nullable(inner) = arg_type.kind()
-        && is_type_compatible(inner, param_type, class_loader, strict_types)
-    {
         return true;
     }
 

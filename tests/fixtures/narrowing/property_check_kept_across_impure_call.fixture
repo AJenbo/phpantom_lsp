@@ -1,0 +1,25 @@
+// test: an impure call keeps a property path narrowed through the receiver
+// feature: hover
+// A call on `$conn` could reassign anything it owns, but guard, call, use
+// is ordinary code and forgetting the check there reports a null the
+// program has already ruled out. What the call does drop is a *recorded
+// call* read through the receiver, whose answer it really can change.
+// expect: $h = Handle
+---
+<?php
+
+class Handle {}
+
+class Conn {
+    public Handle|null $handle = null;
+
+    public function reset(): void {}
+}
+
+function run(Conn $conn): void {
+    if ($conn->handle instanceof Handle) {
+        $conn->reset();
+        $h = $conn->handle;
+        echo $<>h;
+    }
+}

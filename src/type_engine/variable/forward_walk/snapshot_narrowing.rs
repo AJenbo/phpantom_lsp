@@ -164,6 +164,19 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                 record_match_ternary_snapshots(arg_expr, scope, ctx);
             }
         }
+        // `new Foo($x ? $x->name() : '')` holds a ternary in the same
+        // position a call does, and its branches narrow the same way.
+        Expression::Instantiation(inst) => {
+            if let Some(args) = &inst.argument_list {
+                for arg in args.arguments.iter() {
+                    let arg_expr = match arg {
+                        Argument::Positional(a) => a.value,
+                        Argument::Named(a) => a.value,
+                    };
+                    record_match_ternary_snapshots(arg_expr, scope, ctx);
+                }
+            }
+        }
         Expression::Binary(bin) => {
             record_match_ternary_snapshots(bin.lhs, scope, ctx);
             record_match_ternary_snapshots(bin.rhs, scope, ctx);
@@ -378,6 +391,18 @@ pub(crate) fn record_scope_snapshot_recursive(expr: &Expression<'_>, scope: &Sco
                 };
                 record_scope_snapshot(arg_expr.span().start.offset, scope);
                 record_scope_snapshot_recursive(arg_expr, scope);
+            }
+        }
+        Expression::Instantiation(inst) => {
+            if let Some(args) = &inst.argument_list {
+                for arg in args.arguments.iter() {
+                    let arg_expr = match arg {
+                        Argument::Positional(a) => a.value,
+                        Argument::Named(a) => a.value,
+                    };
+                    record_scope_snapshot(arg_expr.span().start.offset, scope);
+                    record_scope_snapshot_recursive(arg_expr, scope);
+                }
             }
         }
         Expression::Access(access) => match access {
