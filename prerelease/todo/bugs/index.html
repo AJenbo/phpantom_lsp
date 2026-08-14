@@ -840,17 +840,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b176-a-template-bound-through-a-union-param-never-binds" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. A <code>@template</code> bound through a union <code>@param</code> never binds
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b141-a-never-conditional-branch-does-not-assert-the-condition" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -862,21 +851,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b142-builtins-with-argument-dependent-return-types-round-two" class="md-nav__link">
+  <a href="#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B142. Builtins with argument-dependent return types, round two
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B143. Conditional-return arguments written as expressions still read as nothing
+        B143. A constant built from another constant does not fold to its value
       </span>
     </span>
   </a>
@@ -927,17 +905,6 @@
   
     <nav class="md-nav" aria-label="Array types">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b146-array-builtins-lose-key-and-element-generics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B146. Array builtins lose key and element generics
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" class="md-nav__link">
@@ -1618,17 +1585,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b176-a-template-bound-through-a-union-param-never-binds" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. A <code>@template</code> bound through a union <code>@param</code> never binds
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b141-a-never-conditional-branch-does-not-assert-the-condition" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1640,21 +1596,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b142-builtins-with-argument-dependent-return-types-round-two" class="md-nav__link">
+  <a href="#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B142. Builtins with argument-dependent return types, round two
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B143. Conditional-return arguments written as expressions still read as nothing
+        B143. A constant built from another constant does not fold to its value
       </span>
     </span>
   </a>
@@ -1705,17 +1650,6 @@
   
     <nav class="md-nav" aria-label="Array types">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b146-array-builtins-lose-key-and-element-generics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B146. Array builtins lose key and element generics
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" class="md-nav__link">
@@ -1954,38 +1888,14 @@ diagnostics across ten projects, ~330 of them false positives). Site
 counts refer to that sweep; the git-ignored triage log has the full
 per-project inventory. Entries filed later say where they came from.</p>
 <h2 id="conditional-and-argument-dependent-return-types">Conditional and argument-dependent return types<a class="headerlink" href="#conditional-and-argument-dependent-return-types" title="Permanent link">&para;</a></h2>
-<h3 id="b176-a-template-bound-through-a-union-param-never-binds">B176. A <code>@template</code> bound through a union <code>@param</code> never binds<a class="headerlink" href="#b176-a-template-bound-through-a-union-param-never-binds" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>A template parameter is bound from the argument whose <code>@param</code> names
-it, but only when the annotation names it plainly (<code>@param T $x</code>),
-inside an array (<code>@param T[] $x</code>), or as one generic wrapper
-(<code>@param array&lt;TKey, TValue&gt; $x</code>). A <em>union</em> of shapes binds nothing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * @param Collection&lt;TKey, TValue&gt;|EloquentCollection&lt;TKey, TValue&gt;|array&lt;TKey, TValue&gt; $items</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> * @return array&lt;TKey, TValue&gt;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x"> */</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function pick($items) {}</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">pick($rows);   // array&lt;int, string&gt; in, reported array&lt;array-key, mixed&gt;</span>
-</code></pre></div>
-<p>Each alternative is a binding site of its own, and the one whose shape
-the argument matches is the one that should bind. spatie's
-<code>Data::collect()</code> is the case that surfaced it: the branch its
-arguments select is right, but its key type falls back to the declared
-<code>array-key</code> bound. A method binds the <em>whole</em> argument type instead,
-which is worse: <code>array&lt;TKey, …&gt;</code> with a <code>list&lt;string&gt;</code> argument reports
-<code>array&lt;array&lt;int, string&gt;, …&gt;</code>.</p>
-<p><strong>Fix:</strong> in <code>classify_template_binding</code>, treat a union <code>@param</code> as the
-set of binding sites it names and match the argument against each,
-binding from the alternative it satisfies.</p>
 <h3 id="b141-a-never-conditional-branch-does-not-assert-the-condition">B141. A <code>never</code> conditional branch does not assert the condition<a class="headerlink" href="#b141-a-never-conditional-branch-does-not-assert-the-condition" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function throw_unless($condition, ...$args) {}</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">$dispatcher = Model::getEventDispatcher();      // Dispatcher|null</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">throw_unless($dispatcher, &#39;Exception&#39;, &#39;…&#39;);</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">Model::setEventDispatcher($dispatcher);         // reported Dispatcher|null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @return ($condition is false ? never : ($condition is non-empty-mixed ? TValue : never)) */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function throw_unless($condition, ...$args) {}</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$dispatcher = Model::getEventDispatcher();      // Dispatcher|null</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">throw_unless($dispatcher, &#39;Exception&#39;, &#39;…&#39;);</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">Model::setEventDispatcher($dispatcher);         // reported Dispatcher|null</span>
 </code></pre></div>
 <p>When a call's conditional return resolves to <code>never</code> for some subtype
 of an argument, that subtype cannot survive the call; PHPStan derives
@@ -1996,42 +1906,37 @@ so every <code>throw_unless</code>/<code>throw_if</code>/<code>abort_unless</cod
 subtype</em> of an argument is <code>never</code>, subtract that subtype from the
 argument expression in the following scope — the same subtraction the
 <code>if (!$x) { throw … }</code> form already gets.</p>
-<h3 id="b142-builtins-with-argument-dependent-return-types-round-two">B142. Builtins with argument-dependent return types, round two<a class="headerlink" href="#b142-builtins-with-argument-dependent-return-types-round-two" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>The T38 work covered the replace family and <code>json_encode</code>; the
-conditional-signature round covered <code>pathinfo</code>, <code>print_r</code>, <code>hrtime</code>,
-<code>microtime</code>, <code>getenv</code>, <code>mb_convert_encoding</code>, <code>abs</code> and
-<code>SimpleXMLElement::asXML()</code>/<code>saveXML()</code>. What is left needs the
-<em>element</em> type of an array argument rather than the argument's own
-category, which the conditional evaluator cannot express (<code>array&lt;int&gt;</code>
-and <code>array&lt;string&gt;</code> both read as "array"):</p>
-<ul>
-<li><code>array_sum(array&lt;int&gt;)</code> is <code>int</code> (<code>array_product</code> likewise). 2 sites.</li>
-</ul>
-<p><strong>Fix:</strong> a per-function rule in
-<code>type_engine/variable/array_func_rules.rs</code>, which already has the
-argument's raw type at hand. Blocked behind the same
-<code>resolve_arg_raw_type</code> gap as <a href="#b146-array-builtins-lose-key-and-element-generics">B146</a>.</p>
-<p><code>ReflectionClass&lt;T&gt;::newInstance()</code>/<code>newInstanceArgs()</code>/
-<code>newInstanceWithoutConstructor()</code> were listed here too but do not
-reproduce: all three substitute <code>T</code> when the receiver carries a type
-argument, and <code>object</code> is the honest answer for a bare
-<code>ReflectionClass</code>.</p>
-<h3 id="b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing">B143. Conditional-return arguments written as expressions still read as nothing<a class="headerlink" href="#b143-conditional-return-arguments-written-as-expressions-still-read-as-nothing" title="Permanent link">&para;</a></h3>
+<h3 id="b143-a-constant-built-from-another-constant-does-not-fold-to-its-value">B143. A constant built from another constant does not fold to its value<a class="headerlink" href="#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>The successor to B124. The replace-family conditional keys on
-<code>$subject</code>, but the subject's type is only read for simple argument
-shapes, so <code>str_replace(NS, '', $class)</code> on a <code>string</code> parameter, or
-<code>preg_replace($pats, $reps, file_get_contents($f) ?: '')</code>, still
-returns <code>array|string</code> (5 sites). Same story for flag arguments built
-from expressions: <code>json_encode($v, $options | self::FLAGS)</code> and
-<code>json_encode($v, $encodeOptions)</code> where the local was assigned a
-constant <code>|</code> chain never strip <code>false</code> even though the
-<code>JSON_THROW_ON_ERROR</code> bit is provably set (3 sites).</p>
-<p><strong>Fix:</strong> resolve conditional-return argument types through the shared
-<code>resolve_expression_type</code> pipeline rather than a call-site text reader,
-and evaluate flag bits against an integer range ("bit definitely set")
-instead of requiring a literal constant.</p>
+<p>A flags argument is bit-tested by resolving each <code>|</code> operand to a
+literal integer, so it reads <code>json_encode($v, 4194304)</code> and
+<code>json_encode($v, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)</code> but stops at
+one level of indirection. A constant whose <em>value</em> is itself a constant
+expression resolves to plain <code>int</code>, and every form built on one is
+missed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    const FLAGS = JSON_THROW_ON_ERROR;              // resolves to `int`</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    const COMBO = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">json_encode($v, self::FLAGS);                       // reported string|false</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">json_encode($v, $options | self::FLAGS);            // reported string|false</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">$local = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">json_encode($v, $local);                            // reported string|false</span>
+</code></pre></div>
+<p>The same gap is why a <code>match</code> on a constant alias, or a comparison
+against one, cannot be decided either — the flags case is just where it
+was measured (3 sites).</p>
+<p><strong>Fix:</strong> fold a constant initialiser that names other constants (and
+<code>|</code>/<code>&amp;</code>/<code>&lt;&lt;</code> chains of them) to its literal value during constant
+resolution, with a visited set so a cyclic initialiser terminates, and
+carry the same folding onto a variable assigned such a chain. The bit
+test in <code>type_engine::types::flag_returns</code> then needs no change: it
+already asks the shared resolver for a literal and would start getting
+one.</p>
+<p>The other half of this entry — the replace family reading its <code>$subject</code>
+through the shared pipeline — is fixed; <code>str_replace(self::NS, '',
+$class)</code> and <code>preg_replace($p, $r, file_get_contents($f) ?: '')</code> both
+resolve to <code>string</code> now.</p>
 <h2 id="preg_match">preg_match<a class="headerlink" href="#preg_match" title="Permanent link">&para;</a></h2>
 <h3 id="b144-preg_match-matches-is-nullable-and-shapeless">B144. <code>preg_match</code> <code>$matches</code> is nullable and shapeless<a class="headerlink" href="#b144-preg_match-matches-is-nullable-and-shapeless" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Effort: Medium</strong></p>
@@ -2061,34 +1966,6 @@ seven projects):</p>
 non-null after the call; add a literal-pattern group-shape analysis
 (port the capture-group walk from PHPStan's <code>RegexArrayShapeMatcher</code>).</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b146-array-builtins-lose-key-and-element-generics">B146. Array builtins lose key and element generics<a class="headerlink" href="#b146-array-builtins-lose-key-and-element-generics" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p>~20 sites across six projects, all the same underlying gap — the
-signature's <code>int[]|string[]</code>/<code>array-key</code> placeholders are returned
-verbatim instead of substituting the input's generics:</p>
-<ul>
-<li><code>array_keys(array&lt;K, V&gt;)</code> → <code>list&lt;K&gt;</code> (10 sites; the stub-literal
-  <code>array&lt;int&gt;|array&lt;string&gt;</code> union then fails against
-  <code>array&lt;string&gt;</code>/<code>list&lt;int&gt;</code> on the wrong branch).</li>
-<li><code>array_search($needle, array&lt;K, V&gt;)</code> → <code>K|false</code>; <code>key()</code>,
-  <code>array_key_first/last(array&lt;K, V&gt;)</code> → <code>K|null</code>.</li>
-<li><code>array_values(array&lt;K, V&gt;)</code> → <code>list&lt;V&gt;</code>.</li>
-<li><code>array_filter</code>/<code>array_map</code> (single-array form) preserve the key
-  type; <code>array_filter</code> with no callback also strips falsy members
-  from the value type (<code>array&lt;string, string|null&gt;</code> →
-  <code>array&lt;string, non-falsy-string&gt;</code>).</li>
-<li><code>array_flip(array&lt;K, V&gt;)</code> → <code>array&lt;V, K&gt;</code>.</li>
-</ul>
-<p><strong>Fix:</strong> the rules themselves are not the gap — <code>array_func_rules.rs</code>
-already computes <code>array_values(array&lt;string, int&gt;) → array&lt;string, int&gt;</code>
-correctly, and <code>array_flip</code> resolves through the stub's own <code>@template</code>.
-The gap is that on the forward-walker path <code>resolve_arg_raw_type</code>
-returns <code>None</code> for a docblock-typed parameter, so the rule never fires
-and the stub's bare <code>array</code> wins; only the text-driven call resolver
-reaches it. Fix that first, then add the per-function rules above
-(<code>array_values</code> → <code>list&lt;V&gt;</code> rather than the input type it preserves
-today, plus <code>array_keys</code>, <code>array_search</code>, <code>key</code>,
-<code>array_key_first</code>/<code>last</code>, and <code>array_filter</code>'s falsy strip).</p>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
