@@ -1003,6 +1003,50 @@ class ViewServiceProvider
         );
     }
 
+    /// The directive is written under a check that proves the variable,
+    /// and Blade compiles that check into the same `if` any PHP walker
+    /// reads, so the partial receives the narrowed type rather than the
+    /// nullable one the template declared.
+    #[tokio::test]
+    async fn an_include_under_a_guard_inherits_the_narrowed_type() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/card.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User $user\n */\n@endphp\n<p>{{ $user->email }}</p>\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User|null $user\n */\n@endphp\n@if ($user)\n@include('partials.card')\n@endif\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
+        assert!(
+            diags.is_empty(),
+            "the guard proves the user is there, got {diags:?}"
+        );
+    }
+
+    /// The same template without the guard still reports, so the check is
+    /// reading the flow rather than being switched off.
+    #[tokio::test]
+    async fn an_unguarded_include_still_reports_the_nullable_type() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/partials/card.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User $user\n */\n@endphp\n<p>{{ $user->email }}</p>\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User|null $user\n */\n@endphp\n@include('partials.card')\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "type_mismatch_view_variable");
+    }
+
     /// An item name built at runtime binds a variable whose name cannot be
     /// known, so nothing about what the partial is short of follows.
     #[tokio::test]

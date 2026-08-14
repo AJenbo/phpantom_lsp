@@ -299,3 +299,97 @@ fn model_type_ignores_generics_for_other_parents() {
         "only an @extends Factory<…> annotation names the model"
     );
 }
+
+// ── Count state carried by the value ────────────────────────────────
+
+/// A resolved factory value with a count state attached.
+fn factory_value(class: &str, count: FactoryCount) -> ResolvedType {
+    let mut value = ResolvedType::from_arc(Arc::new(make_class(class)));
+    value.factory_count = count;
+    value
+}
+
+#[test]
+fn a_lone_factory_value_speaks_for_itself() {
+    assert_eq!(
+        carried_count(&[factory_value("UserFactory", FactoryCount::Many)]),
+        FactoryCount::Many
+    );
+}
+
+#[test]
+fn factory_values_that_disagree_carry_nothing() {
+    assert_eq!(
+        carried_count(&[
+            factory_value("UserFactory", FactoryCount::One),
+            factory_value("UserFactory", FactoryCount::Many),
+        ]),
+        FactoryCount::Unknown
+    );
+}
+
+/// The `null` half of a `?UserFactory` is not a factory of unknown
+/// count, so it does not overrule the factory beside it.
+#[test]
+fn a_nullable_factory_keeps_its_count() {
+    assert_eq!(
+        carried_count(&[
+            factory_value("UserFactory", FactoryCount::One),
+            ResolvedType::from_type_string(PhpType::null()),
+        ]),
+        FactoryCount::One
+    );
+}
+
+#[test]
+fn a_fluent_call_hands_its_state_to_the_same_class() {
+    let receiver = vec![factory_value("UserFactory", FactoryCount::Many)];
+    let mut results = vec![
+        ResolvedType::from_arc(Arc::new(make_class("UserFactory"))),
+        ResolvedType::from_arc(Arc::new(make_class("User"))),
+    ];
+
+    carry_factory_count(&mut results, &receiver, FactoryCount::Many);
+
+    assert_eq!(results[0].factory_count, FactoryCount::Many);
+    assert_eq!(
+        results[1].factory_count,
+        FactoryCount::Unknown,
+        "the model a factory builds is not itself a factory"
+    );
+}
+
+// ── factory($count) settled by the argument's type ──────────────────
+
+#[test]
+fn a_numeric_argument_type_sets_a_count() {
+    for ty in ["int", "float", "positive-int"] {
+        assert_eq!(
+            numeric_argument_count(&PhpType::parse(ty)),
+            FactoryCount::Many,
+            "{ty} is what is_numeric() accepts"
+        );
+    }
+}
+
+#[test]
+fn a_state_argument_type_sets_no_count() {
+    for ty in ["array<string, mixed>", "callable", "Closure", "null"] {
+        assert_eq!(
+            numeric_argument_count(&PhpType::parse(ty)),
+            FactoryCount::One,
+            "{ty} is state, not a count"
+        );
+    }
+}
+
+#[test]
+fn an_argument_type_that_could_be_either_settles_nothing() {
+    for ty in ["mixed", "string", "int|array<mixed>"] {
+        assert_eq!(
+            numeric_argument_count(&PhpType::parse(ty)),
+            FactoryCount::Unknown,
+            "{ty} does not settle what is_numeric() would say"
+        );
+    }
+}

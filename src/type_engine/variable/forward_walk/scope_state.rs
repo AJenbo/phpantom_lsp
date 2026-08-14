@@ -267,6 +267,10 @@ impl ScopeState {
                             // guard held.  Drop any virtual member missing
                             // from the incoming branch.
                             drop_branch_local_virtual_members(existing, rt);
+                            // A factory is only known to build one model
+                            // (or a collection) at the join when every
+                            // incoming path built the same thing.
+                            existing.factory_count = existing.factory_count.join(rt.factory_count);
                             merged_into_existing = true;
                             break;
                         }

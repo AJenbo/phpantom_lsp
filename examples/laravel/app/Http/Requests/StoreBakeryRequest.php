@@ -32,6 +32,11 @@ class StoreBakeryRequest extends FormRequest
             'notes' => 'array',
             'notes.*.body' => 'required|string',
             'owner.email' => 'required|email',
+            // A field validated as one file, and one validated as a list of
+            // them: that is what tells `file('…')`'s two shapes apart.
+            'photo' => 'nullable|image',
+            'gallery' => 'array',
+            'gallery.*' => 'file',
             // An enum rule validates the raw input, so the validated value is
             // the enum's backing type: string here, int for `batch_size`.
             'flavor' => ['required', new Enum(JamFlavor::class)],

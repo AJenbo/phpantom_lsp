@@ -158,6 +158,43 @@ fn resolve_auth_user_at_call(
 ///
 /// Returns `None` for every other call, leaving the declared return type
 /// alone.
+/// The type a request input accessor call returns, given the arguments it
+/// was written with.
+///
+/// The subject-expression path reaches the arguments as text, which is all
+/// the key needs; the default's type is resolved through the shared
+/// pipeline the same way an argument anywhere else is.
+fn resolve_request_accessor_at_call(
+    method_name: &str,
+    text_args: &str,
+    owners: &[ResolvedType],
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    use crate::virtual_members::laravel::request_input;
+
+    let accessor = request_input::input_accessor(method_name)?;
+    let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
+    let args = split_text_args(text_args);
+    let default_type = || {
+        let text = args.get(1)?;
+        let resolved =
+            crate::type_engine::resolver::resolve_target_classes(text, AccessKind::Arrow, ctx);
+        (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+    };
+    request_input::resolve_accessor_type(
+        receiver,
+        accessor,
+        &request_input::AccessorArgs {
+            key: args.first().copied(),
+            default_type: &default_type,
+        },
+        ctx.content,
+        ctx.cursor_offset,
+        ctx.class_loader,
+        ctx.backend,
+    )
+}
+
 fn resolve_validated_shape_at_call(
     base: &SubjectExpr,
     method_name: &str,
@@ -414,6 +451,25 @@ impl Backend {
                 {
                     if let Some(ref mut hint_out) = return_type_hint_out {
                         **hint_out = Some(hint);
+                    }
+                    return classes;
+                }
+
+                // Laravel request input: `header('X', '')`, `query()`,
+                // `file('photo')` and the rest all declare one union
+                // covering every way of calling them, and the call's own
+                // arguments say which of those ways this is.
+                if let Some(ty) =
+                    resolve_request_accessor_at_call(method_name, text_args, &lhs_resolved, ctx)
+                {
+                    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &ty,
+                        "",
+                        ctx.all_classes,
+                        ctx.class_loader,
+                    );
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(ty);
                     }
                     return classes;
                 }

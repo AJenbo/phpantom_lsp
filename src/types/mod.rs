@@ -2432,6 +2432,54 @@ pub struct ResolvedType {
     /// class/interface/trait/enum.  `None` for scalars, shapes
     /// where the base is `array`, and unresolvable types.
     pub class_info: Option<Arc<ClassInfo>>,
+
+    /// How many models an Eloquent factory value builds.
+    ///
+    /// [`FactoryCount::Unknown`] for every type that is not a factory,
+    /// which is what the constructors set.  See the enum's own
+    /// documentation for why the state travels with the value.
+    pub factory_count: FactoryCount,
+}
+
+/// How many models an Eloquent factory chain builds.
+///
+/// Laravel writes both outcomes of `create()`/`make()` as one
+/// `Collection<int, TModel>|TModel` return type, so the branch a call
+/// produces is decided by the count the chain set — which can be several
+/// calls and one variable assignment away from the `create()` that reads
+/// it (`$factory = User::factory(); … $factory->state([…])->create()`).
+///
+/// The state therefore travels on the value rather than being re-derived
+/// from the call's syntax, the same way Larastan carries it on its
+/// `ModelFactoryType`: every fluent call passes it along, and a branch
+/// join that disagrees about it drops back to [`Unknown`](Self::Unknown).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FactoryCount {
+    /// No count was set, or a previously set count was cleared with
+    /// `count(null)`.
+    One,
+    /// `count()`, `times()`, or a numeric `factory(3)` argument set a
+    /// count, so the chain builds a collection.
+    Many,
+    /// Either outcome is possible: the value is not a factory at all, or
+    /// it is one whose count never became visible.
+    #[default]
+    Unknown,
+}
+
+impl FactoryCount {
+    /// Join two count states, which agree only on themselves.
+    ///
+    /// A value that is a single model on one path and a collection on
+    /// the other is neither at the join, so `create()` keeps Laravel's
+    /// declared union there rather than picking a side.
+    pub(crate) fn join(self, other: FactoryCount) -> FactoryCount {
+        if self == other {
+            self
+        } else {
+            FactoryCount::Unknown
+        }
+    }
 }
 
 // ─── File Context ───────────────────────────────────────────────────────────

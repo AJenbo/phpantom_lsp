@@ -8475,6 +8475,112 @@ async fn test_counted_factory_create_passed_as_a_model_is_reported() {
     );
 }
 
+/// The factory a variable holds remembers what it was opened with, so a
+/// `create()` reached through the variable builds one model.
+#[tokio::test]
+async fn test_factory_held_in_a_variable_builds_a_single_model() {
+    let messages =
+        factory_argument_mismatches("$factory = User::factory();\nneedsUser($factory->create());")
+            .await;
+    assert!(
+        messages.is_empty(),
+        "a countless factory in a variable builds one User, got: {messages:?}"
+    );
+}
+
+/// The fluent calls on either side of the assignment keep the state: the
+/// ones before it hand it to the stored value, the ones after it read it
+/// back off the variable.
+#[tokio::test]
+async fn test_factory_variable_through_fluent_calls_builds_a_single_model() {
+    let messages = factory_argument_mismatches(
+        "$factory = User::factory()->state([]);\nneedsUser($factory->state([])->create());",
+    )
+    .await;
+    assert!(
+        messages.is_empty(),
+        "state() calls do not set a count, got: {messages:?}"
+    );
+}
+
+/// The same chain rebuilt onto itself, which is how a test that adds
+/// relationships in a loop is written.
+#[tokio::test]
+async fn test_factory_variable_reassigned_from_itself_builds_a_single_model() {
+    let messages = factory_argument_mismatches(
+        "$factory = User::factory();\n$factory = $factory->state([]);\nneedsUser($factory->create());",
+    )
+    .await;
+    assert!(
+        messages.is_empty(),
+        "reassigning the factory to itself keeps its count, got: {messages:?}"
+    );
+}
+
+/// A count set before the assignment is just as visible as no count.
+#[tokio::test]
+async fn test_counted_factory_held_in_a_variable_builds_a_collection() {
+    let messages = factory_argument_mismatches(
+        "$factory = User::factory()->count(3);\nneedsUser($factory->create());",
+    )
+    .await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "a counted factory in a variable builds a Collection, got: {messages:?}"
+    );
+}
+
+/// `factory($count)` is not written out as a number, but its argument is
+/// typed as one, and that is what Laravel's `is_numeric()` check sees.
+#[tokio::test]
+async fn test_factory_with_an_int_typed_argument_builds_a_collection() {
+    let messages = factory_argument_mismatches(concat!(
+        "function build(int $count): void {\n",
+        "    needsUser(User::factory($count)->create());\n",
+        "}",
+    ))
+    .await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "an int argument sets a count, got: {messages:?}"
+    );
+}
+
+/// The same call with an array of state instead of a count.
+#[tokio::test]
+async fn test_factory_with_an_array_typed_argument_builds_a_single_model() {
+    let messages = factory_argument_mismatches(concat!(
+        "function build(array $state): void {\n",
+        "    needsUser(User::factory($state)->create());\n",
+        "}",
+    ))
+    .await;
+    assert!(
+        messages.is_empty(),
+        "an array argument is state, not a count, got: {messages:?}"
+    );
+}
+
+/// Branches that disagree about the count leave the value ambiguous, so
+/// Laravel's declared union stands rather than one branch being picked.
+#[tokio::test]
+async fn test_factory_variable_with_disagreeing_branches_keeps_the_union() {
+    let messages = factory_argument_mismatches(concat!(
+        "function pick(bool $many): void {\n",
+        "    $factory = $many ? User::factory(3) : User::factory();\n",
+        "    needsUser($factory->create());\n",
+        "}",
+    ))
+    .await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "an ambiguous count keeps the declared union, got: {messages:?}"
+    );
+}
+
 /// The count state reaches the assigned variable, and indexing back
 /// through the collection recovers the model.
 #[tokio::test]
@@ -8569,13 +8675,11 @@ class UserFactory extends Factory {
     );
 }
 
-/// A factory reached through a variable carries no count state we can
-/// read, so the declared `Collection<int, TModel>|TModel` stands rather
-/// than being narrowed to one branch.  Narrowing it to the model would
-/// make `create()->first()` a false positive for every caller that did
-/// set a count before assigning.
+/// A factory reached through a variable carries the count it was built
+/// with, so the declared `Collection<int, TModel>|TModel` narrows to the
+/// branch the assignment settled.
 #[tokio::test]
-async fn test_factory_through_a_variable_keeps_both_branches() {
+async fn test_factory_count_survives_a_variable() {
     let annotated_factory_php = "\
 <?php
 namespace Database\\Factories;
@@ -8611,8 +8715,8 @@ class UserFactory extends Factory {
 
     let methods = method_names(&items);
     assert!(
-        methods.contains(&"all"),
-        "a variable-held factory should keep the collection branch, got: {:?}",
+        methods.contains(&"all") && !methods.contains(&"greet"),
+        "a variable-held counted factory should build a Collection, got: {:?}",
         methods
     );
 }

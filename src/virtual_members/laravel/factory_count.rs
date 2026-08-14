@@ -9,11 +9,15 @@
 //!
 //! This module reads the count state off the receiver chain and picks the
 //! branch the call actually produces, mirroring Larastan's conditional
-//! return type extensions.  Only the syntactic chain is inspected, so a
-//! factory that travels through a variable (`$factory = User::factory(); …`)
-//! carries no count state we can see.  That case is left alone rather than
-//! guessed at: narrowing it to one model would make `create()->first()` a
-//! false positive whenever the variable did hold a count.
+//! return type extensions.  The state reaches the `create()` two ways:
+//! from the syntax of the chain it is written on, and from the value the
+//! receiver resolved to — every factory-returning call tags its result
+//! with a [`FactoryCount`], so a chain that travels through a variable
+//! (`$factory = User::factory(); … $factory->state([…])->create()`) still
+//! knows what it builds.  A factory whose count never became visible
+//! (a parameter, a property, a branch join that disagreed) is left alone
+//! rather than guessed at: narrowing it to one model would make
+//! `create()->first()` a false positive whenever it did hold a count.
 
 use std::sync::Arc;
 
@@ -25,23 +29,9 @@ use crate::php_type::PhpType;
 use crate::type_engine::conditional_resolution::split_text_args;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::SubjectExpr;
-use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, ResolvedType};
+use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, FactoryCount, ResolvedType};
 
 use super::factory::{extends_eloquent_factory, factory_model_type};
-
-/// How many models a factory chain builds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FactoryCount {
-    /// No count was set, or a previously set count was cleared with
-    /// `count(null)`.
-    One,
-    /// `count()`, `times()`, or a numeric `factory(3)` argument set a
-    /// count, so the chain builds a collection.
-    Many,
-    /// The chain sets no count of its own and does not reach back to a
-    /// head that settles the question, so either outcome is possible.
-    Unknown,
-}
 
 /// Whether `name` is one of the `Factory` methods whose return type
 /// depends on the chain's count state.
@@ -83,7 +73,7 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
             // A static call is the head of the chain: `Model::factory()`,
             // `UserFactory::new()`, `UserFactory::times(3)`.
             SubjectExpr::StaticMethodCall { method, .. } => {
-                return static_count_state(method, first_arg);
+                return static_count_state(method, first_arg, &|| None);
             }
             _ => return FactoryCount::Unknown,
         }
@@ -132,7 +122,7 @@ pub(crate) fn chain_count_ast(receiver: &Expression<'_>, content: &str) -> Facto
                 }
                 current = base;
             }
-            None => return static_count_state(method, first_arg),
+            None => return static_count_state(method, first_arg, &|| None),
         }
     }
 }
@@ -173,11 +163,19 @@ fn instance_count_state(method: &str, first_arg: Option<&str>) -> Option<Factory
 }
 
 /// Count state contributed by the static call that opens the chain.
-fn static_count_state(method: &str, first_arg: Option<&str>) -> FactoryCount {
+///
+/// `first_arg_type` answers for an argument whose spelling does not
+/// settle what `is_numeric()` would say about it, and is only asked when
+/// that happens.
+fn static_count_state(
+    method: &str,
+    first_arg: Option<&str>,
+    first_arg_type: &dyn Fn() -> Option<PhpType>,
+) -> FactoryCount {
     match method {
         // `Model::factory(…)` forwards its first argument to `count()`
         // only when it is numeric; an array or callable is state.
-        "factory" => factory_argument_count(first_arg),
+        "factory" => factory_argument_count(first_arg, first_arg_type),
         "times" => FactoryCount::Many,
         // `Factory::new(array $attributes)` takes state, never a count.
         "new" => FactoryCount::One,
@@ -189,24 +187,51 @@ fn static_count_state(method: &str, first_arg: Option<&str>) -> FactoryCount {
 
 /// Count state set by `Model::factory(…)`'s first argument.
 ///
-/// Laravel gates on `is_numeric($parameters[0])`, so the argument has to
-/// be written out to settle the question: a numeric literal (`3`, and
-/// `'3'`, which `is_numeric()` also accepts) sets a count, and a literal
-/// it rejects (an array, a closure, `null`) is state.  A variable or a
-/// call could be either, and guessing wrong would turn one model into a
-/// collection or the reverse.
-fn factory_argument_count(first_arg: Option<&str>) -> FactoryCount {
+/// Laravel gates on `is_numeric($parameters[0])`, so a numeric literal
+/// (`3`, and `'3'`, which `is_numeric()` also accepts) sets a count and a
+/// literal it rejects (an array, a closure, `null`) is state.  An
+/// argument written as anything else — `factory($count)` — is settled by
+/// its type instead.
+fn factory_argument_count(
+    first_arg: Option<&str>,
+    first_arg_type: &dyn Fn() -> Option<PhpType>,
+) -> FactoryCount {
     let Some(first) = first_arg else {
         return FactoryCount::One;
     };
     if !is_decidable_literal(first) {
-        return FactoryCount::Unknown;
+        return first_arg_type().map_or(FactoryCount::Unknown, |ty| numeric_argument_count(&ty));
     }
     let unquoted = crate::text_scan::unquote_php_string(first).unwrap_or(first);
     if !unquoted.is_empty() && unquoted.parse::<f64>().is_ok() {
         FactoryCount::Many
     } else {
         FactoryCount::One
+    }
+}
+
+/// Count state a resolved argument type settles.
+///
+/// A number is what `is_numeric()` accepts, and the alternative the
+/// parameter is written for — an array or a callable of state — is what
+/// it rejects.  Anything else (a `mixed`, a union spanning both, a
+/// `string` that may or may not hold digits) is left undecided.
+fn numeric_argument_count(ty: &PhpType) -> FactoryCount {
+    if ty.is_int_subtype() || ty.is_float_subtype() || is_numeric_string_literal(ty) {
+        return FactoryCount::Many;
+    }
+    if ty.is_array_like() || ty.is_callable() || ty.is_closure() || ty.is_null() {
+        return FactoryCount::One;
+    }
+    FactoryCount::Unknown
+}
+
+/// Whether `ty` is a string literal holding digits, which `is_numeric()`
+/// accepts just as it accepts the number itself.
+fn is_numeric_string_literal(ty: &PhpType) -> bool {
+    match ty.kind() {
+        crate::php_type::TypeKind::Literal(value) => value.is_numeric_string(),
+        _ => false,
     }
 }
 
@@ -241,6 +266,116 @@ fn is_decidable_literal(arg: &str) -> bool {
     }
 }
 
+/// The count state a resolved receiver carries.
+///
+/// Only entries that name a class have a say: the `null` half of a
+/// `?UserFactory` is not a factory whose count went missing, so it does
+/// not veto the factory's own state.  Class entries that disagree do,
+/// since the value is then a factory of unknown count.
+fn carried_count(receiver: &[ResolvedType]) -> FactoryCount {
+    receiver
+        .iter()
+        .filter(|rt| rt.class_info.is_some())
+        .map(|rt| rt.factory_count)
+        .reduce(FactoryCount::join)
+        .unwrap_or(FactoryCount::Unknown)
+}
+
+/// The count state an instance call hands to its result, or `None` when
+/// the call has none to hand on.
+///
+/// A fluent factory method (`state()`, `for()`, `hasPosts()`, …) returns
+/// `static`, so its result is the same factory and carries the same
+/// count.  `count()` and `times()` set one instead.  Everything else —
+/// which is every method call in a codebase that is not on a factory —
+/// answers `None` after one look at the receiver's own state.
+pub(crate) fn fluent_factory_count(
+    receiver: &[ResolvedType],
+    method: &str,
+    first_arg: Option<&str>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<FactoryCount> {
+    let inherited = carried_count(receiver);
+    let Some(set) = instance_count_state(method, first_arg) else {
+        return (inherited != FactoryCount::Unknown).then_some(inherited);
+    };
+    // `count()` is a common method name, so a receiver that never
+    // carried a factory state has to prove it is a factory before its
+    // `count()` is read as one.
+    if inherited != FactoryCount::Unknown || receiver_is_factory(receiver, ctx) {
+        return Some(set);
+    }
+    None
+}
+
+/// Whether any of the receiver's classes is an Eloquent factory.
+fn receiver_is_factory(receiver: &[ResolvedType], ctx: &ResolutionCtx<'_>) -> bool {
+    receiver.iter().any(|rt| {
+        rt.class_info
+            .as_ref()
+            .is_some_and(|ci| extends_eloquent_factory(ci, ctx.class_loader))
+    })
+}
+
+/// Give every result that is the receiver's own class the count state
+/// `count` describes.
+///
+/// A fluent factory method returns `static`, so the result naming the
+/// same class is the same factory travelling on.  A method that returned
+/// something else (the model out of `create()`, a builder) is not, and
+/// keeps whatever state it resolved with.
+pub(crate) fn carry_factory_count(
+    results: &mut [ResolvedType],
+    receiver: &[ResolvedType],
+    count: FactoryCount,
+) {
+    for result in results.iter_mut() {
+        let Some(result_class) = result.class_info.as_ref() else {
+            continue;
+        };
+        let same_class = receiver.iter().any(|rt| {
+            rt.class_info
+                .as_ref()
+                .is_some_and(|ci| ci.fqn() == result_class.fqn())
+        });
+        if same_class {
+            result.factory_count = count;
+        }
+    }
+}
+
+/// Tag the factory a static call opened with the count it was opened
+/// with: `Model::factory(3)`, `UserFactory::times(3)`,
+/// `UserFactory::new()`.
+///
+/// The method name is checked first, so the class-hierarchy walk that
+/// confirms the result really is a factory only runs for the three names
+/// that could have opened one.
+pub(crate) fn tag_static_factory_call(
+    results: &mut [ResolvedType],
+    method: &str,
+    first_arg: Option<&str>,
+    first_arg_type: &dyn Fn() -> Option<PhpType>,
+    ctx: &ResolutionCtx<'_>,
+) {
+    if !matches!(method, "factory" | "times" | "new") {
+        return;
+    }
+    let count = static_count_state(method, first_arg, first_arg_type);
+    if count == FactoryCount::Unknown {
+        return;
+    }
+    for result in results.iter_mut() {
+        if result
+            .class_info
+            .as_ref()
+            .is_some_and(|ci| extends_eloquent_factory(ci, ctx.class_loader))
+        {
+            result.factory_count = count;
+        }
+    }
+}
+
 /// Resolve `create()` / `createQuietly()` / `make()` on an Eloquent
 /// factory to the type the call-site chain actually builds.
 ///
@@ -260,9 +395,26 @@ pub(crate) fn resolve_factory_count_return(
     // Read the count off the chain before touching the class loader.  The
     // walk is pure syntax, and it rules out the great majority of the
     // `create()`/`make()` calls in a codebase — every builder that is not
-    // a factory, and every factory reached through a variable — without a
-    // hierarchy walk per owner.
-    resolve_for_count(chain_count(receiver), method_name, owners, ctx)
+    // a factory — without a hierarchy walk per owner.
+    resolve_for_count(
+        effective_count(chain_count(receiver), owners),
+        method_name,
+        owners,
+        ctx,
+    )
+}
+
+/// The count state to resolve a `create()`/`make()` call with.
+///
+/// The chain's own syntax answers first, since it is the cheaper of the
+/// two and settles every chain written out in one expression.  What it
+/// cannot see — the head of a chain that reaches back through a variable,
+/// a parameter, or a property — the receiver's own resolved state can.
+fn effective_count(from_syntax: FactoryCount, owners: &[ResolvedType]) -> FactoryCount {
+    match from_syntax {
+        FactoryCount::Unknown => carried_count(owners),
+        settled => settled,
+    }
 }
 
 /// [`resolve_factory_count_return`] for the AST-walking resolution path.
@@ -281,7 +433,12 @@ pub(crate) fn resolve_factory_count_return_ast(
     if !is_count_conditional_method(method_name) {
         return None;
     }
-    resolve_for_count(chain_count_ast(receiver, content), method_name, owners, ctx)
+    resolve_for_count(
+        effective_count(chain_count_ast(receiver, content), owners),
+        method_name,
+        owners,
+        ctx,
+    )
 }
 
 /// Pick the type a count-conditional factory call builds, given the count

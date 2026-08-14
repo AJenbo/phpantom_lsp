@@ -412,6 +412,9 @@ check(
         'notes',
         'notes.*.body',
         'owner.email',
+        'photo',
+        'gallery',
+        'gallery.*',
         'flavor',
         'batch_size',
     ]

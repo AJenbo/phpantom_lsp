@@ -222,6 +222,24 @@ class Demo
     }
 
 
+    // ── Factory count through a variable ────────────────────────────────────
+    // The count travels with the factory, so a chain built up over several
+    // statements still knows what its create() builds.
+
+    public function factoryInAVariable(int $count): void
+    {
+        $factory = BlogAuthor::factory();
+        $factory = $factory->hasPosts(3);
+        $factory->create()->displayName;                      // → BlogAuthor
+
+        $many = BlogAuthor::factory()->count(2);
+        $many->create()->emails();                            // → AuthorCollection
+
+        // An argument typed as a number is a count, the same as writing one.
+        BlogAuthor::factory($count)->create()->first();       // → BlogAuthor|null
+    }
+
+
     // ── Custom Eloquent Collections ─────────────────────────────────────────
 
     public function customCollection(): void
@@ -825,6 +843,34 @@ class Demo
 
         $safe = $request->safe();
         $safe->except(['dough_temp']);    // → still StoreBakeryRequest's keys
+    }
+
+
+    // ── Request accessors answer for the call they were written as ──────
+    // Each of these declares one type covering every way of calling it, so
+    // the arguments at the call site are what say which way this is.
+
+    public function requestAccessorTypes(StoreBakeryRequest $request): void
+    {
+        // No key at all is the whole bag; a key is the item in it.
+        $request->query();                // → array<string, mixed>
+        $request->header();               // → array<string, list<string|null>>
+
+        // A header is a string, and the default is what a missing one
+        // produces — so a string default leaves nothing else.
+        $request->header('User-Agent');       // → string|null
+        $request->header('User-Agent', '');   // → string
+
+        // The rules say `photo` is one image and `gallery` a list of files,
+        // so that is what each key hands back.
+        $request->file('photo');          // → UploadedFile|null
+        $request->file('gallery');        // → list<UploadedFile>|null
+        $request->file();                 // → array<string, UploadedFile|list<UploadedFile>>
+
+        $photo = $request->file('photo');
+        if ($photo !== null) {
+            $photo->getClientOriginalName();  // → string
+        }
     }
 
 

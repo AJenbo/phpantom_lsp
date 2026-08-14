@@ -136,6 +136,21 @@ constant shapes satisfy their generic supertypes.
 
 ## Narrowing
 
+### B174. `assert($this instanceof X)` does not narrow `$this`
+
+**Impact: Medium-High · Effort: Low-Medium**
+
+A Pest test closure is bound to whatever `pest()->extends(…)` names,
+which no expression in the test file says, so the suites write
+`assert($this instanceof TestCase);` as the first line of the closure
+to tell an analyser what it is bound to. The assertion is ignored for
+`$this` (it narrows an ordinary variable), so every helper the base
+class provides is reported `unknown_member` against Pest's default
+`PHPUnit\Framework\TestCase` — ~21 sites in one project's browser
+suite alone. Narrowing `$this` the way any other subject is narrowed
+clears them; reading `pest()->extends(…)->in(…)` to bind the closure
+in the first place would clear them without the assertion.
+
 ### B175. A call's recorded check survives a statement that could change what it returns
 
 **Impact: Medium · Effort: Medium**
@@ -175,50 +190,21 @@ then silently dropped.
 `array|Traversable` for the inclusion test so a union narrows to the
 members that can be iterated.
 
+### B177. A doubly negated truthiness guard does not narrow
+
+**Impact: Low · Effort: Low-Medium**
+
+`if (!(!$user))` and Blade's `@unless (!$user)`, which compiles to it,
+leave `$user` as `User|null` inside the guard, while the single-negation
+and comparison spellings (`if ($user)`, `if (!($user === null))`,
+`@unless ($user === null)`) all narrow. The negation is applied to the
+operand rather than folded, so the inner `!` re-negates a proof the
+outer one had already inverted. Found while confirming the Blade
+`@include` narrowing, not from a sample-project site.
+
 ## Laravel
 
-### B167. Factory `create()`/`make()` keep the collection half on single-model chains
-
-**Impact: Medium-High · Effort: Low-Medium**
-
-The shipped factory-count narrowing misses chains that pass through
-`for()`/`has()`/`state()` (`$factory->for($brand)->create()` reports
-`ProductCollection|Product`) and the count-argument static form
-(`Product::factory($n)->create()` should be pure
-`Collection<int, Product>`). Track the single-vs-collection state
-across the whole fluent chain, in both directions. 8 sites.
-
-### B168. `Request` input accessors deserve precise per-argument types
-
-**Impact: Medium-High · Effort: Medium**
-
-`$request->header('User-Agent', '')` reports `string|array|null`
-against a `string` parameter — with a string default the real type is
-`string`. `query()` with no key returns the full `array`;
-`file('key')` is `UploadedFile|null` for a scalar key (larastan wraps
-it in a benevolent union; resolving on the key/default is more
-precise). Model the conditional shapes natively for
-`header`/`query`/`input`/`cookie`/`file`. 5 sites. (Unguarded
-`query('x')` uses that really can receive arrays were patched in the
-sample sources as genuine.)
-
-### B169. Blade `@if` narrowing does not reach `@include`d variables
-
-**Impact: Medium-High · Effort: Medium**
-
-```blade
-@if ($product)
-    @include('products.edit.page-links-product')   {{-- expects non-null $product --}}
-@endif
-```
-
-An inherited variable is checked against the template's *declared*
-signature type at the `@include` site, ignoring the enclosing Blade
-control flow that provably narrows it (4 sites in two projects). Use
-the flow-narrowed scope at the include position — the compiled
-virtual PHP already contains the real `if`, so the walker has the
-narrowing; it is the include-contract check that reads the wrong
-scope.
+No outstanding items.
 
 ## Miscellaneous
 

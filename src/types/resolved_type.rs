@@ -16,6 +16,7 @@ impl ResolvedType {
         Self {
             type_string,
             class_info: Some(Arc::new(class)),
+            factory_count: FactoryCount::Unknown,
         }
     }
 
@@ -27,6 +28,7 @@ impl ResolvedType {
         Self {
             type_string,
             class_info: Some(class),
+            factory_count: FactoryCount::Unknown,
         }
     }
 
@@ -39,6 +41,7 @@ impl ResolvedType {
         Self {
             type_string,
             class_info: None,
+            factory_count: FactoryCount::Unknown,
         }
     }
 
@@ -53,6 +56,7 @@ impl ResolvedType {
         Self {
             type_string,
             class_info: Some(Arc::new(class)),
+            factory_count: FactoryCount::Unknown,
         }
     }
 
@@ -63,6 +67,7 @@ impl ResolvedType {
         Self {
             type_string,
             class_info: Some(class),
+            factory_count: FactoryCount::Unknown,
         }
     }
 
@@ -130,16 +135,21 @@ impl ResolvedType {
     /// Keying on the FQN rather than the short name keeps `NsA\Thing` and
     /// `NsB\Thing` apart, so a union over both retains the members of each.
     pub(crate) fn push_unique(results: &mut Vec<ResolvedType>, rt: ResolvedType) {
-        let dominated =
+        let dominating =
             results
-                .iter()
-                .any(|existing| match (&existing.class_info, &rt.class_info) {
+                .iter_mut()
+                .find(|existing| match (&existing.class_info, &rt.class_info) {
                     (Some(a), Some(b)) => a.fqn() == b.fqn(),
                     (None, None) => existing.type_string == rt.type_string,
                     _ => false,
                 });
-        if !dominated {
-            results.push(rt);
+        match dominating {
+            // The entry that stays speaks for the one that was dropped,
+            // so it may only keep a factory count both agreed on.
+            Some(existing) => {
+                existing.factory_count = existing.factory_count.join(rt.factory_count)
+            }
+            None => results.push(rt),
         }
     }
 

@@ -126,6 +126,7 @@ mod pivots;
 mod provider_resources;
 mod relationships;
 mod request_fields;
+pub(crate) mod request_input;
 mod route_names;
 mod scopes;
 mod storage;
@@ -225,7 +226,10 @@ pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
     factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
 };
-pub(crate) use factory_count::{resolve_factory_count_return, resolve_factory_count_return_ast};
+pub(crate) use factory_count::{
+    carry_factory_count, fluent_factory_count, resolve_factory_count_return,
+    resolve_factory_count_return_ast, tag_static_factory_call,
+};
 
 use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};

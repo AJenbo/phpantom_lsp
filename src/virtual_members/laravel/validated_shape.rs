@@ -87,6 +87,23 @@ fn rules_member_type(
         .try_fold(shape, |ty, segment| ty.shape_value_type(segment).cloned())
 }
 
+/// The type the rules in scope give one key of a request.
+///
+/// Shared with the input accessors, which have their own reasons to ask
+/// what a field holds: `file('photos')` is a list of uploads or a single
+/// one depending on how the field is validated.
+pub(crate) fn rules_key_type(
+    backend: &Backend,
+    receiver: &ClassInfo,
+    key: &str,
+    content: &str,
+    offset: u32,
+    class_loader: ClassLoader<'_>,
+) -> Option<PhpType> {
+    let rules = lookup_rules(backend, receiver, content, offset)?;
+    rules_member_type(&rules, key, class_loader)
+}
+
 /// Narrow a shape to the listed keys (`safe()->only([…])`) or to everything
 /// but them (`safe()->except([…])`).
 ///

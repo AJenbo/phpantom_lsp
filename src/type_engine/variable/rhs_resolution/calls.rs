@@ -1465,6 +1465,13 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     let shape_call = validated_shape::shape_bearing_method(&method_name)
         .filter(|call| *call == validated_shape::ShapeCall::Validate || ctx.backend.is_some());
 
+    // Laravel request input: `header('X', '')`, `query()`, `file('photo')`
+    // and the rest declare one union spanning every way of calling them,
+    // and the arguments say which of those ways this is.  Classified once
+    // for the same reason the shape call above is.
+    let input_accessor =
+        crate::virtual_members::laravel::request_input::input_accessor(&method_name);
+
     for owner in &owner_classes {
         if let Some(result) =
             try_resolve_config_method_type(&owner.fqn(), &method_name, argument_list, ctx)
@@ -1486,6 +1493,12 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
         {
             return vec![ResolvedType::from_type_string(shape)];
         }
+        if let Some(accessor) = input_accessor
+            && let Some(result) =
+                try_resolve_request_accessor_type(owner, accessor, argument_list, &arg_refs, ctx)
+        {
+            return result;
+        }
     }
 
     // Laravel factory count state: `create()`/`make()` build a single
@@ -1506,6 +1519,17 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
             None => ResolvedType::from_type_string(hint),
         }];
     }
+
+    // A fluent factory call (`state()`, `for()`, `hasPosts()`, `count()`)
+    // returns the factory itself, so the count state the chain has built
+    // up so far travels on to the result — which is what lets a `create()`
+    // several statements and one variable later still know what it builds.
+    let fluent_count = crate::virtual_members::laravel::fluent_factory_count(
+        &receiver_resolved,
+        &method_name,
+        arg_refs.first().copied(),
+        &rctx,
+    );
 
     let receiver_is_this = matches!(
         object,
@@ -1547,7 +1571,7 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
                 None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
             };
 
-        let owner_results = resolve_owner_method_call(
+        let mut owner_results = resolve_owner_method_call(
             owner,
             &method_name,
             argument_list,
@@ -1556,6 +1580,13 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
             &template_subs,
             &self_replace,
         );
+        if let Some(count) = fluent_count {
+            crate::virtual_members::laravel::carry_factory_count(
+                &mut owner_results,
+                &receiver_resolved,
+                count,
+            );
+        }
         if !is_union {
             return owner_results;
         }
@@ -2348,7 +2379,7 @@ pub(super) fn resolve_rhs_static_call(
             let self_replace =
                 |ty: &PhpType| ty.replace_self_bound(&owner_key, lsb_class.as_deref());
 
-            return resolve_owner_method_call(
+            let mut results = resolve_owner_method_call(
                 owner,
                 &method_name,
                 &static_call.argument_list,
@@ -2357,6 +2388,25 @@ pub(super) fn resolve_rhs_static_call(
                 &template_subs,
                 &self_replace,
             );
+            // `Model::factory(…)`, `UserFactory::times(3)` and
+            // `UserFactory::new()` open a factory chain, and what they
+            // were opened with is what the `create()` at the far end of
+            // it builds.  `factory($count)` only settles that once its
+            // argument is resolved, which is why the type is fetched
+            // lazily rather than for every static call in the file.
+            let first_arg_type = || {
+                let arg = static_call.argument_list.arguments.first()?;
+                let resolved = resolve_rhs_expression(arg.value(), ctx);
+                (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+            };
+            crate::virtual_members::laravel::tag_static_factory_call(
+                &mut results,
+                &method_name,
+                arg_refs.first().copied(),
+                &first_arg_type,
+                &rctx,
+            );
+            return results;
         }
     }
     vec![]
@@ -2493,6 +2543,53 @@ fn try_resolve_trans_method_type(
         .and_then(|key| resolver(&key))
         .unwrap_or_else(crate::virtual_members::laravel::unresolved_trans_type);
     Some(vec![ResolvedType::from_type_string(ty)])
+}
+
+/// Resolve a request input accessor (`header()`, `query()`, `input()`,
+/// `cookie()`, `post()`, `file()`) to what the call's own arguments say it
+/// returns, rather than the union that covers every way of calling it.
+fn try_resolve_request_accessor_type(
+    owner: &ClassInfo,
+    accessor: crate::virtual_members::laravel::request_input::InputAccessor,
+    argument_list: &ArgumentList<'_>,
+    arg_refs: &[&str],
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    use crate::virtual_members::laravel::request_input;
+
+    // The default only decides the missing-key branch, so it is resolved
+    // only once a keyed call has been established.
+    let default_type = || {
+        let argument = argument_list.arguments.get(1)?;
+        let resolved = resolve_rhs_expression(argument.value(), ctx);
+        (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+    };
+    let ty = request_input::resolve_accessor_type(
+        owner,
+        accessor,
+        &request_input::AccessorArgs {
+            key: arg_refs.first().copied(),
+            default_type: &default_type,
+        },
+        ctx.content,
+        ctx.cursor_offset,
+        ctx.class_loader,
+        ctx.backend,
+    )?;
+    // The whole union travels on one entry, carrying the class of its
+    // object half: splitting it into an entry per member would leave the
+    // array half as a class-less entry that a later `instanceof` guard has
+    // no way to rule out.
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &ty,
+        &owner.fqn(),
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    Some(vec![match classes.first() {
+        Some(class) => ResolvedType::from_both_arc(ty, Arc::clone(class)),
+        None => ResolvedType::from_type_string(ty),
+    }])
 }
 
 /// Narrow `$this->argument('user')` / `$this->option('queue')` on an Artisan
