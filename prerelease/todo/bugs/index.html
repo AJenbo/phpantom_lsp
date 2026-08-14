@@ -1073,28 +1073,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b165-__-trans-report-their-raw-stringarraynull-signature" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B165. <code>__()</code> / <code>trans()</code> report their raw <code>string|array|null</code> signature
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b166-console-argument-option-ignore-the-commands-signature" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B166. Console <code>argument()</code> / <code>option()</code> ignore the command's <code>$signature</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b167-factory-createmake-keep-the-collection-half-on-single-model-chains" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1149,17 +1127,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B173. Classes shipped inside a dependency's phar are invisible
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b177-a-property-tag-name-is-highlighted-as-a-method" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B177. A <code>@property</code> tag name is highlighted as a method
       </span>
     </span>
   </a>
@@ -1884,28 +1851,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b165-__-trans-report-their-raw-stringarraynull-signature" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B165. <code>__()</code> / <code>trans()</code> report their raw <code>string|array|null</code> signature
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b166-console-argument-option-ignore-the-commands-signature" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B166. Console <code>argument()</code> / <code>option()</code> ignore the command's <code>$signature</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b167-factory-createmake-keep-the-collection-half-on-single-model-chains" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1960,17 +1905,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B173. Classes shipped inside a dependency's phar are invisible
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b177-a-property-tag-name-is-highlighted-as-a-method" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B177. A <code>@property</code> tag name is highlighted as a method
       </span>
     </span>
   </a>
@@ -2298,27 +2232,6 @@ result the same either way.</p>
 leaves, and union those edges into the post-loop scope alongside the
 normal fall-through.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b165-__-trans-report-their-raw-stringarraynull-signature">B165. <code>__()</code> / <code>trans()</code> report their raw <code>string|array|null</code> signature<a class="headerlink" href="#b165-__-trans-report-their-raw-stringarraynull-signature" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p>27 sites in one project: every <code>{{ __('key') }}</code> echo, <code>__()</code> fed to
-an <code>HtmlString</code>, and <code>assertSee(__('key'))</code> mismatches because the
-helper's framework signature is <code>string|array|null</code>. PHPantom already
-indexes translation keys and their shapes (<code>trans_keys.rs</code>); a
-literal-key call can resolve to the actual translation's type
-(<code>string</code> for a leaf, <code>array&lt;…&gt;</code> for a group), which is strictly
-better than larastan's benevolent-union hand-wave. A keyless <code>__()</code>
-returns <code>null</code>; an unresolvable dynamic key should stay permissive
-(treat as accepting-any-branch rather than reporting every branch).</p>
-<h3 id="b166-console-argument-option-ignore-the-commands-signature">B166. Console <code>argument()</code> / <code>option()</code> ignore the command's <code>$signature</code><a class="headerlink" href="#b166-console-argument-option-ignore-the-commands-signature" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p>29 sites in one project. <code>$this-&gt;argument('name')</code> /
-<code>$this-&gt;option('markets')</code> return the framework's raw
-<code>array|string|float|int|bool|null</code> union. The command's own
-<code>$signature</code> string decides the real type per entry: a value-less
-<code>{--flag}</code> is <code>bool</code>, <code>{--opt=}</code> is <code>string|null</code>, <code>{arg}</code> is
-<code>string</code>, <code>{arg*}</code> is <code>array&lt;string&gt;</code>. PHPantom already parses
-signature strings for command-name indexing; extend that to type
-these two accessors (Symfony <code>InputDefinition</code> semantics).</p>
 <h3 id="b167-factory-createmake-keep-the-collection-half-on-single-model-chains">B167. Factory <code>create()</code>/<code>make()</code> keep the collection half on single-model chains<a class="headerlink" href="#b167-factory-createmake-keep-the-collection-half-on-single-model-chains" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
 <p>The shipped factory-count narrowing misses chains that pass through
@@ -2360,29 +2273,6 @@ scope.</p>
 (1 site — a custom extension calling <code>getConstantStrings()</code>). Check
 what the package's <code>bootstrap.php</code> exposes and whether indexing the
 phar (or its extracted stubs) is feasible.</p>
-<h3 id="b177-a-property-tag-name-is-highlighted-as-a-method">B177. A <code>@property</code> tag name is highlighted as a method<a class="headerlink" href="#b177-a-property-tag-name-is-highlighted-as-a-method" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Low</strong></p>
-<p>The member name in a <code>@property</code> tag emits the <code>method</code> semantic
-token, while the same name emits <code>property</code> everywhere it is used:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/**</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x"> * @property string $displayName    &lt;- `displayName` highlights as a method</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x"> * @method string shout(string $x)  &lt;- correct</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x"> */</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">class Demo</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">{</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">    public function demo(): string</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">    {</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">        return $this-&gt;displayName;  // highlights as a property, as it should</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">    }</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">}</span>
-</code></pre></div>
-<p>Both tags produce a <code>MemberDeclaration</code> span, and
-<code>classify_member_declaration</code> looks the name up in the enclosing
-class's own members. A tag-declared member is not there, so both fall
-through to the <code>TT_METHOD</code> default. Classify the declaration from the
-tag that produced it (or from the resolved virtual members) instead of
-the fallback. <code>SemanticMagicMemberDemo</code> in
-<code>examples/php/semantic_tokens.php</code> shows the case.</p>
 
 
 
