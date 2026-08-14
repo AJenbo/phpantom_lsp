@@ -180,7 +180,9 @@ The following are deferred to a later sprint:
   reverse-inheritance index and never reaches the sequential classmap
   scan below. Phase 3 (reading and parsing classmap files one at a
   time) only still runs for `"composer"`/`"self"`/`"none"` strategies,
-  or for a request that arrives before the background index finishes.
+  for a request that arrives before the background index finishes, or
+  for a target that lives under `/vendor/` (where the index-ready fast
+  path would filter out the package's own implementations).
   Parallelizing it requires care because it interleaves reads and
   writes through `class_loader` callbacks.
 - **Parallel autoload file scanning.** The `scan_autoload_files` work

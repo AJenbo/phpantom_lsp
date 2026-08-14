@@ -827,6 +827,12 @@ find_implementors("Cacheable", "App\\Contracts\\Cacheable")
 └── Vec<ClassInfo> (concrete implementors only)
 ```
 
+### Workspace-Index Fast Path and Vendor-Owned Targets
+
+Once the workspace index is ready, Phase 1 alone answers the request and its results are restricted to project classes. The reverse-inheritance index is populated by every parse, so a vendor or stub class that happened to be loaded earlier in the session would otherwise appear while an identical class that was never loaded would not, making results depend on session history. The full workspace index parses only project files, so user-only is the deterministic set to return.
+
+The exception is a target that itself lives under `/vendor/`. An interface shipped by a Composer package is normally implemented inside that same package, so the project-only restriction would answer a request about `HttpKernelInterface` with everything Symfony ships filtered out. Such a target keeps the class-index scans (Phases 2–5), which is the only way to reach classes the workspace index never parses. Embedded stubs stay on the fast path: PHP's own interfaces (`Countable`, `Iterator`) are implemented across the whole dependency tree, so scanning it for them costs far more than the answer is worth.
+
 ### Phase 5 Scope: User Code Only (by design)
 
 Phase 5 walks PSR-4 roots from `composer.json` (`autoload` and `autoload-dev`). Since PSR-4 mappings are sourced exclusively from the project's own `composer.json` (vendor PSR-4 is not loaded), Phase 5 inherently only discovers classes in the user's own source directories (e.g. `src/`, `app/`, `tests/`). Vendor dependencies are fully covered by fqn_uri_index (Phase 3).
@@ -845,7 +851,7 @@ Phases 3–5 avoid expensive parsing by first reading the raw file content and c
 
 ### Member-Level Implementation
 
-When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. Only classes that directly define (override) the method are returned — inherited-but-not-overridden methods are excluded.
+When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. The location returned for an implementor is the declaration that supplies the body: its own when it declares the method, otherwise the nearest ancestor that declares it, since a class that inherits a method unchanged still implements it. A method that is only re-declared `abstract` is another declaration rather than an implementation and is skipped, which is also why implementors are collected with abstract classes included — whether the *class* is abstract says nothing about the method that was asked for.
 
 ### Reverse Jump: Concrete Method → Prototype Declaration
 

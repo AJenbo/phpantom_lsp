@@ -396,12 +396,12 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Vec<Location>> {
         let target_short = &interface_class.name;
-        let target_fqn = self
-            .class_fqn_for_short(target_short)
-            .unwrap_or(target_short.to_string());
+        let target_fqn = self.implementor_target_fqn(interface_class);
 
+        // Abstract classes are included: a class being abstract says
+        // nothing about whether the queried method has a body in it.
         let implementors =
-            self.find_implementors(target_short, &target_fqn, class_loader, false, false, false);
+            self.find_implementors(target_short, &target_fqn, class_loader, true, false, false);
 
         let member_kind = if interface_class
             .methods
@@ -421,30 +421,16 @@ impl Backend {
 
         let mut locations = Vec::new();
         for imp in &implementors {
-            // Check that the implementor owns (not inherits) this member.
-            let owns_member = match member_kind {
-                MemberKind::Method => imp.has_method(member_name),
-                MemberKind::Property => imp.properties.iter().any(|p| p.name == member_name),
-                MemberKind::Constant => imp.constants.iter().any(|c| c.name == member_name),
-            };
-            if !owns_member {
-                continue;
-            }
-
-            if let Some((class_uri, class_content)) =
-                self.find_class_file_content(&imp.name, uri, content)
-                && let Some(member_pos) = Self::find_member_position_in_class(
-                    &class_content,
-                    member_name,
-                    member_kind,
-                    imp,
-                )
-                && let Ok(parsed_uri) = Url::parse(&class_uri)
+            if let Some(loc) = self.locate_member_implementation(
+                imp,
+                member_name,
+                member_kind,
+                class_loader,
+                uri,
+                content,
+            ) && !locations.contains(&loc)
             {
-                let loc = point_location(parsed_uri, member_pos);
-                if !locations.contains(&loc) {
-                    locations.push(loc);
-                }
+                locations.push(loc);
             }
         }
 
@@ -453,6 +439,76 @@ impl Backend {
         } else {
             Some(locations)
         }
+    }
+
+    /// The location of the implementation of `member_name` that `imp`
+    /// provides, or `None` when it provides none.
+    ///
+    /// The definition to jump to is the one `imp` declares itself or, when
+    /// `imp` only inherits the member, the one declared by the nearest
+    /// ancestor that has a body — a concrete class that inherits a method
+    /// unchanged still implements it, it just implements it elsewhere.  A
+    /// method that is only ever re-declared `abstract` is another
+    /// declaration rather than an implementation, so it is skipped.
+    fn locate_member_implementation(
+        &self,
+        imp: &ClassInfo,
+        member_name: &str,
+        member_kind: MemberKind,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        current_uri: &str,
+        current_content: &str,
+    ) -> Option<Location> {
+        let declares = |cls: &ClassInfo| match member_kind {
+            MemberKind::Method => cls
+                .get_method_ci(member_name)
+                .is_some_and(|m| !m.is_abstract && !m.is_virtual),
+            MemberKind::Property => cls.properties.iter().any(|p| p.name == member_name),
+            MemberKind::Constant => cls.constants.iter().any(|c| c.name == member_name),
+        };
+
+        let locate = |cls: &ClassInfo| -> Option<Location> {
+            let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
+            let (class_uri, class_content) =
+                self.find_class_file_content(&cls_fqn, current_uri, current_content)?;
+            let member_pos =
+                Self::find_member_position_in_class(&class_content, member_name, member_kind, cls)?;
+            Some(point_location(Url::parse(&class_uri).ok()?, member_pos))
+        };
+
+        if declares(imp) {
+            return locate(imp);
+        }
+
+        let mut current = imp.parent_class;
+        let mut depth = 0u32;
+        while let Some(parent_name) = current {
+            if depth >= MAX_INHERITANCE_DEPTH {
+                break;
+            }
+            depth += 1;
+            let Some(parent_cls) = class_loader(&parent_name) else {
+                break;
+            };
+            if declares(&parent_cls) {
+                return locate(&parent_cls);
+            }
+            current = parent_cls.parent_class;
+        }
+
+        None
+    }
+
+    /// The FQN to search implementors of `cls` by: the namespace the class
+    /// declares itself when it has one, falling back to whatever the class
+    /// index knows about its short name.
+    fn implementor_target_fqn(&self, cls: &ClassInfo) -> String {
+        let from_class = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
+        if from_class.contains('\\') {
+            return from_class;
+        }
+        self.class_fqn_for_short(&cls.name)
+            .unwrap_or_else(|| cls.name.to_string())
     }
 
     /// Resolve implementations of a method call on an interface/abstract class.
@@ -528,70 +584,28 @@ impl Backend {
             };
 
             let target_short = &candidate.name;
-            let target_fqn = self
-                .class_fqn_for_short(target_short)
-                .unwrap_or(target_short.to_string());
+            let target_fqn = self.implementor_target_fqn(candidate);
 
             let implementors = self.find_implementors(
                 target_short,
                 &target_fqn,
                 &class_loader,
-                false,
+                true,
                 false,
                 false,
             );
 
             for imp in &implementors {
-                // Check that the implementor actually has this member.
-                let imp_merged = crate::virtual_members::resolve_class_fully_cached(
+                if let Some(loc) = self.locate_member_implementation(
                     imp,
+                    member_name,
+                    member_kind,
                     &class_loader,
-                    &self.resolved_class_cache,
-                );
-                let imp_has = match member_kind {
-                    MemberKind::Method => imp_merged.has_method(member_name),
-                    MemberKind::Property => {
-                        imp_merged.properties.iter().any(|p| p.name == member_name)
-                    }
-                    MemberKind::Constant => {
-                        imp_merged.constants.iter().any(|c| c.name == member_name)
-                    }
-                };
-
-                if !imp_has {
-                    continue;
-                }
-
-                // Find the member position in the implementor's file.
-                // We want the member defined directly on this class (not
-                // inherited), so check the un-merged class first.
-                let owns_member = match member_kind {
-                    MemberKind::Method => imp.has_method(member_name),
-                    MemberKind::Property => imp.properties.iter().any(|p| p.name == member_name),
-                    MemberKind::Constant => imp.constants.iter().any(|c| c.name == member_name),
-                };
-
-                if !owns_member {
-                    // The member is inherited — the implementor doesn't
-                    // override it, so there's no definition to jump to
-                    // in this class.
-                    continue;
-                }
-
-                if let Some((class_uri, class_content)) =
-                    self.find_class_file_content(&imp.name, uri, content)
-                    && let Some(member_pos) = Self::find_member_position_in_class(
-                        &class_content,
-                        member_name,
-                        member_kind,
-                        imp,
-                    )
-                    && let Ok(parsed_uri) = Url::parse(&class_uri)
+                    uri,
+                    content,
+                ) && !all_locations.contains(&loc)
                 {
-                    let loc = point_location(parsed_uri, member_pos);
-                    if !all_locations.contains(&loc) {
-                        all_locations.push(loc);
-                    }
+                    all_locations.push(loc);
                 }
             }
         }
@@ -645,6 +659,18 @@ impl Backend {
     /// session would otherwise appear non-deterministically.  The full
     /// workspace index only parses project files, so user-only results are
     /// both deterministic and consistent with the indexed set.
+    ///
+    /// That restriction is lifted when the *target itself* lives under
+    /// `/vendor/`: an interface shipped by a Composer package is normally
+    /// implemented inside that same package, so keeping only project
+    /// classes would answer a request about `HttpKernelInterface` with the
+    /// implementations Symfony ships filtered out — usually an empty
+    /// result.  Such a target therefore keeps the class-index scans below,
+    /// which is the only way to reach classes the workspace index never
+    /// parses.  Embedded stubs stay on the fast path: PHP's own interfaces
+    /// (`Countable`, `Iterator`, …) are implemented across the whole
+    /// dependency tree, so scanning it for them would cost far more than
+    /// the answer is worth.
     pub(crate) fn find_implementors(
         &self,
         target_short: &str,
@@ -664,6 +690,17 @@ impl Backend {
         }
         let workspace_index_ready = self.workspace_indexed.load(Ordering::Acquire);
 
+        // A target that ships in a Composer package is answered from the
+        // class index rather than from the project-only workspace index,
+        // so that the package's own implementations are reachable.
+        let scan_vendor_target = !project_only
+            && self
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get(target_fqn)
+                .is_some_and(|uri| uri.contains("/vendor/"));
+
         // Whether an FQN's indexed source is project code (outside
         // `/vendor/` and not an embedded stub).  A class with no indexed
         // URI is treated as project-local (mirrors the downstream filter in
@@ -679,7 +716,7 @@ impl Backend {
         // was never loaded would not, making results depend on session
         // history.  The full workspace index parses only project files, so
         // user-only is the deterministic set the fast path should return.
-        let exclude_non_project = project_only || workspace_index_ready;
+        let exclude_non_project = project_only || (workspace_index_ready && !scan_vendor_target);
         let is_project_fqn = |fqn: &str| -> bool {
             if !exclude_non_project {
                 return true;
@@ -743,7 +780,7 @@ impl Backend {
             }
         }
 
-        if workspace_index_ready {
+        if workspace_index_ready && !scan_vendor_target {
             return result;
         }
 
@@ -1454,5 +1491,469 @@ mod tests {
             "should find exactly one implementation: {locations:?}",
         );
         assert_eq!(locations[0].uri, impl_uri);
+    }
+
+    // ─── Method implementations across vendor and inheritance ───────────
+
+    const VENDOR_IFACE: &str = "vendor/symfony/http-kernel/HttpKernelInterface.php";
+    const VENDOR_IMPL: &str = "vendor/symfony/http-kernel/HttpKernel.php";
+    const VENDOR_SUB_IFACE: &str = "vendor/symfony/http-kernel/KernelInterface.php";
+    const VENDOR_ABSTRACT: &str = "vendor/symfony/http-kernel/Kernel.php";
+    const PROJECT_KERNEL: &str = "src/Kernel.php";
+
+    /// Build a backend over a temp workspace holding `files` (relative
+    /// path, content), with `vendor/` registered as a vendor directory and
+    /// every `(fqn, relative path)` in `indexed` present in the FQN → URI
+    /// index the way the Composer classmap scan leaves it.
+    fn scenario_workspace(
+        files: &[(&str, &str)],
+        indexed: &[(&str, &str)],
+    ) -> (Backend, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        fs::write(
+            dir.path().join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        )
+        .expect("composer.json");
+        for (rel, content) in files {
+            let path = dir.path().join(rel);
+            fs::create_dir_all(path.parent().expect("file parent")).expect("file dirs");
+            fs::write(&path, content).expect("php file");
+        }
+
+        let (mappings, _vendor_dir) = crate::composer::parse_composer_json(dir.path());
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
+        backend.add_vendor_dir(&dir.path().join("vendor"));
+        let mut config = Config::default();
+        config.indexing.strategy = Some(IndexingStrategy::Full);
+        backend.set_config(config);
+
+        {
+            let mut idx = backend.symbols.fqn_uri_index.write();
+            for (fqn, rel) in indexed {
+                idx.insert(
+                    (*fqn).to_string(),
+                    Url::from_file_path(dir.path().join(rel))
+                        .expect("indexed uri")
+                        .to_string(),
+                );
+            }
+        }
+
+        (backend, dir)
+    }
+
+    /// Parse `rel` into the backend the way opening it in the editor does,
+    /// returning its URI and content.
+    fn open_file(backend: &Backend, dir: &std::path::Path, rel: &str) -> (Url, String) {
+        let path = dir.join(rel);
+        let content = fs::read_to_string(&path).expect("read php file");
+        let uri = Url::from_file_path(&path).expect("file uri");
+        backend.update_ast(uri.as_str(), &content);
+        (uri, content)
+    }
+
+    /// The workspace-relative files the returned locations point at.
+    fn located_files(locations: &[Location], dir: &std::path::Path) -> Vec<String> {
+        locations
+            .iter()
+            .map(|loc| {
+                let path = loc.uri.to_file_path().expect("location path");
+                path.strip_prefix(dir)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect()
+    }
+
+    /// A Symfony-like `vendor/` tree: an interface, a concrete direct
+    /// implementor, a sub-interface, an abstract class whose `handle()` is
+    /// concrete, and a project subclass that only inherits `handle()`.
+    fn symfony_like_workspace() -> (Backend, tempfile::TempDir) {
+        scenario_workspace(
+            &[
+                (
+                    VENDOR_IFACE,
+                    concat!(
+                        "<?php\n",
+                        "namespace Symfony\\Component\\HttpKernel;\n",
+                        "interface HttpKernelInterface\n",
+                        "{\n",
+                        "    public function handle(string $request): string;\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    VENDOR_IMPL,
+                    concat!(
+                        "<?php\n",
+                        "namespace Symfony\\Component\\HttpKernel;\n",
+                        "class HttpKernel implements HttpKernelInterface\n",
+                        "{\n",
+                        "    public function handle(string $request): string\n",
+                        "    {\n",
+                        "        return 'response';\n",
+                        "    }\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    VENDOR_SUB_IFACE,
+                    concat!(
+                        "<?php\n",
+                        "namespace Symfony\\Component\\HttpKernel;\n",
+                        "interface KernelInterface extends HttpKernelInterface\n",
+                        "{\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    VENDOR_ABSTRACT,
+                    concat!(
+                        "<?php\n",
+                        "namespace Symfony\\Component\\HttpKernel;\n",
+                        "abstract class Kernel implements KernelInterface\n",
+                        "{\n",
+                        "    public function handle(string $request): string\n",
+                        "    {\n",
+                        "        return 'kernel';\n",
+                        "    }\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    PROJECT_KERNEL,
+                    concat!(
+                        "<?php\n",
+                        "namespace App;\n",
+                        "use Symfony\\Component\\HttpKernel\\Kernel as BaseKernel;\n",
+                        "class Kernel extends BaseKernel\n",
+                        "{\n",
+                        "}\n",
+                    ),
+                ),
+            ],
+            &[
+                (
+                    "Symfony\\Component\\HttpKernel\\HttpKernelInterface",
+                    VENDOR_IFACE,
+                ),
+                ("Symfony\\Component\\HttpKernel\\HttpKernel", VENDOR_IMPL),
+                (
+                    "Symfony\\Component\\HttpKernel\\KernelInterface",
+                    VENDOR_SUB_IFACE,
+                ),
+                ("Symfony\\Component\\HttpKernel\\Kernel", VENDOR_ABSTRACT),
+                ("App\\Kernel", PROJECT_KERNEL),
+            ],
+        )
+    }
+
+    /// A method declared on a vendor interface resolves to the concrete
+    /// implementations that vendor package ships.  The workspace index
+    /// covers project files only, so the vendor implementors have to come
+    /// from the class-index scans.
+    #[test]
+    fn vendor_interface_method_finds_vendor_implementations() {
+        let (backend, dir) = symfony_like_workspace();
+        let (iface_uri, iface_text) = open_file(&backend, dir.path(), VENDOR_IFACE);
+
+        // Cursor on `handle` in `public function handle(...)` (line 4).
+        let locations = backend
+            .resolve_implementation(
+                iface_uri.as_str(),
+                &iface_text,
+                Position {
+                    line: 4,
+                    character: 22,
+                },
+            )
+            .expect("vendor implementations of HttpKernelInterface::handle should be found");
+
+        let files = located_files(&locations, dir.path());
+        assert!(
+            files.contains(&VENDOR_IMPL.to_string()),
+            "the concrete direct implementor HttpKernel::handle should be returned: {files:?}"
+        );
+        assert!(
+            !files.contains(&VENDOR_IFACE.to_string()),
+            "the queried interface itself is not an implementation: {files:?}"
+        );
+    }
+
+    /// The class-level request on a vendor interface returns the vendor
+    /// classes that implement it, not an empty list.
+    #[test]
+    fn vendor_interface_class_finds_vendor_implementors() {
+        let (backend, dir) = symfony_like_workspace();
+        let (iface_uri, iface_text) = open_file(&backend, dir.path(), VENDOR_IFACE);
+
+        // Cursor on `HttpKernelInterface` in the interface declaration.
+        let locations = backend
+            .resolve_implementation(
+                iface_uri.as_str(),
+                &iface_text,
+                Position {
+                    line: 2,
+                    character: 12,
+                },
+            )
+            .expect("vendor implementors of HttpKernelInterface should be found");
+
+        let files = located_files(&locations, dir.path());
+        assert!(
+            files.contains(&VENDOR_IMPL.to_string()),
+            "HttpKernel implements the interface directly: {files:?}"
+        );
+        assert!(
+            files.contains(&PROJECT_KERNEL.to_string()),
+            "App\\Kernel implements it through the vendor base kernel: {files:?}"
+        );
+    }
+
+    /// An abstract class whose method body is concrete is a valid method
+    /// implementation: `Symfony\Component\HttpKernel\Kernel` is abstract but
+    /// owns a concrete `handle()`.
+    #[test]
+    fn abstract_class_with_concrete_method_is_an_implementation() {
+        let (backend, dir) = symfony_like_workspace();
+        let (iface_uri, iface_text) = open_file(&backend, dir.path(), VENDOR_IFACE);
+
+        let locations = backend
+            .resolve_implementation(
+                iface_uri.as_str(),
+                &iface_text,
+                Position {
+                    line: 4,
+                    character: 22,
+                },
+            )
+            .expect("implementations of HttpKernelInterface::handle should be found");
+
+        let files = located_files(&locations, dir.path());
+        assert!(
+            files.contains(&VENDOR_ABSTRACT.to_string()),
+            "the abstract Kernel owns the concrete handle() body: {files:?}"
+        );
+    }
+
+    /// A concrete subclass that inherits the method without overriding it
+    /// resolves to the nearest ancestor that actually declares the method.
+    #[test]
+    fn inherited_method_resolves_to_declaring_ancestor() {
+        let (backend, dir) = scenario_workspace(
+            &[
+                (
+                    "src/Handler.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App;\n",
+                        "interface Handler\n",
+                        "{\n",
+                        "    public function handle(): void;\n",
+                        "}\n",
+                    ),
+                ),
+                // Declares handle() but is unrelated to Handler, so it is
+                // never itself an implementor of the interface.
+                (
+                    "src/BaseHandler.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App;\n",
+                        "abstract class BaseHandler\n",
+                        "{\n",
+                        "    public function handle(): void\n",
+                        "    {\n",
+                        "    }\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    "src/AppHandler.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App;\n",
+                        "class AppHandler extends BaseHandler implements Handler\n",
+                        "{\n",
+                        "}\n",
+                    ),
+                ),
+            ],
+            &[],
+        );
+        let (iface_uri, iface_text) = open_file(&backend, dir.path(), "src/Handler.php");
+
+        let locations = backend
+            .resolve_implementation(
+                iface_uri.as_str(),
+                &iface_text,
+                Position {
+                    line: 4,
+                    character: 22,
+                },
+            )
+            .expect("the inherited implementation should resolve to its declaring class");
+
+        let files = located_files(&locations, dir.path());
+        assert_eq!(
+            files,
+            vec!["src/BaseHandler.php".to_string()],
+            "only the class that declares handle() has a body to jump to: {files:?}"
+        );
+        assert_eq!(
+            locations[0].range.start.line, 4,
+            "should point at BaseHandler::handle: {locations:?}"
+        );
+    }
+
+    /// An abstract re-declaration is another declaration, not an
+    /// implementation, so only the class with the body is returned.
+    #[test]
+    fn abstract_method_redeclaration_is_not_an_implementation() {
+        let (backend, dir) = scenario_workspace(
+            &[
+                (
+                    "src/Handler.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App;\n",
+                        "interface Handler\n",
+                        "{\n",
+                        "    public function handle(): void;\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    "src/AbstractHandler.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App;\n",
+                        "abstract class AbstractHandler implements Handler\n",
+                        "{\n",
+                        "    abstract public function handle(): void;\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    "src/RealHandler.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App;\n",
+                        "class RealHandler extends AbstractHandler\n",
+                        "{\n",
+                        "    public function handle(): void\n",
+                        "    {\n",
+                        "    }\n",
+                        "}\n",
+                    ),
+                ),
+            ],
+            &[],
+        );
+        let (iface_uri, iface_text) = open_file(&backend, dir.path(), "src/Handler.php");
+
+        let locations = backend
+            .resolve_implementation(
+                iface_uri.as_str(),
+                &iface_text,
+                Position {
+                    line: 4,
+                    character: 22,
+                },
+            )
+            .expect("the concrete implementation should be found");
+
+        let files = located_files(&locations, dir.path());
+        assert_eq!(
+            files,
+            vec!["src/RealHandler.php".to_string()],
+            "the abstract re-declaration is not an implementation: {files:?}"
+        );
+    }
+
+    /// A vendor class implementing a *project* interface stays excluded:
+    /// the project-only restriction still applies when the queried symbol
+    /// belongs to the project.
+    #[test]
+    fn project_interface_method_still_excludes_vendor_implementors() {
+        let (backend, dir) = scenario_workspace(
+            &[
+                (
+                    "src/Contracts/Cacheable.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App\\Contracts;\n",
+                        "interface Cacheable\n",
+                        "{\n",
+                        "    public function cacheKey(): string;\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    "src/Cache/FileCache.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace App\\Cache;\n",
+                        "use App\\Contracts\\Cacheable;\n",
+                        "class FileCache implements Cacheable\n",
+                        "{\n",
+                        "    public function cacheKey(): string\n",
+                        "    {\n",
+                        "        return 'file';\n",
+                        "    }\n",
+                        "}\n",
+                    ),
+                ),
+                (
+                    "vendor/acme/cache/src/AcmeCache.php",
+                    concat!(
+                        "<?php\n",
+                        "namespace Acme\\Cache;\n",
+                        "use App\\Contracts\\Cacheable;\n",
+                        "class AcmeCache implements Cacheable\n",
+                        "{\n",
+                        "    public function cacheKey(): string\n",
+                        "    {\n",
+                        "        return 'acme';\n",
+                        "    }\n",
+                        "}\n",
+                    ),
+                ),
+            ],
+            &[
+                ("App\\Contracts\\Cacheable", "src/Contracts/Cacheable.php"),
+                ("App\\Cache\\FileCache", "src/Cache/FileCache.php"),
+                (
+                    "Acme\\Cache\\AcmeCache",
+                    "vendor/acme/cache/src/AcmeCache.php",
+                ),
+            ],
+        );
+
+        // The vendor implementor was parsed earlier in the session, which
+        // puts it into the reverse-inheritance index.
+        open_file(&backend, dir.path(), "vendor/acme/cache/src/AcmeCache.php");
+        let (iface_uri, iface_text) =
+            open_file(&backend, dir.path(), "src/Contracts/Cacheable.php");
+
+        let locations = backend
+            .resolve_implementation(
+                iface_uri.as_str(),
+                &iface_text,
+                Position {
+                    line: 4,
+                    character: 22,
+                },
+            )
+            .expect("the project implementation should be found");
+
+        let files = located_files(&locations, dir.path());
+        assert_eq!(
+            files,
+            vec!["src/Cache/FileCache.php".to_string()],
+            "a vendor implementor of a project interface must stay excluded: {files:?}"
+        );
     }
 }
