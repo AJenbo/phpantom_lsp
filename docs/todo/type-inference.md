@@ -711,3 +711,41 @@ bit set), and the array branch when the argument is left out. Anything
 else keeps the declared union. Left over from the work that took the
 `preg_replace`/`str_replace` family and `json_encode`, the two shapes
 that accounted for the bulk of the volume.
+
+## T41. `@param-out` is parsed but never read
+**Impact: Medium · Effort: Low-Medium**
+
+```php
+/**
+ * @param-out list<string> $lines
+ */
+function readInto(string $path, ?array &$lines = null): int { … }
+
+readInto($path, $lines);
+$lines[0];   // list<string> is what the tag promises; the declared
+             // `?array` is what the caller gets
+```
+
+`TagKind::ParamOut` exists in `docblock/tag_kind.rs` and nothing
+consumes it, so the only thing describing an argument after a call is
+the parameter's declared type. That type describes what goes *in*: a
+function that takes `array &$buffer` and fills it with `Token` objects
+has no way to say so, and a `?array &$out = null` says null where the
+callee guarantees an array.
+
+The null half of that is handled by `ParameterInfo::out_type()`, which
+drops the null a by-reference parameter's `null` default implies. That
+is a heuristic standing in for the tag: it is right for the standard
+library's out-parameters and for the ordinary `&$out = null` idiom, but
+it cannot be argued with by a callee that genuinely may leave the
+argument null, and it says nothing about the *element* types the callee
+writes.
+
+**Fix:** record the tag on `ParameterInfo` alongside
+`closure_this_type`, and have `out_type()` prefer it over both the
+declared type and the null-default heuristic. Then the two write-back
+paths (`seed_pass_by_ref_primitives` and
+`try_apply_pass_by_reference_type`) pick it up with no further change.
+Once it is read, the pcre stub patches can declare `preg_match`'s and
+`preg_match_all`'s out types directly rather than inheriting
+phpstorm-stubs' `null|string[]`.

@@ -9931,3 +9931,57 @@ $reducible->reduce(
     let messages = type_error_messages(&diags);
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+// ─── By-reference out-parameters are written by the callee ──────────────────
+
+#[test]
+fn no_diagnostic_for_by_ref_out_param_with_null_default() {
+    // A by-reference parameter that defaults to `null` is an out-parameter:
+    // the null says the caller may omit the argument, not that the callee
+    // may leave it null. This is the shape every PCRE out-parameter uses
+    // (`preg_match(string $p, string $s, ?array &$m = null)`), so reading an
+    // offset off `$matches` after the call must not be reported as possibly
+    // null.
+    let php = r#"<?php
+/** @param null|string[] &$matches */
+function match_it(string $pattern, string $subject, ?array &$matches = null): int|false
+{
+    return 0;
+}
+
+function consume(string $s): void {
+    if (match_it('/(?<unit>\w+)/', $s, $match)) {
+        strtolower($match['unit']);
+        strtolower($match[0]);
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "by-ref out-param $match should be a non-null array after the call: {diags:?}"
+    );
+}
+
+#[test]
+fn diagnostic_kept_for_nullable_by_ref_param_without_default() {
+    // Without a default there is nothing to say the callee writes the
+    // argument, so a nullable by-reference parameter stays nullable and the
+    // null dereference is still reported.
+    let php = r#"<?php
+function fill(?string &$out): void
+{
+}
+
+function consume(): void {
+    $value = null;
+    fill($value);
+    strtolower($value);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "nullable by-ref param without a default should stay nullable: {diags:?}"
+    );
+}

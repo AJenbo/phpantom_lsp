@@ -2130,10 +2130,10 @@ pub(super) fn try_apply_pass_by_reference_type(
         // Check if the corresponding parameter is pass-by-reference
         // with a type hint.
         if param.is_reference
-            && let Some(type_hint) = &param.type_hint
+            && let Some(out_hint) = param.out_type()
         {
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                type_hint,
+                &out_hint,
                 &ctx.current_class.name,
                 ctx.all_classes,
                 ctx.class_loader,
@@ -2144,7 +2144,7 @@ pub(super) fn try_apply_pass_by_reference_type(
                 }
                 ResolvedType::extend_unique(
                     results,
-                    ResolvedType::from_classes_with_hint(resolved, type_hint.clone()),
+                    ResolvedType::from_classes_with_hint(resolved, out_hint),
                 );
             }
         }

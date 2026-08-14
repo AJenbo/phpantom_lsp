@@ -83,38 +83,34 @@ resolve to `string` now.
 
 ## preg_match
 
-### B144. `preg_match` `$matches` is nullable and shapeless
+### B144. `preg_match` `$matches` is shapeless
 
-**Impact: High · Effort: Medium**
+**Impact: Medium-High · Effort: Medium**
 
-The single largest false-positive source of the sweep (~40 sites in
-seven projects):
+`$matches` is an array of unknown keys, so every group read off it is
+`string` at best and the pattern's own capture groups say nothing:
 
 ```php
 if (preg_match('/(?<amount>\d+)(?<unit>\w*)/', $size, $match)) {
-    strtolower($match['unit']);   // reported: got null|string
+    strtolower($match['unit']);   // no key check, no arity check
 }
 ```
 
-Three compounding defects:
+Two remaining defects:
 
-1. The stub's `?array &$matches = null` default leaks into the
-   written-back type, so `$matches` is `array<string>|null` after the
-   call and every offset read yields `string|null`. After a truthy
-   `preg_match` (and unconditionally after `preg_match_all`),
-   `$matches` is definitely an array.
-2. No match-shape inference for literal patterns: PHPStan's
+1. No match-shape inference for literal patterns: PHPStan's
    `RegexArrayShapeMatcher` types group 0 and every always-matching
    group as `string` (`string|null` only under
    `PREG_UNMATCHED_AS_NULL`), with named groups as keys. PDepend,
    PHPMD, AGCMS and Bladestan all index `$match[1]`/`$match['name']`
    directly inside the guard.
-3. `preg_match_all` group reads (`$matches[1]`) should be
-   `list<string>`, not `array<string>|null`.
+2. `preg_match_all` group reads (`$matches[1]`) should be
+   `list<string>`, not `array<string>`.
 
-**Fix:** treat the by-ref out-parameter as definitely-assigned
-non-null after the call; add a literal-pattern group-shape analysis
-(port the capture-group walk from PHPStan's `RegexArrayShapeMatcher`).
+**Fix:** add a literal-pattern group-shape analysis (port the
+capture-group walk from PHPStan's `RegexArrayShapeMatcher`). Depends
+on B147: the matcher's result has nowhere to go until constant-array
+shapes exist as a value representation.
 
 ## Array types
 

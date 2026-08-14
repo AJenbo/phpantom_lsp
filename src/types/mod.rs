@@ -335,13 +335,39 @@ impl ParameterInfo {
     /// `type_hint`, since the merge would otherwise drop the implied null.
     /// The operation is idempotent.
     pub fn apply_null_default(&mut self) {
-        let defaults_to_null = self
-            .default_value
-            .as_deref()
-            .is_some_and(|d| d.eq_ignore_ascii_case("null"));
-        if defaults_to_null && let Some(t) = self.type_hint.take() {
+        if self.defaults_to_null()
+            && let Some(t) = self.type_hint.take()
+        {
             self.type_hint = Some(t.or_null());
         }
+    }
+
+    /// Whether the declared default value is the literal `null`.
+    pub fn defaults_to_null(&self) -> bool {
+        self.default_value
+            .as_deref()
+            .is_some_and(|d| d.eq_ignore_ascii_case("null"))
+    }
+
+    /// The type the caller's argument holds *after* the call returns.
+    ///
+    /// For everything but a by-reference parameter this is just the
+    /// declared type. A by-reference parameter that defaults to `null`
+    /// is an out-parameter, and its null is the inverse of the one
+    /// [`apply_null_default`](Self::apply_null_default) adds: it says the
+    /// caller may leave the argument unset, not that the callee may leave
+    /// it null. `preg_match(string $p, string $s, ?array &$m = null)`
+    /// writes `$m` whenever it is passed, so reading an offset off it
+    /// after the call is not a null dereference.
+    ///
+    /// Returns `None` when the parameter carries no type at all, and
+    /// leaves a hint that is *only* `null` alone rather than erasing it.
+    pub fn out_type(&self) -> Option<PhpType> {
+        let hint = self.type_hint.as_ref()?;
+        if !self.is_reference || !self.defaults_to_null() {
+            return Some(hint.clone());
+        }
+        Some(hint.non_null_type().unwrap_or_else(|| hint.clone()))
     }
 
     /// Return the type hint as a string, if present.

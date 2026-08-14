@@ -26,9 +26,9 @@ within the same impact tier.
 | #    | Item                                                                                                                                                      | Impact      | Effort      |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B167 | [Factory `create()`/`make()` keep the collection half on single-model chains](todo/bugs.md#b167-factory-createmake-keep-the-collection-half-on-single-model-chains) | Medium-High | Low-Medium |
-| B144 | [`preg_match` `$matches` is nullable and shapeless](todo/bugs.md#b144-preg_match-matches-is-nullable-and-shapeless)                                        | High        | Medium      |
 | B141 | [A `never` conditional branch does not assert the condition](todo/bugs.md#b141-a-never-conditional-branch-does-not-assert-the-condition) | Medium-High | Medium      |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
+| B144 | [`preg_match` `$matches` is shapeless](todo/bugs.md#b144-preg_match-matches-is-shapeless) (depends on B147)                                | Medium-High | Medium      |
 | B157 | [`@phpstan-assert` tags on called methods are ignored](todo/bugs.md#b157-phpstan-assert-tags-on-called-methods-are-ignored)                                | Medium-High | Medium      |
 | B168 | [`Request` input accessors deserve precise per-argument types](todo/bugs.md#b168-request-input-accessors-deserve-precise-per-argument-types)               | Medium-High | Medium      |
 | B169 | [Blade `@if` narrowing does not reach `@include`d variables](todo/bugs.md#b169-blade-if-narrowing-does-not-reach-included-variables)                       | Medium-High | Medium      |
@@ -36,7 +36,7 @@ within the same impact tier.
 | B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
 | B155 | [A checked call expression is forgotten by the next identical call](todo/bugs.md#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call)   | Medium-High | Medium-High |
 | B158 | [Strict `in_array` against a constant list does not narrow the needle](todo/bugs.md#b158-strict-in_array-against-a-constant-list-does-not-narrow-the-needle) (depends on B155) | Low-Medium | Medium |
-| B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state)                                     | Medium      | Medium-High |
+| B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state) (depends on B147)                   | Medium      | Medium-High |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -89,6 +89,7 @@ unlikely to move the needle for most users.
 | T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | Medium      |
 | T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium      |
 | T32 | [Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps](todo/type-inference.md#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps)    | Medium      | Medium      |
+| T41 | [`@param-out` is parsed but never read](todo/type-inference.md#t41-param-out-is-parsed-but-never-read)                                                                      | Medium      | Low-Medium  |
 | T34 | [`static::CONST` over-narrows to the declaring class's value](todo/type-inference.md#t34-staticconst-over-narrows-to-the-declaring-classs-value)                            | Medium      | Medium      |
 | T30 | [Literal type collapse limit](todo/type-inference.md#t30-literal-type-collapse-limit)                                                                                       | Low-Medium  | Low         |
 | T40 | [`pathinfo()` returns a shape or a string depending on the flags argument](todo/type-inference.md#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument) | Low-Medium  | Low         |

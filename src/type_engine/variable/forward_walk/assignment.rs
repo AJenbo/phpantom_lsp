@@ -2585,18 +2585,18 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
         }
 
         let already_in_scope = !scope.get(&var_name).is_empty();
-        if let Some(type_hint) = &param.type_hint {
+        if let Some(out_hint) = param.out_type() {
             // A variadic parameter's stored PHPDoc type may describe the
             // collected argument array (`string[] &$values`), while each
             // call-site variable is one element of that collection. Native
             // element hints such as `string &...$values` are already scalar
             // and therefore pass through unchanged.
             let effective_hint = if param.is_variadic {
-                type_hint
+                out_hint
                     .iterable_element_type()
-                    .unwrap_or_else(|| type_hint.clone())
+                    .unwrap_or_else(|| out_hint.clone())
             } else {
-                type_hint.clone()
+                out_hint
             };
             let primitive_hint = match effective_hint.kind() {
                 TypeKind::Union(members) | TypeKind::Intersection(members) => {
