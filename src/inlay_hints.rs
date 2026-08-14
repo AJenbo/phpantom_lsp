@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::reference_index::ReferenceIndexKey;
-use crate::symbol_map::{CallSite, UntypedClosureSite};
+use crate::symbol_map::{CallSite, SymbolKind, UntypedClosureSite};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, Visibility};
 
@@ -137,6 +137,12 @@ impl Backend {
             return;
         }
 
+        // A standalone function belongs to no class, so the class walk
+        // below never reaches one.  These go first, or a file holding
+        // nothing but functions would leave at the `else` below with no
+        // hints at all.
+        self.emit_function_count_hints(uri, content, range, hints);
+
         let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() else {
             return;
         };
@@ -253,6 +259,48 @@ impl Backend {
                     reference_label(ref_count as usize),
                 );
             }
+        }
+    }
+
+    /// Emit a reference count beside every standalone function the file
+    /// declares.
+    ///
+    /// Methods are counted through `member_ref_count_cached`, which
+    /// exists because a method name has to be attributed to a class and
+    /// followed up an inheritance chain.  A function has neither, so its
+    /// count is a single lookup in the reference index, the way a class
+    /// declaration's is.
+    fn emit_function_count_hints(
+        &self,
+        uri: &str,
+        content: &str,
+        range: (u32, u32),
+        hints: &mut Vec<InlayHint>,
+    ) {
+        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+            return;
+        };
+
+        for span in &symbol_map.spans {
+            let SymbolKind::FunctionCall {
+                name,
+                is_definition: true,
+                ..
+            } = &span.kind
+            else {
+                continue;
+            };
+
+            if !offset_in_range(span.start, range) {
+                continue;
+            }
+
+            let key = self.function_reference_key(uri, span.start, name);
+            push_count_hint(
+                hints,
+                line_end_position(content, span.start as usize),
+                reference_label(self.ref_count(&key)),
+            );
         }
     }
 

@@ -440,6 +440,26 @@ impl Backend {
             .get(uri)
             .and_then(|rn| rn.get(offset).map(normalize_symbol_name))
     }
+
+    /// The key a function named at `offset` in `uri` is indexed under.
+    ///
+    /// Resolution lives here rather than at the asking end so a caller
+    /// counting references cannot key the function differently from the
+    /// way its call sites were keyed on the way in.
+    pub(crate) fn function_reference_key(
+        &self,
+        uri: &str,
+        offset: u32,
+        name: &str,
+    ) -> ReferenceIndexKey {
+        let resolved = if let Some(fqn) = self.resolved_name_at(uri, offset) {
+            fqn
+        } else {
+            let (use_map, namespace) = self.use_map_and_namespace_at(uri, offset);
+            Self::resolve_to_fqn(name, &use_map, &namespace)
+        };
+        ReferenceIndexKey::Function(normalize_symbol_name(resolved))
+    }
 }
 
 /// How many references to each member name a file currently contributes.
