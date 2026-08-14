@@ -836,23 +836,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Crashes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b150-a-xnn-escape-in-a-string-literal-aborts-the-process" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B150. A <code>\xNN</code> escape in a string literal aborts the process
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1398,23 +1381,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Crashes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b150-a-xnn-escape-in-a-string-literal-aborts-the-process" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B150. A <code>\xNN</code> escape in a string literal aborts the process
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1522,65 +1488,22 @@ diagnostics across ten projects, ~330 of them false positives). Site
 counts refer to that sweep; the git-ignored triage log has the full
 per-project inventory. Entries filed later say where they came from.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
-<h3 id="b150-a-xnn-escape-in-a-string-literal-aborts-the-process">B150. A <code>\xNN</code> escape in a string literal aborts the process<a class="headerlink" href="#b150-a-xnn-escape-in-a-string-literal-aborts-the-process" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Low</strong></p>
-<p>Found while diffing analyser output over <code>laravel/framework</code> on
-2026-08-14, not in the sample-project sweep. Seven lines reproduce it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">function</span> <span class="nf">probe</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$output</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">{</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">if</span> <span class="p">((</span><span class="nv">$pos</span> <span class="o">=</span> <span class="nb">strpos</span><span class="p">(</span><span class="nv">$output</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\x8b</span><span class="s2">&quot;</span><span class="p">))</span> <span class="o">!==</span> <span class="k">false</span><span class="p">)</span> <span class="p">{</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="k">echo</span> <span class="nv">$pos</span><span class="p">;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="p">}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">}</span>
-</code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>$ phpantom_lsp analyze r.php
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>thread &#39;diag-worker&#39; panicked at library/core/src/str/validations.rs:48:36:
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>unsafe precondition(s) violated: hint::unreachable_unchecked must never be reached
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>thread caused non-unwinding panic. aborting.
-</code></pre></div>
-<p><code>bytes_to_str</code> (<code>src/atom.rs</code>) is <code>str::from_utf8_unchecked</code>, on the
-stated ground that "PHP source is always valid UTF-8 (mago guarantees
-this after lexing)". That holds for identifiers, not for a string
-literal's <em>decoded</em> value: mago resolves <code>\x8b</code> to the single byte
-<code>0x8b</code>, and <code>LiteralString::value</code> then holds bytes no UTF-8 string
-can. <code>argument_value_key</code>
-(<code>type_engine/types/narrowing/resolve.rs</code>) builds a <code>&amp;str</code> from that
-value and iterates it with <code>.chars()</code>, which is where the
-undefined-behaviour check fires. The panic is non-unwinding, so
-<code>catch_unwind</code> cannot contain it and the whole process goes down: on
-the CLI the run dies mid-analysis, and in the editor the server exits.</p>
-<p>Two things make it worse than the repro suggests. The check that fires
-here is a debug-build assertion, so a release build performs the
-undefined behaviour silently instead of aborting. And the same
-<code>bytes_to_str</code>-on-a-literal-value pattern is spread across roughly
-three dozen call sites (<code>regex_shape::literal_string</code>,
-<code>extract_array_key_for_shape</code>, the docblock and Blade readers, …), any
-of which a <code>\xNN</code> escape can reach.</p>
-<p>A raw non-UTF-8 byte written directly into the source file did not
-reproduce it in the same position, so the decode path is the one that
-matters.</p>
-<p><strong>Fix:</strong> make the conversion of a <em>literal value</em> checked, since that
-is the one place the input is arbitrary bytes rather than lexed PHP
-identifier text: <code>str::from_utf8(...)</code> with a lossy or skip-this-value
-fallback. Keep <code>bytes_to_str</code> unchecked for the identifier and raw-token
-paths where mago's guarantee does hold, and correct its safety comment
-to say which inputs it covers.</p>
+<p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <h3 id="b151-t-and-tnull-are-judged-by-different-rules">B151. <code>?T</code> and <code>T|null</code> are judged by different rules<a class="headerlink" href="#b151-t-and-tnull-are-judged-by-different-rules" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Effort: Low-Medium</strong></p>
 <p>Found on 2026-08-14 while checking why an optional array-shape key read
 was not reported, not in the sample-project sweep. The same type in its
 two spellings gets two different answers from every consumer:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function f(?string $x): string {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    trim($x);            // silent</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    return $x;           // silent</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">/** @param array{a: string|null} $row */</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">function g(array $row): void {</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    trim($row[&#39;a&#39;]);     // reported: null does not satisfy string</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function f(?string $x): string {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    trim($x);            // silent</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    return $x;           // silent</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">/** @param array{a: string|null} $row */</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">function g(array $row): void {</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    trim($row[&#39;a&#39;]);     // reported: null does not satisfy string</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>Assigning a <code>?string</code> into a <code>string</code> property and passing one to a
 user-defined <code>string</code> parameter are silent too, so this is not specific
@@ -1613,11 +1536,11 @@ have been guarded out) rather than removing it outright.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">foreach ($rows as $row) {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$rows[] = [$violation, $location, $name];        // RuleViolation, string, string</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">foreach ($rows as $row) {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    [$violation, $location, $name] = $row;       // each: RuleViolation|string</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    $writer-&gt;write($location);                   // reported: RuleViolation|string</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A list literal collapses to <code>array&lt;union-of-values&gt;</code>, so list
 destructuring and constant-offset reads cannot select a slot (6 sites
