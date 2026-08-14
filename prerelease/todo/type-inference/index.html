@@ -1421,6 +1421,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t41-param-out-is-parsed-but-never-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T41. <code>@param-out</code> is parsed but never read
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1774,6 +1785,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T40. <code>pathinfo()</code> returns a shape or a string depending on the flags argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t41-param-out-is-parsed-but-never-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T41. <code>@param-out</code> is parsed but never read
       </span>
     </span>
   </a>
@@ -2398,6 +2420,38 @@ bit set), and the array branch when the argument is left out. Anything
 else keeps the declared union. Left over from the work that took the
 <code>preg_replace</code>/<code>str_replace</code> family and <code>json_encode</code>, the two shapes
 that accounted for the bulk of the volume.</p>
+<h2 id="t41-param-out-is-parsed-but-never-read">T41. <code>@param-out</code> is parsed but never read<a class="headerlink" href="#t41-param-out-is-parsed-but-never-read" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> */</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int { … }</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">readInto($path, $lines);</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">$lines[0];   // list&lt;string&gt; is what the tag promises; the declared</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">             // `?array` is what the caller gets</span>
+</code></pre></div>
+<p><code>TagKind::ParamOut</code> exists in <code>docblock/tag_kind.rs</code> and nothing
+consumes it, so the only thing describing an argument after a call is
+the parameter's declared type. That type describes what goes <em>in</em>: a
+function that takes <code>array &amp;$buffer</code> and fills it with <code>Token</code> objects
+has no way to say so, and a <code>?array &amp;$out = null</code> says null where the
+callee guarantees an array.</p>
+<p>The null half of that is handled by <code>ParameterInfo::out_type()</code>, which
+drops the null a by-reference parameter's <code>null</code> default implies. That
+is a heuristic standing in for the tag: it is right for the standard
+library's out-parameters and for the ordinary <code>&amp;$out = null</code> idiom, but
+it cannot be argued with by a callee that genuinely may leave the
+argument null, and it says nothing about the <em>element</em> types the callee
+writes.</p>
+<p><strong>Fix:</strong> record the tag on <code>ParameterInfo</code> alongside
+<code>closure_this_type</code>, and have <code>out_type()</code> prefer it over both the
+declared type and the null-default heuristic. Then the two write-back
+paths (<code>seed_pass_by_ref_primitives</code> and
+<code>try_apply_pass_by_reference_type</code>) pick it up with no further change.
+Once it is read, the pcre stub patches can declare <code>preg_match</code>'s and
+<code>preg_match_all</code>'s out types directly rather than inheriting
+phpstorm-stubs' <code>null|string[]</code>.</p>
 
 
 

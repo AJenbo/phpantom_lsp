@@ -879,10 +879,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b144-preg_match-matches-is-nullable-and-shapeless" class="md-nav__link">
+  <a href="#b144-preg_match-matches-is-shapeless" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B144. <code>preg_match</code> <code>$matches</code> is nullable and shapeless
+        B144. <code>preg_match</code> <code>$matches</code> is shapeless
       </span>
     </span>
   </a>
@@ -1580,10 +1580,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b144-preg_match-matches-is-nullable-and-shapeless" class="md-nav__link">
+  <a href="#b144-preg_match-matches-is-shapeless" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B144. <code>preg_match</code> <code>$matches</code> is nullable and shapeless
+        B144. <code>preg_match</code> <code>$matches</code> is shapeless
       </span>
     </span>
   </a>
@@ -1850,21 +1850,16 @@ through the shared pipeline — is fixed; <code>str_replace(self::NS, '',
 $class)</code> and <code>preg_replace($p, $r, file_get_contents($f) ?: '')</code> both
 resolve to <code>string</code> now.</p>
 <h2 id="preg_match">preg_match<a class="headerlink" href="#preg_match" title="Permanent link">&para;</a></h2>
-<h3 id="b144-preg_match-matches-is-nullable-and-shapeless">B144. <code>preg_match</code> <code>$matches</code> is nullable and shapeless<a class="headerlink" href="#b144-preg_match-matches-is-nullable-and-shapeless" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p>The single largest false-positive source of the sweep (~40 sites in
-seven projects):</p>
+<h3 id="b144-preg_match-matches-is-shapeless">B144. <code>preg_match</code> <code>$matches</code> is shapeless<a class="headerlink" href="#b144-preg_match-matches-is-shapeless" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
+<p><code>$matches</code> is an array of unknown keys, so every group read off it is
+<code>string</code> at best and the pattern's own capture groups say nothing:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">if (preg_match(&#39;/(?&lt;amount&gt;\d+)(?&lt;unit&gt;\w*)/&#39;, $size, $match)) {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    strtolower($match[&#39;unit&#39;]);   // reported: got null|string</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    strtolower($match[&#39;unit&#39;]);   // no key check, no arity check</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
 </code></pre></div>
-<p>Three compounding defects:</p>
+<p>Two remaining defects:</p>
 <ol>
-<li>The stub's <code>?array &amp;$matches = null</code> default leaks into the
-   written-back type, so <code>$matches</code> is <code>array&lt;string&gt;|null</code> after the
-   call and every offset read yields <code>string|null</code>. After a truthy
-   <code>preg_match</code> (and unconditionally after <code>preg_match_all</code>),
-   <code>$matches</code> is definitely an array.</li>
 <li>No match-shape inference for literal patterns: PHPStan's
    <code>RegexArrayShapeMatcher</code> types group 0 and every always-matching
    group as <code>string</code> (<code>string|null</code> only under
@@ -1872,11 +1867,12 @@ seven projects):</p>
    PHPMD, AGCMS and Bladestan all index <code>$match[1]</code>/<code>$match['name']</code>
    directly inside the guard.</li>
 <li><code>preg_match_all</code> group reads (<code>$matches[1]</code>) should be
-   <code>list&lt;string&gt;</code>, not <code>array&lt;string&gt;|null</code>.</li>
+   <code>list&lt;string&gt;</code>, not <code>array&lt;string&gt;</code>.</li>
 </ol>
-<p><strong>Fix:</strong> treat the by-ref out-parameter as definitely-assigned
-non-null after the call; add a literal-pattern group-shape analysis
-(port the capture-group walk from PHPStan's <code>RegexArrayShapeMatcher</code>).</p>
+<p><strong>Fix:</strong> add a literal-pattern group-shape analysis (port the
+capture-group walk from PHPStan's <code>RegexArrayShapeMatcher</code>). Depends
+on B147: the matcher's result has nowhere to go until constant-array
+shapes exist as a value representation.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>

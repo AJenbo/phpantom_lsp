@@ -1316,12 +1316,6 @@ within the same impact tier.</p>
 <td>Low-Medium</td>
 </tr>
 <tr>
-<td>B144</td>
-<td><a href="../todo/bugs/#b144-preg_match-matches-is-nullable-and-shapeless"><code>preg_match</code> <code>$matches</code> is nullable and shapeless</a></td>
-<td>High</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>B141</td>
 <td><a href="../todo/bugs/#b141-a-never-conditional-branch-does-not-assert-the-condition">A <code>never</code> conditional branch does not assert the condition</a></td>
 <td>Medium-High</td>
@@ -1330,6 +1324,12 @@ within the same impact tier.</p>
 <tr>
 <td>B147</td>
 <td><a href="../todo/bugs/#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">Array literals are not tuples: slot reads return the union of all elements</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B144</td>
+<td><a href="../todo/bugs/#b144-preg_match-matches-is-shapeless"><code>preg_match</code> <code>$matches</code> is shapeless</a> (depends on B147)</td>
 <td>Medium-High</td>
 <td>Medium</td>
 </tr>
@@ -1377,7 +1377,7 @@ within the same impact tier.</p>
 </tr>
 <tr>
 <td>B148</td>
-<td><a href="../todo/bugs/#b148-element-writes-do-not-refine-tracked-array-state">Element writes do not refine tracked array state</a></td>
+<td><a href="../todo/bugs/#b148-element-writes-do-not-refine-tracked-array-state">Element writes do not refine tracked array state</a> (depends on B147)</td>
 <td>Medium</td>
 <td>Medium-High</td>
 </tr>
@@ -1625,6 +1625,12 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/type-inference/#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps">Audit <code>is_type_compatible</code>'s MAYBE escape hatches for core-engine gaps</a></td>
 <td>Medium</td>
 <td>Medium</td>
+</tr>
+<tr>
+<td>T41</td>
+<td><a href="../todo/type-inference/#t41-param-out-is-parsed-but-never-read"><code>@param-out</code> is parsed but never read</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
 </tr>
 <tr>
 <td>T34</td>
