@@ -2195,7 +2195,7 @@
 <p>Known gaps and missing features in PHPantom's Laravel Eloquent support.
 For the general architecture and virtual member provider design, see
 <code>ARCHITECTURE.md</code>.</p>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
 <thead>
@@ -2210,8 +2210,8 @@ within the same impact tier.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
@@ -2449,7 +2449,7 @@ degrades gracefully.</p>
    or propose it as a <code>@phpstan-method</code> line that coexists with the
    plain <code>@method</code> so tools that choke keep reading the flattened one.</li>
 </ol>
-<p><strong>Impact: High · Effort: Medium (upstream PRs)</strong></p>
+<p><strong>Impact: High · Complexity: High (upstream PRs)</strong></p>
 <hr />
 <h2 id="model-property-source-gaps">Model property source gaps<a class="headerlink" href="#model-property-source-gaps" title="Permanent link">&para;</a></h2>
 <p>The <code>LaravelModelProvider</code> synthesizes virtual properties from several
@@ -2505,7 +2505,7 @@ today and what is still missing.</p>
 <h3 id="gaps-ranked-by-impact-effort">Gaps (ranked by impact ÷ effort)<a class="headerlink" href="#gaps-ranked-by-impact-effort" title="Permanent link">&para;</a></h3>
 <hr />
 <h4 id="l5-abort_ifabort_unless-type-narrowing">L5. <code>abort_if</code>/<code>abort_unless</code> type narrowing<a class="headerlink" href="#l5-abort_ifabort_unless-type-narrowing" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Effort: Medium</strong></p>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
 <p>These are the standard guard patterns in Laravel controllers and
 middleware. Without narrowing, variables keep their wider type,
 causing false "unknown member" warnings and missing completions.</p>
@@ -2540,7 +2540,7 @@ to subsequent code:
 <p>This is similar to the existing guard clause narrowing but triggered
 by specific function names rather than <code>if</code> + early return.</p>
 <h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium-High</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>For each relationship method we synthesize a <code>{snake_name}_count</code>
 property typed <code>int</code>, unconditionally. At runtime the attribute only
 exists when the query that produced the model called <code>withCount()</code> /
@@ -2560,7 +2560,7 @@ declaratively like <code>$casts</code> is today.</p>
 than a missing feature. Reported as a follow-up on
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/312">#312</a>.</p>
 <h4 id="l8-withsum-withavg-withmin-withmax-aggregate-properties">L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties<a class="headerlink" href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium-High</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>Less common than <code>withCount</code>; only affects codebases using aggregate
 eager-loading. Cannot be inferred declaratively from the model alone;
 requires tracking call-site string arguments.</p>
@@ -2572,7 +2572,7 @@ aggregate function (<code>withSum</code>/<code>withAvg</code> → <code>float</c
 <code>withMin</code>/<code>withMax</code> → <code>mixed</code>).</p>
 <p>The <code>@property</code> workaround applies here too.</p>
 <h4 id="l10-viewwithx-and-redirectresponsewithx-dynamic-methods">L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods<a class="headerlink" href="#l10-viewwithx-and-redirectresponsewithx-dynamic-methods" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>Most code uses <code>-&gt;with('key', $value)</code> instead of the dynamic
 <code>-&gt;withKey($value)</code> form. Explicitly declared methods (<code>withErrors</code>,
 <code>withInput</code>, etc.) already work.</p>
@@ -2598,7 +2598,7 @@ hard-coding the two known classes.  A simpler approach: add
 methods, or document this as a known limitation.</p>
 <hr />
 <h4 id="l12-hasuuids-hasulids-trait-id-typed-as-string">L12. <code>HasUuids</code> / <code>HasUlids</code> trait — <code>$id</code> typed as <code>string</code><a class="headerlink" href="#l12-hasuuids-hasulids-trait-id-typed-as-string" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Models that use <code>Illuminate\Database\Eloquent\Concerns\HasUuids</code> or
 <code>HasUlids</code> have their primary key (<code>$id</code> by default) typed as
 <code>string</code> instead of <code>int</code>. Currently PHPantom does not inspect these
@@ -2617,7 +2617,7 @@ purposes just the <code>id</code> type is the main gap.</p>
 tags or a typed <code>$id</code> override, the PHPDoc provider may handle it
 automatically once the traits are loaded.</p>
 <h4 id="l47-morph-aliases-in-_type-column-comparisons">L47. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l47-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>The morph-map index (<code>virtual_members/laravel/morph_map.rs</code>) recognizes
 alias strings in the positions Eloquent resolves through the map by
 name: the <code>morphMap()</code> keys themselves, <code>Relation::getMorphedModel()</code>,
@@ -2638,7 +2638,7 @@ opposite one in a <code>where()</code> / comparison against the alias index.</p>
 find-references, and the enforced-map diagnostic for free, since those
 dispatch on the <code>LaravelStringKind::MorphAlias</code> span kind.</p>
 <h4 id="l42-morph-alias-completion-in-array-positions">L42. Morph alias completion in array positions<a class="headerlink" href="#l42-morph-alias-completion-in-array-positions" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Morph aliases complete inside <code>Relation::getMorphedModel('|')</code> and
 <code>Model::getActualClassNameForMorph('|')</code>, but not in the two array
 positions where they are most often written:</p>
@@ -2737,7 +2737,7 @@ relation and column name strings</strong> have completion (<code>completion/eloq
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.</p>
 <h4 id="l17-additional-string-contexts-without-booting">L17. Additional string contexts without booting<a class="headerlink" href="#l17-additional-string-contexts-without-booting" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>Constructs the extension and the Laravel LSP cover that we don't, and
 that are statically recoverable (no booting):</p>
 <ul>
@@ -2796,7 +2796,7 @@ requires the live container. These genuinely cannot be resolved without
 booting, and a snapshot of them is the "true for one boot" half-truth we are
 choosing not to ship.</p>
 <h4 id="l22-broaden-recognized-call-sites-for-laravel-string-keys">L22. Broaden recognized call sites for Laravel string keys<a class="headerlink" href="#l22-broaden-recognized-call-sites-for-laravel-string-keys" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Effort: Low-Medium</strong></p>
+<p><strong>Impact: High · Complexity: Medium</strong></p>
 <p>Detection breadth multiplies everything else in this section: the
 symbol-map spans already feed go-to-definition, references, hover, and
 diagnostics for every call site we recognize. <code>to_route()</code> (as a route
@@ -2829,7 +2829,7 @@ name), <code>Lang::has()</code>, and the typed config accessors (<code>Config::s
   of scope (see the table at the top).</li>
 </ul>
 <h4 id="l24-translation-depth-json-lang-files-locales-placeholders">L24. Translation depth: JSON lang files, locales, placeholders<a class="headerlink" href="#l24-translation-depth-json-lang-files-locales-placeholders" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
 <p>Statically recoverable translation features the Laravel LSP has and we
 still partially lack:</p>
 <ul>
@@ -2849,7 +2849,7 @@ still partially lack:</p>
   each file) instead of just the one.</li>
 </ul>
 <h4 id="l25-storage-disk-name-strings">L25. Storage disk name strings<a class="headerlink" href="#l25-storage-disk-name-strings" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p><code>Storage::disk('...')</code> and the <code>#[Storage]</code> container attribute already
 complete against <code>filesystems.disks.*</code>, navigate to the disk's entry in
 <code>config/filesystems.php</code>, and flag an unknown disk. <code>Storage::fake()</code>,
@@ -2858,7 +2858,7 @@ that: their return type is patched to <code>FilesystemAdapter</code>, but the
 disk-name argument itself gets no completion, go-to-definition, or
 diagnostic.</p>
 <h4 id="l27-legacy-controllermethod-action-strings">L27. Legacy <code>Controller@method</code> action strings<a class="headerlink" href="#l27-legacy-controllermethod-action-strings" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>We already complete and resolve the modern <code>[Controller::class,
 'method']</code> array form (which the Laravel LSP does <em>not</em> complete), and
 method-name strings inside <code>Route::controller()</code> groups. The legacy
@@ -2868,7 +2868,7 @@ group namespace prefix), and provide completion, go-to-definition, and
 an unknown-action diagnostic. Low priority: the string form is
 discouraged since Laravel 8.</p>
 <h4 id="l28-path-helper-links-and-completion">L28. Path helper links and completion<a class="headerlink" href="#l28-path-helper-links-and-completion" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
 <p><code>base_path('...')</code>, <code>app_path()</code>, <code>config_path()</code>, <code>database_path()</code>,
 <code>lang_path()</code>, <code>public_path()</code>, <code>resource_path()</code>, and <code>storage_path()</code>
 map to fixed conventional directories under the project root. Provide
@@ -2878,7 +2878,7 @@ The Laravel LSP boots the app to learn the base paths and only links
 arguments that resolve to an existing <em>file</em>; convention gives us the
 same statically, and we can also handle directories.</p>
 <h4 id="l29-livewire-and-volt-component-names">L29. Livewire and Volt component names<a class="headerlink" href="#l29-livewire-and-volt-component-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low (Livewire projects only) · Effort: Low</strong></p>
+<p><strong>Impact: Low (Livewire projects only) · Complexity: Low</strong></p>
 <p>The component index (class components under <code>app/Livewire/</code>, nested
 names, and view-based Volt / Livewire v4 single-file components), the
 <code>&lt;livewire:foo-bar&gt;</code> tag resolution on the Blade side, and hover on a
@@ -2887,7 +2887,7 @@ implemented. The remaining gap is the PHP-side triggers: <code>Volt::route(
 '/path', 'component')</code> (arg 1) and <code>Route::livewire()</code> get no
 completion, go-to-definition, or unknown-component diagnostic.</p>
 <h4 id="l30-eloquent-attribute-array-key-completion">L30. Eloquent attribute-array key completion<a class="headerlink" href="#l30-eloquent-attribute-array-key-completion" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Our Eloquent string completion covers where-style column arguments and
 relation names, but not <strong>attribute-array keys</strong>: <code>User::create(['name'
 =&gt; …])</code>, <code>fill()</code>, <code>make()</code>, <code>update()</code>, <code>updateOrCreate()</code>,
@@ -2902,7 +2902,7 @@ framework version has them. The Laravel LSP gets its column list from
 same static sources the model provider already uses (casts, fillable,
 accessors, <code>@property</code> tags) — no database needed.</p>
 <h4 id="l31-string-key-rename-highlight-and-semantic-tokens">L31. String-key rename, highlight, and semantic tokens<a class="headerlink" href="#l31-string-key-rename-highlight-and-semantic-tokens" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>References and go-to-definition already work for the four indexed
 string kinds, but the rename, document-highlight, and semantic-token
 arms are explicit no-ops. Wiring them up exceeds the Laravel LSP (which
@@ -2912,7 +2912,7 @@ updates the <code>-&gt;name()</code> declaration and all usages; highlight and
 semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.</p>
 <h4 id="l32-config-backed-named-resource-strings">L32. Config-backed named-resource strings<a class="headerlink" href="#l32-config-backed-named-resource-strings" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>L25 (storage disks) is one instance of a general pattern: a method
 argument names an entry under a known config subtree, and the config
 scanner already parses those files. Auth guards (<code>auth('...')</code>,
@@ -2946,7 +2946,7 @@ pass:</p>
 as a <code>LaravelStringKey</code>: completion, go-to-definition (jump to the
 config entry), hover, diagnostics, and references.</p>
 <h4 id="l36-container-binding-registrations-from-service-providers">L36. Container binding registrations from service providers<a class="headerlink" href="#l36-container-binding-registrations-from-service-providers" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
 <p><code>$this-&gt;app-&gt;bind('payments', StripeGateway::class)</code>, <code>bindIf()</code>,
 <code>singleton()</code>, <code>singletonIf()</code>, <code>scoped()</code>, <code>scopedIf()</code>, <code>instance()</code>,
 and <code>alias()</code> calls in <code>register()</code>/<code>boot()</code> of app and package service
@@ -2967,7 +2967,7 @@ binding <code>bind(Gateway::class, StripeGateway::class)</code> does <strong>not
 retype <code>app(Gateway::class)</code> to the concrete — the contract is the
 interface.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>The reverse of the invalid-key diagnostics: keys that are <em>declared</em>
 but never referenced. The references machinery already finds all
 usages of a view name or translation key; inverting it over the
@@ -2979,7 +2979,7 @@ always-on diagnostics — dynamic construction (<code>view("emails.$type")</code
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.</p>
 <h4 id="l41-conditional-return-types-on-url-and-its-sibling-helpers">L41. Conditional return types on <code>url()</code> and its sibling helpers<a class="headerlink" href="#l41-conditional-return-types-on-url-and-its-sibling-helpers" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>url()</code> returns the generator or a string depending on whether it got a
 path:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
@@ -2998,7 +2998,7 @@ Application : mixed)</code>).</p>
 <code>type_engine/call_resolution/return_types.rs</code> and the matching branch in
 <code>type_engine/variable/rhs_resolution/calls.rs</code>.</p>
 <h4 id="l44-sibling-resource-registrations-and-degenerate-resource-names">L44. Sibling resource registrations and degenerate resource names<a class="headerlink" href="#l44-sibling-resource-registrations-and-degenerate-resource-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
 registrations that generate route names the same way are not, so every
 <code>route()</code> call naming one is reported as an unknown route:</p>
@@ -3023,7 +3023,7 @@ framework in both directions.</p>
 <p><strong>Where to look:</strong> <code>virtual_members/laravel/route_names.rs</code>, alongside the
 existing <code>resource_registration</code> handling.</p>
 <h4 id="l46-can-on-a-user-model-the-receiver-does-not-name">L46. <code>-&gt;can()</code> on a user model the receiver does not name<a class="headerlink" href="#l46-can-on-a-user-model-the-receiver-does-not-name" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
 <p>Authorization abilities are recognized on <code>Gate::allows()</code>,
 <code>$this-&gt;authorize()</code>, the <code>can:</code> middleware parameter, and Blade's <code>@can</code>,
 but the most common spelling of all, <code>$user-&gt;can('update', $post)</code>, is
@@ -3051,7 +3051,7 @@ resolution at all.</p>
 <code>completion/laravel_string_keys.rs</code>; <code>ViewReceiverSite</code> in
 <code>symbol_map/mod.rs</code> for the confirm-later shape.</p>
 <h4 id="l48-a-factorys-model-property-is-ignored">L48. A factory's <code>$model</code> property is ignored<a class="headerlink" href="#l48-a-factorys-model-property-is-ignored" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>Factory::modelName()</code> reads <code>protected $model</code> before it reaches for the
 naming convention, and a factory whose name does not match its model is
 exactly what the property is there for:</p>

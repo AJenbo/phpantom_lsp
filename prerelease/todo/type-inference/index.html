@@ -1830,7 +1830,7 @@
 type narrowing, PHP version features, and stub attribute handling.
 Items that are purely about <em>completion UX</em> or <em>stub metadata
 extraction</em> live in <a href="../completion/">completion.md</a>.</p>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
 <thead>
@@ -1845,14 +1845,14 @@ within the same impact tier.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
 <hr />
 <h2 id="t3-property-hooks-php-84">T3. Property hooks (PHP 8.4)<a class="headerlink" href="#t3-property-hooks-php-84" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>PHP 8.4 introduced property hooks (<code>get</code> / <code>set</code>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class User {</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public string $name {</span>
@@ -1903,7 +1903,7 @@ is just to store the value; context-aware filtering can follow later.</p>
 fix above, so both should be implemented together.</p>
 <hr />
 <h2 id="t4-non-empty-type-narrowing-and-propagation">T4. Non-empty-* type narrowing and propagation<a class="headerlink" href="#t4-non-empty-type-narrowing-and-propagation" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>PHPStan tracks <code>non-empty-string</code> and <code>non-empty-array</code> through
 built-in functions. These narrowings don't directly enable
 class-based completion, but they improve hover type display and
@@ -1947,7 +1947,7 @@ is a possibly-empty widening at each join point, not a change to the
 write helpers.</p>
 <hr />
 <h2 id="t5-fiber-type-resolution">T5. Fiber type resolution<a class="headerlink" href="#t5-fiber-type-resolution" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p><code>Generator&lt;TKey, TValue, TSend, TReturn&gt;</code> has dedicated support for
 extracting each type parameter (value type for foreach, send type
 for <code>$var = yield</code>, return type for <code>getReturn()</code>). <code>Fiber</code> has no
@@ -1958,7 +1958,7 @@ so this is low priority. If demand appears, the fix would mirror the
 Generator extraction in <code>docblock/types.rs</code>.</p>
 <hr />
 <h2 id="t6-closurebind-closurefromcallable-return-type-preservation">T6. <code>Closure::bind()</code> / <code>Closure::fromCallable()</code> return type preservation<a class="headerlink" href="#t6-closurebind-closurefromcallable-return-type-preservation" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
 <p>Variables holding closure literals, arrow functions, and first-class
 callables now resolve to the <code>Closure</code> class, so <code>$fn-&gt;bindTo()</code>,
 <code>$fn-&gt;call()</code>, etc. offer completions.  The remaining gap is
@@ -1970,7 +1970,7 @@ containers and middleware patterns but is a niche use case.</p>
 <code>ClosureFromCallableDynamicReturnTypeExtension</code> in PHPStan.</p>
 <hr />
 <h2 id="t10-ternary-expression-as-rhs-of-list-destructuring">T10. Ternary expression as RHS of list destructuring<a class="headerlink" href="#t10-ternary-expression-as-rhs-of-list-destructuring" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>List destructuring (<code>[$a, $b] = expr</code>) resolves element types when
 the RHS is a function call returning an array shape, or a simple
 array literal. When the RHS is a ternary expression whose branches
@@ -1986,7 +1986,7 @@ doesn't drill into the branches to union the element types.</p>
 <p><strong>phpactor ref:</strong> <code>assignment/list_assignment.test</code></p>
 <hr />
 <h2 id="t11-nested-list-destructuring">T11. Nested list destructuring<a class="headerlink" href="#t11-nested-list-destructuring" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>Nested destructuring like <code>[[$one, $two]] = $source</code> is not resolved.
 When the RHS has a type like <code>array{array{Foo, Bar}}</code>, the outer
 destructuring peels the first dimension but the inner destructuring
@@ -2004,7 +2004,7 @@ doesn't resolve individual elements.</p>
 <p><strong>phpactor ref:</strong> <code>assignment/list_desconstruct_nested.test</code></p>
 <hr />
 <h2 id="t13-closure-variables-lose-callable-signature-detail">T13. Closure variables lose callable signature detail<a class="headerlink" href="#t13-closure-variables-lose-callable-signature-detail" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>When a variable holds a closure or arrow function, the resolution
 pipeline resolves it to the <code>Closure</code> class name. The callable
 signature (parameter types, return type) is lost. This means:</p>
@@ -2053,7 +2053,7 @@ produce a full callable type string for variable-type contexts.</p>
 emits the concrete callable signature in the <code>@param</code> tag.</p>
 <hr />
 <h2 id="t20-type-narrowing-reconciliation-engine">T20. Type narrowing reconciliation engine<a class="headerlink" href="#t20-type-narrowing-reconciliation-engine" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Effort: High</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
 <p>PHPantom's type narrowing in <code>type_engine/types/narrowing/</code> handles
 basic patterns (instanceof, is_* calls, null checks) but lacks the
 algebraic framework that PHPStan and Psalm use. Key gaps:</p>
@@ -2122,7 +2122,7 @@ raw strings.</p>
 <hr />
 <hr />
 <h2 id="t26-globbed-constant-unions-foobar_">T26. Globbed constant unions (<code>Foo::BAR_*</code>)<a class="headerlink" href="#t26-globbed-constant-unions-foobar_" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>Resolve wildcard constant patterns like <code>Foo::BAR_*</code> to the union of
 all matching constant types on the class. PHPStan supports this syntax
 in docblock type strings:</p>
@@ -2148,7 +2148,7 @@ it should:</p>
 - Phpactor: <code>GlobbedConstantUnionType</code>.</p>
 <hr />
 <h2 id="t28-template-inference-depth-priority-shallowest-bound-wins">T28. Template inference depth priority (shallowest bound wins)<a class="headerlink" href="#t28-template-inference-depth-priority-shallowest-bound-wins" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>When a generic type parameter is inferred from multiple argument
 positions at a call site, all inferred types are currently unioned.
 This produces overly broad types when a shallow (direct) inference
@@ -2181,7 +2181,7 @@ bound (<code>string</code>) should win, not produce <code>string|int</code>.</p>
   <code>getMostSpecificTypeFromBounds</code> in <code>Psalm\Internal\Type\TemplateResult</code></p>
 <hr />
 <h2 id="t29-definite-vs-possible-variable-existence-tracking">T29. Definite vs possible variable existence tracking<a class="headerlink" href="#t29-definite-vs-possible-variable-existence-tracking" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
 <p>PHPantom currently treats all assigned variables as definitely in
 scope. This causes false negatives: a variable assigned only inside
 one branch of an <code>if</code> (without the other branch) is treated as
@@ -2220,7 +2220,7 @@ intentional).</p>
   (<code>Psalm\Context</code>)</p>
 <hr />
 <h2 id="t30-literal-type-collapse-limit">T30. Literal type collapse limit<a class="headerlink" href="#t30-literal-type-collapse-limit" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>When combining union types, if the number of literal type variants
 (literal strings, literal ints) exceeds a threshold, collapse them to
 the parent scalar type. Without this, large switch statements, array
@@ -2236,7 +2236,7 @@ blowup.</p>
 <p><strong>References:</strong>
 - Psalm: literal limit in <code>Type::combineUnionTypes()</code> (<code>Psalm\Type</code>)</p>
 <h2 id="t31-closure-literal-return-shape-inference">T31. Closure literal-return shape inference<a class="headerlink" href="#t31-closure-literal-return-shape-inference" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>A closure whose native return hint is just <code>array</code> but whose body
 returns a literal array should get the literal shape as its
 inferred return type, so <code>array_map()</code> results carry it:</p>
@@ -2260,7 +2260,7 @@ unresolved. Depends on nothing else in this file.</p>
 - Psalm: <code>ClosureAnalyzer</code> return-type widening.</p>
 <hr />
 <h2 id="t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps">T32. Audit <code>is_type_compatible</code>'s MAYBE escape hatches for core-engine gaps<a class="headerlink" href="#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
 <p><code>is_type_compatible</code> (<code>src/diagnostics/type_errors/compatibility.rs</code>,
 moved there from <code>type_errors.rs</code> as part of a refactor split) is the
 diagnostic-policy layer over <code>class_lookup::is_subtype_of_typed</code>. It
@@ -2360,7 +2360,7 @@ some of these).</p>
 </ul>
 <hr />
 <h2 id="t33-class-constant-on-an-expression-objconst-resolves-to-nothing">T33. Class constant on an expression (<code>$obj::CONST</code>) resolves to nothing<a class="headerlink" href="#t33-class-constant-on-an-expression-objconst-resolves-to-nothing" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>A class constant reached through a variable produces no type at all, so
 hover is blank and anything downstream of it loses the value. The same
 constant reached through a class name or <code>self</code> resolves fine.</p>
@@ -2383,7 +2383,7 @@ a <code>$foo::INTEGER_CONSTANT</code> block that was dropped when
 <code>tests/phpstan_nsrt/deducted-types.php</code> was ported; port it back.</p>
 <hr />
 <h2 id="t34-staticconst-over-narrows-to-the-declaring-classs-value">T34. <code>static::CONST</code> over-narrows to the declaring class's value<a class="headerlink" href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>Late static binding is ignored for class constants: <code>static::CONST</code>
 resolves to the value declared on the <em>current</em> class, even though a
 subclass may redeclare it. This is unsound in the false-positive
@@ -2415,7 +2415,7 @@ upstream's <code>nsrt/class-constant-types.php</code> were dropped when
 <code>self::</code> cases survive); port them back.</p>
 <hr />
 <h2 id="t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument">T40. <code>pathinfo()</code> returns a shape or a string depending on the flags argument<a class="headerlink" href="#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$parts = pathinfo($path);                      // array{dirname: …, basename: …, extension?: …, filename: …}</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">$name  = pathinfo($path, PATHINFO_FILENAME);   // string</span>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">needsString($name); // reported: got string|array{…} — a single component is always a string</span>
@@ -2439,7 +2439,7 @@ else keeps the declared union. Left over from the work that took the
 <code>preg_replace</code>/<code>str_replace</code> family and <code>json_encode</code>, the two shapes
 that accounted for the bulk of the volume.</p>
 <h2 id="t41-param-out-is-parsed-but-never-read">T41. <code>@param-out</code> is parsed but never read<a class="headerlink" href="#t41-param-out-is-parsed-but-never-read" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> */</span>

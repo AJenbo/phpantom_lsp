@@ -1862,7 +1862,7 @@
 
 
 <h1 id="phpantom-code-actions">PHPantom — Code Actions<a class="headerlink" href="#phpantom-code-actions" title="Permanent link">&para;</a></h1>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
 <thead>
@@ -1877,8 +1877,8 @@ within the same impact tier.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
@@ -1886,7 +1886,7 @@ within the same impact tier.</p>
 forward-pass variable usage tracking with byte offsets across function
 scopes.</p>
 <h2 id="a34-unified-code-action-handler-architecture">A34. Unified code action handler architecture<a class="headerlink" href="#a34-unified-code-action-handler-architecture" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium-High</strong></p>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
 <p>Refactor the code action system to use a unified handler architecture
 inspired by rust-analyzer's assist system. Currently each code action
 has a separate <code>collect_*</code> method called from a hand-maintained list in
@@ -1929,7 +1929,7 @@ cheaper to add: write one function, append it to an array.</p>
 <hr />
 <hr />
 <h2 id="a16-snippet-placeholder-for-extracted-method-name">A16. Snippet Placeholder for Extracted Method Name<a class="headerlink" href="#a16-snippet-placeholder-for-extracted-method-name" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <blockquote>
 <p><strong>Blocked:</strong> Requires <code>SnippetTextEdit</code> support in <code>lsp-types</code>.
 Upstream issue: <a href="https://github.com/gluon-lang/lsp-types/issues/310">gluon-lang/lsp-types#310</a>.
@@ -2012,7 +2012,7 @@ benefit from editor context (cursor position, file state) rather than
 competing with CLI transformers.</p>
 <hr />
 <h3 id="a25-strpos-str_contains-php-80">A25. <code>strpos</code> → <code>str_contains</code> (PHP 8.0+)<a class="headerlink" href="#a25-strpos-str_contains-php-80" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Convert <code>strpos($haystack, $needle) !== false</code> to
 <code>str_contains($haystack, $needle)</code> and the negated form
 <code>strpos($haystack, $needle) === false</code> to
@@ -2026,7 +2026,7 @@ offset has different semantics).</p>
 <strong>Guard:</strong> <code>php_version &gt;= 8.0</code>.</p>
 <hr />
 <h3 id="a28-explicit-nullable-parameter-type-php-84-deprecation">A28. Explicit nullable parameter type (PHP 8.4 deprecation)<a class="headerlink" href="#a28-explicit-nullable-parameter-type-php-84-deprecation" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
 <p>Convert implicit nullable parameters to explicit nullable syntax:
 <code>function foo(string $p = null)</code> → <code>function foo(?string $p = null)</code>.</p>
 <p>PHP 8.4 deprecates the implicit nullable form. PHPStorm flags this.
@@ -2039,7 +2039,7 @@ in a union).</p>
 <p><strong>Code action kind:</strong> <code>quickfix</code>.</p>
 <hr />
 <h3 id="a29-simplify-boolean-return">A29. Simplify boolean return<a class="headerlink" href="#a29-simplify-boolean-return" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Convert if-return-boolean patterns to direct boolean returns:</p>
 <ul>
 <li><code>if ($a === $b) { return true; } return false;</code> → <code>return $a === $b;</code></li>
@@ -2054,7 +2054,7 @@ wrap with <code>(bool)</code>.</p>
 <p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
 <hr />
 <h3 id="a31-remove-always-else-extract-guard-clause">A31. Remove always-else (extract guard clause)<a class="headerlink" href="#a31-remove-always-else-extract-guard-clause" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>When an if-body ends with a flow-breaking statement (<code>return</code>, <code>throw</code>,
 <code>continue</code>, <code>exit</code>), the <code>else</code> keyword is redundant. Promote the else
 body to the same nesting level.</p>
@@ -2065,7 +2065,7 @@ these eagerly, removing the else changes semantics).</p>
 <p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
 <hr />
 <h3 id="a37-simplify-with-nullsafe-operator">A37. Simplify with <code>?-&gt;</code> (nullsafe operator)<a class="headerlink" href="#a37-simplify-with-nullsafe-operator" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>Replace null-checked method/property chains with PHP 8.0's nullsafe
 operator:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// Before</span>
@@ -2116,7 +2116,7 @@ operator:</p>
 <strong>Guard:</strong> <code>php_version &gt;= 8.0</code>.</p>
 <hr />
 <h3 id="a38-convert-ifelseif-chain-to-switch">A38. Convert if/elseif chain to switch<a class="headerlink" href="#a38-convert-ifelseif-chain-to-switch" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>Convert an if/elseif chain that compares the same variable or
 expression against different values into a <code>switch</code> statement:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// Before</span>
@@ -2175,7 +2175,7 @@ expression against different values into a <code>switch</code> statement:</p>
 <p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
 <hr />
 <h3 id="a40-generate-method-from-call">A40. Generate method from call<a class="headerlink" href="#a40-generate-method-from-call" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
 <p>When invoking an undefined method (e.g. <code>$foo-&gt;newMethod($a, $b)</code>),
 offer a code action to generate a method stub on the target class
 with the correct signature inferred from the call-site arguments.
@@ -2195,7 +2195,7 @@ High-impact rapid-prototyping workflow. Phpactor has this.</p>
 <strong>Trigger:</strong> Unknown-member diagnostic on a method call.</p>
 <hr />
 <h3 id="a41-create-class-from-non-existing-name">A41. Create class from non-existing name<a class="headerlink" href="#a41-create-class-from-non-existing-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
 <p>When a class name cannot be resolved, offer a code action to
 generate a new class file with the correct namespace based on PSR-4
 mapping. Pairs naturally with the unknown-class diagnostic.
@@ -2213,7 +2213,7 @@ Phpactor has this.</p>
 <strong>Trigger:</strong> Unknown-class diagnostic.</p>
 <hr />
 <h3 id="a43-update-docblock-generics">A43. Update docblock generics<a class="headerlink" href="#a43-update-docblock-generics" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Auto-update or add <code>@extends</code>/<code>@implements</code> tags to match the actual
 class hierarchy when a class extends a generic parent. Phpactor has
 this as a transformer.</p>
@@ -2231,7 +2231,7 @@ this as a transformer.</p>
 <p><strong>Code action kind:</strong> <code>quickfix</code>.</p>
 <hr />
 <h3 id="a45-simplify-with-elvis-operator">A45. Simplify with <code>?:</code> (Elvis operator)<a class="headerlink" href="#a45-simplify-with-elvis-operator" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Replace <code>$x ? $x : $y</code> with <code>$x ?: $y</code> (PHP's short ternary / "Elvis"
 operator), the mirror image of the null-coalescing simplifications
 <code>src/code_actions/simplify_null.rs</code> already offers. That module's

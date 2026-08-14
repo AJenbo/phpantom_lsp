@@ -1037,10 +1037,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort" class="md-nav__link">
+  <a href="#complexity" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -1131,10 +1131,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort_1" class="md-nav__link">
+  <a href="#complexity_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -1203,10 +1203,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort_2" class="md-nav__link">
+  <a href="#complexity_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -1264,10 +1264,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort_3" class="md-nav__link">
+  <a href="#complexity_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -2010,10 +2010,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort" class="md-nav__link">
+  <a href="#complexity" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -2104,10 +2104,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort_1" class="md-nav__link">
+  <a href="#complexity_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -2176,10 +2176,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort_2" class="md-nav__link">
+  <a href="#complexity_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -2237,10 +2237,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#effort_3" class="md-nav__link">
+  <a href="#complexity_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Effort
+        Complexity
       </span>
     </span>
   </a>
@@ -2497,7 +2497,7 @@ beyond the built-in phpstorm-stubs embedded in the binary. External
 stubs let users get type information for PHP extensions, framework
 helpers, and IDE-specific annotations that the bundled stubs don't
 cover or that the user wants to override.</p>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
 <thead>
@@ -2512,8 +2512,8 @@ within the same impact tier.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
@@ -2695,7 +2695,7 @@ file, parse it, find the symbol by name/offset).</p>
 <li>No scanning of stub files at init (just parsing the map file, which
   is a single fast text scan).</li>
 </ul>
-<h3 id="effort">Effort<a class="headerlink" href="#effort" title="Permanent link">&para;</a></h3>
+<h3 id="complexity">Complexity<a class="headerlink" href="#complexity" title="Permanent link">&para;</a></h3>
 <p>Low. The map-parsing logic already exists in <code>build.rs</code> and can be
 extracted into a shared helper. The GTD fallback is a small addition
 to <code>resolve_class_definition</code> / <code>resolve_function_definition</code>.</p>
@@ -2825,16 +2825,17 @@ an external stub (from any source).</p>
 in the embedded stubs (e.g. <code>wordpress-stubs</code> redefining <code>wpdb</code>),
 the external package wins. This is the correct behaviour: the
 project-specific definition is more accurate than the generic one.</p>
-<h3 id="effort_1">Effort<a class="headerlink" href="#effort_1" title="Permanent link">&para;</a></h3>
-<p>Medium. The scanning infrastructure this needs (byte-level
-class/function/constant scanning) already shipped as part of
-indexing.md's full-scan path, so this item is no longer blocked on
-it — it only needs to be pointed at stub directories and to populate
-the three new indices above instead of the project's own symbol
-tables. The resolution changes are straightforward (one new phase in
-each lookup chain). The <code>PhpStormStubsMap.php</code> parser for
-project-level phpstorm-stubs is already written in <code>build.rs</code> and
-just needs to be available at runtime.</p>
+<h3 id="complexity_1">Complexity<a class="headerlink" href="#complexity_1" title="Permanent link">&para;</a></h3>
+<p>High. This inserts a new phase directly into <code>find_or_load_class</code>,
+<code>find_or_load_function</code>, and the constant lookup chain — the shared
+resolution paths every consumer (diagnostics, completion, hover, GTD)
+goes through — so a mistake in priority ordering or the skip-if-present
+merge logic silently misresolves symbols for all of them. It also adds
+three new indices to <code>Backend</code> and a package-detection heuristic. The
+byte-level scanning infrastructure this needs already shipped as part
+of indexing.md's full-scan path, so this item is no longer blocked on
+it, but wiring the new phase into the core resolver chains correctly
+still requires real familiarity with how those chains are structured.</p>
 <hr />
 <h2 id="e3-ide-provided-and-phpantomtoml-stub-paths">E3. IDE-provided and <code>.phpantom.toml</code> stub paths<a class="headerlink" href="#e3-ide-provided-and-phpantomtoml-stub-paths" title="Permanent link">&para;</a></h2>
 <p><strong>Goal:</strong> Support stub directories provided by IDE extensions (via
@@ -2898,7 +2899,7 @@ skip-if-present, so higher-priority sources win:</p>
   annotation can place a corrected stub in their <code>.phpantom.toml</code>
   paths and it wins over everything.</li>
 </ul>
-<h3 id="effort_2">Effort<a class="headerlink" href="#effort_2" title="Permanent link">&para;</a></h3>
+<h3 id="complexity_2">Complexity<a class="headerlink" href="#complexity_2" title="Permanent link">&para;</a></h3>
 <p>Low (once Phase 2 is done). The scanning is identical. The new work
 is reading <code>initializationOptions</code> during <code>initialize</code>, reading
 <code>.phpantom.toml</code> <code>[stubs]</code> paths, resolving them, and feeding them
@@ -2941,7 +2942,7 @@ their own?</p>
 base stubs are. They go into a separate <code>STUB_OVERLAY_CLASS_MAP</code>
 array. At resolution time, when <code>find_or_load_class</code> reaches Phase 3
 (embedded stubs), it checks the overlay map first, then the base map.</p>
-<h3 id="effort_3">Effort<a class="headerlink" href="#effort_3" title="Permanent link">&para;</a></h3>
+<h3 id="complexity_3">Complexity<a class="headerlink" href="#complexity_3" title="Permanent link">&para;</a></h3>
 <p>Low. The overlay stubs are small hand-written PHP files. The build
 and resolution changes are minor additions to the existing
 infrastructure.</p>
@@ -3009,7 +3010,7 @@ embedded stubs, built-in symbols would be invisible.</p>
 <tr>
 <th>#</th>
 <th>Goal</th>
-<th>Effort</th>
+<th>Complexity</th>
 <th>Dependencies</th>
 </tr>
 </thead>
@@ -3023,7 +3024,7 @@ embedded stubs, built-in symbols would be invisible.</p>
 <tr>
 <td>E2</td>
 <td>Project-level stubs as a type resolution source</td>
-<td>Medium</td>
+<td>High</td>
 <td>None (byte-level scanner already shipped)</td>
 </tr>
 <tr>
@@ -3041,7 +3042,7 @@ embedded stubs, built-in symbols would be invisible.</p>
 <tr>
 <td>E7</td>
 <td>Stub-based framework patches (replace Rust patch system)</td>
-<td>Medium</td>
+<td>Medium-High</td>
 <td>E2 or E3</td>
 </tr>
 </tbody>
@@ -3062,7 +3063,7 @@ instead of directory scanning, then other stub packages are scanned
 on top.</p>
 <hr />
 <h2 id="e5-extension-stub-selection-stubs-extensions">E5. Extension stub selection (<code>[stubs] extensions</code>)<a class="headerlink" href="#e5-extension-stub-selection-stubs-extensions" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p>Override which PHP extension stubs are loaded. By default PHPantom
 loads core + all commonly bundled extensions, plus any declared in
 the project's <code>composer.json</code> via <code>ext-*</code> keys.</p>
@@ -3091,7 +3092,7 @@ extension directories. This is a simple string prefix check on the
 relative path from <code>STUB_CLASS_MAP</code>.</p>
 <hr />
 <h2 id="e6-stub-install-prompt-for-non-composer-projects">E6. Stub install prompt for non-Composer projects<a class="headerlink" href="#e6-stub-install-prompt-for-non-composer-projects" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>For non-Composer projects, offer to install phpstorm-stubs into the
 project so that go-to-definition works for built-in symbols. The
 answer (<code>true</code> or <code>false</code>) is written to <code>[stubs] install</code> in
@@ -3101,7 +3102,7 @@ answer (<code>true</code> or <code>false</code>) is written to <code>[stubs] ins
 prerequisite.</p>
 <hr />
 <h2 id="e7-stub-based-framework-patches">E7. Stub-based framework patches<a class="headerlink" href="#e7-stub-based-framework-patches" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium · Dependencies: E2 or E3</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High · Dependencies: E2 or E3</strong></p>
 <p>Replace the Rust-coded Laravel class patch system
 (<code>virtual_members/laravel/patches.rs</code>) with plain PHP stub files that
 override specific declarations. Instead of patching return types in

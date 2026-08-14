@@ -1773,7 +1773,7 @@ files (recognised by URI suffix, or by a <code>did_open</code> <code>languageId<
 existing pipeline (parser, resolver, completion, definition), and map
 response positions back to the original Blade file through a source
 map. Every item below builds on that pipeline.</p>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier, with a dependent item placed after its
 dependency.</p>
 <table>
@@ -1789,8 +1789,8 @@ dependency.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
@@ -1854,7 +1854,7 @@ dependency.</p>
 </ul>
 <hr />
 <h2 id="bl11-custom-directive-discovery">BL11. Custom directive discovery<a class="headerlink" href="#bl11-custom-directive-discovery" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>Blade::directive('datetime', …)</code> and <code>Blade::if('env', …)</code>
 registrations in app and package service providers declare
 project-specific directives. (Component namespace/path registrations —
@@ -1875,7 +1875,7 @@ directive-registration half.) Scan literal directive registrations too
 </ul>
 <hr />
 <h2 id="bl1-blade-aware-code-actions">BL1. Blade-aware code actions<a class="headerlink" href="#bl1-blade-aware-code-actions" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>Code actions are currently disabled for <code>.blade.php</code> files because
 text edits target virtual PHP coordinates and actions like "Import
 class" insert <code>use</code> statements at the top of the file rather than
@@ -1888,7 +1888,7 @@ inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions
 <p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
 <hr />
 <h2 id="bl23-unbalanced-component-tag-diagnostics">BL23. Unbalanced component tag diagnostics<a class="headerlink" href="#bl23-unbalanced-component-tag-diagnostics" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>src/blade/balance.rs</code> pairs up block <em>directives</em>, but a component tag
 body is a block too: <code>&lt;x-alert&gt;</code> … <code>&lt;/x-alert&gt;</code>, <code>&lt;x-slot:title&gt;</code> …
 <code>&lt;/x-slot&gt;</code>. A tag nobody closes renders the rest of the template inside
@@ -1914,7 +1914,7 @@ reported today.</p>
 </ul>
 <hr />
 <h2 id="bl14-folding-ranges-for-blade-files">BL14. Folding ranges for Blade files<a class="headerlink" href="#bl14-folding-ranges-for-blade-files" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>textDocument/foldingRange</code> on a <code>.blade.php</code> file currently returns
 ranges in virtual-PHP coordinates, which don't line up with the
 original template, because <code>folding.rs</code> never translates through the
@@ -1939,7 +1939,7 @@ source map.</p>
 </ul>
 <hr />
 <h2 id="bl15-document-outline-symbols-for-blade-files">BL15. Document outline (symbols) for Blade files<a class="headerlink" href="#bl15-document-outline-symbols-for-blade-files" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>A <code>.blade.php</code> file today reports no outline, or an outline positioned
 in virtual-PHP coordinates, because <code>document_symbols.rs</code> never
 translates through the source map.</p>
@@ -1962,7 +1962,7 @@ translates through the source map.</p>
 </ul>
 <hr />
 <h2 id="bl24-named-slot-variables-scoped-to-the-component-that-receives-them">BL24. Named slot variables scoped to the component that receives them<a class="headerlink" href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Deferred from the component-tag work: <code>&lt;x-slot:title&gt;</code> and its legacy
 <code>&lt;x-slot name="title"&gt;</code> form become a comment in the virtual PHP, so
 nothing declares <code>$title</code>.</p>
@@ -1992,7 +1992,7 @@ template's variables.</p>
 </ul>
 <hr />
 <h2 id="bl16-blade-aware-formatting">BL16. Blade-aware formatting<a class="headerlink" href="#bl16-blade-aware-formatting" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: High</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p><code>formatting.rs</code> has no Blade awareness. <code>mago</code>'s formatter runs against
 the virtual PHP buffer generated for <code>.blade.php</code> files, and its output
 has no fixed relationship to the original directive/HTML structure —
@@ -2111,7 +2111,7 @@ reaches that bar.</p>
 </ul>
 <hr />
 <h2 id="bl17-format-check-cli-subcommand-for-ci">BL17. <code>format --check</code> CLI subcommand for CI<a class="headerlink" href="#bl17-format-check-cli-subcommand-for-ci" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong> (depends on BL16)</p>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong> (depends on BL16)</p>
 <p>Filed while researching BL16: once the native Blade formatter (and,
 more generally, PHPantom's resolved formatting strategy — external
 tool or built-in) is trustworthy enough to enforce, projects want a

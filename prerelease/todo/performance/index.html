@@ -2054,7 +2054,7 @@
 and lock contention on the hot paths. These items are sequenced so
 that structural fixes land before features that would amplify the
 underlying costs (parallel file processing, full background indexing).</p>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
 <thead>
@@ -2069,14 +2069,14 @@ within the same impact tier.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
 <hr />
 <h2 id="p3-parallel-pre-filter-in-find_implementors">P3. Parallel pre-filter in <code>find_implementors</code><a class="headerlink" href="#p3-parallel-pre-filter-in-find_implementors" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p><code>find_implementors</code> Phase 3 reads every unloaded classmap file
 sequentially: <code>fs::read_to_string</code>, string pre-filter for the target
 name, then <code>parse_and_cache_file</code>. On a project with thousands of
@@ -2111,7 +2111,7 @@ is large. Skip parallelism when the candidate count is below a
 threshold (e.g. 8 files).</p>
 <hr />
 <h2 id="p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps">P15. Two-phase stub index construction (eliminate <code>RwLock</code> on stub maps)<a class="headerlink" href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
 <p>The three stub indexes (<code>stub_index</code>, <code>stub_function_index</code>,
 <code>stub_constant_index</code>) are write-once-read-many maps. They are
 populated at construction time from the compiled-in phpstorm-stubs
@@ -2165,7 +2165,7 @@ the stub indexes grow significantly or if <code>Backend</code> construction
 is restructured for other reasons.</p>
 <hr />
 <h2 id="p16-pre-parsed-stub-format-eliminate-raw-php-embedding">P16. Pre-parsed stub format (eliminate raw PHP embedding)<a class="headerlink" href="#p16-pre-parsed-stub-format-eliminate-raw-php-embedding" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Effort: Medium-High</strong></p>
+<p><strong>Impact: High · Complexity: Very High</strong></p>
 <p>The ~530 phpstorm-stubs PHP files are embedded as raw source via
 <code>include_str!</code> (~9.8 MB in <code>.rodata</code>). This has three costs:</p>
 <ol>
@@ -2293,7 +2293,7 @@ avoids hitting the memory ceiling and ensures the stubs layer is
 essentially free for both eager and deferred indexing paths.</p>
 <hr />
 <h2 id="p17-mago-names-resolution-on-the-parse-hot-path">P17. <code>mago-names</code> resolution on the parse hot path<a class="headerlink" href="#p17-mago-names-resolution-on-the-parse-hot-path" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
 <p>The <code>mago-names</code> name resolver runs synchronously inside
 <code>update_ast_inner</code>, adding a full AST walk plus an owned <code>HashMap</code>
 copy on every <code>didChange</code> event. Measured regression from <code>6a0737a</code>
@@ -2361,7 +2361,7 @@ now would likely be reworked. Revisit once <code>use_map</code> usage is
 significantly reduced.</p>
 <hr />
 <h2 id="p18-subtype-result-caching">P18. Subtype result caching<a class="headerlink" href="#p18-subtype-result-caching" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
 <p>PHPStan caches subtype check results (<code>isSuperTypeOf()</code>) in a static
 <code>HashMap</code> keyed by type description strings. This avoids redundant
 class hierarchy walks when the same type pair is checked multiple
@@ -2433,7 +2433,7 @@ like:</p>
 </code></pre></div>
 <hr />
 <h2 id="p20-content-hash-gated-resolution-cache-persistence">P20. Content-hash gated resolution cache persistence<a class="headerlink" href="#p20-content-hash-gated-resolution-cache-persistence" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
 <p>The resolved-class cache (<code>resolved_class_cache</code>) is ephemeral — it
 lives only for the duration of the process. On LSP restart or cold
 start, all class resolution (inheritance merging, virtual members,
@@ -2488,7 +2488,7 @@ isn't needed.</p>
   LRU-by-mtime eviction plans — useful pitfall list if P20 ships.</p>
 <hr />
 <h2 id="p21-offset-shifting-for-cached-diagnostics-on-partial-edits">P21. Offset-shifting for cached diagnostics on partial edits<a class="headerlink" href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
 <p>When a user edits one method in a file, PHPantom currently re-runs
 diagnostics on the entire file. For large files (500+ lines), this
 is wasteful — diagnostics in unchanged regions are still valid, just
@@ -2525,7 +2525,7 @@ diagnostic layer.</p>
 - Psalm: <code>Analyzer::shiftFileOffsets()</code> for the offset-shifting logic</p>
 <hr />
 <h2 id="p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code><a class="headerlink" href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Effort: High</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
 <p><code>mago-hir</code> is an intermediate representation that lowers the CST plus
 PHPDoc comments into a single flat,
 fully-resolved tree in one pass: names are resolved
@@ -2626,7 +2626,7 @@ shows a real win; otherwise record the findings here and keep
 waiting on the triggers above.</p>
 <hr />
 <h2 id="p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution">P47. The resolved-class cache lock caps concurrent class resolution<a class="headerlink" href="#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium-High</strong></p>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
 <p><code>ResolvedClassCache</code> is a single <code>RwLock&lt;ResolvedCacheInner&gt;</code>, and every
 resolution takes its write lock several times: twice per
 <code>resolve_class_fully_inner</code> call to mark and clear the cycle-break
@@ -2706,7 +2706,7 @@ acquisitions per site during a population run: the sweep above proves
 <em>a</em> lock is the ceiling but not which acquirer dominates.</p>
 <hr />
 <h2 id="p35-diagnostic-passes-reach-only-a-fraction-of-available-cores">P35. Diagnostic passes reach only a fraction of available cores<a class="headerlink" href="#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
 <p>Measured on a 32-core machine against large Laravel projects (release
 build): the <code>analyze</code> Phase 2 diagnostic pass spawns one worker per
 core with atomic work-stealing but does not keep them busy. Three
@@ -2843,7 +2843,7 @@ by 32 workers doing <code>find_or_load_class</code> concurrently) is closer to t
 real ceiling than the hashing was.</p>
 <hr />
 <h2 id="p48-higher-order-collection-proxy-injection-repeats-work">P48. Higher-order collection proxy injection repeats work<a class="headerlink" href="#p48-higher-order-collection-proxy-injection-repeats-work" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>Grafting the item type's members onto a
 <code>HigherOrderCollectionProxy&lt;TKey, TValue, 'method', Collection&gt;</code> runs
 inside <code>resolve_class_fully_with_generics</code>, on the generic-substitution
@@ -2881,7 +2881,7 @@ most of the repetition.</p>
 <code>virtual_members/resolve.rs</code>, and the template-param mixin block in
 <code>type_engine/types/resolution.rs</code>.</p>
 <h2 id="p49-a-very-long-method-chain-costs-superlinear-time-to-analyse">P49. A very long method chain costs superlinear time to analyse<a class="headerlink" href="#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>Resolving a receiver spine no longer recurses per link, so a fluent chain
 of any length parses, hovers, and analyses without overflowing the stack.
 The work is still superlinear in the chain's length, though: a 1000-link
@@ -2911,7 +2911,7 @@ Neither is a correctness problem, and hand-written code never reaches the
 lengths where it shows.</p>
 <hr />
 <h2 id="p50-cache-the-top-level-scope-for-global-keyword-resolution">P50. Cache the top-level scope for <code>global</code> keyword resolution<a class="headerlink" href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>Every <code>resolve_variable_types</code> call on a file containing <code>global</code>
 rebuilds the top-level scope by forward-walking every top-level
 statement with <code>cursor_offset = u32::MAX</code>. This is done once per

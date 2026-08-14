@@ -1810,7 +1810,7 @@
 definitions across the workspace. The goal is to remain fast and
 lightweight by default while offering progressively richer modes for
 users who want exhaustive workspace intelligence.</p>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
 <thead>
@@ -1825,8 +1825,8 @@ within the same impact tier.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
@@ -2065,7 +2065,7 @@ index entry. They later switched to <code>blake3(uri || content)</code>.</p>
 better.</p>
 <hr />
 <h2 id="x7-recency-tracking">X7. Recency tracking<a class="headerlink" href="#x7-recency-tracking" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>The current lazy-loading design provides an implicit recency signal:
 classes in <code>uri_classes_index</code> were loaded because the developer interacted with
 their file during this session (hovered, navigated, completed). Source
@@ -2115,7 +2115,7 @@ ready to implement.</p>
 </ol>
 <hr />
 <h2 id="x9-honor-editor-file-excludes-and-php-associations-during-indexing">X9. Honor editor file excludes and PHP associations during indexing<a class="headerlink" href="#x9-honor-editor-file-excludes-and-php-associations-during-indexing" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>This task spans both the server and the IDE plugins. The server side
 teaches the directory walkers to honor a generic list of exclude globs
 and extra PHP extensions. The client side (each editor extension) must

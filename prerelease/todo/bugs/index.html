@@ -847,6 +847,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b57-a-typed-class-constant-loses-its-literal-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B57. A typed class constant loses its literal value
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b67-str_replaces-return-type-ignores-the-subject-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B67. <code>str_replace()</code>'s return type ignores the <code>$subject</code> argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -857,6 +885,166 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b49-short-circuit-narrowing-does-not-reach-the-second-operand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B49. Short-circuit <code>&amp;&amp;</code>/<code>||</code> narrowing does not reach the second operand
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b50-ternary-branch-narrowing-is-not-applied-to-propertyarray-element-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B50. Ternary-branch narrowing is not applied to property/array-element reads
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B51. <code>instanceof</code> does not eliminate a class from a union in the guarded branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b52-a-variable-reassigned-inside-a-guard-that-catches-its-bad-value-is-not-merged-as-excluding-that-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B52. A variable reassigned inside a guard that catches its "bad" value is not merged as excluding that value
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b53-a-repeated-identical-no-argument-call-is-not-recognized-as-consistent-within-the-same-truthy-guarded-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B53. A repeated identical no-argument call is not recognized as consistent within the same truthy-guarded scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b54-a-nullsafe-chain-guard-does-not-narrow-a-later-plain-dereference-of-the-same-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B54. A nullsafe-chain guard does not narrow a later plain dereference of the same chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b55-a-ternarys-self-referencing-true-branch-loses-truthy-narrowing-when-compiled-from-a-blade-component-attribute" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B55. A ternary's self-referencing true branch loses truthy narrowing when compiled from a Blade component attribute
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b62-phpunits-assertnotnullassertnotfalse-are-not-recognized-as-narrowing-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B62. PHPUnit's <code>assertNotNull</code>/<code>assertNotFalse</code> are not recognized as narrowing assertions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b63-assertinstanceof-narrowed-return-types-leak-across-unrelated-call-sites-of-a-shared-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B63. <code>assertInstanceOf</code>-narrowed return types leak across unrelated call sites of a shared helper
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b64-a-template-bound-that-includes-null-is-dropped-by-the-call-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B64. A <code>@template</code> bound that includes <code>null</code> is dropped by the call site
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b70-is_array-does-not-narrow-a-union-typed-parameter-before-an-array-dimension-fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B70. <code>is_array()</code> does not narrow a union-typed parameter before an array-dimension fetch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b71-a-continue-discarded-falsy-union-member-is-not-carried-into-a-variable-the-value-is-copied-into" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B71. A <code>continue</code>-discarded falsy union member is not carried into a variable the value is copied into
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b72-null-narrowing-on-a-var-annotated-variable-is-not-applied-before-a-builtin-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B72. <code>!== null</code> narrowing on a <code>@var</code>-annotated variable is not applied before a builtin call
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b74-scopeisinclass-paired-with-getclassreflection-is-not-recognized-as-an-assert-if-true-pair" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B74. <code>Scope::isInClass()</code> paired with <code>getClassReflection()</code> is not recognized as an assert-if-true pair
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -869,6 +1057,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B65. <code>ReflectionClass&lt;T&gt;</code>'s generic argument is not carried through <code>newInstanceArgs()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B66. A closure parameter passed to <code>spl_autoload_register()</code> is not inferred from the callback's declared type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -879,6 +1095,100 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b56-array_key_firstarray_key_last-are-not-narrowed-non-null-after-a-non-empty-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B56. <code>array_key_first</code>/<code>array_key_last</code> are not narrowed non-null after a non-empty guard
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B58. The array union operator (<code>+</code>) does not preserve a previously narrowed key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b59-maxmin-with-scalar-arguments-return-mixed-instead-of-the-arguments-common-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B59. <code>max()</code>/<code>min()</code> with scalar arguments return <code>mixed</code> instead of the arguments' common type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B60. Array keys built from loop-index arithmetic or <code>array_keys()</code> still widen to <code>int|string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b68-array_chunks-return-element-type-resolves-to-the-source-arrays-element-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B68. <code>array_chunk()</code>'s return element type resolves to the source array's element type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b69-array_map-with-a-builtin-function-name-string-callback-does-not-preserve-the-source-arrays-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B69. <code>array_map()</code> with a builtin function-name string callback does not preserve the source array's key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B61. <code>isset()</code> narrowing is not propagated through a multi-level chained array-dimension fetch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b73-array_sum-on-a-var-annotated-listint-from-a-method-call-still-returns-intfloat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B73. <code>array_sum()</code> on a <code>@var</code>-annotated <code>list&lt;int&gt;</code> from a method call still returns <code>int|float</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1369,6 +1679,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b57-a-typed-class-constant-loses-its-literal-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B57. A typed class constant loses its literal value
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b67-str_replaces-return-type-ignores-the-subject-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B67. <code>str_replace()</code>'s return type ignores the <code>$subject</code> argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1379,6 +1717,166 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b49-short-circuit-narrowing-does-not-reach-the-second-operand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B49. Short-circuit <code>&amp;&amp;</code>/<code>||</code> narrowing does not reach the second operand
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b50-ternary-branch-narrowing-is-not-applied-to-propertyarray-element-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B50. Ternary-branch narrowing is not applied to property/array-element reads
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B51. <code>instanceof</code> does not eliminate a class from a union in the guarded branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b52-a-variable-reassigned-inside-a-guard-that-catches-its-bad-value-is-not-merged-as-excluding-that-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B52. A variable reassigned inside a guard that catches its "bad" value is not merged as excluding that value
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b53-a-repeated-identical-no-argument-call-is-not-recognized-as-consistent-within-the-same-truthy-guarded-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B53. A repeated identical no-argument call is not recognized as consistent within the same truthy-guarded scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b54-a-nullsafe-chain-guard-does-not-narrow-a-later-plain-dereference-of-the-same-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B54. A nullsafe-chain guard does not narrow a later plain dereference of the same chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b55-a-ternarys-self-referencing-true-branch-loses-truthy-narrowing-when-compiled-from-a-blade-component-attribute" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B55. A ternary's self-referencing true branch loses truthy narrowing when compiled from a Blade component attribute
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b62-phpunits-assertnotnullassertnotfalse-are-not-recognized-as-narrowing-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B62. PHPUnit's <code>assertNotNull</code>/<code>assertNotFalse</code> are not recognized as narrowing assertions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b63-assertinstanceof-narrowed-return-types-leak-across-unrelated-call-sites-of-a-shared-helper" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B63. <code>assertInstanceOf</code>-narrowed return types leak across unrelated call sites of a shared helper
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b64-a-template-bound-that-includes-null-is-dropped-by-the-call-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B64. A <code>@template</code> bound that includes <code>null</code> is dropped by the call site
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b70-is_array-does-not-narrow-a-union-typed-parameter-before-an-array-dimension-fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B70. <code>is_array()</code> does not narrow a union-typed parameter before an array-dimension fetch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b71-a-continue-discarded-falsy-union-member-is-not-carried-into-a-variable-the-value-is-copied-into" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B71. A <code>continue</code>-discarded falsy union member is not carried into a variable the value is copied into
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b72-null-narrowing-on-a-var-annotated-variable-is-not-applied-before-a-builtin-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B72. <code>!== null</code> narrowing on a <code>@var</code>-annotated variable is not applied before a builtin call
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b74-scopeisinclass-paired-with-getclassreflection-is-not-recognized-as-an-assert-if-true-pair" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B74. <code>Scope::isInClass()</code> paired with <code>getClassReflection()</code> is not recognized as an assert-if-true pair
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1391,6 +1889,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B65. <code>ReflectionClass&lt;T&gt;</code>'s generic argument is not carried through <code>newInstanceArgs()</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B66. A closure parameter passed to <code>spl_autoload_register()</code> is not inferred from the callback's declared type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1401,6 +1927,100 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b56-array_key_firstarray_key_last-are-not-narrowed-non-null-after-a-non-empty-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B56. <code>array_key_first</code>/<code>array_key_last</code> are not narrowed non-null after a non-empty guard
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B58. The array union operator (<code>+</code>) does not preserve a previously narrowed key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b59-maxmin-with-scalar-arguments-return-mixed-instead-of-the-arguments-common-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B59. <code>max()</code>/<code>min()</code> with scalar arguments return <code>mixed</code> instead of the arguments' common type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B60. Array keys built from loop-index arithmetic or <code>array_keys()</code> still widen to <code>int|string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b68-array_chunks-return-element-type-resolves-to-the-source-arrays-element-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B68. <code>array_chunk()</code>'s return element type resolves to the source array's element type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b69-array_map-with-a-builtin-function-name-string-callback-does-not-preserve-the-source-arrays-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B69. <code>array_map()</code> with a builtin function-name string callback does not preserve the source array's key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B61. <code>isset()</code> narrowing is not propagated through a multi-level chained array-dimension fetch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b73-array_sum-on-a-var-annotated-listint-from-a-method-call-still-returns-intfloat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B73. <code>array_sum()</code> on a <code>@var</code>-annotated <code>list&lt;int&gt;</code> from a method call still returns <code>int|float</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1434,23 +2054,589 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>Each entry below carries an <strong>Impact · Effort</strong> rating using the same
+<p>Each entry below carries an <strong>Impact · Complexity</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<p>Most entries below come from the 2026-08-13 sample-project sweep (345
-diagnostics across ten projects, ~330 of them false positives). Site
-counts refer to that sweep; the git-ignored triage log has the full
-per-project inventory. Entries filed later say where they came from.</p>
+<p>All entries below come from the 2026-08-15 sample-project sweep (46
+diagnostics across ten projects). 45 were false positives, filed here as
+<strong>B49–B74</strong>; the one genuine finding (an unguarded <code>SimpleXMLElement</code>
+child lookup) was patched directly in <code>luxplus-backoffice</code>'s sample
+source.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b57-a-typed-class-constant-loses-its-literal-value">B57. A typed class constant loses its literal value<a class="headerlink" href="#b57-a-typed-class-constant-loses-its-literal-value" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">final class Json</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    private const int DEFAULT_OPTIONS = JSON_HEX_TAG | JSON_THROW_ON_ERROR;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    public static function encode(mixed $value, int $options = 0): string</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    {</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        return json_encode($value, $options | self::DEFAULT_OPTIONS);   // reported: got string|false</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    }</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>json_encode()</code>'s return type narrows to plain <code>string</code> (dropping
+<code>false</code>) when the resolved <code>$flags</code> argument provably has
+<code>JSON_THROW_ON_ERROR</code> set — the flag makes a failure throw instead of
+returning <code>false</code>. That bitwise fold works when <code>DEFAULT_OPTIONS</code> is a
+plain untyped <code>const</code>, but PHP 8.3's typed class constants
+(<code>const int NAME = expr</code>) resolve to the declared type (<code>int</code>) instead
+of the constant-folded literal value of <code>expr</code>, so the downstream
+bitwise-OR reasoning never sees <code>JSON_THROW_ON_ERROR</code> and falls back to
+the unrefined <code>string|false</code>.</p>
+<p><strong>Fix:</strong> when reading a typed class constant's value for constant
+folding, evaluate its initializer expression the same way an untyped
+constant's is evaluated, rather than substituting the declared type.</p>
+<h3 id="b67-str_replaces-return-type-ignores-the-subject-argument">B67. <code>str_replace()</code>'s return type ignores the <code>$subject</code> argument<a class="headerlink" href="#b67-str_replaces-return-type-ignores-the-subject-argument" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function clean(?string $error): ?string</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    return str_replace(&#39;Error: &#39;, &#39;&#39;, $error ?? &#39;&#39;);   // reported: got array&lt;array-key, string&gt;|string</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>str_replace($search, $replace, $subject)</code> only returns an <code>array</code> when
+<code>$subject</code> is an array; for a <code>string</code> subject it always returns
+<code>string</code>. The stub reports the full overloaded union regardless of the
+argument actually passed.</p>
+<p><strong>Fix:</strong> add a dynamic-return-type rule (alongside the existing
+argument-dependent-return-type mechanism) that resolves <code>str_replace()</code>
+and <code>str_ireplace()</code>'s return type from <code>$subject</code>'s resolved type:
+<code>string</code> in → <code>string</code> out, <code>array</code> in → <code>array</code> out.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b49-short-circuit-narrowing-does-not-reach-the-second-operand">B49. Short-circuit <code>&amp;&amp;</code>/<code>||</code> narrowing does not reach the second operand<a class="headerlink" href="#b49-short-circuit-narrowing-does-not-reach-the-second-operand" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Holder</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    /** @var null|array&lt;string, string&gt; */</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public ?array $data = null;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    public function field(string $key): ?string</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    {</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">        return is_array($this-&gt;data) &amp;&amp; array_key_exists($key, $this-&gt;data)  // reported: got null|array&lt;string,string&gt;</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">            ? $this-&gt;data[$key]</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">            : null;</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">    }</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">}</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">function useIt(?int $count, Service $s): bool</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">{</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">    return null === $count || $s-&gt;hasMet($count);   // reported: got ?int</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">}</span>
+</code></pre></div>
+<p>Guard-clause narrowing (<code>if ($x === null) { return; }</code> followed by
+later code) already works. The gap is narrower: within a single
+short-circuit expression, the left operand's truthy/falsy proof does
+not narrow the type used to evaluate the right operand, and the
+narrowing that does apply to plain local variables is not applied to a
+property access (<code>$this-&gt;data</code>) at all.</p>
+<p><strong>Fix:</strong> apply the same type-specifier narrowing used for <code>if</code>
+conditions to the right operand of <code>&amp;&amp;</code>/<code>||</code> while evaluating it, and
+extend the narrowing target from "plain variable" to any narrowable
+subject expression (property access included).</p>
+<h3 id="b50-ternary-branch-narrowing-is-not-applied-to-propertyarray-element-reads">B50. Ternary-branch narrowing is not applied to property/array-element reads<a class="headerlink" href="#b50-ternary-branch-narrowing-is-not-applied-to-propertyarray-element-reads" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @var array&lt;string, string&gt;|&#39;{}&#39; $raw not quite — see real shape below */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function decode(array|string $raw): void</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">{</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $value = isset($raw[&#39;x&#39;]) &amp;&amp; is_string($raw[&#39;x&#39;]) ? $raw[&#39;x&#39;] : &#39;{}&#39;;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    json_decode($value, true);   // fine: $value is string</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">function display(?string $countryName): string</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">{</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">    return $countryName ? strtoupper($countryName) : &#39;&#39;;   // reported: got ?string</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>is_string($x) ? $x : default</code> and <code>$x ? f($x) : default</code> both narrow
+correctly when <code>$x</code> is a plain local variable, but not when <code>$x</code> is a
+property or array-element read — the same subject-expression gap as
+B49, manifesting inside a ternary condition instead of <code>&amp;&amp;</code>/<code>||</code>.</p>
+<p><strong>Fix:</strong> once B49's narrowing-target extension lands, verify the
+ternary condition evaluator reuses it for both the <code>is_string</code>/<code>is_array</code>
+guard form and the plain truthy form.</p>
+<h3 id="b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch">B51. <code>instanceof</code> does not eliminate a class from a union in the guarded branch<a class="headerlink" href="#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function clip(Decimal|float $value): string</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">{</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    if ($value instanceof Decimal) {</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">        return $value-&gt;format();</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    }</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    return number_format($value, 2);   // reported: got Decimal|float</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">}</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">function imgix(Image|string $imgix): string</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">{</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="x">    if (!$imgix instanceof Image) {</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x">        $imgix = new Image($imgix);   // reported: got Image|string</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">    }</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">    return $imgix-&gt;url();</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="x">}</span>
+</code></pre></div>
+<p>An <code>instanceof</code> check on a union-typed value should remove the checked
+class from the union on the branch where the check fails — whether that
+branch is a separate <code>else</code> or the body of a negated
+<code>!$x instanceof T</code> check. Neither form narrows today; both leave the
+full pre-check union.</p>
+<p><strong>Fix:</strong> extend the existing <code>instanceof</code> narrowing (which already
+handles "rule out the array half of a union", per a prior fix) to also
+subtract the checked class from a union on the negative branch,
+covering both <code>if/else</code> and <code>if (!...)</code>.</p>
+<h3 id="b52-a-variable-reassigned-inside-a-guard-that-catches-its-bad-value-is-not-merged-as-excluding-that-value">B52. A variable reassigned inside a guard that catches its "bad" value is not merged as excluding that value<a class="headerlink" href="#b52-a-variable-reassigned-inside-a-guard-that-catches-its-bad-value-is-not-merged-as-excluding-that-value" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">function normalize(): string</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    $value = mb_strrchr(&#39;x&#39;, &#39;\\&#39;);   // string|false</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    if (!$value) {</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        $value = &#39;fallback&#39;;</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    }</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">    return $value;   // reported: got string|false</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">}</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">function toArray(array|Status $status): array</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">{</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x">    if (!is_array($status)) {</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="x">        $status = [$status];</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="x">    }</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="x">    foreach ($status as $s) {</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="x">        acceptsStatus($s);   // reported: got Status|array&lt;Status&gt;</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="x">    }</span>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="x">}</span>
+</code></pre></div>
+<p>Both examples reassign a variable inside the branch that detects its
+unwanted type (<code>false</code>, or "not yet an array"), replacing it with a
+value of the wanted type. After the <code>if</code>, every path should agree on the
+wanted type: the branch was either skipped (meaning the value already
+had the wanted type) or taken (meaning it was just reassigned to it).
+The merge instead keeps the original union.</p>
+<p><strong>Fix:</strong> when a branch's only effect is reassigning a variable, and the
+branch condition is the negation of (or implies) the variable having a
+specific type, the post-merge type should be the reassigned type joined
+with the type the variable already had on the skipped path — not the
+pre-branch union.</p>
+<h3 id="b53-a-repeated-identical-no-argument-call-is-not-recognized-as-consistent-within-the-same-truthy-guarded-scope">B53. A repeated identical no-argument call is not recognized as consistent within the same truthy-guarded scope<a class="headerlink" href="#b53-a-repeated-identical-no-argument-call-is-not-recognized-as-consistent-within-the-same-truthy-guarded-scope" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">function currentUser(): ?User { /* ... */ }</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">function show(): void</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">{</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    if (currentUser()) {</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">        render(currentUser());   // reported: got ?User</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">    }</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>PHPStan tracks expression types by their normalized form, not just by
+variable, so a second call to the same pure/no-argument expression
+inside a scope already narrowed by the first call's truthy check is
+treated as having the same narrowed type. Calling <code>currentUser()</code> twice
+in a row (once in the <code>if</code>, once inside its body) is a common pattern
+this relies on.</p>
+<p><strong>Fix:</strong> when narrowing a condition's subject expression, key the
+narrowing by the expression's normalized form (as the resolver cache
+already does for chain resolution) rather than only by variable name,
+so an identical repeated call inside the guarded scope picks up the same
+narrowed type.</p>
+<h3 id="b54-a-nullsafe-chain-guard-does-not-narrow-a-later-plain-dereference-of-the-same-chain">B54. A nullsafe-chain guard does not narrow a later plain dereference of the same chain<a class="headerlink" href="#b54-a-nullsafe-chain-guard-does-not-narrow-a-later-plain-dereference-of-the-same-chain" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">function process(?Agreement $agreement): void</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">{</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    $period = $agreement?-&gt;latestPeriod();</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    if (!$period instanceof Period) {</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">        return;</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">    }</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">    accept($agreement);   // reported: got ?Agreement — but $agreement can&#39;t be null here</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>If <code>$agreement</code> were <code>null</code>, the nullsafe chain <code>$agreement?-&gt;latestPeriod()</code>
+short-circuits to <code>null</code>, and the guard above would have returned. So by
+the time execution reaches <code>accept($agreement)</code>, <code>$agreement</code> is
+provably non-null — but nothing propagates that proof back from the
+chain's result to the chain's own subject.</p>
+<p><strong>Fix:</strong> when a nullsafe chain's result is proven non-null (by a guard,
+an <code>instanceof</code> check, or a strict-equality comparison against a
+non-null value), treat every nullsafe (<code>?-&gt;</code>) link in that chain as
+proven non-null too, and narrow the base expression accordingly.</p>
+<h3 id="b55-a-ternarys-self-referencing-true-branch-loses-truthy-narrowing-when-compiled-from-a-blade-component-attribute">B55. A ternary's self-referencing true branch loses truthy narrowing when compiled from a Blade component attribute<a class="headerlink" href="#b55-a-ternarys-self-referencing-true-branch-loses-truthy-narrowing-when-compiled-from-a-blade-component-attribute" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>&lt;x-img :alt=&quot;$article-&gt;image_alt_text ? $article-&gt;image_alt_text : $article-&gt;title&quot; /&gt;
+</code></pre></div>
+<p><code>$x ? $x : $y</code> narrows the true branch to a non-falsy <code>$x</code> when <code>$x</code> is
+a plain variable or a real declared property, and this reproduces
+correctly in an ordinary function call. It stops narrowing specifically
+when the repeated expression is an Eloquent model's virtual
+(<code>@property</code>-declared) member read inside a Blade component attribute
+expression — the same source line, compiled outside a component
+attribute, does not trip this.</p>
+<p><strong>Fix:</strong> trace how Blade component attributes compile virtual-member
+ternary expressions (<code>bladeToPhp</code>/component-attribute lowering) and
+confirm the compiled form still carries the same subject expression the
+truthy-narrowing pass keys on; a compilation step that rewrites or
+re-wraps the expression would explain the mismatch with the
+non-Blade case.</p>
+<h3 id="b62-phpunits-assertnotnullassertnotfalse-are-not-recognized-as-narrowing-assertions">B62. PHPUnit's <code>assertNotNull</code>/<code>assertNotFalse</code> are not recognized as narrowing assertions<a class="headerlink" href="#b62-phpunits-assertnotnullassertnotfalse-are-not-recognized-as-narrowing-assertions" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @var null|array{categories: list&lt;array{id: int}&gt;} $section */</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">$section = collect($data)-&gt;firstWhere(&#39;id&#39;, $id);</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">self::assertNotNull($section);</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">self::assertCount(1, $section[&#39;categories&#39;]);   // reported: got null|list&lt;...&gt;</span>
+</code></pre></div>
+<p><code>assert()</code> and <code>@phpstan-assert</code> tags already narrow. <code>phpstan-phpunit</code>
+maps <code>Assert::assertNotNull()</code>/<code>assertNotFalse()</code> (and their static
+<code>self::</code>/<code>static::</code> call forms) to the same <code>!== null</code> / <code>!== false</code>
+type-specification <code>assert()</code> gets, so real PHPStan narrows the
+variable for the rest of the test method. PHPantom doesn't recognize
+these two PHPUnit methods as assertion functions at all.</p>
+<p><strong>Fix:</strong> add <code>PHPUnit\Framework\Assert::assertNotNull</code> and
+<code>::assertNotFalse</code> (matched by unqualified name, since tests call them
+as <code>self::</code>/<code>static::</code>/<code>$this-&gt;</code>) to the assertion-narrowing table
+already used for <code>assert()</code>, applying <code>!== null</code> / <code>!== false</code>
+narrowing to their first argument for the rest of the enclosing scope.</p>
+<h3 id="b63-assertinstanceof-narrowed-return-types-leak-across-unrelated-call-sites-of-a-shared-helper">B63. <code>assertInstanceOf</code>-narrowed return types leak across unrelated call sites of a shared helper<a class="headerlink" href="#b63-assertinstanceof-narrowed-return-types-leak-across-unrelated-call-sites-of-a-shared-helper" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">private function makeMock(string $class): MockObject { /* ... */ }</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">protected function getMethodMock(): MethodNode&amp;MockObject</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">{</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    $node = $this-&gt;makeMock(MethodNode::class);</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">    static::assertInstanceOf(MethodNode::class, $node);</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">    return $node;   // reported: got (FunctionNode|MethodNode)&amp;MockObject</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">}</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="x">protected function createFunctionMock(): FunctionNode&amp;MockObject</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="x">{</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="x">    $node = $this-&gt;makeMock(FunctionNode::class);</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="x">    static::assertInstanceOf(FunctionNode::class, $node);</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="x">    return $node;   // reported: got (FunctionNode|MethodNode)&amp;MockObject</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>makeMock()</code>'s own return type is the wide <code>MockObject</code>. Each caller
+narrows the local it gets back with its own <code>assertInstanceOf()</code> before
+returning — that narrowing is call-site-local and should stay local. The
+resolved type instead looks like a union of every class ever proven at
+<em>any</em> call site of the shared helper, as though the assertions from
+<code>getMethodMock()</code> and <code>createFunctionMock()</code> were merged into one fact
+about <code>makeMock()</code> itself.</p>
+<p><strong>Fix:</strong> this looks like the per-call-site narrowed type is being cached
+or merged keyed by the <em>callee</em> (<code>makeMock</code>) rather than by the call
+expression's position; confirm the assertion-narrowing cache is keyed
+per call site, not per shared-helper declaration.</p>
+<h3 id="b64-a-template-bound-that-includes-null-is-dropped-by-the-call-site">B64. A <code>@template</code> bound that includes <code>null</code> is dropped by the call site<a class="headerlink" href="#b64-a-template-bound-that-includes-null-is-dropped-by-the-call-site" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">/**</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x"> * @template TDate of \DateTimeInterface|\Carbon\Carbon|string|null</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x"> * @param TDate $date</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x"> */</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">function travelTo(mixed $date): void {}</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="x">travelTo(Carbon::create(2024, 6, 15));   // reported: expects Carbon, got ?Carbon</span>
+</code></pre></div>
+<p><code>Carbon::create()</code> is genuinely nullable (invalid date components can
+yield <code>null</code>), and the callee's own <code>@template</code> bound explicitly
+includes <code>null</code> in its type list. The argument-compatibility check
+against the resolved template bound drops the <code>|null</code> arm somewhere
+before comparing, reporting a plain <code>Carbon</code> requirement that
+contradicts the callee's own declared bound.</p>
+<p><strong>Fix:</strong> when resolving a <code>@template ... of A|B|null</code> bound for an
+argument-compatibility check, confirm the full union (all three
+members) is what gets compared against, not a narrowed/truncated
+version of it.</p>
+<h3 id="b70-is_array-does-not-narrow-a-union-typed-parameter-before-an-array-dimension-fetch">B70. <code>is_array()</code> does not narrow a union-typed parameter before an array-dimension fetch<a class="headerlink" href="#b70-is_array-does-not-narrow-a-union-typed-parameter-before-an-array-dimension-fetch" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/** @param array{args: array&lt;int, string&gt;, message: string}|string $violationMessage */</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">function __construct(array|string $violationMessage)</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">{</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">    if (is_array($violationMessage)) {</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">        $this-&gt;args = $violationMessage[&#39;args&#39;];   // reported: got array&lt;int,string&gt;|string</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">    }</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>Inside <code>if (is_array($violationMessage))</code>, the parameter should be
+narrowed to its <code>array{...}</code> shape before the array-dimension fetch
+runs, giving <code>array&lt;int, string&gt;</code> for <code>['args']</code>. The fetch instead
+appears to read against the pre-narrowed <code>array|string</code> union.</p>
+<p><strong>Fix:</strong> confirm <code>is_array()</code> guard narrowing is applied to the subject
+of an array-dimension access, not just to later assignments of the bare
+variable — this is the same "subject expression, not just variable"
+gap as B49/B50, applied to a constructor-promoted/union-typed
+parameter instead of a property.</p>
+<h3 id="b71-a-continue-discarded-falsy-union-member-is-not-carried-into-a-variable-the-value-is-copied-into">B71. A <code>continue</code>-discarded falsy union member is not carried into a variable the value is copied into<a class="headerlink" href="#b71-a-continue-discarded-falsy-union-member-is-not-carried-into-a-variable-the-value-is-copied-into" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/** @return array{0: false|string, 1: Country|false} */</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">function columnValues(string $key): array { /* ... */ }</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">foreach ($keys as $key) {</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">    [$dbCol, $newMarket] = columnValues($key);</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">    if (!$dbCol || !$newMarket) {</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">        continue;</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">    }</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">    if (!$market) {</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">        $market = $newMarket;</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">    }</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="x">    // ... later ...</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="x">    updatePrice($productId, $market, $row);   // reported: expects Country, got Country|false</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="x">}</span>
+</code></pre></div>
+<p>The <code>continue</code> on <code>!$newMarket</code> rules out <code>false</code> for the rest of the
+loop body on every path that doesn't skip to the next iteration. The
+assignment <code>$market = $newMarket</code> two lines later should therefore only
+ever store a <code>Country</code>, but the <code>false</code> variant survives into <code>$market</code>'s
+tracked type.</p>
+<p><strong>Fix:</strong> when a <code>continue</code>/<code>break</code>/<code>return</code> guard clause rules out a
+value for the rest of the current iteration, apply that narrowing to
+the guarded variable before any subsequent assignment reads from it
+in the same iteration, not just at direct uses of the original variable.</p>
+<h3 id="b72-null-narrowing-on-a-var-annotated-variable-is-not-applied-before-a-builtin-call">B72. <code>!== null</code> narrowing on a <code>@var</code>-annotated variable is not applied before a builtin call<a class="headerlink" href="#b72-null-narrowing-on-a-var-annotated-variable-is-not-applied-before-a-builtin-call" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @var null|list&lt;array{version: string}&gt; $cached */</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$cached = Cache::get(self::CACHE_KEY);</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">if ($cached !== null) {</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported: got null|list&lt;array{version: string}&gt;</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>The inline <code>@var</code> annotation sets <code>$cached</code>'s type to
+<code>null|list&lt;array{...}&gt;</code>; the immediately following <code>$cached !== null</code>
+guard should strip the <code>null</code> arm for the rest of the <code>if</code> body, same as
+it would for a plain assignment without the annotation. It doesn't, and
+the un-narrowed annotated type reaches <code>array_slice()</code>.</p>
+<p><strong>Fix:</strong> check whether inline <code>@var</code>-sourced types go through the same
+narrowing pass as inferred types, or whether the annotation is
+re-applied after narrowing runs (which would explain the guard being
+overwritten rather than skipped).</p>
+<h3 id="b74-scopeisinclass-paired-with-getclassreflection-is-not-recognized-as-an-assert-if-true-pair">B74. <code>Scope::isInClass()</code> paired with <code>getClassReflection()</code> is not recognized as an assert-if-true pair<a class="headerlink" href="#b74-scopeisinclass-paired-with-getclassreflection-is-not-recognized-as-an-assert-if-true-pair" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">if ($scope-&gt;isInClass()) {</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">    $reflection = $scope-&gt;getClassReflection();   // reported: got ?ClassReflection</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    use($reflection);</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>getClassReflection(): ?ClassReflection</code> is genuinely nullable in
+general, but PHPStan's own codebase (and any PHPStan extension, like
+Bladestan, built against it) treats a preceding <code>isInClass(): bool ===
+true</code> check as proof the paired call returns non-null — the same
+assert-if-true relationship <code>@phpstan-assert-if-true</code> tags express, but
+hardcoded for this specific pair rather than declared via a tag PHPStan
+ships no docblock for.</p>
+<p><strong>Fix:</strong> lowest-effort option is a targeted special case (like the
+<code>abort_if</code>/<code>abort_unless</code> handling tracked in <code>docs/todo/laravel.md</code>)
+for <code>PHPStan\Analyser\Scope::isInClass()</code> narrowing a subsequent
+<code>getClassReflection()</code> call on the same <code>$scope</code>. Low priority: this is
+PHPStan-extension-authoring-specific, not general PHP or Laravel code.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs">B65. <code>ReflectionClass&lt;T&gt;</code>'s generic argument is not carried through <code>newInstanceArgs()</code><a class="headerlink" href="#b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">/** @var class-string&lt;Node&gt; $class */</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">$class = substr(static::class, 0, -4);</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">$reflection = new ReflectionClass($class);</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">return $reflection-&gt;newInstanceArgs([__METHOD__]);   // reported: got Node|null</span>
+</code></pre></div>
+<p><code>new ReflectionClass($class)</code> on a <code>class-string&lt;Node&gt;</code> should produce
+<code>ReflectionClass&lt;Node&gt;</code>, and its generic <code>newInstanceArgs(): T</code> stub
+should then resolve to plain <code>Node</code> here — matching the declared return
+type exactly. An extra <code>|null</code> is added instead.</p>
+<p><strong>Fix:</strong> confirm the generic type argument captured from the
+<code>class-string&lt;T&gt;</code> constructor argument is threaded through to
+<code>newInstanceArgs()</code>'s templated return, the same way it already must be
+for <code>newInstance()</code> (worth checking both stay in sync).</p>
+<h3 id="b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type">B66. A closure parameter passed to <code>spl_autoload_register()</code> is not inferred from the callback's declared type<a class="headerlink" href="#b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">spl_autoload_register(function ($class): void {</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">    $file = __DIR__ . strtr(str_replace(&#39;App\\&#39;, &#39;&#39;, $class), &#39;\\&#39;, &#39;/&#39;) . &#39;.php&#39;;   // reported: got array&lt;array-key,string&gt;|string</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">    // ...</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">});</span>
+</code></pre></div>
+<p><code>spl_autoload_register()</code>'s stub types its callback parameter as
+<code>callable(string): void</code>. The closure's own <code>$class</code> parameter has no
+type declaration, so its type should be inferred from that
+context — <code>string</code> — the same way an inferred parameter type already
+works for other typed-callable consumers (e.g. <code>array_map</code>). Left
+untyped, <code>$class</code> falls back to a wider inferred type and <code>str_replace()</code>
+returns its full union.</p>
+<p><strong>Fix:</strong> confirm the callable-parameter-type inference used for
+<code>usort</code>/<code>array_map</code>/similar higher-order builtins also covers
+<code>spl_autoload_register</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b56-array_key_firstarray_key_last-are-not-narrowed-non-null-after-a-non-empty-guard">B56. <code>array_key_first</code>/<code>array_key_last</code> are not narrowed non-null after a non-empty guard<a class="headerlink" href="#b56-array_key_firstarray_key_last-are-not-narrowed-non-null-after-a-non-empty-guard" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">/** @param array&lt;int, float&gt; $weights */</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">function pick(array $weights): int</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x">{</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">    assert($weights !== []);</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="x">    foreach ($weights as $key =&gt; $weight) {</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="x">        if ($weight &gt; 0.5) {</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="x">            return $key;</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="x">        }</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="x">    }</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="x">    return array_key_last($weights);   // reported: got int|null</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>array_key_first()</code>/<code>array_key_last()</code> only return <code>null</code> for an empty
+array. <code>assert($weights !== [])</code> proves <code>$weights</code> is non-empty for the
+rest of the function, so the call should resolve to plain <code>int</code> (the
+array's key type), not <code>int|null</code>.</p>
+<p><strong>Fix:</strong> add a dynamic-return-type rule for <code>array_key_first</code>/
+<code>array_key_last</code> that drops <code>null</code> from the return type when the array
+argument is provably non-empty (an <code>assert()</code>/guard-clause emptiness
+check, or a literal with entries).</p>
+<h3 id="b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type">B58. The array union operator (<code>+</code>) does not preserve a previously narrowed key type<a class="headerlink" href="#b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @return array&lt;string&gt; shorthand for array&lt;int|string, string&gt; */</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">function convert(string $raw): array { /* ... */ }</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">/** @param array&lt;string, string&gt; $vars */</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">function build(array $vars): void {}</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="x">function run(string $raw): void</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="x">{</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="x">    $data = convert($raw);</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="x">    $data = array_filter($data, fn(string|int $key): bool =&gt; is_string($key), ARRAY_FILTER_USE_KEY);</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="x">    build($data);                      // fine on its own</span>
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="x">    $data = getShared() + $data + getShared();   // reported: got array&lt;int|string, string&gt;</span>
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a><span class="x">    build($data);</span>
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>array_filter(..., ARRAY_FILTER_USE_KEY)</code> with an <code>is_string($key)</code>
+guard already narrows the key type correctly on its own (a prior fix
+landed this). The narrowing is lost specifically when the result then
+feeds into a <code>+</code> (array union) expression with other
+<code>array&lt;string, string&gt;</code>-typed arrays: the merge widens the key type back
+to <code>int|string</code> instead of keeping <code>string</code>.</p>
+<p><strong>Fix:</strong> the <code>+</code> operator's result-type computation should combine each
+operand's <em>actual</em> (possibly narrowed) key type, not re-derive a wider
+key type from the operands' declared/generic shapes.</p>
+<h3 id="b59-maxmin-with-scalar-arguments-return-mixed-instead-of-the-arguments-common-type">B59. <code>max()</code>/<code>min()</code> with scalar arguments return <code>mixed</code> instead of the arguments' common type<a class="headerlink" href="#b59-maxmin-with-scalar-arguments-return-mixed-instead-of-the-arguments-common-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">function nextLine(int $current, int $extra): void</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">{</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">    $line = max($current - 1 - $extra, 0);   // resolves to mixed, not int</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">    $result[++$line] = &#39;x&#39;;                  // array key ends up int|string instead of int</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>Calling <code>max()</code>/<code>min()</code> with two or more scalar arguments (as opposed to
+a single iterable argument) resolves to <code>mixed</code> rather than the
+arguments' common type (<code>int</code> when every argument is <code>int</code>). Using the
+result as an array key then widens the key type, cascading into
+unrelated array-shape mismatches downstream.</p>
+<p><strong>Fix:</strong> add a dynamic-return-type rule for the scalar-arguments overload
+of <code>max</code>/<code>min</code> that returns the union of the resolved argument types
+(collapsing to a single type when they agree), matching how the
+single-iterable-argument overload is presumably already handled.</p>
+<h3 id="b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring">B60. Array keys built from loop-index arithmetic or <code>array_keys()</code> still widen to <code>int|string</code><a class="headerlink" href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @return list&lt;string&gt; */</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">function paths(): array</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">{</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">    /** @return array&lt;string, string&gt; absoluteFilePath =&gt; viewName */</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">    $templates = discover();</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="x">    return array_keys($templates);   // reported: got list&lt;array-key&gt;, not list&lt;string&gt;</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="x">}</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="x">/** @return array&lt;int, array&lt;string,int&gt;&gt; */</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="x">function lineMapping(string $contents): array</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="x">{</span>
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="x">    $mapping = [];</span>
+<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="x">    foreach (explode(&quot;\n&quot;, $contents) as $lineIndex =&gt; $line) {</span>
+<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="x">        $mapping[$lineIndex + 1] = [&#39;x&#39; =&gt; 1];   // reported: got array&lt;int|string,...&gt;</span>
+<a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a><span class="x">    }</span>
+<a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a><span class="x">    return $mapping;</span>
+<a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a><span class="x">}</span>
+</code></pre></div>
+<p>Both examples only ever produce <code>int</code> (arithmetic on a sequential
+<code>foreach</code> index) or <code>string</code> (<code>array_keys()</code> on an <code>array&lt;string, ...&gt;</code>)
+keys, yet the resolved type includes the other half of <code>array-key</code>.
+Unlike B58 and B59, neither a <code>+</code> merge nor <code>max()</code>/<code>min()</code> appears in
+either example, so this may be a separate residual cause rather than a
+duplicate of those two — worth re-checking once B58 and B59 are fixed,
+since either could be an indirect contributor via code paths not shown
+in this trimmed repro.</p>
+<p><strong>Fix:</strong> re-run this project's diagnostics once B58/B59 land; if either
+site still reports the widened key type, isolate the exact expression
+<code>array_keys()</code>/the loop-index write goes through and trace where the
+<code>int</code>-only or <code>string</code>-only key type gets joined with its opposite.</p>
+<h3 id="b68-array_chunks-return-element-type-resolves-to-the-source-arrays-element-type">B68. <code>array_chunk()</code>'s return element type resolves to the source array's element type<a class="headerlink" href="#b68-array_chunks-return-element-type-resolves-to-the-source-arrays-element-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">/** @param array&lt;int, int&gt; $ids */</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">function dispatch(array $ids): void</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">{</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="x">    foreach (array_chunk($ids, 500) as $chunk) {</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="x">        new BatchJob($chunk);   // reported: expects array&lt;int,int&gt;, got int</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="x">    }</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>array_chunk()</code> always returns an array of arrays — each <code>$chunk</code> should
+be <code>array&lt;int, int&gt;</code> here, matching the source array's element type
+wrapped in a list. PHPantom instead resolves <code>$chunk</code> to plain <code>int</code>, as
+though it reused the source array's <em>element</em> type as the chunk type
+rather than wrapping it.</p>
+<p><strong>Fix:</strong> fix <code>array_chunk()</code>'s dynamic-return-type rule to return
+<code>list&lt;array&lt;TKey, TValue&gt;&gt;</code> (or the tightest list-shape it can prove)
+given a <code>array&lt;TKey, TValue&gt;</code> input, not <code>list&lt;TValue&gt;</code>.</p>
+<h3 id="b69-array_map-with-a-builtin-function-name-string-callback-does-not-preserve-the-source-arrays-key-type">B69. <code>array_map()</code> with a builtin function-name string callback does not preserve the source array's key type<a class="headerlink" href="#b69-array_map-with-a-builtin-function-name-string-callback-does-not-preserve-the-source-arrays-key-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">$ids = explode(&#39;,&#39;, $csv);       // array&lt;int, string&gt;</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">$ids = array_filter($ids);       // array&lt;int, string&gt;</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">$ids = array_map(&#39;intval&#39;, $ids); // reported: got array&lt;int|string, int&gt;</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x">foreach ($ids as $key =&gt; $id) {</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x">    setWeight($key);   // expects int, got int|string</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>array_map()</code> with a single array argument already preserves the
+source's key type when the callback is a closure (per the same fix that
+landed B58's <code>array_filter</code> case). It does not when the callback is
+passed as a builtin function <em>name string</em> (<code>'intval'</code>) instead of a
+closure — an easy-to-miss second call shape for the same rule.</p>
+<p><strong>Fix:</strong> confirm the single-array <code>array_map()</code> key-preservation rule
+matches on "callback is any callable, closure or name-string", not just
+on closures.</p>
+<h3 id="b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch">B61. <code>isset()</code> narrowing is not propagated through a multi-level chained array-dimension fetch<a class="headerlink" href="#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">/**</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x"> * @param array{files?: array&lt;string, array{violations?: list&lt;array{rule: string}&gt;}&gt;} $state</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="x"> */</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">function violations(array $state, string $path): array</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="x">{</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="x">    if (!isset($state[&#39;files&#39;][$path][&#39;violations&#39;])) {</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="x">        return [];</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="x">    }</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="x">    return $state[&#39;files&#39;][$path][&#39;violations&#39;];   // reported: got list&lt;array{rule:string}&gt;|null</span>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>violations</code> is an <em>optional</em> shape key (<code>violations?: ...</code>), not a
+nullable one, so <code>isset()</code> on the full three-level chain is the
+idiomatic presence check. After it passes, re-reading the same chain
+should resolve to the non-optional <code>list&lt;...&gt;</code> shape. A stray <code>|null</code>
+survives instead.</p>
+<p><strong>Fix:</strong> confirm <code>isset()</code>'s narrowing walks the full depth of a chained
+array-dimension expression (not just a single level) when proving an
+optional shape key present, matching the depth the array-shape resolver
+itself supports for reads.</p>
+<h3 id="b73-array_sum-on-a-var-annotated-listint-from-a-method-call-still-returns-intfloat">B73. <code>array_sum()</code> on a <code>@var</code>-annotated <code>list&lt;int&gt;</code> from a method call still returns <code>int|float</code><a class="headerlink" href="#b73-array_sum-on-a-var-annotated-listint-from-a-method-call-still-returns-intfloat" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">class Repo</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">{</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">    /** @return list&lt;int&gt; */</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">    public function counts(): array { /* ... */ }</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="x">    public function total(): int</span>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="x">    {</span>
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="x">        /** @var list&lt;int&gt; */</span>
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="x">        $result = $this-&gt;counts();</span>
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="x">        return \array_sum($result);   // reported: got int|float</span>
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="x">    }</span>
+<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>array_sum()</code> should narrow to <code>int</code> when every element of its argument
+is <code>int</code>. This resolves correctly for a plain array literal assigned
+under the same <code>@var list&lt;int&gt;</code> annotation, but not when the annotated
+variable is assigned from a method call whose own declared return type
+already is <code>list&lt;int&gt;</code> — an unnecessary-looking annotation that
+shouldn't change the outcome, but does.</p>
+<p><strong>Fix:</strong> compare how the inline <code>@var</code> annotation interacts with an
+already-typed call expression on the right-hand side versus a literal;
+one of the two appears to skip re-deriving the element type that
+<code>array_sum()</code>'s rule reads.</p>
 
 
 

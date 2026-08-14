@@ -2296,7 +2296,7 @@
 
 
 <h1 id="phpantom-lsp-features">PHPantom — LSP Features<a class="headerlink" href="#phpantom-lsp-features" title="Permanent link">&para;</a></h1>
-<p>Items are ordered by <strong>impact</strong> (descending), then <strong>effort</strong> (ascending)
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
 <thead>
@@ -2311,14 +2311,14 @@ within the same impact tier.</p>
 <td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
 </tr>
 </tbody>
 </table>
 <hr />
 <h2 id="f2-partial-result-streaming-via-progress">F2. Partial result streaming via <code>$/progress</code><a class="headerlink" href="#f2-partial-result-streaming-via-progress" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium-High</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>The LSP spec (3.17) allows requests that return arrays — such as
 <code>textDocument/implementation</code>, <code>textDocument/references</code>,
 <code>workspace/symbol</code>, and even <code>textDocument/completion</code> — to stream
@@ -2408,7 +2408,7 @@ developer arrive before vendor matches, even within a single phase.</p>
 </ol>
 <hr />
 <h2 id="f5-call-hierarchy">F5. Call hierarchy<a class="headerlink" href="#f5-call-hierarchy" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Implement <code>callHierarchy/incomingCalls</code> and
 <code>callHierarchy/outgoingCalls</code> to answer "who calls this function?" and
 "what does this function call?"</p>
@@ -2447,7 +2447,7 @@ Find References uses on its own.</p>
   editors rely on.
 - Phpactor: call hierarchy via its references index.</p>
 <h2 id="f7-evaluatable-expression-support-dap-integration">F7. Evaluatable expression support (DAP integration)<a class="headerlink" href="#f7-evaluatable-expression-support-dap-integration" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p>Implement <code>textDocument/evaluatableExpression</code> so debuggers (Xdebug
 via DAP) can evaluate expressions under the cursor during a debug
 session. Given a cursor position, the handler returns the expression
@@ -2491,8 +2491,8 @@ debugger.</p>
 <td>High</td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td>Medium (2-5 days)</td>
+<td><strong>Complexity</strong></td>
+<td>Medium-High</td>
 </tr>
 </tbody>
 </table>
@@ -2558,8 +2558,8 @@ Gatekeeper or SmartScreen warnings).</p>
 <td>High</td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td>Medium (2-5 days)</td>
+<td><strong>Complexity</strong></td>
+<td>Medium-High</td>
 </tr>
 </tbody>
 </table>
@@ -2616,8 +2616,8 @@ IDEs, not just PHPStorm.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td>Low (≤ 1 day)</td>
+<td><strong>Complexity</strong></td>
+<td>Low</td>
 </tr>
 </tbody>
 </table>
@@ -2657,8 +2657,8 @@ downloading).</p>
 <td>Low-Medium</td>
 </tr>
 <tr>
-<td><strong>Effort</strong></td>
-<td>Low (≤ 1 day)</td>
+<td><strong>Complexity</strong></td>
+<td>Low</td>
 </tr>
 </tbody>
 </table>
@@ -2682,7 +2682,7 @@ language entry (alongside <code>intelephense</code>):</p>
   server and its feature set.</li>
 </ul>
 <h2 id="f15-go-to-declaration">F15. Go-to-declaration<a class="headerlink" href="#f15-go-to-declaration" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p>Implement <code>textDocument/declaration</code> to jump from a concrete method to
 its abstract or interface prototype, complementing the existing
 go-to-definition (which jumps to the concrete implementation) and
@@ -2707,7 +2707,7 @@ same.</p>
 <p>Register <code>declaration_provider</code> in <code>server.rs</code> and wire it to a thin
 handler that delegates to the existing infrastructure.</p>
 <h2 id="f16-on-type-brace-de-indent">F16. On-type <code>}</code> brace de-indent<a class="headerlink" href="#f16-on-type-brace-de-indent" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low</strong></p>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>Extend the existing on-type formatting handler (currently triggered on
 <code>\n</code> for docblock generation) to also trigger on <code>}</code>, automatically
 de-indenting the closing brace to match its opening <code>{</code>.</p>
@@ -2726,7 +2726,7 @@ de-indenting the closing brace to match its opening <code>{</code>.</p>
 an additional <code>on_type_formatting_trigger_character</code> alongside the
 existing <code>\n</code>.</p>
 <h2 id="f17-wire-class-move-to-workspacewillrenamefiles">F17. Wire class move to <code>workspace/willRenameFiles</code><a class="headerlink" href="#f17-wire-class-move-to-workspacewillrenamefiles" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Renaming a class's FQN via <code>textDocument/rename</code> already moves the file
 and rewrites references across the project: renaming a class's
 declaration accepts the full FQCN so it can move between namespaces in
@@ -2753,7 +2753,7 @@ machinery to produce the <code>WorkspaceEdit</code>. The companion
   PSR-4 stub insertion.</p>
 <hr />
 <h2 id="f19-connect-to-a-remotetcp-language-server-vs-code-extension">F19. Connect to a remote/TCP language server (VS Code extension)<a class="headerlink" href="#f19-connect-to-a-remotetcp-language-server-vs-code-extension" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>This task is for the VS Code extension package, not the <code>phpantom_lsp</code>
 server itself. The server can already speak LSP over a TCP socket; the
 gap is purely on the client side, where the editor extensions only ever

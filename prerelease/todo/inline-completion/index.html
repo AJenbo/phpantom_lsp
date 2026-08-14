@@ -2379,7 +2379,7 @@ and n-grams silently. The sidecar binary is a separate downloadable
 artifact, not bundled in the main LSP binary.</p>
 <hr />
 <h2 id="n1-template-engine">N1. Template Engine<a class="headerlink" href="#n1-template-engine" title="Permanent link">&para;</a></h2>
-<p><strong>Effort:</strong> Medium (2-5 days per pattern group)
+<p><strong>Complexity:</strong> Medium (per pattern group)
 <strong>Dependencies:</strong> None beyond existing type resolution</p>
 <p>The template engine is pattern matching on the current AST node and
 cursor position, combined with type information from the existing
@@ -2641,7 +2641,7 @@ shown. Below that, showing nothing is better than showing something
 wrong.</p>
 <hr />
 <h2 id="n2-n-gram-engine">N2. N-gram Engine<a class="headerlink" href="#n2-n-gram-engine" title="Permanent link">&para;</a></h2>
-<p><strong>Effort:</strong> Medium-High (1-2 weeks including training)
+<p><strong>Complexity:</strong> Very High (novel statistical model and training pipeline, no existing pattern to follow)
 <strong>Dependencies:</strong> Training corpus, PHP tokenizer</p>
 <p>The n-gram engine handles the cases where the template engine has no
 pattern match but there's still enough local context to make a useful
@@ -2762,7 +2762,7 @@ resolver fills in the actual symbols.</p>
 and <code>$id</code>.</p>
 <hr />
 <h2 id="n3-fine-tuned-gguf-model">N3. Fine-Tuned GGUF Model<a class="headerlink" href="#n3-fine-tuned-gguf-model" title="Permanent link">&para;</a></h2>
-<p><strong>Effort:</strong> High (2-4 weeks including training and integration)
+<p><strong>Complexity:</strong> Very High (model selection, fine-tuning, and a new sidecar architecture, well outside the existing codebase's patterns)
 <strong>Dependencies:</strong> Phase 1 and 2 complete, training infrastructure</p>
 <p>This is the "eventually" phase. A small language model fine-tuned
 exclusively on PHP code with fill-in-the-middle capability. It runs
