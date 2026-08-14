@@ -1,0 +1,17 @@
+// test: the else branch of a doubly negated guard inverts once, not twice
+// feature: hover
+// Folding the pair must not lose the polarity: the branch `$user` failed
+// to reach is the one where it is null.
+// expect: $gone = null
+---
+<?php
+
+class User {}
+
+function run(?User $user): void {
+    if (!(!$user)) {
+        return;
+    }
+    $gone = $user;
+    echo $go<>ne;
+}

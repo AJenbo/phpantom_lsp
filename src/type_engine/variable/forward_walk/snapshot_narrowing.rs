@@ -42,7 +42,7 @@ pub(crate) fn collect_and_chain_operands_inner<'b>(
             return;
         }
     }
-    out.push(expr);
+    out.push(narrowing::fold_negation_pairs(expr));
 }
 
 pub(crate) fn collect_or_chain_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
@@ -73,7 +73,7 @@ pub(crate) fn collect_or_chain_operands_inner<'b>(
             return;
         }
     }
-    out.push(expr);
+    out.push(narrowing::fold_negation_pairs(expr));
 }
 
 /// Walk an expression tree looking for `match(true)` arms and ternary

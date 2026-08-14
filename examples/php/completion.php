@@ -361,6 +361,20 @@ class CompoundNarrowingDemo
         if (($picked = $holder->maybe()) instanceof Scaffolding\Banana) {
             $picked->peel();                      // inline-assigned var narrowed
         }
+
+        // A pair of `!` cancels, so a doubly negated guard proves exactly
+        // what the bare one does. Blade's `@unless (!$specimen)` compiles
+        // to this shape, which is how it turns up without being written.
+        $specimen = $holder->maybe();             // Scaffolding\Rock|Scaffolding\Banana|null
+        if (!(!$specimen)) {
+            $specimen->weigh();                   // null dropped, as with `if ($specimen)`
+        }
+
+        // The fold applies per conjunct, so wrapping one of them costs the
+        // chain nothing.
+        if (!(!$specimen) && !(!($specimen instanceof Scaffolding\Rock))) {
+            $specimen->crush();                   // narrowed to Scaffolding\Rock
+        }
     }
 
     /**

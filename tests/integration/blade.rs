@@ -826,4 +826,37 @@ mod tests {
             messages
         );
     }
+    /// `@unless (!$user)` is how Blade spells a doubly negated truthiness
+    /// guard, since `@unless` compiles to `if(!…)` and the condition adds a
+    /// `!` of its own.  The pair cancels, so the body sees what
+    /// `@if ($user)` would give it.
+    #[tokio::test]
+    async fn test_unless_a_negated_condition_narrows_its_body() {
+        let backend = create_test_backend();
+
+        let php_uri = Url::parse("file:///User.php").unwrap();
+        let php_text = "<?php\nclass User {\n    public string $name = '';\n}\n";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri,
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php_text.to_string(),
+                },
+            })
+            .await;
+
+        let uri = Url::parse("file:///greeting.blade.php").unwrap();
+        let body = "@php\n/** @var ?User $user */\n@endphp\n@unless (!$user)\n    {{ $user->name }}\n@endunless\n";
+        open_blade(&backend, &uri, body).await;
+
+        // `{{ $user->name }}` — hover on `$user`.
+        let hover = hover_text(&backend, &uri, 4, 9).await;
+        assert!(
+            hover.contains("$user = User") && !hover.contains("?User"),
+            "the doubly negated guard must narrow $user the way `@if ($user)` does, got: {}",
+            hover
+        );
+    }
 }

@@ -1,0 +1,20 @@
+// test: a doubly negated truthiness guard narrows the same as the bare one
+// feature: hover
+// `!(!$user)` says exactly what `$user` says, so the pair cancels before
+// any extractor looks at the condition.  Blade's `@unless (!$user)`
+// compiles to this shape.
+// expect: $kept = User
+// expect_absent: ?User
+---
+<?php
+
+class User {
+    public function name(): string { return ''; }
+}
+
+function run(?User $user): void {
+    if (!(!$user)) {
+        $kept = $user;
+        echo $ke<>pt;
+    }
+}

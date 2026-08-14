@@ -104,6 +104,12 @@ function runDemoAssertions(): void
         'a name the shelf does not carry yields null, so nothing is proved about that call',
     );
 
+    // ── A pair of `!` cancels ───────────────────────────────────────────
+    $bare = new Scaffolding\Rock();
+    assert((!(!$bare)) === (bool) $bare, 'double negation is the bare truthiness test');
+    $absent = null;
+    assert((!(!$absent)) === false, 'a doubly negated null is still falsy');
+
     // ── A proof lasts only as long as the state it was made about ───────
     assert(
         (new CompoundNarrowingDemo())->callInvalidation(new Scaffolding\SpecimenHolder()) === 'specimens',

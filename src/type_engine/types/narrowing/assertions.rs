@@ -629,6 +629,46 @@ pub(in crate::type_engine) fn unwrap_condition_negation<'b>(
     }
 }
 
+/// Cancel pairs of `!` off a condition, returning the equivalent
+/// expression the AST already holds.
+///
+/// `!(!$user)` is `$user` and `!(!(!$user))` is `!$user`, so folding the
+/// chain leaves each spelling in the polarity its extractor recognises.
+/// Without it the outer `!` is a node no guard extractor matches, and a
+/// condition that says exactly what `if ($user)` says narrows nothing.
+/// Blade's `@unless (!$user)` compiles to the doubly negated form, so this
+/// is a shape people write without meaning to.
+///
+/// Parentheses are transparent, since they change no meaning here.
+pub(in crate::type_engine) fn fold_negation_pairs<'b>(
+    expr: &'b Expression<'b>,
+) -> &'b Expression<'b> {
+    fn strip_parens<'b>(expr: &'b Expression<'b>) -> &'b Expression<'b> {
+        match expr {
+            Expression::Parenthesized(inner) => strip_parens(inner.expression),
+            other => other,
+        }
+    }
+    /// The operand of `expr` when it is a logical `!`.
+    fn not_operand<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+        match expr {
+            Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+                Some(strip_parens(prefix.operand))
+            }
+            _ => None,
+        }
+    }
+
+    let mut current = strip_parens(expr);
+    while let Some(once) = not_operand(current) {
+        match not_operand(once) {
+            Some(twice) => current = twice,
+            None => break,
+        }
+    }
+    current
+}
+
 /// Given a function's argument list and a parameter name (with `$`
 /// prefix), find the subject key passed at that parameter's position.
 ///

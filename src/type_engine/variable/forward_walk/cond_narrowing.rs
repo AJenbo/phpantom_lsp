@@ -405,6 +405,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // `!(!$x)` says exactly what `$x` says, so cancel the pair before any
+    // extractor looks at it.  The chain collectors fold each operand of an
+    // `&&` / `||` the same way.
+    let condition = narrowing::fold_negation_pairs(condition);
+
     // Seed property access keys from conditions into the scope so that
     // narrowing functions can find and narrow them.
     seed_property_keys_into_scope(condition, scope, ctx);
@@ -868,6 +873,9 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // As in the truthy pass: `!(!$x)` is `$x`, so cancel the pair first.
+    let condition = narrowing::fold_negation_pairs(condition);
+
     // De Morgan over `||`: NOT (A || B) = !A && !B.  Every operand's inverse
     // holds at the same time, so they apply sequentially to one scope.  This
     // is what makes the `if (!guard1 || !guard2) { return; }` idiom narrow

@@ -136,14 +136,4 @@ constant shapes satisfy their generic supertypes.
 
 ## Narrowing
 
-### B177. A doubly negated truthiness guard does not narrow
-
-**Impact: Low · Effort: Low-Medium**
-
-`if (!(!$user))` and Blade's `@unless (!$user)`, which compiles to it,
-leave `$user` as `User|null` inside the guard, while the single-negation
-and comparison spellings (`if ($user)`, `if (!($user === null))`,
-`@unless ($user === null)`) all narrow. The negation is applied to the
-operand rather than folded, so the inner `!` re-negates a proof the
-outer one had already inverted. Found while confirming the Blade
-`@include` narrowing, not from a sample-project site.
+No outstanding items.

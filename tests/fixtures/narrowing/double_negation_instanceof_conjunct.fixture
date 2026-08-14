@@ -1,0 +1,22 @@
+// test: a doubly negated conjunct narrows alongside its neighbours
+// feature: completion
+// The chain collectors fold each operand, so a `!!` around one conjunct
+// does not cost the whole `&&` its narrowing.
+// expect: crush(
+// expect_absent: peel(
+---
+<?php
+
+class Rock {
+    public function crush(): string { return 'smash!'; }
+}
+
+class Banana {
+    public function peel(): void {}
+}
+
+function run(Rock|Banana|null $specimen, ?Rock $other): void {
+    if (!(!$other) && !(!($specimen instanceof Rock))) {
+        $specimen-><>
+    }
+}

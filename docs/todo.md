@@ -28,7 +28,6 @@ within the same impact tier.
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 | B144 | [`preg_match` `$matches` is shapeless](todo/bugs.md#b144-preg_match-matches-is-shapeless) (depends on B147)                                | Medium-High | Medium      |
 | B143 | [A constant built from another constant does not fold to its value](todo/bugs.md#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value) | Medium | Medium |
-| B177 | [A doubly negated truthiness guard does not narrow](todo/bugs.md#b177-a-doubly-negated-truthiness-guard-does-not-narrow)                                    | Low         | Low-Medium  |
 | B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state) (depends on B147)                   | Medium      | Medium-High |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
