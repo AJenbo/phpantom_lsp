@@ -836,6 +836,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b159-inferring-a-methods-return-type-panics-on-a-multi-byte-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B159. Inferring a method's return type panics on a multi-byte file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -873,10 +890,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b158-a-namespaced-constant-is-only-found-under-its-bare-name" class="md-nav__link">
+  <a href="#b160-a-second-namespace-block-silences-the-argument-type-check" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B158. A namespaced constant is only found under its bare name
+        B160. A second <code>namespace</code> block silences the argument-type check
       </span>
     </span>
   </a>
@@ -1375,6 +1392,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Crashes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b159-inferring-a-methods-return-type-panics-on-a-multi-byte-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B159. Inferring a method's return type panics on a multi-byte file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1412,10 +1446,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b158-a-namespaced-constant-is-only-found-under-its-bare-name" class="md-nav__link">
+  <a href="#b160-a-second-namespace-block-silences-the-argument-type-check" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B158. A namespaced constant is only found under its bare name
+        B160. A second <code>namespace</code> block silences the argument-type check
       </span>
     </span>
   </a>
@@ -1476,41 +1510,52 @@ diagnostics across ten projects, ~330 of them false positives). Site
 counts refer to that sweep; the git-ignored triage log has the full
 per-project inventory. Entries filed later say where they came from.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b159-inferring-a-methods-return-type-panics-on-a-multi-byte-file">B159. Inferring a method's return type panics on a multi-byte file<a class="headerlink" href="#b159-inferring-a-methods-return-type-panics-on-a-multi-byte-file" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><code>infer_body_return_type</code> (<code>type_engine/call_resolution/target_cache.rs</code>)
+slices <code>content[..offset]</code> with the method's recorded <code>name_offset</code>. When
+that offset does not land on a character boundary of the content it read
+back — the file changed, or the URI resolved to a different file than the
+one the offset was recorded against — the slice panics rather than
+returning <code>None</code>, and the panic aborts the diagnostic worker for the whole
+file. The bounds check above it only compares against <code>content.len()</code>, so
+any file with multi-byte characters can hit it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>panicked at type_engine/call_resolution/target_cache.rs:246:
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>end byte index 245419 is not a char boundary; it is inside &#39;─&#39;
+</code></pre></div>
+<p>Counting the newlines before the offset does not need a slice at all, so
+the fix is to count over the bytes and drop the panicking index. Found
+while working on constant resolution, by pointing <code>analyze</code> at a
+directory of unrelated files.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b158-a-namespaced-constant-is-only-found-under-its-bare-name">B158. A namespaced constant is only found under its bare name<a class="headerlink" href="#b158-a-namespaced-constant-is-only-found-under-its-bare-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p><code>extract_defines_from_statements</code> (<code>parser/functions.rs</code>) registers a
-namespace-level <code>const</code> under the name as written, dropping the
-namespace it sits in, so <code>Demo\Scaffolding\GRADES</code> is stored as
-<code>GRADES</code>. Every reference that names the namespace therefore finds
-nothing, while the bare reference finds it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">use App\Config;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">use const App\Config\GRADES;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">in_array($g, GRADES, true);          // resolved</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">in_array($g, Config\GRADES, true);   // not resolved</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">in_array($g, \App\Config\GRADES, true); // not resolved</span>
+<h3 id="b160-a-second-namespace-block-silences-the-argument-type-check">B160. A second <code>namespace</code> block silences the argument-type check<a class="headerlink" href="#b160-a-second-namespace-block-silences-the-argument-type-check" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
+<p>A file with two <code>namespace</code> blocks reports no argument type mismatches at
+all. The same code in a single-namespace file reports them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">namespace</span> <span class="nx">App\Other</span><span class="p">;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">class</span> <span class="nc">Marker</span> <span class="p">{}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="k">namespace</span> <span class="nx">App</span><span class="p">;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">function</span> <span class="nf">takesInt</span><span class="p">(</span><span class="nx">int</span> <span class="nv">$x</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{}</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="k">function</span> <span class="nf">plain</span><span class="p">(</span><span class="nx">string</span> <span class="nv">$key</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span> <span class="p">{</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="nx">takesInt</span><span class="p">(</span><span class="nv">$key</span><span class="p">);</span>      <span class="c1">// not reported; reported without the first block</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="p">}</span>
 </code></pre></div>
-<p>The value is what the narrowing, hover and completion paths read, so a
-qualified reference silently loses whatever the constant proves. It is
-visible in <code>examples/php/completion.php</code>, where the <code>in_array($grade,
-Scaffolding\GRADES, true)</code> gate cannot narrow the <code>?string</code> away and the
-return is reported as a mismatch — the demo is right and the resolution
-is not.</p>
-<p>Storing the fully-qualified name is only half of it: a bare reference
-has to keep resolving, which in PHP means trying the current namespace
-first and the global one after, and a qualified one has to go through
-the file's <code>use</code> table the way a class name does. The function index
-made the same choice deliberately (see the comment about short-name
-collisions in <code>parser/ast_update.rs</code>), so follow it rather than adding a
-short-name fallback entry.</p>
+<p><code>FileContext::namespace</code> is built from the <em>first</em> namespace span in the
+file (<code>file_context</code> in <code>backend/file_access.rs</code>), so every name in the
+second block is resolved against the wrong namespace and the called
+function is never found. <code>resolve_function_name_at</code> already takes an
+offset and consults <code>resolved_names</code> for exactly this case, so the
+diagnostic collectors need to resolve per call site rather than per file.
+Found while writing tests for namespaced constant resolution.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
