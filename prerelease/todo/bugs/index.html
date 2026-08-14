@@ -946,28 +946,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B150. Branch-local reassignment and narrowing are wrong at the join point
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B177. A branch-local proof about an untyped subject escapes the join
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -994,28 +972,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B158. Strict <code>in_array</code> against a constant list does not narrow the needle
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b159-an-inline-var-re-pins-the-variable-on-every-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B159. An inline <code>@var</code> re-pins the variable on every read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B174. A <code>break</code> that leaves a loop early is missing from the post-loop join
       </span>
     </span>
   </a>
@@ -1691,28 +1647,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B150. Branch-local reassignment and narrowing are wrong at the join point
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B177. A branch-local proof about an untyped subject escapes the join
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1739,28 +1673,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B158. Strict <code>in_array</code> against a constant list does not narrow the needle
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b159-an-inline-var-re-pins-the-variable-on-every-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B159. An inline <code>@var</code> re-pins the variable on every read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B174. A <code>break</code> that leaves a loop early is missing from the post-loop join
       </span>
     </span>
   </a>
@@ -2002,48 +1914,12 @@ generic array only for non-constant keys.</p>
 auto-vivification), merge <code>+=</code> like an array-shape union, and make
 constant shapes satisfy their generic supertypes.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point">B150. Branch-local reassignment and narrowing are wrong at the join point<a class="headerlink" href="#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p>Two inverse defects at <code>if</code>/<code>else</code> merges (~5 sites):</p>
-<ul>
-<li>A reassignment inside a branch is <em>not</em> applied after the join:
-  <code>if ($v instanceof AbstractNode) { $v = $v-&gt;getNode(); }</code> still
-  carries <code>AbstractNode</code> afterwards; <code>if ($r instanceof User)
-  { $r = $r-&gt;getToken(); }</code> still carries <code>User</code>.</li>
-<li>A narrowing <em>does</em> leak past the join: after
-  <code>if ($r instanceof Verbose) { … }</code> the post-if type keeps the
-  branch-narrowed member instead of re-merging to the declared type.</li>
-</ul>
-<p><strong>Fix:</strong> at the merge, each branch contributes its end-state (declared
-type transformed by that branch's assignments/narrowings), and the
-join is the union of branch end-states — nothing more, nothing less.</p>
-<h3 id="b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join">B177. A branch-local proof about an untyped subject escapes the join<a class="headerlink" href="#b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$version = $row-&gt;version;      // stdClass property: no type</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">if ($version instanceof Foo) { }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">$version;                      // reported Foo, should stay untyped</span>
-</code></pre></div>
-<p>Narrowing a subject the scope has no type for <em>establishes</em> that type
-(this is what lets <code>assert($x instanceof Foo)</code> and
-<code>if (!is_string($x)) { return; }</code> work at all), but the branch merge
-cannot tell the resulting entry apart from a branch-local assignment:
-a name absent on one incoming path and present on the other is adopted
-wholesale, so the proof survives a join it should not. The negated form
-leaks the same way, from the implicit-else path back into the body.</p>
-<p>Harmless while the alternative is no information at all, and long-standing
-— it predates the <code>instanceof</code>/type-guard narrowing work that made it
-visible. Found while fixing the condition-proof handling, not by a sample
-project.</p>
-<p><strong>Fix:</strong> distinguish "no entry" from "unknown" in <code>ScopeState</code> so the merge
-can widen a narrowed-from-nothing entry back to unknown, rather than
-adopting it. Overlaps <a href="../type-inference/#t29-definite-vs-possible-variable-existence-tracking">T29</a>,
-which needs the same distinction for variable existence.</p>
 <h3 id="b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call">B155. A checked call expression is forgotten by the next identical call<a class="headerlink" href="#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">}</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">}</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
 </code></pre></div>
 <p>Narrowing is keyed on variables only; a structurally identical
 side-effect-free call repeated inside the guarded scope re-resolves
@@ -2074,40 +1950,6 @@ hard-coded PHPUnit list in favour of the tags.</p>
 proves on the fall-through that the needle is one of the constant
 list's literals (⊆ <code>string</code>), removing <code>null</code>. Requires B155's
 expression keying for method-call needles. 2 sites.</p>
-<h3 id="b159-an-inline-var-re-pins-the-variable-on-every-read">B159. An inline <code>@var</code> re-pins the variable on every read<a class="headerlink" href="#b159-an-inline-var-re-pins-the-variable-on-every-read" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @var null|list&lt;array{…}&gt; $cached */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$cached = Cache::get(self::KEY);</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">if ($cached !== null) {</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported null|list&lt;…&gt;</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>A plain <code>!== null</code> guard that works on any ordinary variable does
-nothing here — and a later reassignment (<code>$x = []; … $x = narrow();</code>)
-is also overridden by the annotation. The <code>@var</code> should seed the
-assignment it documents and then submit to normal flow narrowing
-(3 sites).</p>
-<h3 id="b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join">B174. A <code>break</code> that leaves a loop early is missing from the post-loop join<a class="headerlink" href="#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$a = &#39;x&#39;;</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">do {</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    if (rand(0, 1)) { break; }   // leaves with $a === &#39;x&#39;</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    $a = 1;</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">} while (rand(0, 1));</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">$a;                              // reported 1, should be &#39;x&#39;|1</span>
-</code></pre></div>
-<p>The state a <code>break</code> carries out of a loop does not reach the post-loop
-merge, so only the paths that ran to the end of the body contribute. The
-inverse shows up in a nested loop, where a <code>break</code> out of the <em>inner</em>
-loop loses the assignment it made: <code>foreach { foreach { … $b = 1;
-break; } } $b;</code> reports the pre-loop value alone. Both forms are visible
-in Psalm's <code>falseToBool</code> loop tests (the three <code>// SKIP</code> assertions in
-<code>tests/psalm_assertions/loop_do.php</code> and <code>loop_foreach.php</code>), which were
-only passing while every boolean widened to <code>bool</code> and made the merge
-result the same either way.</p>
-<p><strong>Fix:</strong> record each <code>break</code>'s scope state as an exit edge of the loop it
-leaves, and union those edges into the post-loop scope alongside the
-normal fall-through.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h3 id="b167-factory-createmake-keep-the-collection-half-on-single-model-chains">B167. Factory <code>create()</code>/<code>make()</code> keep the collection half on single-model chains<a class="headerlink" href="#b167-factory-createmake-keep-the-collection-half-on-single-model-chains" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
@@ -2130,9 +1972,9 @@ precise). Model the conditional shapes natively for
 sample sources as genuine.)</p>
 <h3 id="b169-blade-if-narrowing-does-not-reach-included-variables">B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables<a class="headerlink" href="#b169-blade-if-narrowing-does-not-reach-included-variables" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>@if ($product)
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>@endif
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>@if ($product)
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>@endif
 </code></pre></div>
 <p>An inherited variable is checked against the template's <em>declared</em>
 signature type at the <code>@include</code> site, ignoring the enclosing Blade
