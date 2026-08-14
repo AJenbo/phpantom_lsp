@@ -75,11 +75,15 @@ pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
 pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str, u32) -> Option<FunctionInfo>>;
 
 /// Type alias for the optional constant-value-loader closure passed
-/// through the resolution chain.  Given a constant name, returns
-/// `Some(Some(value))` when the constant exists with a known value,
-/// `Some(None)` when it exists but the value is unknown, and `None`
-/// when the constant was not found.
-pub(crate) type ConstantLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<Option<String>>>;
+/// through the resolution chain.  Given a constant name as written and
+/// the byte offset it was written at, returns `Some(Some(value))` when
+/// the constant exists with a known value, `Some(None)` when it exists
+/// but the value is unknown, and `None` when the constant was not found.
+///
+/// The offset is what lets the closure resolve the name against the
+/// file it appears in, the way a class or function name is resolved;
+/// pass `0` when no offset is available.
+pub(crate) type ConstantLoaderFn<'a> = Option<&'a dyn Fn(&str, u32) -> Option<Option<String>>>;
 
 /// Type alias for the optional config-value resolver closure.  Given a
 /// dotted Laravel config key (e.g. `"database.default"`), returns the
@@ -271,7 +275,7 @@ impl<'a> VarResolutionCtx<'a> {
         self.loaders.function_loader
     }
 
-    /// The value of the global constant `name`, as
+    /// The value of the constant written as `name` at `offset`, as
     /// `Some(Some(value))` when it is known, `Some(None)` when the constant
     /// exists without a readable value, and `None` when it is not found.
     ///
@@ -279,10 +283,12 @@ impl<'a> VarResolutionCtx<'a> {
     /// closure reads from anyway: a context built from a [`ResolutionCtx`]
     /// (which carries no constant loader) would otherwise report every
     /// global constant unknown, so a variable assigned one would resolve to
-    /// nothing on that path while resolving fine on others.
-    pub(crate) fn lookup_constant(&self, name: &str) -> Option<Option<String>> {
+    /// nothing on that path while resolving fine on others.  That fallback
+    /// has no file to resolve `name` against, so it only finds the constant
+    /// under the name as written.
+    pub(crate) fn lookup_constant(&self, name: &str, offset: u32) -> Option<Option<String>> {
         match self.loaders.constant_loader {
-            Some(loader) => loader(name),
+            Some(loader) => loader(name, offset),
             None => self.backend?.lookup_global_constant(name),
         }
     }

@@ -1533,14 +1533,97 @@ impl Backend {
         crate::type_engine::variable::closure_resolution::find_closure_this_override(&rctx)
     }
 
-    /// Return a constant-value-loader closure.
+    /// Return a constant-value-loader closure bound to a [`FileContext`].
     ///
-    /// The returned closure looks up a global constant name and returns
+    /// The returned closure takes the constant name as written and the
+    /// byte offset of that name in the file, and returns
     /// `Some(Some(value))` when found with a known value,
     /// `Some(None)` when found without a value, and `None` when not
-    /// found.
-    pub(crate) fn constant_loader(&self) -> impl Fn(&str) -> Option<Option<String>> + '_ {
-        move |name: &str| self.lookup_global_constant(name)
+    /// found.  Pass `0` as the offset when none is available.
+    pub(crate) fn constant_loader<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> impl Fn(&str, u32) -> Option<Option<String>> + 'a {
+        self.constant_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return a constant-value-loader closure from individual file-context
+    /// components.
+    ///
+    /// The counterpart of [`function_loader_with`](Self::function_loader_with)
+    /// for constants; see [`constant_loader`](Self::constant_loader) for the
+    /// closure's contract.
+    pub(crate) fn constant_loader_with<'a>(
+        &'a self,
+        resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
+        use_map: &'a HashMap<String, String>,
+        namespace: &'a Option<String>,
+    ) -> impl Fn(&str, u32) -> Option<Option<String>> + 'a {
+        move |name: &str, offset: u32| {
+            self.resolve_constant_name_at(name, resolved_names, offset, use_map, namespace)
+        }
+    }
+
+    /// Resolve a constant reference to its value, trying the names PHP
+    /// would try in the order it would try them.
+    ///
+    /// Constants are indexed under their fully-qualified name, so the name
+    /// a reference writes has to be resolved against the file before it can
+    /// be looked up: `Config\GRADES` goes through the `use` table the way a
+    /// class name does, and a bare `GRADES` means the current namespace's
+    /// constant when there is one and the global constant otherwise.
+    ///
+    /// `offset` is the starting byte offset of the constant-name identifier;
+    /// pass `0` when none is available.  With an offset and `resolved_names`,
+    /// mago-names supplies the primary candidate, which is the only source
+    /// that gets multi-namespace files and `use const` aliases right.
+    pub(crate) fn resolve_constant_name_at(
+        &self,
+        name: &str,
+        resolved_names: Option<&crate::names::OwnedResolvedNames>,
+        offset: u32,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+    ) -> Option<Option<String>> {
+        // A leading backslash is an explicit absolute reference: it names
+        // exactly one constant, with no namespace or import in play.
+        if let Some(absolute) = name.strip_prefix('\\') {
+            return self.lookup_global_constant_candidates(&[absolute]);
+        }
+
+        // `offset == 0` is the "no offset available" sentinel (no PHP
+        // constant identifier ever starts at byte 0, before `<?php`).
+        let offset_resolved: Option<&str> = if offset != 0 {
+            resolved_names.and_then(|rn| rn.get(offset))
+        } else {
+            None
+        };
+
+        // Import-table resolution, for the paths that have no resolved
+        // names: a bare name may be a `use const` alias, and the first
+        // segment of a qualified name may be an imported namespace.
+        let use_resolved: Option<String> = match name.split_once('\\') {
+            Some((first, rest)) => use_map.get(first).map(|fqn| format!("{fqn}\\{rest}")),
+            None => use_map.get(name).cloned(),
+        };
+        let ns_qualified: Option<String> = namespace.as_ref().map(|ns| format!("{ns}\\{name}"));
+
+        let mut candidates: Vec<&str> = Vec::with_capacity(4);
+        if let Some(r) = offset_resolved {
+            candidates.push(r);
+        }
+        if let Some(ref fqn) = use_resolved {
+            candidates.push(fqn.as_str());
+        }
+        if let Some(ref nq) = ns_qualified {
+            candidates.push(nq.as_str());
+        }
+        // The global fallback runs last: PHP only reaches it once the
+        // namespace-local name has failed.
+        candidates.push(name);
+        candidates.dedup();
+
+        self.lookup_global_constant_candidates(&candidates)
     }
 
     /// The member that an unqualified `@see` reference at `offset` names on

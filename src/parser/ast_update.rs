@@ -738,6 +738,7 @@ impl Backend {
                 program.statements.iter(),
                 &mut define_entries,
                 content,
+                None,
             );
             let defines: Vec<(String, DefineInfo)> = define_entries
                 .into_iter()

@@ -325,7 +325,7 @@ impl Backend {
 
         let class_loader = self.class_loader(&file_ctx);
         let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader();
+        let constant_loader_cl = self.constant_loader(&file_ctx);
 
         // Walk the AST once, collect argument expressions, and resolve
         // their types — all inside the `with_parsed_program` closure so

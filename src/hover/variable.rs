@@ -68,7 +68,7 @@ impl Backend {
 
         let class_loader = self.class_loader(ctx);
         let function_loader = self.function_loader(ctx);
-        let constant_loader = self.constant_loader();
+        let constant_loader = self.constant_loader(ctx);
         let config_resolver = |key: &str| self.resolve_config_type(key);
         let trans_resolver = |key: &str| self.resolve_trans_type(key);
         let loaders = crate::type_engine::resolver::Loaders {

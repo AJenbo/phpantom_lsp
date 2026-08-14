@@ -26,38 +26,60 @@ impl Backend {
     /// namespace to skip the fallback lookup) names the same constant as the
     /// bare form, so the leading separator is dropped before searching.
     pub(crate) fn lookup_global_constant(&self, name: &str) -> Option<Option<String>> {
-        let name = name.strip_prefix('\\').unwrap_or(name);
+        self.lookup_global_constant_candidates(&[name.strip_prefix('\\').unwrap_or(name)])
+    }
+
+    /// [`Self::lookup_global_constant`] over a list of candidate names, in
+    /// the order PHP would try them.
+    ///
+    /// A constant is indexed under its fully-qualified name, and the name a
+    /// reference writes rarely is one: an unqualified `FOO` inside
+    /// `namespace App` means `App\FOO` if that exists and global `FOO`
+    /// otherwise, and a qualified `Config\FOO` means whatever the file's
+    /// `use` table makes of `Config`.  Callers build the candidates with
+    /// [`Backend::resolve_constant_name_at`](crate::Backend), which is what
+    /// knows the file.
+    ///
+    /// Each phase is tried for every candidate before the next, more
+    /// expensive one runs, so a bare name that exists globally is never
+    /// paid for with a full autoload parse looking for the namespaced
+    /// spelling.
+    pub(crate) fn lookup_global_constant_candidates(
+        &self,
+        candidates: &[&str],
+    ) -> Option<Option<String>> {
         // Phase 1: already-parsed constants.
-        let lookup = self
-            .symbols
-            .global_defines
-            .read()
-            .get(name)
-            .map(|info| info.value.clone());
-        if lookup.is_some() {
-            return lookup;
+        {
+            let dmap = self.symbols.global_defines.read();
+            for name in candidates {
+                if let Some(info) = dmap.get(*name) {
+                    return Some(info.value.clone());
+                }
+            }
         }
 
         // Phase 2: autoload constant index — lazily parse the file.
-        let path = self
-            .symbols
-            .autoload_constant_index
-            .read()
-            .get(name)
-            .cloned();
-        if let Some(path) = path
-            && let Ok(content) = std::fs::read_to_string(&path)
-        {
-            let file_uri = crate::util::path_to_uri(&path);
-            self.update_ast(&file_uri, &content);
-            let lookup = self
+        for name in candidates {
+            let path = self
                 .symbols
-                .global_defines
+                .autoload_constant_index
                 .read()
-                .get(name)
-                .map(|info| info.value.clone());
-            if lookup.is_some() {
-                return lookup;
+                .get(*name)
+                .cloned();
+            if let Some(path) = path
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                let file_uri = crate::util::path_to_uri(&path);
+                self.update_ast(&file_uri, &content);
+                let lookup = self
+                    .symbols
+                    .global_defines
+                    .read()
+                    .get(*name)
+                    .map(|info| info.value.clone());
+                if lookup.is_some() {
+                    return lookup;
+                }
             }
         }
 
@@ -73,14 +95,11 @@ impl Backend {
                 }
                 if let Ok(content) = std::fs::read_to_string(path) {
                     self.update_ast(&uri, &content);
-                    let lookup = self
-                        .symbols
-                        .global_defines
-                        .read()
-                        .get(name)
-                        .map(|info| info.value.clone());
-                    if lookup.is_some() {
-                        return lookup;
+                    let dmap = self.symbols.global_defines.read();
+                    for name in candidates {
+                        if let Some(info) = dmap.get(*name) {
+                            return Some(info.value.clone());
+                        }
                     }
                 }
             }
@@ -90,22 +109,24 @@ impl Backend {
         // Parse the stub via update_ast (which populates global_defines),
         // then re-check.  This is the same lazy-parse pattern as Phases
         // 2 and 3 — no special raw-source scanning needed.
-        let stub_const_idx = self.stub_constant_index.read();
-        if let Some(&stub_source) = stub_const_idx.get(name) {
-            let stub_uri = format!("phpantom-stub://const/{}", name);
-            self.update_ast(&stub_uri, stub_source);
-            let lookup = self
-                .symbols
-                .global_defines
-                .read()
-                .get(name)
-                .map(|info| info.value.clone());
-            if lookup.is_some() {
-                return lookup;
+        for name in candidates {
+            let stub_source = self.stub_constant_index.read().get(*name).copied();
+            if let Some(stub_source) = stub_source {
+                let stub_uri = format!("phpantom-stub://const/{}", name);
+                self.update_ast(&stub_uri, stub_source);
+                let lookup = self
+                    .symbols
+                    .global_defines
+                    .read()
+                    .get(*name)
+                    .map(|info| info.value.clone());
+                if lookup.is_some() {
+                    return lookup;
+                }
+                // Stub was parsed but constant not found in global_defines —
+                // it exists in the index, so report it with unknown value.
+                return Some(None);
             }
-            // Stub was parsed but constant not found in global_defines —
-            // it exists in the index, so report it with unknown value.
-            return Some(None);
         }
 
         None

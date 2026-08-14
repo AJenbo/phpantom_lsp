@@ -63,7 +63,7 @@ struct PropertyCheckCtx<'a> {
     file_ctx: &'a crate::types::FileContext,
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
-    constant_loader: &'a dyn Fn(&str) -> Option<Option<String>>,
+    constant_loader: &'a dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &'a Backend,
     out: &'a mut Vec<ResolvedPropertyAssignment>,
 }
@@ -418,7 +418,7 @@ impl Backend {
 
         let class_loader = self.class_loader(&file_ctx);
         let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader();
+        let constant_loader_cl = self.constant_loader(&file_ctx);
 
         let results: Vec<ResolvedPropertyAssignment> =
             with_parsed_program(content, "property_type_diagnostics", |program, _content| {

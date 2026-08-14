@@ -338,7 +338,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             let file_ctx = backend.file_context(uri);
                             let class_loader = backend.class_loader(&file_ctx);
                             let function_loader_cl = backend.function_loader(&file_ctx);
-                            let constant_loader_cl = backend.constant_loader();
+                            let constant_loader_cl = backend.constant_loader(&file_ctx);
                             let config_resolver = |key: &str| backend.resolve_config_type(key);
                             let trans_resolver = |key: &str| backend.resolve_trans_type(key);
                             let loaders = crate::type_engine::resolver::Loaders {

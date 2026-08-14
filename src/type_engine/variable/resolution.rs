@@ -2192,7 +2192,7 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
                 offset as u32,
                 ctx.class_loader,
                 ctx.backend,
-                Loaders::with_function(ctx.function_loader()),
+                ctx.loaders,
             )
         };
         if !resolved.is_empty() {

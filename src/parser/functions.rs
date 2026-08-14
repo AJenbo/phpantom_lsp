@@ -589,12 +589,21 @@ impl Backend {
     /// The `content` parameter is the full source text of the file, used
     /// to extract the initializer value as a string slice.
     ///
+    /// `namespace` is the namespace the statements sit in, which the walk
+    /// updates as it descends into `Statement::Namespace`.  A `const`
+    /// declaration is recorded under its fully-qualified name, matching
+    /// PHP: `const FOO` inside `namespace App` declares `App\FOO`, not a
+    /// global `FOO`.  A `define()` call is not namespaced — the name it
+    /// declares is exactly the string it was given, wherever the call
+    /// sits.
+    ///
     /// Uses the parsed AST rather than regex, so it piggybacks on the
     /// parse pass that `update_ast` already performs.
     pub(crate) fn extract_defines_from_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         defines: &mut Vec<(String, u32, Option<String>)>,
         content: &str,
+        namespace: Option<&str>,
     ) {
         for statement in statements {
             match statement {
@@ -611,18 +620,25 @@ impl Backend {
                         let start = item.value.span().start.offset as usize;
                         let end = item.value.span().end.offset as usize;
                         let value = content.get(start..end).map(|s| s.to_string());
-                        defines.push((
-                            bytes_to_str(item.name.value).to_string(),
-                            item.name.span.start.offset,
-                            value,
-                        ));
+                        let name = bytes_to_str(item.name.value);
+                        let fqn = match namespace {
+                            Some(ns) => format!("{ns}\\{name}"),
+                            None => name.to_string(),
+                        };
+                        defines.push((fqn, item.name.span.start.offset, value));
                     }
                 }
-                Statement::Namespace(namespace) => {
+                Statement::Namespace(ns_stmt) => {
+                    let inner = ns_stmt
+                        .name
+                        .as_ref()
+                        .map(|ident| bytes_to_str(ident.value()))
+                        .filter(|s| !s.is_empty());
                     Self::extract_defines_from_statements(
-                        namespace.statements().iter(),
+                        ns_stmt.statements().iter(),
                         defines,
                         content,
+                        inner.or(namespace),
                     );
                 }
                 Statement::Block(block) => {
@@ -630,10 +646,11 @@ impl Backend {
                         block.statements.iter(),
                         defines,
                         content,
+                        namespace,
                     );
                 }
                 Statement::If(if_stmt) => {
-                    Self::extract_defines_from_if_body(&if_stmt.body, defines, content);
+                    Self::extract_defines_from_if_body(&if_stmt.body, defines, content, namespace);
                 }
                 Statement::Class(class) => {
                     for member in class.members.iter() {
@@ -644,6 +661,7 @@ impl Backend {
                                 body.statements.iter(),
                                 defines,
                                 content,
+                                namespace,
                             );
                         }
                     }
@@ -657,6 +675,7 @@ impl Backend {
                                 body.statements.iter(),
                                 defines,
                                 content,
+                                namespace,
                             );
                         }
                     }
@@ -670,6 +689,7 @@ impl Backend {
                                 body.statements.iter(),
                                 defines,
                                 content,
+                                namespace,
                             );
                         }
                     }
@@ -679,6 +699,7 @@ impl Backend {
                         func.body.statements.iter(),
                         defines,
                         content,
+                        namespace,
                     );
                 }
                 _ => {}
@@ -692,6 +713,7 @@ impl Backend {
         body: &'a IfBody<'a>,
         defines: &mut Vec<(String, u32, Option<String>)>,
         content: &str,
+        namespace: Option<&str>,
     ) {
         match body {
             IfBody::Statement(body) => {
@@ -699,12 +721,14 @@ impl Backend {
                     std::iter::once(body.statement),
                     defines,
                     content,
+                    namespace,
                 );
                 for else_if in body.else_if_clauses.iter() {
                     Self::extract_defines_from_statements(
                         std::iter::once(else_if.statement),
                         defines,
                         content,
+                        namespace,
                     );
                 }
                 if let Some(else_clause) = &body.else_clause {
@@ -712,16 +736,23 @@ impl Backend {
                         std::iter::once(else_clause.statement),
                         defines,
                         content,
+                        namespace,
                     );
                 }
             }
             IfBody::ColonDelimited(body) => {
-                Self::extract_defines_from_statements(body.statements.iter(), defines, content);
+                Self::extract_defines_from_statements(
+                    body.statements.iter(),
+                    defines,
+                    content,
+                    namespace,
+                );
                 for else_if in body.else_if_clauses.iter() {
                     Self::extract_defines_from_statements(
                         else_if.statements.iter(),
                         defines,
                         content,
+                        namespace,
                     );
                 }
                 if let Some(else_clause) = &body.else_clause {
@@ -729,6 +760,7 @@ impl Backend {
                         else_clause.statements.iter(),
                         defines,
                         content,
+                        namespace,
                     );
                 }
             }

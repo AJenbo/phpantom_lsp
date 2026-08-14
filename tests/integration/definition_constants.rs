@@ -1057,3 +1057,90 @@ async fn test_goto_definition_constant_inside_namespace_class_method() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+/// A namespaced `const` is indexed under its fully-qualified name, and
+/// every spelling of a reference to it navigates to the declaration.
+#[tokio::test]
+async fn test_goto_definition_namespaced_constant_every_spelling() {
+    let text = concat!(
+        "<?php\n",                          // 0
+        "namespace App\\Config;\n",         // 1
+        "\n",                               // 2
+        "const GRADES = ['a'];\n",          // 3
+        "\n",                               // 4
+        "namespace App;\n",                 // 5
+        "\n",                               // 6
+        "use App\\Config;\n",               // 7
+        "use const App\\Config\\GRADES;\n", // 8
+        "\n",                               // 9
+        "$a = GRADES;\n",                   // 10
+        "$b = Config\\GRADES;\n",           // 11
+        "$c = \\App\\Config\\GRADES;\n",    // 12
+    );
+
+    for (line, character, spelling) in [
+        (10, 6, "GRADES"),
+        (11, 14, "Config\\GRADES"),
+        (12, 19, "\\App\\Config\\GRADES"),
+    ] {
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///ns_const.php").unwrap();
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .await;
+
+        let result = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position { line, character },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+
+        match result {
+            Some(GotoDefinitionResponse::Scalar(location)) => assert_eq!(
+                location.range.start.line, 3,
+                "`{spelling}` should land on the declaration"
+            ),
+            other => panic!("`{spelling}` did not resolve: {other:?}"),
+        }
+    }
+}
+
+/// The declaration is indexed fully-qualified, so a bare name that no
+/// namespace declares still finds the global constant.
+#[tokio::test]
+async fn test_namespaced_const_is_indexed_fully_qualified() {
+    let backend = create_test_backend();
+    let uri = "file:///ns_const_index.php";
+    let content =
+        "<?php\nnamespace App\\Config;\n\nconst GRADES = ['a'];\ndefine('APP_KEY', 'k');\n";
+    backend.update_ast(uri, content);
+
+    let dmap = backend.global_defines().read();
+    assert!(
+        dmap.contains_key("App\\Config\\GRADES"),
+        "a namespaced const is indexed fully-qualified; got {:?}",
+        dmap.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !dmap.contains_key("GRADES"),
+        "and not additionally under its short name"
+    );
+    assert!(
+        dmap.contains_key("APP_KEY"),
+        "a define() names a global constant wherever it sits; got {:?}",
+        dmap.keys().collect::<Vec<_>>()
+    );
+}

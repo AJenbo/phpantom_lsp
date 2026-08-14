@@ -61,7 +61,7 @@ impl Backend {
         let _parse_guard = with_parse_cache(content);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader();
+        let constant_loader_cl = self.constant_loader(&file_ctx);
         let default_class = ClassInfo::default();
 
         let issues: Vec<MatchArmIssue> =

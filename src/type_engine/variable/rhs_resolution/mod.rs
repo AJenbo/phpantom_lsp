@@ -45,7 +45,7 @@ use crate::parser::extract_hint_type;
 use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
 use crate::types::{ClassInfo, ResolvedType};
 
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::type_resolution;
 use crate::util::strip_fqn_prefix;
 
@@ -218,7 +218,7 @@ fn resolve_var_types(
         cursor_offset,
         ctx.class_loader,
         ctx.backend,
-        Loaders::with_function(ctx.function_loader()),
+        ctx.loaders,
     )
 }
 
@@ -1070,7 +1070,7 @@ fn resolve_rhs_expression_inner<'b>(
                 }
                 _ => {}
             }
-            if let Some(maybe_value) = ctx.lookup_constant(name_clean)
+            if let Some(maybe_value) = ctx.lookup_constant(&name, ca.name.span().start.offset)
                 && let Some(ref value) = maybe_value
                 && let Some(ts) = infer_type_from_constant_value(value).or_else(|| {
                     crate::type_engine::call_resolution::folded_global_constant_type(

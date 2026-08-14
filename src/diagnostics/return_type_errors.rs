@@ -170,7 +170,7 @@ impl Backend {
 
         let class_loader = self.class_loader(&file_ctx);
         let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader();
+        let constant_loader_cl = self.constant_loader(&file_ctx);
 
         // Walk the AST, find return statements in method/function
         // bodies, resolve their types, and pair them with the declared
@@ -383,7 +383,7 @@ fn process_top_level_statement(
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
-    constant_loader: &dyn Fn(&str) -> Option<Option<String>>,
+    constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
 ) {
@@ -593,7 +593,7 @@ fn process_class_member(
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
-    constant_loader: &dyn Fn(&str) -> Option<Option<String>>,
+    constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
 ) {

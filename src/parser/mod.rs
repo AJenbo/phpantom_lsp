@@ -1386,11 +1386,17 @@ impl Backend {
     /// Returns a list of `(name, offset, value)` tuples for every
     /// `define('NAME', value)` call or `const NAME = value;` statement
     /// found at the top level, inside namespace blocks, block statements,
-    /// or `if` guards.
+    /// or `if` guards.  A `const` is named fully-qualified, a `define()`
+    /// exactly as it was written.
     pub fn parse_defines(&self, content: &str) -> Vec<(String, u32, Option<String>)> {
         with_parsed_program(content, "parse_defines", |program, content| {
             let mut defines = Vec::new();
-            Self::extract_defines_from_statements(program.statements.iter(), &mut defines, content);
+            Self::extract_defines_from_statements(
+                program.statements.iter(),
+                &mut defines,
+                content,
+                None,
+            );
             defines
         })
     }

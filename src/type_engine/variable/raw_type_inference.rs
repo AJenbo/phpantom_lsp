@@ -351,7 +351,7 @@ fn infer_element_type<'b>(
                 ctx.all_classes,
                 ctx.class_loader,
                 ctx.backend,
-                crate::type_engine::resolver::Loaders::with_function(ctx.function_loader()),
+                ctx.loaders,
             )
         }
         // ── Parenthesized ──

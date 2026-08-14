@@ -404,7 +404,12 @@ impl Backend {
         {
             let dmap = self.symbols.global_defines.read();
             for (name, info) in dmap.iter() {
-                let tier = match match_tier(name, &query_lower) {
+                // A namespaced `const` is indexed fully-qualified, so the
+                // query has to be matched against its last segment too —
+                // users search for `GRADES`, not `App\Config\GRADES`.
+                let tier = match match_tier(name, &query_lower)
+                    .or_else(|| match_tier(short_name(name), &query_lower))
+                {
                     Some(t) => t,
                     None => continue,
                 };
@@ -596,7 +601,7 @@ fn make_constant_symbol(name: &str, info: &DefineInfo, pos: Position) -> SymbolI
                 .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
             range: Range::new(pos, pos),
         },
-        container_name: None,
+        container_name: namespace_from_fqn(name),
     }
 }
 

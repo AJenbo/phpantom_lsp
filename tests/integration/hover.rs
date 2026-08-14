@@ -14663,3 +14663,40 @@ function probe(): void {
         "the proxy branch carries the argument's type too: {proxy}"
     );
 }
+
+/// Hovering a namespaced constant shows its value through every spelling
+/// a reference can use, not only the bare one.
+#[test]
+fn hover_namespaced_constant_through_every_spelling() {
+    let backend = create_test_backend();
+    let uri = "file:///hover_ns_const.php";
+    let content = concat!(
+        "<?php\n",                          // 0
+        "namespace App\\Config;\n",         // 1
+        "\n",                               // 2
+        "const GRADES = ['a'];\n",          // 3
+        "\n",                               // 4
+        "namespace App;\n",                 // 5
+        "\n",                               // 6
+        "use App\\Config;\n",               // 7
+        "use const App\\Config\\GRADES;\n", // 8
+        "\n",                               // 9
+        "$a = GRADES;\n",                   // 10
+        "$b = Config\\GRADES;\n",           // 11
+        "$c = \\App\\Config\\GRADES;\n",    // 12
+    );
+
+    for (line, character, spelling) in [
+        (10, 6, "GRADES"),
+        (11, 14, "Config\\GRADES"),
+        (12, 19, "\\App\\Config\\GRADES"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, character)
+            .unwrap_or_else(|| panic!("no hover for `{spelling}`"));
+        let text = hover_text(&hover).to_string();
+        assert!(
+            text.contains("['a']"),
+            "`{spelling}` should show the constant's value; got {text}"
+        );
+    }
+}

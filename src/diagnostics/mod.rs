@@ -361,7 +361,7 @@ impl Backend {
         if let Some(ctx) = &file_ctx {
             let class_loader = self.class_loader(&ctx.file);
             let function_loader_cl = self.function_loader(&ctx.file);
-            let constant_loader_cl = self.constant_loader();
+            let constant_loader_cl = self.constant_loader(&ctx.file);
             let config_resolver = |key: &str| self.resolve_config_type(key);
             let trans_resolver = |key: &str| self.resolve_trans_type(key);
             let loaders = crate::type_engine::resolver::Loaders {

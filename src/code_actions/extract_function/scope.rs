@@ -27,7 +27,7 @@ pub(crate) fn resolve_var_type(
     let ctx = backend.file_context(uri);
     let class_loader = backend.class_loader(&ctx);
     let function_loader = backend.function_loader(&ctx);
-    let constant_loader = backend.constant_loader();
+    let constant_loader = backend.constant_loader(&ctx);
     let config_resolver = |key: &str| backend.resolve_config_type(key);
     let trans_resolver = |key: &str| backend.resolve_trans_type(key);
     let loaders = Loaders {

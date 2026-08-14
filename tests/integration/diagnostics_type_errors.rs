@@ -10118,3 +10118,33 @@ function consume(): void {
         "nullable by-ref param without a default should stay nullable: {diags:?}"
     );
 }
+
+/// A `key-of<CONSTANT>` operand is resolved against the file's import
+/// table and read as an absolute name, not only as a bare one.
+#[test]
+fn key_of_over_an_imported_constant_types_the_parameter() {
+    for operand in ["TABLE", "\\App\\ID_TABLE"] {
+        let php = format!(
+            r#"<?php
+namespace App;
+
+const ID_TABLE = ['immutable' => 1, 'mutable' => 'two'];
+
+use const App\ID_TABLE as TABLE;
+
+function takesInt(int $x): void {{}}
+
+/** @param key-of<{operand}> $key */
+function acceptsKey(string $key): void {{
+    takesInt($key);
+}}
+"#
+        );
+        let messages = type_error_messages(&collect(&php));
+        assert_eq!(messages.len(), 1, "`{operand}`: got {messages:?}");
+        assert!(
+            messages[0].contains("'immutable'|'mutable'"),
+            "`{operand}`: {messages:?}"
+        );
+    }
+}

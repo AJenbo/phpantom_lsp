@@ -484,7 +484,16 @@ impl Backend {
             }
 
             SymbolKind::ConstantReference { name } => {
-                let lookup = self.lookup_global_constant(name);
+                // The name is resolved against the file the same way the
+                // type engine resolves it, so a namespaced constant is
+                // found through whichever spelling the reference used.
+                let lookup = self.resolve_constant_name_at(
+                    name,
+                    ctx.resolved_names.as_deref(),
+                    symbol.start,
+                    &ctx.use_map,
+                    &ctx.namespace,
+                );
 
                 // `lookup` is `Some(Some(val))` when the constant
                 // exists with a known value, `Some(None)` when it

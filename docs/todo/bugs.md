@@ -18,7 +18,28 @@ per-project inventory. Entries filed later say where they came from.
 
 ## Crashes
 
-No outstanding items.
+### B159. Inferring a method's return type panics on a multi-byte file
+
+**Impact: Medium · Effort: Low**
+
+`infer_body_return_type` (`type_engine/call_resolution/target_cache.rs`)
+slices `content[..offset]` with the method's recorded `name_offset`. When
+that offset does not land on a character boundary of the content it read
+back — the file changed, or the URI resolved to a different file than the
+one the offset was recorded against — the slice panics rather than
+returning `None`, and the panic aborts the diagnostic worker for the whole
+file. The bounds check above it only compares against `content.len()`, so
+any file with multi-byte characters can hit it:
+
+```
+panicked at type_engine/call_resolution/target_cache.rs:246:
+end byte index 245419 is not a char boundary; it is inside '─'
+```
+
+Counting the newlines before the offset does not need a slice at all, so
+the fix is to count over the bytes and drop the panicking index. Found
+while working on constant resolution, by pointing `analyze` at a
+directory of unrelated files.
 
 ## Type comparison
 
@@ -30,41 +51,35 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B158. A namespaced constant is only found under its bare name
+### B160. A second `namespace` block silences the argument-type check
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Medium-High · Effort: Low-Medium**
 
-`extract_defines_from_statements` (`parser/functions.rs`) registers a
-namespace-level `const` under the name as written, dropping the
-namespace it sits in, so `Demo\Scaffolding\GRADES` is stored as
-`GRADES`. Every reference that names the namespace therefore finds
-nothing, while the bare reference finds it:
+A file with two `namespace` blocks reports no argument type mismatches at
+all. The same code in a single-namespace file reports them:
 
 ```php
+<?php
+namespace App\Other;
+
+class Marker {}
+
 namespace App;
 
-use App\Config;
-use const App\Config\GRADES;
+function takesInt(int $x): void {}
 
-in_array($g, GRADES, true);          // resolved
-in_array($g, Config\GRADES, true);   // not resolved
-in_array($g, \App\Config\GRADES, true); // not resolved
+function plain(string $key): void {
+    takesInt($key);      // not reported; reported without the first block
+}
 ```
 
-The value is what the narrowing, hover and completion paths read, so a
-qualified reference silently loses whatever the constant proves. It is
-visible in `examples/php/completion.php`, where the `in_array($grade,
-Scaffolding\GRADES, true)` gate cannot narrow the `?string` away and the
-return is reported as a mismatch — the demo is right and the resolution
-is not.
-
-Storing the fully-qualified name is only half of it: a bare reference
-has to keep resolving, which in PHP means trying the current namespace
-first and the global one after, and a qualified one has to go through
-the file's `use` table the way a class name does. The function index
-made the same choice deliberately (see the comment about short-name
-collisions in `parser/ast_update.rs`), so follow it rather than adding a
-short-name fallback entry.
+`FileContext::namespace` is built from the *first* namespace span in the
+file (`file_context` in `backend/file_access.rs`), so every name in the
+second block is resolved against the wrong namespace and the called
+function is never found. `resolve_function_name_at` already takes an
+offset and consults `resolved_names` for exactly this case, so the
+diagnostic collectors need to resolve per call site rather than per file.
+Found while writing tests for namespaced constant resolution.
 
 ## Array types
 

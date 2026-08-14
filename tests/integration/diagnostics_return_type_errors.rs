@@ -3858,3 +3858,65 @@ function counted(string $text, int $format): int { return words($text, $format);
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("list<string>"), "{messages:?}");
 }
+
+/// A namespaced `const` list narrows a needle through every spelling a
+/// reference can use: bare, through an imported namespace, and fully
+/// qualified.  The gate proves `$grade` is one of the table's literals, so
+/// the `?string` the parameter allowed is gone by the `return`.
+#[test]
+fn a_namespaced_constant_list_narrows_through_every_spelling() {
+    for haystack in [
+        "GRADES",
+        "Config\\GRADES",
+        "\\App\\Config\\GRADES",
+        "namespace\\Config\\GRADES",
+    ] {
+        let php = format!(
+            r#"<?php
+namespace App\Config;
+
+const GRADES = ['a', 'b', 'c'];
+
+namespace App;
+
+use App\Config;
+use const App\Config\GRADES;
+
+function gate(?string $grade): string {{
+    if (!in_array($grade, {haystack}, true)) {{
+        throw new \RuntimeException('unknown grade');
+    }}
+    return $grade;
+}}
+"#
+        );
+        assert!(
+            !has_return_error(&collect(&php)),
+            "`{haystack}` should narrow `$grade` to its literals; got: {}",
+            return_error_messages(&collect(&php)).join("; ")
+        );
+    }
+}
+
+/// The global fallback still applies: an unqualified name that the current
+/// namespace does not declare means the global constant of that name.
+#[test]
+fn an_unqualified_constant_falls_back_to_the_global_one() {
+    let php = r#"<?php
+const GRADES = ['a', 'b', 'c'];
+
+namespace App;
+
+function gate(?string $grade): string {
+    if (!in_array($grade, GRADES, true)) {
+        throw new \RuntimeException('unknown grade');
+    }
+    return $grade;
+}
+"#;
+    assert!(
+        !has_return_error(&collect(php)),
+        "a bare name should fall back to the global constant; got: {}",
+        return_error_messages(&collect(php)).join("; ")
+    );
+}

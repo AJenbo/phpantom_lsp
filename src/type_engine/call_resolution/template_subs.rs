@@ -736,11 +736,13 @@ impl Backend {
         //
         // A bare identifier that isn't a keyword, a `::class`/enum/const
         // access (handled above and below), or any other special form is a
-        // global constant reference.  Consult the constant loader (derived
-        // from the attached `Backend`, the same source `VarResolutionCtx`
-        // draws from) and infer the type from its value, mirroring the
+        // global constant reference.  Ask the attached `Backend` (the same
+        // source `VarResolutionCtx`'s constant loader draws from) and infer
+        // the type from its value, mirroring the
         // `Expression::ConstantAccess` branch the AST-based RHS resolver
-        // already has for a plain `$x = PHP_EOL;` assignment.
+        // already has for a plain `$x = PHP_EOL;` assignment.  This path
+        // takes expression *text*, with no offset to resolve a namespaced
+        // name against, so only the name as written is tried.
         if !trimmed.is_empty()
             && !trimmed.starts_with('$')
             && !trimmed.contains("::")
@@ -753,7 +755,7 @@ impl Backend {
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
             && let Some(backend) = ctx.backend
-            && let Some(Some(value)) = backend.constant_loader()(trimmed)
+            && let Some(Some(value)) = backend.lookup_global_constant(trimmed)
             && let Some(ty) =
                 crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(&value)
                     .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
@@ -1251,21 +1253,64 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
             );
             merged.get_constant(const_name)?.value.clone()?
         }
-        // `resolve_names` qualifies a bare docblock name against the file's
-        // namespace, since almost every bare name in a type position is a
-        // class. A namespace-level `const` is indexed under its short name,
-        // so both spellings have to be tried.
-        None => {
-            let backend = ctx.backend?;
-            let short = crate::util::short_name(name);
-            backend.lookup_indexed_global_constant(name).or_else(|| {
-                (short != name)
-                    .then(|| backend.lookup_indexed_global_constant(short))
-                    .flatten()
-            })?
-        }
+        // The name may arrive in either spelling: some paths hand over what
+        // `resolve_names` already qualified against the file's namespace,
+        // since almost every bare name in a type position is a class, while
+        // the ones that resolve names through the class loader alone leave a
+        // constant bare.
+        None => resolve_operand_constant_value(name, ctx)?,
     };
     array_literal_shape_type(&value, ctx)
+}
+
+/// The initializer text of the constant a type operand names, or `None`
+/// when no spelling of it is indexed.
+///
+/// A constant is indexed under its fully-qualified name, so the enclosing
+/// namespace is tried first for a bare operand, then the name as written,
+/// then the global constant of that short name the way PHP itself falls
+/// back, and finally the file's `use const` imports.
+///
+/// Only the indexed lookup is used, never the one that ends by parsing
+/// every autoload file: an operand is as often a template parameter as a
+/// constant, and a miss must not charge the whole autoload set.
+fn resolve_operand_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option<String> {
+    let backend = ctx.backend?;
+    // An absolute name names exactly one constant, with no namespace or
+    // import in play.
+    if let Some(absolute) = name.strip_prefix('\\') {
+        return backend.lookup_indexed_global_constant(absolute);
+    }
+    let short = crate::util::short_name(name);
+    if short == name
+        && let Some(value) = ctx
+            .current_class
+            .and_then(|c| c.file_namespace.as_ref())
+            .and_then(|ns| backend.lookup_indexed_global_constant(&format!("{ns}\\{name}")))
+    {
+        return Some(value);
+    }
+    if let Some(value) = backend.lookup_indexed_global_constant(name) {
+        return Some(value);
+    }
+    if short != name
+        && let Some(value) = backend.lookup_indexed_global_constant(short)
+    {
+        return Some(value);
+    }
+    // Last: a `use const` import, which is the one spelling neither the
+    // enclosing namespace nor the global scope accounts for.  The file's
+    // import table is read from the source here because a type operand
+    // carries no offset to resolve against, and it is read only once
+    // every cheaper candidate has missed — a docblock naming an imported
+    // constant is rare, and the walk runs over the already-parsed AST.
+    let use_map = backend.parse_use_statements(ctx.content);
+
+    let imported = match name.split_once('\\') {
+        Some((first, rest)) => use_map.get(first).map(|fqn| format!("{fqn}\\{rest}")),
+        None => use_map.get(name).cloned(),
+    }?;
+    backend.lookup_indexed_global_constant(&imported)
 }
 
 /// The substitution map that resolves every constant operand a set of types

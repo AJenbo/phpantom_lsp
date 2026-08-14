@@ -69,11 +69,15 @@ impl Backend {
             let dmap = self.symbols.global_defines.read();
             for (name, info) in dmap.iter() {
                 if info.file_uri == uri && info.name_offset > 0 {
+                    // A namespaced `const` is indexed fully-qualified, but
+                    // the source only spells its last segment, so the range
+                    // has to be measured against that.
+                    let short = crate::util::short_name(name);
                     let pos = idx.position(info.name_offset as usize);
-                    let name_end = idx.position(info.name_offset as usize + name.len());
+                    let name_end = idx.position(info.name_offset as usize + short.len());
                     let range = Range::new(pos, name_end);
                     symbols.push(DocumentSymbol {
-                        name: name.clone(),
+                        name: short.to_string(),
                         detail: info.value.clone(),
                         kind: SymbolKind::CONSTANT,
                         tags: None,
