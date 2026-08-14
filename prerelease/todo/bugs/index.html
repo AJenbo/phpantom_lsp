@@ -983,45 +983,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#laravel" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Laravel
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#miscellaneous" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Miscellaneous
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b173-classes-shipped-inside-a-dependencys-phar-are-invisible" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B173. Classes shipped inside a dependency's phar are invisible
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1645,45 +1606,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#laravel" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Laravel
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#miscellaneous" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Miscellaneous
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b173-classes-shipped-inside-a-dependencys-phar-are-invisible" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B173. Classes shipped inside a dependency's phar are invisible
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1864,17 +1786,6 @@ and comparison spellings (<code>if ($user)</code>, <code>if (!($user === null))<
 operand rather than folded, so the inner <code>!</code> re-negates a proof the
 outer one had already inverted. Found while confirming the Blade
 <code>@include</code> narrowing, not from a sample-project site.</p>
-<h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
-<h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b173-classes-shipped-inside-a-dependencys-phar-are-invisible">B173. Classes shipped inside a dependency's phar are invisible<a class="headerlink" href="#b173-classes-shipped-inside-a-dependencys-phar-are-invisible" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>A project extending PHPStan (<code>vendor/phpstan/phpstan</code> ships
-<code>phpstan.phar</code> + stub headers) gets <code>mixed</code> for every
-<code>PHPStan\Type\*</code> value, cascading into downstream false positives
-(1 site — a custom extension calling <code>getConstantStrings()</code>). Check
-what the package's <code>bootstrap.php</code> exposes and whether indexing the
-phar (or its extracted stubs) is feasible.</p>
 
 
 
