@@ -875,23 +875,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B152. <code>array_filter</code> with <code>ARRAY_FILTER_USE_KEY</code> does not narrow the key type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1409,23 +1392,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B152. <code>array_filter</code> with <code>ARRAY_FILTER_USE_KEY</code> does not narrow the key type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1512,20 +1478,7 @@ change of the two, since a <code>?T</code> argument is common, so it may be wort
 narrowing it first (keep the hatch only where the null could plausibly
 have been guarded out) rather than removing it outright.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type">B152. <code>array_filter</code> with <code>ARRAY_FILTER_USE_KEY</code> does not narrow the key type<a class="headerlink" href="#b152-array_filter-with-array_filter_use_key-does-not-narrow-the-key-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @return array&lt;string&gt; $data */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$data = array_filter($data, fn (string|int $k): bool =&gt; is_string($k), ARRAY_FILTER_USE_KEY);</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$data = $this-&gt;viewData($view) + $data;    // reported: array&lt;string|int, string&gt;</span>
-</code></pre></div>
-<p><code>array_filter</code> preserves its input type verbatim, so the callback's
-proof about the keys is dropped. That is invisible on its own, but the
-key type surfaces the moment the result is merged with <code>+</code> or passed to
-a parameter declared <code>array&lt;string, …&gt;</code> (2 sites in Bladestan). The
-<code>ARRAY_FILTER_USE_BOTH</code> mode has the same gap for the key half.</p>
-<p><strong>Fix:</strong> read the callback's assertions about its key parameter (the
-same reconciliation an <code>if (is_string($k))</code> body already gets) and
-rebuild the result's key type from what survives.</p>
+<p>No outstanding items.</p>
 
 
 
