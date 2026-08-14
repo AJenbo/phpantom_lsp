@@ -4536,3 +4536,196 @@ async fn rename_namespace_returns_none_when_a_file_is_stale() {
     assert!(result.contains("App\\New\\Foo"), "{result}");
     assert!(!result.contains("App\\Old"), "{result}");
 }
+
+// ─── Function imports and aliases ───────────────────────────────────────────
+
+#[tokio::test]
+async fn rename_function_rewrites_only_the_last_segment_of_an_import() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/import.php").unwrap();
+    let text = "<?php
+namespace Foo;
+
+function bar(): void {}
+
+namespace App;
+
+use function Foo\\bar;
+
+bar();
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "function bar(): void");
+    let edit = rename(&backend, &uri, line, character + 9, "baz")
+        .await
+        .expect("a function declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("use function Foo\\baz;"),
+        "the import keeps the namespace it names the function under, got: {result}"
+    );
+    assert!(
+        result.contains("function baz(): void"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("baz();"),
+        "an unaliased call takes the new name, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_function_leaves_an_explicit_alias_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/alias.php").unwrap();
+    let text = "<?php
+namespace Foo;
+
+function bar(): void {}
+
+namespace App;
+
+use function Foo\\bar as quux;
+
+quux();
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "function bar(): void");
+    let edit = rename(&backend, &uri, line, character + 9, "baz")
+        .await
+        .expect("a function declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("use function Foo\\baz as quux;"),
+        "the import target moves to the new name, the alias does not, got: {result}"
+    );
+    assert!(
+        result.contains("quux();"),
+        "the alias still names the function, so its call sites must not move, got: {result}"
+    );
+    assert!(
+        !result.contains("baz();"),
+        "rewriting the aliased call would break a file that compiles, got: {result}"
+    );
+}
+
+// ─── Constant imports and declarations ──────────────────────────────────────
+
+#[tokio::test]
+async fn rename_global_constant_reaches_its_import_and_uses() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const.php").unwrap();
+    let text = "<?php
+namespace Foo;
+
+const BAR = 1;
+
+namespace App;
+
+use const Foo\\BAR;
+
+echo BAR;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "const BAR = 1;");
+    let edit = rename(&backend, &uri, line, character + 6, "QUX")
+        .await
+        .expect("a global constant declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("const QUX = 1;"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("use const Foo\\QUX;"),
+        "the import keeps the namespace it names the constant under, got: {result}"
+    );
+    assert!(
+        result.contains("echo QUX;"),
+        "a use of the constant takes the new name, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_constant_leaves_an_explicit_alias_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const_alias.php").unwrap();
+    let text = "<?php
+namespace Foo;
+
+const BAR = 1;
+
+namespace App;
+
+use const Foo\\BAR as QUUX;
+
+echo QUUX;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "const BAR = 1;");
+    let edit = rename(&backend, &uri, line, character + 6, "QUX")
+        .await
+        .expect("a global constant declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("use const Foo\\QUX as QUUX;"),
+        "the import target moves to the new name, the alias does not, got: {result}"
+    );
+    assert!(
+        result.contains("echo QUUX;"),
+        "the alias still names the constant, so its uses must not move, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn constant_references_agree_from_the_import_and_from_a_use() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const_refs.php").unwrap();
+    let text = "<?php
+namespace Foo;
+
+const BAR = 1;
+
+namespace App;
+
+use const Foo\\BAR;
+
+echo BAR;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let from_import = {
+        let (line, character) = line_char_of(text, "use const Foo\\BAR;");
+        rename(&backend, &uri, line, character + 14, "QUX")
+            .await
+            .map(|e| apply_edits(text, &edits_for_uri(&e, &uri)))
+    };
+    let from_use = {
+        let (line, character) = line_char_of(text, "echo BAR;");
+        rename(&backend, &uri, line, character + 5, "QUX")
+            .await
+            .map(|e| apply_edits(text, &edits_for_uri(&e, &uri)))
+    };
+
+    assert_eq!(
+        from_import, from_use,
+        "the import and a use name one constant, so both must rewrite the same places"
+    );
+    assert!(
+        from_use.is_some_and(|r| r.contains("const QUX = 1;")),
+        "either starting point must reach the declaration"
+    );
+}

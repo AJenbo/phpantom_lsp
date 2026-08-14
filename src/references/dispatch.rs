@@ -277,7 +277,12 @@ impl Backend {
                 self.find_function_references(&fqn, name, include_declaration)
             }
             SymbolKind::ConstantReference { name } => {
-                self.find_constant_references(name, include_declaration)
+                let fqn = self.constant_fqn_at(uri, span_start, name);
+                self.find_constant_references(
+                    &fqn,
+                    crate::util::short_name(name),
+                    include_declaration,
+                )
             }
             SymbolKind::MemberDeclaration { name, is_static } => {
                 // A constructor declaration's "references" are the

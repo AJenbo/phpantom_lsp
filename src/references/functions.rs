@@ -141,22 +141,36 @@ impl Backend {
     /// Find all references to a constant across all files.
     pub(super) fn find_constant_references(
         &self,
-        target_name: &str,
+        target_fqn: &str,
+        target_short: &str,
         include_declaration: bool,
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
-        let snapshot =
-            self.user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::Constant(
-                target_name.to_string(),
-            )]);
+        // Input boundary: callers may pass FQNs with a leading `\`.
+        let target = strip_fqn_prefix(target_fqn);
+
+        let candidate_keys = constant_candidate_keys(target, target_short);
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
 
         for (file_uri, symbol_map) in &snapshot {
-            // First pass: name-only check.
+            // An import names the constant qualified and a use of it
+            // names it plainly, so the span text alone cannot decide
+            // whether this file matches -- the resolved name can.
+            let resolved_names = self.resolved_names.read().get(file_uri).cloned();
+            let constant_matches = |name: &str, offset: u32| -> bool {
+                let resolved = resolved_names
+                    .as_ref()
+                    .and_then(|rn| rn.get(offset))
+                    .map(strip_fqn_prefix)
+                    .unwrap_or(strip_fqn_prefix(name));
+                resolved == target || crate::util::short_name(resolved) == target_short
+            };
+
             let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
-                SymbolKind::ConstantReference { name } => name == target_name,
+                SymbolKind::ConstantReference { name } => constant_matches(name, span.start),
                 SymbolKind::MemberDeclaration { name, is_static }
-                    if include_declaration && name == target_name && *is_static =>
+                    if include_declaration && name == target_short && *is_static =>
                 {
                     true
                 }
@@ -176,9 +190,9 @@ impl Backend {
 
             for span in &symbol_map.spans {
                 let matched = match &span.kind {
-                    SymbolKind::ConstantReference { name } => name == target_name,
+                    SymbolKind::ConstantReference { name } => constant_matches(name, span.start),
                     SymbolKind::MemberDeclaration { name, is_static }
-                        if include_declaration && name == target_name && *is_static =>
+                        if include_declaration && name == target_short && *is_static =>
                     {
                         true
                     }

@@ -248,6 +248,13 @@ pub(super) fn function_candidate_keys(target: &str, target_short: &str) -> Vec<R
         .collect()
 }
 
+pub(super) fn constant_candidate_keys(target: &str, target_short: &str) -> Vec<ReferenceIndexKey> {
+    symbol_candidate_names(target, target_short)
+        .into_iter()
+        .map(ReferenceIndexKey::Constant)
+        .collect()
+}
+
 fn symbol_candidate_names(target: &str, target_short: &str) -> Vec<String> {
     let mut keys = vec![
         strip_fqn_prefix(target).to_string(),
