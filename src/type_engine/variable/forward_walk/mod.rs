@@ -160,6 +160,14 @@ pub(crate) fn walk_body_forward<'b>(
                         apply_cursor_ternary_narrowing(while_stmt.condition, scope, ctx);
                     }
                 }
+                Statement::DoWhile(dw) => {
+                    let cond_span = dw.condition.span();
+                    if ctx.cursor_offset >= cond_span.start.offset
+                        && ctx.cursor_offset <= cond_span.end.offset
+                    {
+                        apply_cursor_ternary_narrowing(dw.condition, scope, ctx);
+                    }
+                }
                 // A `for` header holds a comma-separated condition list, so
                 // each entry needs its own containment check.
                 Statement::For(for_stmt) => {

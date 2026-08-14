@@ -100,15 +100,10 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                         for condition in expr_arm.conditions.iter() {
                             apply_condition_narrowing(condition, &mut arm_scope, ctx);
                         }
-                        record_scope_snapshot(expr_arm.expression.span().start.offset, &arm_scope);
-                        record_scope_snapshot_recursive(expr_arm.expression, &arm_scope);
-                        // Recurse into the arm body for nested patterns.
-                        record_match_ternary_snapshots(expr_arm.expression, &arm_scope, ctx);
+                        record_branch_snapshots(expr_arm.expression, &arm_scope, ctx);
                     }
                     MatchArm::Default(def_arm) => {
-                        record_scope_snapshot(def_arm.expression.span().start.offset, scope);
-                        record_scope_snapshot_recursive(def_arm.expression, scope);
-                        record_match_ternary_snapshots(def_arm.expression, scope, ctx);
+                        record_branch_snapshots(def_arm.expression, scope, ctx);
                     }
                 }
             }
@@ -123,16 +118,12 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
             if let Some(then_expr) = conditional.then {
                 let mut then_scope = scope.clone();
                 apply_condition_narrowing(conditional.condition, &mut then_scope, ctx);
-                record_scope_snapshot(then_expr.span().start.offset, &then_scope);
-                record_scope_snapshot_recursive(then_expr, &then_scope);
-                record_match_ternary_snapshots(then_expr, &then_scope, ctx);
+                record_branch_snapshots(then_expr, &then_scope, ctx);
             }
 
             let mut else_scope = scope.clone();
             apply_condition_narrowing_inverse(conditional.condition, &mut else_scope, ctx);
-            record_scope_snapshot(conditional.r#else.span().start.offset, &else_scope);
-            record_scope_snapshot_recursive(conditional.r#else, &else_scope);
-            record_match_ternary_snapshots(conditional.r#else, &else_scope, ctx);
+            record_branch_snapshots(conditional.r#else, &else_scope, ctx);
         }
         Expression::Assignment(assignment) => {
             record_match_ternary_snapshots(assignment.rhs, scope, ctx);
@@ -209,16 +200,36 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                     (Some(var), MatchArm::Expression(expr_arm)) => {
                         let mut arm_scope = scope.clone();
                         apply_class_match_arm_narrowing(var, expr_arm, &mut arm_scope, ctx);
-                        record_scope_snapshot(arm_expr.span().start.offset, &arm_scope);
-                        record_scope_snapshot_recursive(arm_expr, &arm_scope);
-                        record_match_ternary_snapshots(arm_expr, &arm_scope, ctx);
+                        record_branch_snapshots(arm_expr, &arm_scope, ctx);
                     }
-                    _ => record_match_ternary_snapshots(arm_expr, scope, ctx),
+                    _ => record_branch_snapshots(arm_expr, scope, ctx),
                 }
             }
         }
         _ => {}
     }
+}
+
+/// Record every snapshot a branch body needs, given the scope that body
+/// runs under.
+///
+/// A match arm and a ternary branch are expression positions with their
+/// own scope, and everything an expression statement gets has to reach
+/// them: the scope at the branch offset, the same scope at each nested
+/// offset inside it, the intra-`&&`/`||` refinements the branch's own
+/// chain makes about its operands, and the nested branches below it.
+/// The chain recorders come last so their finer snapshots overwrite the
+/// flat ones at the offsets both cover.
+fn record_branch_snapshots<'b>(
+    expr: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    record_scope_snapshot(expr.span().start.offset, scope);
+    record_scope_snapshot_recursive(expr, scope);
+    record_and_chain_snapshots(expr, scope, ctx);
+    record_or_chain_snapshots(expr, scope, ctx);
+    record_match_ternary_snapshots(expr, scope, ctx);
 }
 
 /// Record intermediate scope snapshots within `&&` chains.

@@ -1418,9 +1418,14 @@ pub(crate) fn process_assignment_expr<'b>(
         // The key contains `->`, so it is treated as a synthetic
         // narrowing entry and stripped at loop boundaries — matching the
         // conservative behaviour of condition-based property narrowing.
+        // A static property (`self::$repo = …`) is recorded the same way:
+        // it is a member path with a declared type, and the lazy-init
+        // idiom writes it in exactly the shape this branch handles.
         if matches!(
             assignment.lhs,
-            Expression::Access(Access::Property(_) | Access::NullSafeProperty(_))
+            Expression::Access(
+                Access::Property(_) | Access::NullSafeProperty(_) | Access::StaticProperty(_)
+            )
         ) {
             // Skip when the cursor is inside the RHS so that lookups
             // within the RHS see the pre-assignment state.

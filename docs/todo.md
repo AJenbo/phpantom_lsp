@@ -99,11 +99,6 @@ unlikely to move the needle for most users.
 | D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B158 | [A namespaced constant is only found under its bare name](todo/bugs.md#b158-a-namespaced-constant-is-only-found-under-its-bare-name)                                        | Medium-High | Medium      |
-| B153 | [Static properties get no flow tracking at all](todo/bugs.md#b153-static-properties-get-no-flow-tracking-at-all)                                                            | Medium-High | Medium      |
-| B154 | [An assignment inside a `try` block is lost after the block](todo/bugs.md#b154-an-assignment-inside-a-try-block-is-lost-after-the-block)                                    | Medium      | Low-Medium  |
-| B155 | [A `&&` chain inside a `match` arm does not narrow its own operands](todo/bugs.md#b155-a--chain-inside-a-match-arm-does-not-narrow-its-own-operands)                        | Medium      | Low-Medium  |
-| B156 | [`$x === Enum::Case` does not remove null from `$x`](todo/bugs.md#b156-x--enumcase-does-not-remove-null-from-x)                                                            | Medium      | Low         |
-| B157 | [A `do`/`while` condition does not narrow its own operands](todo/bugs.md#b157-a-dowhile-condition-does-not-narrow-its-own-operands)                                        | Low-Medium  | Low-Medium  |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

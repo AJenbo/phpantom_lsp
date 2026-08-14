@@ -2186,6 +2186,11 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         refine_non_empty_in_scope(&var_name, empty, scope);
     }
+    // `$x === Land::Be` — the subject holds whatever the constant holds,
+    // so a constant that cannot be null leaves no null in the subject.
+    if let Some((var_name, constant)) = extract_class_constant_identity(condition, true) {
+        strip_null_by_constant_identity(&var_name, constant, scope, ctx);
+    }
     // `!empty($x)` — truthy branch means $x is non-empty (truthy):
     // strip null and false from the type.
     if let Some(var_name) = extract_not_empty_var(condition) {
@@ -2265,6 +2270,12 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some(var_name) = extract_non_false_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_false_in_scope(&var_name, scope);
+    }
+    // When the condition is `$x !== Land::Be`, the inverse (else/guard)
+    // means the subject is that constant, so it holds whatever the
+    // constant holds.
+    if let Some((var_name, constant)) = extract_class_constant_identity(condition, false) {
+        strip_null_by_constant_identity(&var_name, constant, scope, ctx);
     }
     // When the condition is `$x === ''` / `$x === []`, the inverse
     // (else/guard) means $x is non-empty.
@@ -2515,6 +2526,91 @@ pub(crate) fn extract_null_equality_check_var(expr: &Expression<'_>) -> Option<S
             None
         }
         _ => None,
+    }
+}
+
+/// Extract the subject of an identity comparison against a class
+/// constant, paired with the constant expression itself.
+///
+/// `proves_equal` selects which polarity the caller is narrowing: `true`
+/// for the branch where the subject *is* the constant (the truthy side of
+/// `$x === C`, the guard fall-through of `$x !== C`), `false` for the
+/// branch where it is not.
+///
+/// An enum case is the case that matters — `$land === Land::Be` is how
+/// enum code is written — but every class constant carries the same
+/// proof, so the constant's own type decides what the comparison rules
+/// out rather than the syntax.
+fn extract_class_constant_identity<'b>(
+    expr: &'b Expression<'b>,
+    proves_equal: bool,
+) -> Option<(String, &'b Expression<'b>)> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let Expression::Binary(bin) = inner else {
+        return None;
+    };
+    let identical = match bin.operator {
+        BinaryOperator::Identical(_) => true,
+        BinaryOperator::NotIdentical(_) => false,
+        _ => return None,
+    };
+    // Whether "subject is the constant" is what holds when the written
+    // condition is true; the caller says which of the two branches it is
+    // narrowing.
+    if (identical != negated) != proves_equal {
+        return None;
+    }
+    for (candidate, other) in [(bin.rhs, bin.lhs), (bin.lhs, bin.rhs)] {
+        if !matches!(candidate, Expression::Access(Access::ClassConstant(_))) {
+            continue;
+        }
+        if let Some(name) =
+            expr_to_var_name(other).or_else(|| narrowing::expr_to_subject_key(other))
+        {
+            return Some((name, candidate));
+        }
+    }
+    None
+}
+
+/// Strip `null` from `var_name` when the constant it was proven identical
+/// to cannot be null.
+///
+/// Identity is only ever true between two values of the same type, so a
+/// constant that holds no null leaves none in the subject. A constant
+/// that does — `const NONE = null;`, or one whose type we cannot read —
+/// proves nothing and is left alone.
+fn strip_null_by_constant_identity(
+    var_name: &str,
+    constant: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if scope.get(var_name).is_empty() {
+        seed_synthetic_key_if_needed(var_name, scope, ctx);
+        if scope.get(var_name).is_empty() {
+            return;
+        }
+    }
+    let constant_types = super::assignment::resolve_rhs_with_scope(constant, scope, ctx);
+    if constant_types.is_empty() {
+        return;
+    }
+    if constant_types
+        .iter()
+        .any(|rt| type_admits_null(&rt.type_string))
+    {
+        return;
+    }
+    strip_null_from_scope(var_name, scope);
+}
+
+/// Whether a type has a `null` among the values it describes.
+fn type_admits_null(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Nullable(_) => true,
+        TypeKind::Union(members) => members.iter().any(type_admits_null),
+        _ => ty.is_null() || ty.is_mixed(),
     }
 }
 
@@ -3209,7 +3305,7 @@ pub(crate) fn collect_condition_subject_vars(expr: &Expression<'_>, out: &mut Ve
 /// (`$this->cache`, `$row["id"]`, `mb_strpos($s, $m)`) rather than a
 /// plain variable.
 pub(crate) fn is_synthetic_key(key: &str) -> bool {
-    key.contains("->") || key.contains("[\"") || narrowing::is_call_key(key)
+    narrowing::is_member_path_key(key) || narrowing::is_call_key(key)
 }
 
 /// Remove synthetic property/array access keys from the scope.
@@ -3254,8 +3350,9 @@ pub(crate) fn seed_synthetic_key_if_needed(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Only seed compound keys (property access or array access).
-    if !key.contains("->") && !key.contains("[\"") {
+    // Only seed compound keys (property access, array access, or a
+    // static property).
+    if !narrowing::is_member_path_key(key) {
         return;
     }
     // A call key that carries arguments cannot be re-resolved from its
@@ -3293,9 +3390,70 @@ fn resolve_synthetic_key_type(
         resolve_array_key_type(key, scope, ctx)
     } else if key.contains("->") {
         resolve_member_key_type(key, scope, ctx)
+    } else if let Some((class_key, prop_name)) = split_static_property_key(key) {
+        resolve_static_property_key_type(class_key, prop_name, ctx)
     } else {
         scope.get(key).to_vec()
     }
+}
+
+/// Split `self::$repo` into the class side (`self`) and the property name
+/// (`repo`), or `None` when the key is not a static property path.
+///
+/// Only the trailing segment counts, so `self::$repo->name` (a property
+/// read *through* a static property) is not one: it is a member path whose
+/// base happens to be static, and `resolve_member_key_type` splits it.
+fn split_static_property_key(key: &str) -> Option<(&str, &str)> {
+    let pos = key.rfind("::$")?;
+    let prop = &key[pos + 3..];
+    if prop.is_empty() || prop.contains(|c: char| !(c.is_alphanumeric() || c == '_')) {
+        return None;
+    }
+    Some((&key[..pos], prop))
+}
+
+/// Resolve what a static property's declaration promises.
+///
+/// `self`/`static` name the class the walk is inside; anything else is a
+/// written class name resolved through the same path a type hint takes,
+/// so an imported short name resolves like it does everywhere else.
+fn resolve_static_property_key_type(
+    class_key: &str,
+    prop_name: &str,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    let class_name = match class_key {
+        "self" | "static" => ctx.current_class.name.to_string(),
+        "parent" => match ctx.current_class.parent_class {
+            Some(parent) => parent.to_string(),
+            None => return Vec::new(),
+        },
+        other => other.to_string(),
+    };
+    let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &PhpType::named(crate::atom::atom(&class_name)),
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    for owner in &owners {
+        let Some(hint) =
+            crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
+        else {
+            continue;
+        };
+        let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &hint,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        return match resolved.is_empty() {
+            true => vec![ResolvedType::from_type_string(hint)],
+            false => ResolvedType::from_classes_with_hint(resolved, hint),
+        };
+    }
+    Vec::new()
 }
 
 /// Resolve the element type an array-access key promises (`$a["k"]`,
@@ -3400,7 +3558,7 @@ pub(crate) fn seed_assert_arg_subject_keys(
             Argument::Named(named) => named.value,
         };
         if let Some(key) = narrowing::expr_to_subject_key(arg_expr)
-            && (key.contains("->") || key.contains("[\""))
+            && narrowing::is_member_path_key(&key)
         {
             seed_synthetic_key_if_needed(&key, scope, ctx);
         }
@@ -3425,7 +3583,7 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
         // instanceof: `$a->foo instanceof Foo` or `$row["page"] instanceof Foo`
         Expression::Binary(bin) if bin.operator.is_instanceof() => {
             if let Some(key) = narrowing::expr_to_subject_key(bin.lhs)
-                && (key.contains("->") || key.contains("[\""))
+                && narrowing::is_member_path_key(&key)
                 && !keys.contains(&key)
             {
                 keys.push(key);
@@ -3488,7 +3646,7 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
                         Argument::Named(named) => named.value,
                     };
                     if let Some(key) = narrowing::expr_to_subject_key(arg_expr)
-                        && (key.contains("->") || key.contains("[\""))
+                        && narrowing::is_member_path_key(&key)
                         && !keys.contains(&key)
                     {
                         keys.push(key);
@@ -3643,7 +3801,7 @@ fn resolve_member_key_type(
     // number of segments in the key.
     let resolved_prefix;
     let obj_types: &[ResolvedType] = match scope.get(obj_var) {
-        [] if obj_var.contains("->") || obj_var.ends_with("\"]") => {
+        [] if narrowing::is_member_path_key(obj_var) => {
             resolved_prefix = resolve_synthetic_key_type(obj_var, scope, ctx);
             &resolved_prefix
         }

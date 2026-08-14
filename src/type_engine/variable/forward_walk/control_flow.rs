@@ -1978,6 +1978,14 @@ pub(crate) fn process_for<'b>(
         }
     }
 
+    // A condition clause narrows its own operands the way an `if`
+    // condition does: `for (; $n && $n->next(); )` reaches `$n->next()`
+    // only with `$n` non-null.
+    for cond_expr in for_stmt.conditions.iter() {
+        record_and_chain_snapshots(cond_expr, scope, ctx);
+        record_or_chain_snapshots(cond_expr, scope, ctx);
+    }
+
     let pre_loop_scope = scope.clone();
 
     // The body executes when the conditions are truthy, so apply condition
@@ -2164,6 +2172,12 @@ pub(crate) fn process_do_while<'b>(
     );
     let exits = pop_exit_frame();
 
+    // The condition runs after the body, so its own `&&`/`||` narrowing
+    // is recorded against the scope the body leaves behind: that is where
+    // `do { $n = next(); } while ($n && $n->ok());` reads `$n` from.
+    record_and_chain_snapshots(dw.condition, scope, ctx);
+    record_or_chain_snapshots(dw.condition, scope, ctx);
+
     // After the do-while loop, the condition evaluated to false (that's
     // why the loop exited).  Apply the inverse of the condition to narrow
     // types.  For example: `do { $a = getA(); } while ($a !== null);`
@@ -2264,6 +2278,13 @@ pub(crate) fn process_try<'b>(
             }
         }
         walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);
+        // A catch that rethrows or returns never reaches the statement
+        // after the `try`, so the state it leaves must not be merged in:
+        // that is what puts the pre-try type of a variable the try body
+        // assigned back into the join.
+        if branch_exits_stmts(catch.block.statements.iter(), &catch_scope, ctx) {
+            continue;
+        }
         all_scopes.push(catch_scope);
     }
 

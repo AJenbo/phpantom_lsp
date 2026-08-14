@@ -86,6 +86,17 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
                 None
             }
         }
+        // `self::$repo`, `static::$repo`, `Foo::$repo` — keyed under the
+        // class as the source names it.  Two spellings of the same
+        // storage (`self::$x` in `Foo` and `Foo::$x`) get different keys,
+        // which costs a narrowing but never claims a wrong one.
+        Expression::Access(Access::StaticProperty(sp)) => {
+            let class = static_class_key(sp.class)?;
+            let Variable::Direct(dv) = &sp.property else {
+                return None;
+            };
+            Some(format!("{}::{}", class, bytes_to_str(dv.name)))
+        }
         Expression::ArrayAccess(aa) => {
             let base = expr_to_subject_key(aa.array)?;
             let key = array_access_key_as_string(aa)?;
@@ -162,19 +173,29 @@ pub(in crate::type_engine) fn is_call_key_with_arguments(key: &str) -> bool {
     is_call_key(key) && !key.ends_with("()")
 }
 
+/// Whether a scope key names a path through a member rather than a bare
+/// variable: `$a->b`, `$a["k"]`, `self::$b`.
+///
+/// These are the keys the walker seeds and strips as *narrowing* rather
+/// than tracking as locals, so every gate that asks "is this a compound
+/// subject?" has to agree on the answer.
+pub(in crate::type_engine) fn is_member_path_key(key: &str) -> bool {
+    key.contains("->") || key.contains("[\"") || key.contains("::$")
+}
+
 /// Whether `key` reads `var_name`, so that writing to the variable makes
 /// whatever was tracked for the key stale.
 ///
-/// A key rooted at the variable (`$row->id`, `$row["k"]`) is caught by a
-/// prefix test; a call key mentions its inputs anywhere inside the
-/// argument list (`findPos($slug, $marker)`), so those are matched on a
-/// token boundary — `$slug` must not match `$slugger`.
+/// A key rooted at the variable (`$row->id`, `$row["k"]`, `$cls::$id`) is
+/// caught by a prefix test; a call key mentions its inputs anywhere inside
+/// the argument list (`findPos($slug, $marker)`), so those are matched on
+/// a token boundary — `$slug` must not match `$slugger`.
 pub(in crate::type_engine) fn key_reads_variable(key: &str, var_name: &str) -> bool {
     if var_name.is_empty() {
         return false;
     }
     if let Some(rest) = key.strip_prefix(var_name)
-        && (rest.starts_with("->") || rest.starts_with('['))
+        && (rest.starts_with("->") || rest.starts_with('[') || rest.starts_with("::"))
     {
         return true;
     }

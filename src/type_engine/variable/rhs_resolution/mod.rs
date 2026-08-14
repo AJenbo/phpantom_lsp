@@ -874,9 +874,12 @@ fn resolve_rhs_expression_inner<'b>(
         Expression::Access(access) => {
             // Check if the scope has a narrowed type for this property
             // access (e.g. `$a->foo` narrowed through if/elseif
-            // conditions, or assigned inside a guarded `if`).
+            // conditions, or assigned inside a guarded `if`).  A static
+            // property (`self::$repo`) is read the same way: the walker
+            // records writes and checks under its own key, and reading
+            // straight from the declaration is what loses them.
             if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
-                && key.contains("->")
+                && (key.contains("->") || key.contains("::$"))
                 && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {
                 return from_scope;
