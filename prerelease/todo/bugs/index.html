@@ -1188,6 +1188,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b177-a-property-tag-name-is-highlighted-as-a-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B177. A <code>@property</code> tag name is highlighted as a method
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2021,6 +2032,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b177-a-property-tag-name-is-highlighted-as-a-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B177. A <code>@property</code> tag name is highlighted as a method
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2437,6 +2459,29 @@ scope.</p>
 (1 site — a custom extension calling <code>getConstantStrings()</code>). Check
 what the package's <code>bootstrap.php</code> exposes and whether indexing the
 phar (or its extracted stubs) is feasible.</p>
+<h3 id="b177-a-property-tag-name-is-highlighted-as-a-method">B177. A <code>@property</code> tag name is highlighted as a method<a class="headerlink" href="#b177-a-property-tag-name-is-highlighted-as-a-method" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Low</strong></p>
+<p>The member name in a <code>@property</code> tag emits the <code>method</code> semantic
+token, while the same name emits <code>property</code> everywhere it is used:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/**</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x"> * @property string $displayName    &lt;- `displayName` highlights as a method</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x"> * @method string shout(string $x)  &lt;- correct</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x"> */</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">class Demo</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">{</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">    public function demo(): string</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">    {</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">        return $this-&gt;displayName;  // highlights as a property, as it should</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="x">    }</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="x">}</span>
+</code></pre></div>
+<p>Both tags produce a <code>MemberDeclaration</code> span, and
+<code>classify_member_declaration</code> looks the name up in the enclosing
+class's own members. A tag-declared member is not there, so both fall
+through to the <code>TT_METHOD</code> default. Classify the declaration from the
+tag that produced it (or from the resolved virtual members) instead of
+the fallback. <code>SemanticMagicMemberDemo</code> in
+<code>examples/php/semantic_tokens.php</code> shows the case.</p>
 
 
 
