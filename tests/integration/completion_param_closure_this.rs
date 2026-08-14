@@ -815,6 +815,97 @@ async fn test_param_closure_this_outer_closure_assigned_to_variable() {
     );
 }
 
+// ─── Narrowing on top of a rebound `$this` ──────────────────────────────────
+
+/// `@param-closure-this` states what the closure is *bound* to, so a
+/// narrowing proof inside the body still refines it.  A Pest suite writes
+/// `assert($this instanceof AppTestCase)` as the closure's first line to
+/// name the subclass `pest()->extends(…)` actually binds, which no
+/// expression in the test file says; the members that subclass adds must
+/// resolve from there rather than from the declared base.
+#[tokio::test]
+async fn assert_instanceof_narrows_a_rebound_this_to_the_subclass() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_narrowed.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class TestCase {\n",
+        "    public function assertTrue(bool $c): void {}\n",
+        "}\n",
+        "class AppTestCase extends TestCase {\n",
+        "    public function visitPage(string $url): void {}\n",
+        "}\n",
+        "/**\n",
+        " * @param-closure-this TestCase $callback\n",
+        " */\n",
+        "function test(string $description, \\Closure $callback): void {}\n",
+        "test('it works', function () {\n",
+        "    assert($this instanceof AppTestCase);\n",
+        "    $this->\n",
+        "});\n",
+    );
+
+    // Line 13: `    $this->` — cursor after `->`
+    let items = complete_at(&backend, &uri, src, 13, 11).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"visitPage"),
+        "Expected 'visitPage' from the asserted AppTestCase subclass, got: {:?}",
+        names,
+    );
+    assert!(
+        names.contains(&"assertTrue"),
+        "Expected 'assertTrue' inherited from the declared TestCase, got: {:?}",
+        names,
+    );
+}
+
+/// The scope's `$this` only wins when it is strictly narrower than the
+/// declared binding.  Inside a closure nested in a method of an unrelated
+/// class, the walker carries the lexically captured `$this`, which is
+/// exactly what the tag is there to replace.
+#[tokio::test]
+async fn a_captured_this_does_not_override_the_declared_binding() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_captured.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Inner {\n",
+        "    public function innerOnly(): void {}\n",
+        "}\n",
+        "class Outer {\n",
+        "    /**\n",
+        "     * @param-closure-this Inner $callback\n",
+        "     */\n",
+        "    public function withInner(\\Closure $callback): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function appOnly(): void {}\n",
+        "    public function boot(Outer $outer): void {\n",
+        "        $outer->withInner(function () {\n",
+        "            $this->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 14: `            $this->` — cursor after `->`
+    let items = complete_at(&backend, &uri, src, 14, 19).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"innerOnly"),
+        "Expected 'innerOnly' from @param-closure-this Inner, got: {:?}",
+        names,
+    );
+    assert!(
+        !names.contains(&"appOnly"),
+        "The lexically captured App must not survive the rebinding, got: {:?}",
+        names,
+    );
+}
+
 // ─── Docblock parsing unit tests ────────────────────────────────────────────
 
 #[test]

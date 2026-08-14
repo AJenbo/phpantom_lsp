@@ -3903,6 +3903,15 @@ class ParamClosureThisDemo
             $this->getDefaultDriver();    // resolves Router::getDefaultDriver()
         });
 
+        // The tag names the base class, so an assertion is how a closure
+        // body says which subclass it was actually bound to. Narrowing
+        // refines the tag rather than being overruled by it.
+        $router->apiGroup(function () {
+            assert($this instanceof Scaffolding\ScaffoldingClosureThisApiRoute);
+            $this->version('v2');         // resolves ApiRoute::version()
+            $this->prefix('/api');        // still resolves Route::prefix()
+        });
+
         // Macro-style registration: the closure is bound with the target
         // class as its scope, so self:: and static:: inside it refer to
         // Scaffolding\ScaffoldingMacroTarget, not ParamClosureThisDemo.

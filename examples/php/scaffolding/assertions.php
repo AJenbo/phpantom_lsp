@@ -1321,6 +1321,15 @@ function runDemoAssertions(): void
     });
     assert($ctInner instanceof Scaffolding\ScaffoldingClosureThisResource, 'nested @param-closure-this must bind $this to the innermost declared type');
 
+    // A tag that declares the base class may bind a subclass, which is why
+    // asserting inside the closure body is worth anything.
+    $ctApi = null;
+    $ctRouter->apiGroup(function () use (&$ctApi) {
+        assert($this instanceof Scaffolding\ScaffoldingClosureThisApiRoute);
+        $ctApi = $this->version('v2');
+    });
+    assert($ctApi instanceof Scaffolding\ScaffoldingClosureThisApiRoute, 'apiGroup() must bind $this to the subclass its tag cannot name');
+
     // Macro-style scope binding: self::/static:: inside a registered
     // closure refer to the macro target class at runtime.
     Scaffolding\ScaffoldingMacroTarget::macro('renderTwice', function (): string {

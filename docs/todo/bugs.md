@@ -136,21 +136,6 @@ constant shapes satisfy their generic supertypes.
 
 ## Narrowing
 
-### B174. `assert($this instanceof X)` does not narrow `$this`
-
-**Impact: Medium-High · Effort: Low-Medium**
-
-A Pest test closure is bound to whatever `pest()->extends(…)` names,
-which no expression in the test file says, so the suites write
-`assert($this instanceof TestCase);` as the first line of the closure
-to tell an analyser what it is bound to. The assertion is ignored for
-`$this` (it narrows an ordinary variable), so every helper the base
-class provides is reported `unknown_member` against Pest's default
-`PHPUnit\Framework\TestCase` — ~21 sites in one project's browser
-suite alone. Narrowing `$this` the way any other subject is narrowed
-clears them; reading `pest()->extends(…)->in(…)` to bind the closure
-in the first place would clear them without the assertion.
-
 ### B175. A call's recorded check survives a statement that could change what it returns
 
 **Impact: Medium · Effort: Medium**

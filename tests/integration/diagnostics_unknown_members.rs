@@ -12651,3 +12651,75 @@ class Factory
         "write() is declared on App\\Support\\Pen, got: {diags:?}"
     );
 }
+
+/// `assert($this instanceof Sub)` proves `$this` is the subclass for the
+/// rest of the method, so the members `Sub` adds resolve there the way
+/// they do for any other narrowed subject.
+#[test]
+fn assert_instanceof_narrows_this_to_a_subclass() {
+    let backend = create_test_backend();
+    let uri = "file:///this_instanceof.php";
+    let text = r#"<?php
+namespace App;
+
+class Base
+{
+    public function shared(): void {}
+}
+
+class Sub extends Base
+{
+    public function extra(): void {}
+}
+
+class Host extends Base
+{
+    public function narrowed(): void
+    {
+        assert($this instanceof Sub);
+        $this->extra();
+        $this->shared();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "extra() is declared on the asserted Sub, got: {diags:?}"
+    );
+}
+
+/// Without the assertion the same call is still reported: narrowing
+/// `$this` must not become a blanket excuse for unresolved members.
+#[test]
+fn an_unasserted_subclass_member_on_this_is_still_reported() {
+    let backend = create_test_backend();
+    let uri = "file:///this_no_assert.php";
+    let text = r#"<?php
+namespace App;
+
+class Base
+{
+    public function shared(): void {}
+}
+
+class Sub extends Base
+{
+    public function extra(): void {}
+}
+
+class Host extends Base
+{
+    public function plain(): void
+    {
+        $this->extra();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "extra() is not declared on Host, got: {diags:?}"
+    );
+}

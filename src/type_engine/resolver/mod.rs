@@ -285,19 +285,11 @@ fn resolve_target_classes_expr_inner(
     match expr {
         // ── Keywords that always mean "current class" ────────────
         SubjectExpr::This => {
+            use crate::type_engine::variable::forward_walk;
+
             // `$this` is not available inside static methods.
             if current_class.is_some() && ctx.is_in_static_method {
                 return vec![];
-            }
-
-            // Check for `@param-closure-this` override: when the cursor
-            // is inside a closure passed as an argument to a function
-            // whose parameter carries `@param-closure-this`, resolve
-            // `$this` to the declared type instead of the lexical class.
-            if let Some(override_cls) =
-                super::variable::closure_resolution::find_closure_this_override(ctx)
-            {
-                return vec![ResolvedType::from_class(override_cls)];
             }
 
             // Consult the forward-walk scope for a narrowed or seeded
@@ -310,7 +302,37 @@ fn resolve_target_classes_expr_inner(
             //     a regular method body.
             // When the scope yields nothing, fall back to the lexical
             // `current_class` below.
-            let mut this_types = if let Some(scope_types) = resolve_this_from_scope(ctx) {
+            let from_scope = resolve_this_from_scope(ctx);
+
+            // `@param-closure-this` override: when the cursor is inside a
+            // closure passed as an argument to a function whose parameter
+            // carries the tag, `$this` is the declared type rather than the
+            // lexical class.  The tag states what the closure is *bound* to,
+            // so a narrowing proof inside the body still refines it — a
+            // `assert($this instanceof AppTestCase)` in a Pest closure whose
+            // `test()` parameter declares `@param-closure-this TestCase`
+            // means `$this` is the subclass.  The scope only wins when it is
+            // strictly narrower; otherwise it holds the lexically captured
+            // `$this` the tag is there to replace.
+            if let Some(override_cls) =
+                super::variable::closure_resolution::find_closure_this_override(ctx)
+            {
+                let narrowed = from_scope.filter(|types| {
+                    !types.is_empty()
+                        && types.iter().all(|rt| {
+                            rt.class_info.as_ref().is_some_and(|ci| {
+                                forward_walk::is_subclass_of(
+                                    &ci.fqn(),
+                                    &override_cls.fqn(),
+                                    class_loader,
+                                )
+                            })
+                        })
+                });
+                return narrowed.unwrap_or_else(|| vec![ResolvedType::from_class(override_cls)]);
+            }
+
+            let mut this_types = if let Some(scope_types) = from_scope {
                 scope_types
             } else {
                 current_class
@@ -1302,8 +1324,12 @@ fn check_unresolvable_class_name(
 /// This consults the injected `scope_var_resolver` first (used while the
 /// forward walker resolves an assignment RHS), then the diagnostic scope
 /// snapshot cache (used by the member-verification path after the scope
-/// has been built).  Returns `None` when neither yields a type so the
-/// caller falls back to `current_class`.
+/// has been built), and finally runs the walker itself for the consumers
+/// that have neither — hover, completion and go-to-definition each answer
+/// a single request, so the one body walk `$this` costs there is the same
+/// walk any other variable subject in the chain already pays for.
+/// Returns `None` when nothing yields a type so the caller falls back to
+/// `current_class`.
 fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>> {
     use crate::type_engine::variable::forward_walk;
 
@@ -1312,15 +1338,35 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
         return (!from_scope.is_empty()).then_some(from_scope);
     }
 
-    if forward_walk::is_diagnostic_scope_active()
-        && !forward_walk::is_building_scopes()
-        && let Some(from_scope) = forward_walk::lookup_diagnostic_scope("$this", ctx.cursor_offset)
-        && !from_scope.is_empty()
-    {
-        return Some(from_scope);
+    if forward_walk::is_diagnostic_scope_active() && !forward_walk::is_building_scopes() {
+        // The snapshot is authoritative here: the walker records `$this`
+        // exactly when something narrowed or seeded it, so a miss means
+        // there is no proof to find and re-walking would only repeat the
+        // pass that built the snapshot, once per `$this->` site.
+        return forward_walk::lookup_diagnostic_scope("$this", ctx.cursor_offset)
+            .filter(|types| !types.is_empty());
     }
 
-    None
+    let dummy_class;
+    let effective_class = match ctx.current_class {
+        Some(cc) => cc,
+        None => {
+            dummy_class =
+                crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
+            &dummy_class
+        }
+    };
+    let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
+        "$this",
+        effective_class,
+        ctx.all_classes,
+        ctx.content,
+        ctx.cursor_offset,
+        ctx.class_loader,
+        ctx.backend,
+        Loaders::with_function(ctx.function_loader),
+    );
+    (!resolved.is_empty()).then_some(resolved)
 }
 
 /// Builds a cache-key discriminator from the resolved types of the local

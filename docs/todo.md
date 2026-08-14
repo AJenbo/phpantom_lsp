@@ -27,7 +27,6 @@ within the same impact tier.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 | B144 | [`preg_match` `$matches` is shapeless](todo/bugs.md#b144-preg_match-matches-is-shapeless) (depends on B147)                                | Medium-High | Medium      |
-| B174 | [`assert($this instanceof X)` does not narrow `$this`](todo/bugs.md#b174-assertthis-instanceof-x-does-not-narrow-this)                                     | Medium-High | Low-Medium  |
 | B143 | [A constant built from another constant does not fold to its value](todo/bugs.md#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value) | Medium | Medium |
 | B176 | [`iterable` is not a type guard](todo/bugs.md#b176-iterable-is-not-a-type-guard)                                                                          | Low-Medium  | Low-Medium  |
 | B175 | [A call's recorded check survives a statement that could change what it returns](todo/bugs.md#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns) | Medium | Medium |

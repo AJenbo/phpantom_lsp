@@ -921,6 +921,13 @@ class ScaffoldingClosureThisResource
     public function only(string $action): self { return $this; }
 }
 
+// A subclass the tag on `apiGroup()` cannot name, standing in for the base
+// class a Pest suite's `pest()->extends(…)` binds.
+class ScaffoldingClosureThisApiRoute extends ScaffoldingClosureThisRoute
+{
+    public function version(string $v): self { return $this; }
+}
+
 class ScaffoldingClosureThisRouter
 {
     public function getDefaultDriver(): string { return ''; }
@@ -931,6 +938,19 @@ class ScaffoldingClosureThisRouter
     public function group(\Closure $callback): void
     {
         $callback->call(new ScaffoldingClosureThisRoute());
+    }
+
+    /**
+     * Declares the base class but binds a subclass, the way Pest's `test()`
+     * declares `PHPUnit\Framework\TestCase` and binds whatever
+     * `pest()->extends(…)` names.  A closure body says which one it got by
+     * asserting it.
+     *
+     * @param-closure-this ScaffoldingClosureThisRoute $callback
+     */
+    public function apiGroup(\Closure $callback): void
+    {
+        $callback->call(new ScaffoldingClosureThisApiRoute());
     }
 
     /**
