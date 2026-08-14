@@ -61,7 +61,10 @@ pub(crate) fn resolve_class_names_to_union(
 /// - `$var` → `"$var"`
 /// - `$this->prop` → `"$this->prop"`
 /// - `$this?->prop` → `"$this->prop"` (null-safe normalised)
-/// - `$this->get()` → `"$this->get()"` (argument-less calls only)
+/// - `$this->get()` → `"$this->get()"`
+/// - `$this->option('from')` → `"$this->option('from')"`
+/// - `mb_strpos($s, $m)` → `"mb_strpos($s,$m)"`
+/// - `Carbon::parse($s)` → `"Carbon::parse($s)"`
 ///
 /// Returns `None` for expressions that are not supported as narrowing subjects.
 pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Option<String> {
@@ -88,18 +91,46 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
             let key = array_access_key_as_string(aa)?;
             Some(format!("{}[\"{}\"]", base, key))
         }
-        // A method call taking no arguments: `$kernel->getHttpKernel()`.
-        // Checking one call and using another is the idiom the check is
-        // written for (`if ($h->get() instanceof Foo) { $h->get()->m(); }`),
-        // so the two occurrences share a key.  Calls that take arguments
-        // stay unkeyed: matching them means comparing whole argument
-        // expressions, and an argument is a hint that the call does
-        // something rather than just handing back state.
-        Expression::Call(Call::Method(mc)) if mc.argument_list.arguments.is_empty() => {
-            method_call_key(mc.object, &mc.method)
+        // A call keyed under its own written form: checking one call and
+        // using another is the idiom the check is written for
+        // (`if ($h->get() instanceof Foo) { $h->get()->m(); }`,
+        // `if (mb_strpos($s, $m) !== false) { mb_substr($s, 0,
+        // mb_strpos($s, $m)); }`), so the two occurrences share a key.
+        // The arguments are part of the key, and each of them has to be a
+        // subject in its own right — a call whose argument is itself a
+        // statement (an assignment, an increment) is not the same call
+        // twice.
+        Expression::Call(Call::Method(mc)) => {
+            method_call_key(mc.object, &mc.method, &mc.argument_list)
         }
-        Expression::Call(Call::NullSafeMethod(mc)) if mc.argument_list.arguments.is_empty() => {
-            method_call_key(mc.object, &mc.method)
+        Expression::Call(Call::NullSafeMethod(mc)) => {
+            method_call_key(mc.object, &mc.method, &mc.argument_list)
+        }
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let class = static_class_key(sc.class)?;
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return None;
+            };
+            let args = argument_list_key(&sc.argument_list)?;
+            Some(format!(
+                "{}::{}({})",
+                class,
+                bytes_to_str(ident.value),
+                args
+            ))
+        }
+        Expression::Call(Call::Function(fc)) => {
+            let Expression::Identifier(ident) = fc.function else {
+                return None;
+            };
+            let name = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
+            if !is_deterministic_function(name) {
+                return None;
+            }
+            let args = argument_list_key(&fc.argument_list)?;
+            // PHP function names are case-insensitive, so `STRPOS(...)` and
+            // `strpos(...)` are the same call.
+            Some(format!("{}({})", name.to_ascii_lowercase(), args))
         }
         // See through parentheses so `($x instanceof Foo)` and grouped
         // subjects resolve to the same key as the bare form.
@@ -111,20 +142,257 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
     }
 }
 
-/// Build the subject key for an argument-less method call, matching the
-/// `$obj->method()` text form the resolver's subject keys use.
+/// Whether a scope key names a call rather than a variable or a
+/// property/array path.
+///
+/// Every call key ends in the closing parenthesis of its argument list,
+/// which no other key shape does.
+pub(in crate::type_engine) fn is_call_key(key: &str) -> bool {
+    key.ends_with(')')
+}
+
+/// Whether a call key carries arguments (`$this->option('from')`) rather
+/// than being the argument-less form (`$this->get()`).
+///
+/// The two are seeded into the forward walker's scope by different
+/// routes: an argument-less call key is re-resolved from the key text,
+/// while an argument-carrying one is resolved from the expression it was
+/// built from.
+pub(in crate::type_engine) fn is_call_key_with_arguments(key: &str) -> bool {
+    is_call_key(key) && !key.ends_with("()")
+}
+
+/// Whether `key` reads `var_name`, so that writing to the variable makes
+/// whatever was tracked for the key stale.
+///
+/// A key rooted at the variable (`$row->id`, `$row["k"]`) is caught by a
+/// prefix test; a call key mentions its inputs anywhere inside the
+/// argument list (`findPos($slug, $marker)`), so those are matched on a
+/// token boundary — `$slug` must not match `$slugger`.
+pub(in crate::type_engine) fn key_reads_variable(key: &str, var_name: &str) -> bool {
+    if var_name.is_empty() {
+        return false;
+    }
+    if let Some(rest) = key.strip_prefix(var_name)
+        && (rest.starts_with("->") || rest.starts_with('['))
+    {
+        return true;
+    }
+    if !is_call_key(key) {
+        return false;
+    }
+    let mut rest = key;
+    while let Some(pos) = rest.find(var_name) {
+        rest = &rest[pos + var_name.len()..];
+        if !rest.starts_with(is_name_char) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether `c` can continue a PHP identifier, so `$slug` is not found
+/// inside `$slugger`.
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()
+}
+
+/// Build the subject key for a method call, matching the
+/// `$obj->method(args)` text form the resolver's subject keys use.
 fn method_call_key(
     object: &Expression<'_>,
     method: &ClassLikeMemberSelector<'_>,
+    argument_list: &ArgumentList<'_>,
 ) -> Option<String> {
     let obj = expr_to_subject_key(object)?;
-    match method {
-        ClassLikeMemberSelector::Identifier(ident) => {
-            Some(format!("{}->{}()", obj, bytes_to_str(ident.value)))
+    let ClassLikeMemberSelector::Identifier(ident) = method else {
+        return None;
+    };
+    let args = argument_list_key(argument_list)?;
+    Some(format!("{}->{}({})", obj, bytes_to_str(ident.value), args))
+}
+
+/// The key for the class side of a static call: a written class name, one
+/// of the class keywords, or an expression that is a subject in its own
+/// right (`$class::make(…)`).
+fn static_class_key(class: &Expression<'_>) -> Option<String> {
+    match class {
+        Expression::Identifier(ident) => {
+            Some(crate::util::strip_fqn_prefix(bytes_to_str(ident.value())).to_string())
         }
-        _ => None,
+        Expression::Self_(_) => Some("self".to_string()),
+        Expression::Static(_) => Some("static".to_string()),
+        Expression::Parent(_) => Some("parent".to_string()),
+        other => expr_to_subject_key(other),
     }
 }
+
+/// Render an argument list into the comma-separated form a call key uses,
+/// or `None` when any argument is not something two occurrences of the
+/// call can be compared on.
+fn argument_list_key(argument_list: &ArgumentList<'_>) -> Option<String> {
+    let mut out = String::new();
+    for (index, argument) in argument_list.arguments.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        match argument {
+            Argument::Positional(positional) => {
+                // `f(...$args)` spreads an array of unknown length, so the
+                // written form does not say what the call receives.
+                positional.ellipsis.is_none().then_some(())?;
+                out.push_str(&argument_value_key(positional.value)?);
+            }
+            Argument::Named(named) => {
+                out.push_str(bytes_to_str(named.name.value));
+                out.push(':');
+                out.push_str(&argument_value_key(named.value)?);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Render one argument value, or `None` when it is not deterministic.
+///
+/// Literals and constants render to their value; everything else has to
+/// be a subject key in its own right, which is what makes a nested call
+/// (`f(g($x))`) and a property argument (`f($this->name)`) usable and
+/// rules out anything that writes (`f($i++)`, `f($x = 1)`).
+fn argument_value_key(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Literal(Literal::String(s)) => {
+            let raw_str = bytes_to_str(s.raw);
+            let value = s.value.map(bytes_to_str).unwrap_or_else(|| {
+                crate::text_scan::unquote_php_string(raw_str).unwrap_or(raw_str)
+            });
+            // Escape so that two different strings cannot render to the
+            // same key: `f("a'b")` and `f("a", "b")` must stay distinct.
+            let mut out = String::with_capacity(value.len() + 2);
+            out.push('\'');
+            for c in value.chars() {
+                if c == '\\' || c == '\'' {
+                    out.push('\\');
+                }
+                out.push(c);
+            }
+            out.push('\'');
+            Some(out)
+        }
+        Expression::Literal(Literal::Integer(i)) => Some(
+            i.value
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| bytes_to_str(i.raw).to_string()),
+        ),
+        Expression::Literal(Literal::Float(f)) => Some(bytes_to_str(f.raw).to_string()),
+        Expression::Literal(Literal::True(_)) => Some("true".to_string()),
+        Expression::Literal(Literal::False(_)) => Some("false".to_string()),
+        Expression::Literal(Literal::Null(_)) => Some("null".to_string()),
+        Expression::ConstantAccess(ca) => {
+            Some(crate::util::strip_fqn_prefix(bytes_to_str(ca.name.value())).to_string())
+        }
+        Expression::Access(Access::ClassConstant(cc)) => {
+            let class = static_class_key(cc.class)?;
+            match &cc.constant {
+                ClassLikeConstantSelector::Identifier(ident) => {
+                    Some(format!("{}::{}", class, bytes_to_str(ident.value)))
+                }
+                _ => None,
+            }
+        }
+        Expression::Parenthesized(inner) => argument_value_key(inner.expression),
+        other => expr_to_subject_key(other),
+    }
+}
+
+/// Whether repeating a call to `name` in the same scope yields the same
+/// value, so that a check on one occurrence describes the next.
+///
+/// Almost every function qualifies; the ones that do not either advance a
+/// cursor they read from (`fgets`, `array_shift`, `next`), consult the
+/// clock, or draw a random number.  Reusing a check across two of those
+/// is exactly the case that would report a type the second call cannot be
+/// relied on to have.
+fn is_deterministic_function(name: &str) -> bool {
+    // Matched case-insensitively because PHP function names are.
+    !NON_DETERMINISTIC_FUNCTIONS
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+/// Functions whose result depends on something other than their
+/// arguments: the position of a stream or array cursor, the clock, or a
+/// source of randomness.
+const NON_DETERMINISTIC_FUNCTIONS: &[&str] = &[
+    // Stream and file cursors.
+    "fgetc",
+    "fgetcsv",
+    "fgets",
+    "fgetss",
+    "fread",
+    "fscanf",
+    "fpassthru",
+    "feof",
+    "ftell",
+    "readline",
+    "stream_get_contents",
+    "stream_get_line",
+    "readdir",
+    "socket_read",
+    "curl_exec",
+    "curl_multi_getcontent",
+    // Array cursors and array mutators that return an element.
+    "array_pop",
+    "array_shift",
+    "array_splice",
+    "current",
+    "each",
+    "end",
+    "key",
+    "next",
+    "pos",
+    "prev",
+    "reset",
+    // Iterator and generator state.
+    "iterator_to_array",
+    // Databases, sessions and output buffers hand back the next row or
+    // the buffer as it stands right now.
+    "mysqli_fetch_array",
+    "mysqli_fetch_assoc",
+    "mysqli_fetch_object",
+    "mysqli_fetch_row",
+    "pg_fetch_array",
+    "pg_fetch_assoc",
+    "pg_fetch_object",
+    "pg_fetch_row",
+    "ob_get_clean",
+    "ob_get_contents",
+    "ob_get_flush",
+    "session_id",
+    // The clock.
+    "date",
+    "getdate",
+    "gettimeofday",
+    "gmdate",
+    "hrtime",
+    "idate",
+    "localtime",
+    "microtime",
+    "mktime",
+    "gmmktime",
+    "strtotime",
+    "time",
+    // Randomness.
+    "lcg_value",
+    "mt_rand",
+    "rand",
+    "random_bytes",
+    "random_int",
+    "shuffle",
+    "str_shuffle",
+    "uniqid",
+    "array_rand",
+];
 
 /// Extract a literal key from an array access expression.
 ///
@@ -160,5 +428,56 @@ pub(in crate::type_engine) fn array_access_key_as_string(
                 .or_else(|| Some(bytes_to_str(i.raw).to_string()))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_rooted_at_the_variable_reads_it() {
+        assert!(key_reads_variable("$row->id", "$row"));
+        assert!(key_reads_variable("$row[\"id\"]", "$row"));
+        assert!(key_reads_variable("$this->a->b", "$this->a"));
+    }
+
+    #[test]
+    fn a_sibling_variable_with_a_shared_prefix_is_not_read() {
+        assert!(!key_reads_variable("$rows->id", "$row"));
+        assert!(!key_reads_variable("$row", "$row"));
+        assert!(!key_reads_variable("findPos($slugger,$m)", "$slug"));
+        assert!(!key_reads_variable("findPos($x,$marker2)", "$marker"));
+    }
+
+    #[test]
+    fn a_call_key_reads_every_argument_it_names() {
+        assert!(key_reads_variable("findPos($slug,$marker)", "$slug"));
+        assert!(key_reads_variable("findPos($slug,$marker)", "$marker"));
+        assert!(key_reads_variable("$opts->option('k')", "$opts"));
+        assert!(key_reads_variable("f(g($x))", "$x"));
+        assert!(!key_reads_variable("findPos($slug,$marker)", "$other"));
+    }
+
+    #[test]
+    fn only_a_call_key_ends_in_a_parenthesis() {
+        assert!(is_call_key("$h->get()"));
+        assert!(is_call_key("mb_strpos($s,$m)"));
+        assert!(!is_call_key("$this->handle"));
+        assert!(!is_call_key("$row[\"id\"]"));
+
+        assert!(!is_call_key_with_arguments("$h->get()"));
+        assert!(is_call_key_with_arguments("mb_strpos($s,$m)"));
+        assert!(!is_call_key_with_arguments("$this->handle"));
+    }
+
+    #[test]
+    fn a_state_advancing_function_is_not_deterministic() {
+        assert!(!is_deterministic_function("fgets"));
+        assert!(!is_deterministic_function("FGETS"));
+        assert!(!is_deterministic_function("array_shift"));
+        assert!(!is_deterministic_function("time"));
+        assert!(is_deterministic_function("mb_strpos"));
+        assert!(is_deterministic_function("myOwnHelper"));
     }
 }

@@ -364,15 +364,25 @@ class CompoundNarrowingDemo
     }
 
     /**
-     * A check on an argument-less call narrows the call itself, so the
-     * same call written again inside the branch resolves to what the
-     * check proved rather than to the declared return type.
+     * A check on a call narrows the call itself, so the same call
+     * written again inside the branch resolves to what the check proved
+     * rather than to the declared return type.  The arguments are part
+     * of what makes two occurrences the same call, so `lookUp('rock')`
+     * and `lookUp('banana')` are narrowed apart from one another.
      */
     public function repeatedCall(Scaffolding\SpecimenHolder $holder): string
     {
         if ($holder->maybe() instanceof Scaffolding\Rock) {
             return $holder->maybe()->crush();     // call narrowed to Scaffolding\Rock
         }
+
+        if ($holder->lookUp('rock') instanceof Scaffolding\Rock) {
+            return $holder->lookUp('rock')->crush();   // narrowed to Scaffolding\Rock
+        }
+
+        // Try: put the cursor after the `->` below.  Nothing has been
+        // proved about this call, so it still offers `Rock|Banana|null`.
+        // $holder->lookUp('banana')->
 
         return '';
     }

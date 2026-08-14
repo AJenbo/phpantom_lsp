@@ -1,0 +1,24 @@
+// test: a null check on a call with arguments narrows the same call later in the branch
+// feature: hover
+// `$registry->find('csv')` is keyed under its own written form, so the
+// second occurrence reads the guard's proof rather than the method's
+// declared `?Formatter`.
+// expect: $found = Formatter
+// expect_absent: ?Formatter
+---
+<?php
+
+class Formatter {
+    public function format(): string { return ''; }
+}
+
+class Registry {
+    public function find(string $key): ?Formatter { return null; }
+}
+
+function run(Registry $registry): void {
+    if ($registry->find('csv') !== null) {
+        $found = $registry->find('csv');
+        echo $fou<>nd->format();
+    }
+}

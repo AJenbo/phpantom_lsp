@@ -3059,10 +3059,11 @@ pub(crate) fn collect_condition_subject_vars(expr: &Expression<'_>, out: &mut Ve
     }
 }
 
-/// Whether a scope key is a synthetic property/array access key
-/// (e.g. `$this->cache`, `$row["id"]`) rather than a plain variable.
+/// Whether a scope key is a synthetic key for an expression
+/// (`$this->cache`, `$row["id"]`, `mb_strpos($s, $m)`) rather than a
+/// plain variable.
 pub(crate) fn is_synthetic_key(key: &str) -> bool {
-    key.contains("->") || key.contains("[\"")
+    key.contains("->") || key.contains("[\"") || narrowing::is_call_key(key)
 }
 
 /// Remove synthetic property/array access keys from the scope.
@@ -3109,6 +3110,13 @@ pub(crate) fn seed_synthetic_key_if_needed(
 ) {
     // Only seed compound keys (property access or array access).
     if !key.contains("->") && !key.contains("[\"") {
+        return;
+    }
+    // A call key that carries arguments cannot be re-resolved from its
+    // text — the arguments decide the return type.  Those are seeded from
+    // the expression they were built from, by
+    // [`seed_call_subject_keys`].
+    if narrowing::is_call_key_with_arguments(key) {
         return;
     }
     if scope.contains(key) {
@@ -3354,6 +3362,8 @@ pub(crate) fn seed_property_keys_into_scope(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    seed_call_subject_keys(condition, scope, ctx);
+
     let keys = collect_condition_property_keys(condition);
     if keys.is_empty() {
         return;
@@ -3366,6 +3376,96 @@ pub(crate) fn seed_property_keys_into_scope(
         // from a prior elseif condition).
         seed_synthetic_key_if_needed(key, scope, ctx);
     }
+}
+
+/// Seed the scope with the current type of every call the condition
+/// tests, keyed under the call's own written form.
+///
+/// This is the argument-carrying counterpart of
+/// [`seed_synthetic_key_if_needed`]: `mb_strpos($slug, $marker)` cannot be
+/// re-resolved from its key text the way `$this->handle` can, because the
+/// arguments are what decide the return type.  Resolving it here, from the
+/// expression, puts the un-narrowed type in scope so the guard that
+/// follows has something to narrow — and every later occurrence of the
+/// same call text then reads the narrowed entry instead of asking the
+/// method what it returns.
+pub(crate) fn seed_call_subject_keys(
+    condition: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match condition {
+        Expression::Parenthesized(paren) => seed_call_subject_keys(paren.expression, scope, ctx),
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            seed_call_subject_keys(prefix.operand, scope, ctx)
+        }
+        Expression::Binary(bin) if bin.operator.is_instanceof() => {
+            seed_call_subject(bin.lhs, scope, ctx)
+        }
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::And(_)
+                    | BinaryOperator::LowAnd(_)
+                    | BinaryOperator::Or(_)
+                    | BinaryOperator::LowOr(_)
+            ) =>
+        {
+            seed_call_subject_keys(bin.lhs, scope, ctx);
+            seed_call_subject_keys(bin.rhs, scope, ctx);
+        }
+        // A comparison names its subject on whichever side is not the
+        // value being compared against, and the narrowing extractors read
+        // both, so both are offered here too.
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::Identical(_)
+                    | BinaryOperator::NotIdentical(_)
+                    | BinaryOperator::Equal(_)
+                    | BinaryOperator::NotEqual(_)
+            ) =>
+        {
+            seed_call_subject(bin.lhs, scope, ctx);
+            seed_call_subject(bin.rhs, scope, ctx);
+        }
+        // A bare truthy test on a call, and the argument of a type guard
+        // or assertion helper written around one.
+        Expression::Call(call) => {
+            let argument_list = match call {
+                Call::Function(fc) => &fc.argument_list,
+                Call::Method(mc) => &mc.argument_list,
+                Call::NullSafeMethod(mc) => &mc.argument_list,
+                Call::StaticMethod(sc) => &sc.argument_list,
+            };
+            for argument in argument_list.arguments.iter() {
+                seed_call_subject(narrowing::argument_value(argument), scope, ctx);
+            }
+            seed_call_subject(condition, scope, ctx);
+        }
+        Expression::Construct(Construct::Isset(isset)) => {
+            for value in isset.values.iter() {
+                seed_call_subject(value, scope, ctx);
+            }
+        }
+        Expression::Construct(Construct::Empty(empty)) => {
+            seed_call_subject(empty.value, scope, ctx)
+        }
+        _ => {}
+    }
+}
+
+/// Seed one expression under its call key, when it has one and the scope
+/// does not already carry it.
+fn seed_call_subject(expr: &Expression<'_>, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    let Some(key) = narrowing::expr_to_subject_key(expr) else {
+        return;
+    };
+    if !narrowing::is_call_key_with_arguments(&key) || scope.contains(&key) {
+        return;
+    }
+    let types = super::assignment::resolve_rhs_with_scope(expr, scope, ctx);
+    scope.set(&key, types);
 }
 
 /// Resolve what a member key's declaration promises, reading the scope

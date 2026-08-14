@@ -1226,3 +1226,167 @@ function alternativeSyntax(Source $source, bool $flag): void {{
     let messages = type_error_messages(&backend, uri, &text);
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+// ─── Call-expression subjects ───────────────────────────────────────────
+
+/// Scaffolding for narrowing keyed on a *call* rather than a variable:
+/// a free function and a method that both return a union, plus consumers
+/// that reject the un-narrowed half.
+const CALL_SUBJECT_SCAFFOLD: &str = r#"<?php
+namespace CallSubject;
+
+function findPos(string $haystack, string $needle): int|false { return 0; }
+function useInt(int $value): void {}
+function useString(string $value): void {}
+
+class Options {
+    public function position(string $key): int|false { return false; }
+    public static function lookup(string $key): int|false { return false; }
+}
+"#;
+
+/// A guarded call re-written verbatim inside the branch keeps the
+/// narrowing the guard proved.
+#[test]
+fn a_repeated_function_call_keeps_the_guards_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///call_subject_function.php";
+    let text = format!(
+        "{CALL_SUBJECT_SCAFFOLD}
+function guarded(string $slug, string $marker): void {{
+    if (findPos($slug, $marker) !== false) {{
+        useInt(findPos($slug, $marker));
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The same for a method call that takes an argument, in both the
+/// `if`-body and ternary-arm forms.
+#[test]
+fn a_repeated_method_call_keeps_the_guards_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///call_subject_method.php";
+    let text = format!(
+        "{CALL_SUBJECT_SCAFFOLD}
+function guarded(Options $opts): void {{
+    if ($opts->position('from') !== false) {{
+        useInt($opts->position('from'));
+    }}
+}}
+
+function ternary(Options $opts): void {{
+    $from = $opts->position('from') !== false ? useInt($opts->position('from')) : null;
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A static call is keyed on its class and arguments the same way.
+#[test]
+fn a_repeated_static_call_keeps_the_guards_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///call_subject_static.php";
+    let text = format!(
+        "{CALL_SUBJECT_SCAFFOLD}
+function guarded(): void {{
+    if (Options::lookup('from') !== false) {{
+        useInt(Options::lookup('from'));
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Writing to a variable the key names invalidates the narrowing: the
+/// call is a different call once its argument changed.  A variable whose
+/// name merely *starts* the same is not one of its inputs.
+#[test]
+fn reassigning_an_argument_drops_the_calls_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///call_subject_invalidation.php";
+    let text = format!(
+        "{CALL_SUBJECT_SCAFFOLD}
+function reassign(string $slug, string $marker, string $other): void {{
+    if (findPos($slug, $marker) !== false) {{
+        $marker = $other;
+        useInt(findPos($slug, $marker));
+    }}
+}}
+
+function rewriteSubject(string $slug, string $marker, string $other): void {{
+    if (findPos($slug, $marker) !== false) {{
+        $slug = $other;
+        useInt(findPos($slug, $marker));
+    }}
+}}
+
+function nearMiss(string $slug, string $slugger, string $marker, string $other): void {{
+    if (findPos($slug, $marker) !== false) {{
+        $slugger = $other;
+        useString($slugger);
+        useInt(findPos($slug, $marker));
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+/// A call whose result differs from one invocation to the next is not
+/// keyed at all: the check on the first says nothing about the second.
+#[test]
+fn a_state_advancing_call_is_not_keyed() {
+    let backend = create_test_backend();
+    let uri = "file:///call_subject_nondeterministic.php";
+    let text = format!(
+        "{CALL_SUBJECT_SCAFFOLD}
+function fgets($handle): string|false {{ return false; }}
+
+function readTwice($handle): void {{
+    if (fgets($handle) !== false) {{
+        useString(fgets($handle));
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+/// The proof does not survive the branch it was made in, nor an
+/// iteration of the loop that contains it.
+#[test]
+fn a_calls_narrowing_ends_with_its_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///call_subject_scope.php";
+    let text = format!(
+        "{CALL_SUBJECT_SCAFFOLD}
+function afterBranch(string $slug, string $marker): void {{
+    if (findPos($slug, $marker) !== false) {{
+        useInt(findPos($slug, $marker));
+    }}
+    useInt(findPos($slug, $marker));
+}}
+
+function acrossIterations(string $slug, string $marker): void {{
+    while (true) {{
+        useInt(findPos($slug, $marker));
+        if (findPos($slug, $marker) !== false) {{
+            $slug .= 'x';
+        }}
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}

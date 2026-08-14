@@ -34,8 +34,8 @@ within the same impact tier.
 | B169 | [Blade `@if` narrowing does not reach `@include`d variables](todo/bugs.md#b169-blade-if-narrowing-does-not-reach-included-variables)                       | Medium-High | Medium      |
 | B143 | [A constant built from another constant does not fold to its value](todo/bugs.md#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value) | Medium | Medium |
 | B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
-| B155 | [A checked call expression is forgotten by the next identical call](todo/bugs.md#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call)   | Medium-High | Medium-High |
-| B158 | [Strict `in_array` against a constant list does not narrow the needle](todo/bugs.md#b158-strict-in_array-against-a-constant-list-does-not-narrow-the-needle) (depends on B155) | Low-Medium | Medium |
+| B158 | [Strict `in_array` against a constant list does not narrow the needle](todo/bugs.md#b158-strict-in_array-against-a-constant-list-does-not-narrow-the-needle) | Low-Medium | Medium |
+| B175 | [A call's recorded check survives a statement that could change what it returns](todo/bugs.md#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns) | Medium | Medium |
 | B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state) (depends on B147)                   | Medium      | Medium-High |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 

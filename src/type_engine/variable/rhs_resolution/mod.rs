@@ -417,7 +417,18 @@ fn narrowed_call(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let key = crate::type_engine::types::narrowing::expr_to_subject_key(call)?;
-    narrowed_subject_from_scope(&key, call, ctx).or_else(|| narrowed_by_rewalk(&key, resolved, ctx))
+    if let Some(from_scope) = narrowed_subject_from_scope(&key, call, ctx) {
+        return Some(from_scope);
+    }
+    // The re-walk re-parses the file to find the check, so it is reserved
+    // for the argument-less form, whose receiver is a path the walker's
+    // scope never holds.  A call that takes arguments is answered by the
+    // scope entry the condition seeded, and paying for a re-parse per
+    // occurrence of every such call would be felt on every keystroke.
+    if crate::type_engine::types::narrowing::is_call_key_with_arguments(&key) {
+        return None;
+    }
+    narrowed_by_rewalk(&key, resolved, ctx)
 }
 
 /// Resolve a right-hand-side expression to zero or more
@@ -760,15 +771,10 @@ fn resolve_method_chain<'b>(
             ctx,
         );
         // A check written on the call itself (`if ($h->get() instanceof
-        // Foo)`) is keyed under the call's own text, so a later
-        // occurrence of that text reads the narrowed type instead of the
-        // method's declared return type.  Only an argument-less call
-        // carries such a key: an argument is a hint that the call does
-        // something rather than just handing back state, and matching
-        // two of them means comparing whole argument expressions.
-        if link.argument_list.arguments.is_empty()
-            && let Some(narrowed) = narrowed_call(link.call, &resolved, ctx)
-        {
+        // Foo)`, `if ($this->option('from') !== null)`) is keyed under the
+        // call's own text, so a later occurrence of that text reads the
+        // narrowed type instead of the method's declared return type.
+        if let Some(narrowed) = narrowed_call(link.call, &resolved, ctx) {
             resolved = narrowed;
         }
         receiver = Some((ResolvedType::into_arced_classes(resolved.clone()), resolved));
@@ -860,6 +866,15 @@ fn resolve_rhs_expression_inner<'b>(
                 return from_scope;
             }
             resolve_rhs_array_access(array_access, expr, ctx)
+        }
+        // A function or static call checked earlier in the scope
+        // (`if (mb_strpos($s, $m) !== false)`) reads the narrowed entry
+        // the check left under the call's own text.  Method calls get the
+        // same treatment one level up, in `resolve_method_chain`, where
+        // the chain spine is already peeled.
+        Expression::Call(call @ (Call::Function(_) | Call::StaticMethod(_))) => {
+            let resolved = resolve_rhs_call(call, expr, ctx);
+            narrowed_call(expr, &resolved, ctx).unwrap_or(resolved)
         }
         Expression::Call(call) => resolve_rhs_call(call, expr, ctx),
         Expression::Access(access) => {

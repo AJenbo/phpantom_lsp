@@ -96,8 +96,12 @@ function runDemoAssertions(): void
 
     // ── instanceof on a repeated method call ────────────────────────────
     assert(
-        (new CompoundNarrowingDemo())->repeatedCall(new Scaffolding\SpecimenHolder()) === '',
-        'maybe() returns null, so the instanceof branch is not taken',
+        (new CompoundNarrowingDemo())->repeatedCall(new Scaffolding\SpecimenHolder()) === 'smash!',
+        "maybe() returns null so its branch is skipped, but lookUp('rock') is a Scaffolding\\Rock",
+    );
+    assert(
+        (new Scaffolding\SpecimenHolder())->lookUp('banana') === null,
+        'a name the shelf does not carry yields null, so nothing is proved about that call',
     );
 
     // ── Two checks that both hold make one value of both types ──────────

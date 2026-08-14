@@ -117,34 +117,33 @@ impl ScopeState {
         self.invalidate_assertions(var_name);
     }
 
-    /// Remove synthetic property/array-access keys rooted at `var_name`
-    /// (e.g. `$s->cache`, `$s["k"]`).  Called when the base variable is
-    /// reassigned: the previous object identity no longer holds, so any
-    /// type tracked for one of its properties is stale.
+    /// Remove synthetic keys that read `var_name` — a path rooted at it
+    /// (`$s->cache`, `$s["k"]`) or a call that takes it as an argument
+    /// (`findPos($s, $marker)`).  Called when the variable is reassigned:
+    /// the value the key was recorded against is gone, so whatever was
+    /// tracked for it describes the old one.
     pub fn invalidate_dependent_keys(&mut self, var_name: &str) {
-        let prop_prefix = format!("{var_name}->");
-        let arr_prefix = format!("{var_name}[");
-        self.locals
-            .retain(|key, _| !key.starts_with(&prop_prefix) && !key.starts_with(&arr_prefix));
+        self.locals.retain(|key, _| {
+            !crate::type_engine::types::narrowing::key_reads_variable(key, var_name)
+        });
     }
 
     /// Drop the checks that writing to `var_name` invalidates: whatever
-    /// the variable itself stood for, plus every check whose subject is
-    /// that variable or a path rooted at it.  A boolean only describes
-    /// the value its subject held when the check ran.
+    /// the variable itself stood for, plus every check whose subject
+    /// reads it.  A boolean only describes the value its subject held
+    /// when the check ran.
     pub fn invalidate_assertions(&mut self, var_name: &str) {
         if self.assertions.is_empty() {
             return;
         }
         let key = atom(var_name);
         self.assertions.remove(&key);
-        let prop_prefix = format!("{var_name}->");
-        let arr_prefix = format!("{var_name}[");
         self.assertions.retain(|_, checks| {
             checks.retain(|c| {
                 c.subject != key
-                    && !c.subject.starts_with(&prop_prefix)
-                    && !c.subject.starts_with(&arr_prefix)
+                    && !crate::type_engine::types::narrowing::key_reads_variable(
+                        &c.subject, var_name,
+                    )
             });
             !checks.is_empty()
         });

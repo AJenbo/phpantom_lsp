@@ -1905,6 +1905,12 @@ class SpecimenHolder
     {
         return null;
     }
+
+    /** Looks a specimen up by name; `null` when the shelf has none. */
+    public function lookUp(string $name): Rock|Banana|null
+    {
+        return $name === 'rock' ? new Rock() : null;
+    }
 }
 
 // ─── Ambiguous Variable Support Classes ─────────────────────────────────────

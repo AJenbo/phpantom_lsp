@@ -160,26 +160,29 @@ constant shapes satisfy their generic supertypes.
 
 ## Narrowing
 
-### B155. A checked call expression is forgotten by the next identical call
+### B175. A call's recorded check survives a statement that could change what it returns
 
-**Impact: Medium-High · Effort: Medium-High**
+**Impact: Medium · Effort: Medium**
 
 ```php
-if (mb_strpos($slug, $marker) !== false) {
-    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false
+if ($stmt->fetch('id') !== false) {
+    $stmt->execute();
+    $row = $stmt->fetch('id');   // still reported non-false
 }
-$from = $this->option('from') ? Carbon::parse($this->option('from')) : null;
 ```
 
-Narrowing is keyed on variables only; a structurally identical
-side-effect-free call repeated inside the guarded scope re-resolves
-from scratch (~6 sites). PHPStan keys `SpecifiedTypes` on the printed
-expression and invalidates on side effects; Phpactor caches by node
-identity.
+A call key is dropped when a variable it *reads* is written, but not
+when an intervening statement could change the state behind the
+receiver. Any call on the same receiver, a by-reference write the
+walker does not model as an assignment, or a global mutation leaves the
+recorded check standing. PHPStan invalidates every remembered
+expression rooted at a receiver when an impure call is made on it.
 
-**Fix:** key the narrowing store by a canonical expression form
-(receiver chain + arguments) for deterministic/pure calls, and
-invalidate entries when a statement could change their inputs.
+**Fix:** invalidate the keys rooted at a receiver when a call is made on
+that receiver, unless the callee is declared `@phpstan-pure` /
+`@psalm-pure`. This predates expression keying (the argument-less
+`$obj->get()` form has always had it), but keying calls with arguments
+widens the surface.
 
 ### B157. `@phpstan-assert` tags on called methods are ignored
 
