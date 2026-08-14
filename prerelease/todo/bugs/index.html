@@ -840,10 +840,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b144-preg_match-matches-is-shapeless" class="md-nav__link">
+  <a href="#b149-matches-is-typed-as-though-the-match-succeeded" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B144. <code>preg_match</code> <code>$matches</code> is shapeless
+        B149. <code>$matches</code> is typed as though the match succeeded
       </span>
     </span>
   </a>
@@ -1374,10 +1374,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b144-preg_match-matches-is-shapeless" class="md-nav__link">
+  <a href="#b149-matches-is-typed-as-though-the-match-succeeded" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B144. <code>preg_match</code> <code>$matches</code> is shapeless
+        B149. <code>$matches</code> is typed as though the match succeeded
       </span>
     </span>
   </a>
@@ -1466,29 +1466,21 @@ diagnostics across ten projects, ~330 of them false positives). Site
 counts refer to that sweep; the git-ignored triage log has the full
 per-project inventory. Entries filed later say where they came from.</p>
 <h2 id="preg_match">preg_match<a class="headerlink" href="#preg_match" title="Permanent link">&para;</a></h2>
-<h3 id="b144-preg_match-matches-is-shapeless">B144. <code>preg_match</code> <code>$matches</code> is shapeless<a class="headerlink" href="#b144-preg_match-matches-is-shapeless" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p><code>$matches</code> is an array of unknown keys, so every group read off it is
-<code>string</code> at best and the pattern's own capture groups say nothing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if (preg_match(&#39;/(?&lt;amount&gt;\d+)(?&lt;unit&gt;\w*)/&#39;, $size, $match)) {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    strtolower($match[&#39;unit&#39;]);   // no key check, no arity check</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
+<h3 id="b149-matches-is-typed-as-though-the-match-succeeded">B149. <code>$matches</code> is typed as though the match succeeded<a class="headerlink" href="#b149-matches-is-typed-as-though-the-match-succeeded" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p><code>preg_match()</code> writes its out-parameter with the shape its pattern
+describes, and the forward walker applies that shape wherever the call
+appears, the code after a guard that may not have been taken included:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if (preg_match(&#39;/(\d+)/&#39;, $s, $m)) { /* … */ }</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">echo $m[1];                 // string; at runtime the key may not exist</span>
 </code></pre></div>
-<p>Two remaining defects:</p>
-<ol>
-<li>No match-shape inference for literal patterns: PHPStan's
-   <code>RegexArrayShapeMatcher</code> types group 0 and every always-matching
-   group as <code>string</code> (<code>string|null</code> only under
-   <code>PREG_UNMATCHED_AS_NULL</code>), with named groups as keys. PDepend,
-   PHPMD, AGCMS and Bladestan all index <code>$match[1]</code>/<code>$match['name']</code>
-   directly inside the guard.</li>
-<li><code>preg_match_all</code> group reads (<code>$matches[1]</code>) should be
-   <code>list&lt;string&gt;</code>, not <code>array&lt;string&gt;</code>.</li>
-</ol>
-<p><strong>Fix:</strong> add a literal-pattern group-shape analysis (port the
-capture-group walk from PHPStan's <code>RegexArrayShapeMatcher</code>). Depends
-on B147: the matcher's result has nowhere to go until constant-array
-shapes exist as a value representation.</p>
+<p>PHPStan types this as <code>array{}|array{0: string, 1: string}</code>, the empty
+array being what a failed match leaves behind. Doing the same needs the
+seeding to know which branch of the condition it is writing into, which
+a single write into the shared scope before the branches are walked
+cannot express.</p>
+<p>The result is an under-report rather than a false positive: a key read
+outside the guard resolves to <code>string</code> instead of <code>string|null</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements">B147. Array literals are not tuples: slot reads return the union of all elements<a class="headerlink" href="#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
