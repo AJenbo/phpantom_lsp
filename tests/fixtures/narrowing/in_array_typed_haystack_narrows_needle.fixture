@@ -1,0 +1,18 @@
+// test: a strict in_array against a typed haystack drops the needle's other members
+// feature: hover
+// `list<string>` says every element is a string, so a needle that equals
+// one of them is a string and nothing else.
+// expect: $kept = string
+// expect_absent: ?string
+---
+<?php
+
+class Gate {
+    /** @param list<string> $allowed */
+    public function check(?string $email, array $allowed): void {
+        if (in_array($email, $allowed, true)) {
+            $kept = $email;
+            echo $ke<>pt;
+        }
+    }
+}

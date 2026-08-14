@@ -31,7 +31,8 @@ class Foo
 		assertType('3.14', self::FLOAT_CONST);
 		assertType('bool', self::BOOL_CONST);
 		assertType('null', self::NULL_CONST);
-		assertType('array', self::ARRAY_CONST);
+		// More precise than upstream, which reports a plain `array`.
+		assertType('list{1, 2, 3}', self::ARRAY_CONST);
 	}
 
 }
@@ -127,7 +128,8 @@ class InheritedConstants extends Foo
 		assertType('3.14', self::FLOAT_CONST);
 		assertType('bool', self::BOOL_CONST);
 		assertType('null', self::NULL_CONST);
-		assertType('array', self::ARRAY_CONST);
+		// More precise than upstream, which reports a plain `array`.
+		assertType('list{1, 2, 3}', self::ARRAY_CONST);
 	}
 
 }

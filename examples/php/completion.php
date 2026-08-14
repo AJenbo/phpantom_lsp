@@ -1018,6 +1018,18 @@ class InArrayNarrowingDemo
         }
         $specimen->crush();                       // narrowed to Scaffolding\Rock after guard
     }
+
+    /** A constant list of literals narrows a scalar needle to its values. */
+    public function gate(?string $grade): string
+    {
+        if (!in_array($grade, Scaffolding\GRADES, true)) {
+            throw new \RuntimeException('unknown grade');
+        }
+
+        // $grade is 'a'|'b'|'c' here, so the null the parameter allowed is
+        // gone and the return type below is satisfied.
+        return $grade;
+    }
 }
 
 

@@ -1178,6 +1178,19 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_inclusion(&element_type, false, &var_ctx, classes)
                 });
+                // `apply_narrowing` works on the class layer, so a needle
+                // with no class behind it (`?string`, `int|string`) comes
+                // back untouched.  Strict equality against the haystack's
+                // elements is a proof about the value, so it narrows the
+                // declared type too.
+                for rt in results.iter_mut() {
+                    if rt.class_info.is_none()
+                        && let Some(narrowed) =
+                            narrow_value_by_element(&rt.type_string, &element_type)
+                    {
+                        rt.type_string = narrowed;
+                    }
+                }
             }
 
             if !results.is_empty() {
@@ -1185,6 +1198,49 @@ pub(crate) fn apply_in_array_narrowing<'b>(
             }
         }
     }
+}
+
+/// The needle's type once a strict `in_array` has proved it equals one of
+/// the haystack's elements, or `None` when that proves nothing new.
+///
+/// Every alternative the needle could hold that no element could equal is
+/// gone: `?string` against a `list<string>` haystack keeps only `string`,
+/// which is what makes the `if (!in_array(…)) { abort(); }` gate leave a
+/// definite value behind it.  Where the elements are *narrower* than the
+/// alternative they match, the alternative is replaced by them, so a
+/// constant list of literals narrows a `string` needle to exactly the
+/// values the list names.
+///
+/// A needle typed `mixed`, or a haystack whose element type is unknown,
+/// proves nothing worth recording — narrowing `mixed` to the element type
+/// would claim the haystack is exhaustive over a type nothing constrains.
+fn narrow_value_by_element(needle: &PhpType, element: &PhpType) -> Option<PhpType> {
+    if needle.is_mixed() || element.is_mixed() || needle.is_untyped() || element.is_untyped() {
+        return None;
+    }
+    let element_members = element.union_members();
+    let mut kept: Vec<PhpType> = Vec::new();
+    for member in needle.union_members() {
+        let matching: Vec<PhpType> = element_members
+            .iter()
+            .filter(|e| e.is_subtype_of(member))
+            .map(|e| (*e).clone())
+            .collect();
+        if !matching.is_empty() {
+            for m in matching {
+                if !kept.contains(&m) {
+                    kept.push(m);
+                }
+            }
+        } else if member.is_subtype_of(element) && !kept.contains(member) {
+            kept.push(member.clone());
+        }
+    }
+    if kept.is_empty() {
+        return None;
+    }
+    let narrowed = PhpType::union(kept);
+    (narrowed != *needle).then_some(narrowed)
 }
 
 /// Resolve the element type of a haystack expression for `in_array`
@@ -1231,7 +1287,10 @@ pub(crate) fn resolve_in_array_element_type_fw(
     let var_ctx = build_var_ctx("", ctx, &scope_resolver);
     let raw_type =
         crate::type_engine::variable::resolution::resolve_arg_raw_type(haystack_expr, &var_ctx);
-    raw_type.and_then(|t| t.extract_element_type().cloned())
+    // A constant list (`self::APPROVED`, `[Status::ACTIVE, …]`) resolves to
+    // a shape rather than a parameterised array, and its elements are the
+    // shape's values.
+    raw_type.and_then(|t| t.iterable_element_type())
 }
 
 /// Apply `@phpstan-assert-if-true` / `@phpstan-assert-if-false` narrowing
@@ -3330,6 +3389,10 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
                         | "interface_exists"
                         | "enum_exists"
                         | "trait_exists"
+                        // A strict `in_array` proves its needle is one of
+                        // the haystack's elements, so the needle is a
+                        // subject the branch narrows like any other.
+                        | "in_array"
                 );
                 if is_type_guard && let Some(first_arg) = func_call.argument_list.arguments.first()
                 {

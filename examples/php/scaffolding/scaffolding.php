@@ -1541,6 +1541,9 @@ class CachingPenRepository extends PenRepository
 
 // ─── Constant Tables Read Through a Type Operator ───────────────────────────
 
+/** The grades a gate accepts; a strict `in_array` against it names them. */
+const GRADES = ['a', 'b', 'c'];
+
 const TOOL_DEFAULTS = ['width' => 2, 'ink' => 'black'];
 
 /**

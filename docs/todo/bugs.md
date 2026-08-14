@@ -203,15 +203,6 @@ including the `=` exact-type prefix) from called
 functions/methods and apply them as type specifications; drop the
 hard-coded PHPUnit list in favour of the tags.
 
-### B158. Strict `in_array` against a constant list does not narrow the needle
-
-**Impact: Low-Medium · Effort: Medium**
-
-`if (!in_array($user->getEmail(), self::APPROVED, true)) { abort(403); }`
-proves on the fall-through that the needle is one of the constant
-list's literals (⊆ `string`), removing `null`. Requires B155's
-expression keying for method-call needles. 2 sites.
-
 ## Laravel
 
 ### B167. Factory `create()`/`make()` keep the collection half on single-model chains

@@ -1120,6 +1120,18 @@ function runDemoAssertions(): void
             'Iterating a literal array yields the values it names');
     }
 
+    // ── A strict in_array gate leaves one of the list's values ──────────
+    $gateDemo = new InArrayNarrowingDemo();
+    assert($gateDemo->gate('b') === 'b',
+        'a value the constant list names passes the gate and comes back unchanged');
+    $gateRejected = false;
+    try {
+        $gateDemo->gate(null);
+    } catch (\RuntimeException) {
+        $gateRejected = true;
+    }
+    assert($gateRejected, 'null is not one of Scaffolding\GRADES, so the gate throws');
+
     // ── Dynamic (non-literal) key on a shape ────────────────────────────
     $shapeDemo = new ShapeMethodDemo();
     $dynKit = $shapeDemo->getToolKit();

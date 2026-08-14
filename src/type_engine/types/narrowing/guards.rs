@@ -682,7 +682,7 @@ pub(in crate::type_engine) fn try_extract_in_array<'b>(
         Expression::Identifier(ident) => bytes_to_str(ident.value()),
         _ => return None,
     };
-    if name != "in_array" {
+    if !crate::util::strip_fqn_prefix(name).eq_ignore_ascii_case("in_array") {
         return None;
     }
     let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
@@ -702,11 +702,10 @@ pub(in crate::type_engine) fn try_extract_in_array<'b>(
         Argument::Positional(pos) => pos.value,
         Argument::Named(named) => named.value,
     };
-    let needle_var = match first_expr {
-        Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
-        _ => return None,
-    };
-    if needle_var != var_name {
+    // The needle is a subject like any other, so a property path
+    // (`$row->email`) or a call (`$user->getEmail()`) names one just as a
+    // bare variable does.
+    if expr_to_subject_key(first_expr).as_deref() != Some(var_name) {
         return None;
     }
 

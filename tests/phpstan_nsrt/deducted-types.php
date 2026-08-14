@@ -46,7 +46,8 @@ final class Foo
 		assertType('1', self::INTEGER_CONSTANT);
 		assertType('1.0', self::FLOAT_CONSTANT);
 		assertType('\'foo\'', self::STRING_CONSTANT);
-		assertType('array', self::ARRAY_CONSTANT);
+		// More precise than upstream, which reports a plain `array`.
+		assertType('list{}', self::ARRAY_CONSTANT);
 		assertType('bool', self::BOOLEAN_CONSTANT);
 		assertType('null', self::NULL_CONSTANT);
 

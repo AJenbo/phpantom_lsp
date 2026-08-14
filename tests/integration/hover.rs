@@ -8852,8 +8852,8 @@ function test() {
     let hover = hover_at(&backend, uri, content, 3, 10).expect("expected hover on $hosts");
     let text = hover_text(&hover);
     assert!(
-        text.contains("array"),
-        "variable assigned from array constant should resolve to array, got: {}",
+        text.contains("list{'localhost', '127.0.0.1'}"),
+        "variable assigned from a literal array constant should keep the constant's slots, got: {}",
         text
     );
 }

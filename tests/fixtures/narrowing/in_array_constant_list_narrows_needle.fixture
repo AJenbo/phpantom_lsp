@@ -1,0 +1,24 @@
+// test: a strict in_array against a constant list narrows the needle to its values
+// feature: hover
+// The gate can only be passed by a value the list names, so the needle is
+// one of its literals and cannot be null.
+// expect: $kept = 'a@example.com'|'b@example.com'
+// expect_absent: null
+---
+<?php
+
+class User {
+    public function getEmail(): ?string { return null; }
+}
+
+class Gate {
+    private const APPROVED = ['a@example.com', 'b@example.com'];
+
+    public function check(User $user): void {
+        if (!in_array($user->getEmail(), self::APPROVED, true)) {
+            throw new \RuntimeException('not approved');
+        }
+        $kept = $user->getEmail();
+        echo $ke<>pt;
+    }
+}

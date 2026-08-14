@@ -1228,6 +1228,104 @@ fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
     }
 }
 
+/// The contents of an array literal's brackets, or `None` when the text
+/// is not one.
+fn strip_array_literal(value: &str) -> Option<&str> {
+    if let Some(rest) = value.strip_prefix('[') {
+        return rest.strip_suffix(']');
+    }
+    let rest = value
+        .strip_prefix("array(")
+        .or_else(|| value.strip_prefix("array ("))?;
+    rest.strip_suffix(')')
+}
+
+/// The shape an array literal describes, when every element of it is
+/// itself a literal.
+///
+/// Returns `None` as soon as an element is something that would have to
+/// be resolved (a constant, a call, a concatenation), because a shape
+/// missing one of its slots would claim the array is smaller than it is.
+/// The caller then falls back to an unconstrained `array`.
+fn literal_array_shape(inner: &str) -> Option<PhpType> {
+    use crate::php_type::ShapeEntry;
+
+    if inner.trim().is_empty() {
+        return Some(PhpType::list_shape(Vec::new()));
+    }
+    let items = crate::type_engine::types::conditional::split_text_args(inner);
+    let mut entries: Vec<ShapeEntry> = Vec::new();
+    let mut keyed = false;
+    for item in items {
+        let item = item.trim();
+        // A trailing comma leaves an empty final item.
+        if item.is_empty() {
+            continue;
+        }
+        let (key, value) = match split_top_level_arrow(item) {
+            Some((key_text, value_text)) => {
+                keyed = true;
+                let key = literal_shape_key(key_text.trim())?;
+                (Some(key), value_text)
+            }
+            None => (None, item),
+        };
+        entries.push(ShapeEntry {
+            key,
+            value_type: infer_type_from_constant_value(value)?,
+            optional: false,
+        });
+    }
+    Some(if keyed {
+        PhpType::array_shape(entries)
+    } else {
+        PhpType::list_shape(entries)
+    })
+}
+
+/// The key text of a shape entry, for the literal keys PHP allows: a
+/// quoted string or an integer.
+fn literal_shape_key(text: &str) -> Option<String> {
+    if let Some(unquoted) = crate::text_scan::unquote_php_string(text) {
+        return Some(unquoted.to_string());
+    }
+    crate::php_type::parse_php_int_literal(text).map(|value| value.to_string())
+}
+
+/// Split an array item on its top-level `=>`, skipping the ones inside a
+/// nested array or a quoted string.
+fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
+    let bytes = item.as_bytes();
+    let mut depth = 0i32;
+    let mut quote: Option<u8> = None;
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        match quote {
+            Some(q) => {
+                if byte == b'\\' {
+                    index += 2;
+                    continue;
+                }
+                if byte == q {
+                    quote = None;
+                }
+            }
+            None => match byte {
+                b'\'' | b'"' => quote = Some(byte),
+                b'[' | b'(' => depth += 1,
+                b']' | b')' => depth -= 1,
+                b'=' if depth == 0 && bytes.get(index + 1) == Some(&b'>') => {
+                    return Some((&item[..index], &item[index + 2..]));
+                }
+                _ => {}
+            },
+        }
+        index += 1;
+    }
+    None
+}
+
 /// Infer a scalar type from a constant's initializer value string.
 ///
 /// Recognises integer literals (`42`, `-1`, `0xFF`), float literals
@@ -1258,9 +1356,12 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
         };
     }
 
-    // Array literals.
-    if v.starts_with('[') || v.starts_with("array(") || v.starts_with("array (") {
-        return Some(PhpType::array());
+    // Array literals.  A list built entirely from literals is a shape:
+    // that is what makes `in_array($x, self::APPROVED, true)` and
+    // `foreach (self::APPROVED as $entry)` see the values the constant
+    // names rather than an unconstrained `array`.
+    if let Some(inner) = strip_array_literal(v) {
+        return Some(literal_array_shape(inner).unwrap_or_else(PhpType::array));
     }
 
     let lower = v.to_lowercase();
@@ -1696,7 +1797,7 @@ mod tests {
             infer_type_from_constant_value("1.0-2.0"),
             Some(PhpType::float())
         );
-        // Booleans, null, and arrays keep their base type.
+        // Booleans and null keep their base type.
         assert_eq!(
             infer_type_from_constant_value("true"),
             Some(PhpType::bool())
@@ -1705,11 +1806,62 @@ mod tests {
             infer_type_from_constant_value("null"),
             Some(PhpType::null())
         );
+        assert_eq!(infer_type_from_constant_value("self::OTHER"), None);
+    }
+
+    #[test]
+    fn a_literal_array_constant_keeps_its_slots() {
+        let entry = |key: Option<&str>, value_type: PhpType| crate::php_type::ShapeEntry {
+            key: key.map(str::to_string),
+            value_type,
+            optional: false,
+        };
+
         assert_eq!(
             infer_type_from_constant_value("[1, 2]"),
+            Some(PhpType::list_shape(vec![
+                entry(None, PhpType::literal_int("1")),
+                entry(None, PhpType::literal_int("2")),
+            ]))
+        );
+        // A trailing comma leaves no empty slot behind.
+        assert_eq!(
+            infer_type_from_constant_value("array('a', 'b',)"),
+            Some(PhpType::list_shape(vec![
+                entry(None, PhpType::literal_string_raw("'a'")),
+                entry(None, PhpType::literal_string_raw("'b'")),
+            ]))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("['name' => 'x', 3 => true]"),
+            Some(PhpType::array_shape(vec![
+                entry(Some("name"), PhpType::literal_string_raw("'x'")),
+                entry(Some("3"), PhpType::bool()),
+            ]))
+        );
+        assert_eq!(
+            infer_type_from_constant_value("[]"),
+            Some(PhpType::list_shape(vec![]))
+        );
+        // A `=>` inside a string is not a key separator.
+        assert_eq!(
+            infer_type_from_constant_value("['a => b']"),
+            Some(PhpType::list_shape(vec![entry(
+                None,
+                PhpType::literal_string_raw("'a => b'")
+            )]))
+        );
+        // An element that would have to be resolved leaves the whole
+        // constant an unconstrained array rather than a shape missing a
+        // slot.
+        assert_eq!(
+            infer_type_from_constant_value("[1, self::OTHER]"),
             Some(PhpType::array())
         );
-        assert_eq!(infer_type_from_constant_value("self::OTHER"), None);
+        assert_eq!(
+            infer_type_from_constant_value("[$key => 1]"),
+            Some(PhpType::array())
+        );
     }
 
     #[test]
