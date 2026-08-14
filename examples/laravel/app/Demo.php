@@ -195,12 +195,16 @@ class Demo
         BlogPost::factory()->forAuthor()->trashed()->create(); // → BlogPost
     }
 
+    // The declared return type is the check: makeOne() is inherited through
+    // BaseFactory, and it has to come back as BlogAuthor rather than the base
+    // Model for this to return without a type error.
     protected function makeOneAuthor(BlogAuthor $author): BlogAuthor
     {
         return BlogAuthor::factory()->makeOne(
             $author->only(['name', 'email']),
         );
     }
+
 
     // ── Factory count state ─────────────────────────────────────────────────
     // create()/make() build one model, or a Collection of them once the
