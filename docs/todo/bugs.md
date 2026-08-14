@@ -16,47 +16,6 @@ diagnostics across ten projects, ~330 of them false positives). Site
 counts refer to that sweep; the git-ignored triage log has the full
 per-project inventory. Entries filed later say where they came from.
 
-## Conditional and argument-dependent return types
-
-### B143. A constant built from another constant does not fold to its value
-
-**Impact: Medium · Effort: Medium**
-
-A flags argument is bit-tested by resolving each `|` operand to a
-literal integer, so it reads `json_encode($v, 4194304)` and
-`json_encode($v, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR)` but stops at
-one level of indirection. A constant whose *value* is itself a constant
-expression resolves to plain `int`, and every form built on one is
-missed:
-
-```php
-class Foo {
-    const FLAGS = JSON_THROW_ON_ERROR;              // resolves to `int`
-    const COMBO = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
-}
-json_encode($v, self::FLAGS);                       // reported string|false
-json_encode($v, $options | self::FLAGS);            // reported string|false
-$local = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
-json_encode($v, $local);                            // reported string|false
-```
-
-The same gap is why a `match` on a constant alias, or a comparison
-against one, cannot be decided either — the flags case is just where it
-was measured (3 sites).
-
-**Fix:** fold a constant initialiser that names other constants (and
-`|`/`&`/`<<` chains of them) to its literal value during constant
-resolution, with a visited set so a cyclic initialiser terminates, and
-carry the same folding onto a variable assigned such a chain. The bit
-test in `type_engine::types::flag_returns` then needs no change: it
-already asks the shared resolver for a literal and would start getting
-one.
-
-The other half of this entry — the replace family reading its `$subject`
-through the shared pipeline — is fixed; `str_replace(self::NS, '',
-$class)` and `preg_replace($p, $r, file_get_contents($f) ?: '')` both
-resolve to `string` now.
-
 ## preg_match
 
 ### B144. `preg_match` `$matches` is shapeless

@@ -2006,11 +2006,13 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
         // Untyped constant — infer the value type from the initializer
         // so template params bind to the constant's value (e.g. `int`)
         // rather than the owning class.
-        if let Some(ref val) = constant.value
-            && let Some(ty) =
+        if let Some(ref val) = constant.value {
+            if let Some(ty) =
                 crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(val)
-        {
-            return Some(ty);
+            {
+                return Some(ty);
+            }
+            return folded_class_constant_type(&merged, _member, val, ctx);
         }
     }
 
@@ -2018,6 +2020,58 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
     // determine the type, so return None and let the caller skip the
     // diagnostic.
     None
+}
+
+/// The literal value an untyped class constant holds, folded from an
+/// initialiser that names other constants (`const FLAGS = JSON_THROW_ON_ERROR;`,
+/// `const COMBO = A | B;`).
+///
+/// `class` is the class the constant was looked up on, with its inherited
+/// members merged in, so `self::` inside the initialiser is read against a
+/// class that has the constant it names.
+pub(crate) fn folded_class_constant_type(
+    class: &ClassInfo,
+    const_name: &str,
+    value: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let resolve =
+        |text: &str| Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, class), ctx);
+    let key = format!("{}::{}", class.fqn(), const_name);
+    crate::type_engine::types::const_fold::folded_constant_type(&key, value, &resolve)
+}
+
+/// The literal value a global constant holds, folded from an initialiser that
+/// names other constants (`const FLAGS = JSON_THROW_ON_ERROR;`, `define('MASK',
+/// A | B)`).
+pub(crate) fn folded_global_constant_type(
+    name: &str,
+    value: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let resolve = |text: &str| Backend::resolve_arg_text_to_type(text, ctx);
+    crate::type_engine::types::const_fold::folded_constant_type(name, value, &resolve)
+}
+
+/// `text` with a leading `self::`/`static::`/`parent::` replaced by the class
+/// it names, so a term read out of a constant's initialiser resolves against
+/// the class that declared it rather than the one being read from.
+fn qualify_class_keyword<'t>(text: &'t str, class: &ClassInfo) -> std::borrow::Cow<'t, str> {
+    let (keyword, rest) = match text.split_once("::") {
+        Some(parts) => parts,
+        None => return std::borrow::Cow::Borrowed(text),
+    };
+    let qualifier = if is_self_or_static(keyword) {
+        class.fqn().to_string()
+    } else if let Some(parent) = class
+        .parent_class
+        .filter(|_| keyword.eq_ignore_ascii_case("parent"))
+    {
+        parent.to_string()
+    } else {
+        return std::borrow::Cow::Borrowed(text);
+    };
+    std::borrow::Cow::Owned(format!("{qualifier}::{rest}"))
 }
 
 /// The type a cast expression produces, or `None` when the text is not a
@@ -2066,6 +2120,18 @@ pub(super) fn resolve_cast_type(text: &str) -> Option<PhpType> {
 pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     if contains_top_level_concat(text) {
         return Some(PhpType::named(atom("string")));
+    }
+    // A bitwise expression over constants is the value PHP computes for it
+    // (`JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR` is one mask, not two flags).
+    // Only an expression that actually has an operator folds: a single term
+    // would ask this very resolver about the same text again.
+    if crate::type_engine::types::const_fold::has_top_level_bitwise_operator(text) {
+        let resolve = |term: &str| Backend::resolve_arg_text_to_type(term, ctx);
+        if let Some(value) =
+            crate::type_engine::types::const_fold::fold_int_expression(text, &resolve)
+        {
+            return Some(PhpType::literal_int(value.to_string()));
+        }
     }
     if let Some((left, right)) = split_top_level_elvis(text) {
         let left_ty = Backend::resolve_arg_text_to_type(left, ctx);

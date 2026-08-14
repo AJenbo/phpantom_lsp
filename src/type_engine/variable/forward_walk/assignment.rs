@@ -9,6 +9,7 @@ use crate::docblock::type_strings::split_type_token;
 use crate::parser::with_parsed_program;
 use crate::php_type::{LiteralValue, PhpType, TypeKind, keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::types::const_fold::{BitwiseOp, apply_bitwise};
 use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -1779,6 +1780,30 @@ pub(crate) fn infer_arithmetic_result_type(
     }
 }
 
+/// The bitwise operator `operator` is, or `None` for every other binary
+/// operator.
+fn bitwise_op(operator: &mago_syntax::cst::binary::BinaryOperator<'_>) -> Option<BitwiseOp> {
+    use mago_syntax::cst::binary::BinaryOperator;
+
+    Some(match operator {
+        BinaryOperator::BitwiseAnd(_) => BitwiseOp::And,
+        BinaryOperator::BitwiseOr(_) => BitwiseOp::Or,
+        BinaryOperator::BitwiseXor(_) => BitwiseOp::Xor,
+        BinaryOperator::LeftShift(_) => BitwiseOp::LeftShift,
+        BinaryOperator::RightShift(_) => BitwiseOp::RightShift,
+        _ => return None,
+    })
+}
+
+/// The integer an operand holds, when it resolved to exactly one literal
+/// integer.  An operand that could be several types is not a known value.
+fn single_literal_int(types: &[ResolvedType]) -> Option<i64> {
+    let [only] = types else {
+        return None;
+    };
+    crate::type_engine::types::const_fold::literal_int_value(&only.type_string)
+}
+
 /// Resolve the type of an RHS expression using the current scope.
 ///
 /// This is the key integration point: instead of calling
@@ -2054,24 +2079,14 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
 
         // Bitwise operators (&, |, ^, <<, >>).
         // When both operands are strings, PHP applies bitwise ops
-        // character-by-character and returns a string.  Otherwise int.
-        if matches!(
-            binary.operator,
-            BinaryOperator::BitwiseAnd(_)
-                | BinaryOperator::BitwiseOr(_)
-                | BinaryOperator::BitwiseXor(_)
-                | BinaryOperator::LeftShift(_)
-                | BinaryOperator::RightShift(_)
-        ) {
-            // Check if both operands are string-typed for &, |, ^.
-            if matches!(
-                binary.operator,
-                BinaryOperator::BitwiseAnd(_)
-                    | BinaryOperator::BitwiseOr(_)
-                    | BinaryOperator::BitwiseXor(_)
-            ) {
-                let lhs_types = resolve_rhs_with_scope(binary.lhs, scope, ctx);
-                let rhs_types = resolve_rhs_with_scope(binary.rhs, scope, ctx);
+        // character-by-character and returns a string.  Otherwise int —
+        // or the exact value, when both operands are known integers.
+        if let Some(op) = bitwise_op(&binary.operator) {
+            let lhs_types = resolve_rhs_with_scope(binary.lhs, scope, ctx);
+            let rhs_types = resolve_rhs_with_scope(binary.rhs, scope, ctx);
+            // `&`, `|` and `^` are the ones PHP overloads for strings; a
+            // shift always produces an int.
+            if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor) {
                 let both_strings = !lhs_types.is_empty()
                     && !rhs_types.is_empty()
                     && lhs_types
@@ -2083,6 +2098,17 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                 if both_strings {
                     return vec![ResolvedType::from_type_string(PhpType::string())];
                 }
+            }
+            // A mask built from constants (`$flags = JSON_PRETTY_PRINT |
+            // JSON_THROW_ON_ERROR`) keeps its value, so a call that is
+            // handed it can still read the bits it sets.
+            if let Some(value) = single_literal_int(&lhs_types)
+                .zip(single_literal_int(&rhs_types))
+                .and_then(|(lhs, rhs)| apply_bitwise(op, lhs, rhs))
+            {
+                return vec![ResolvedType::from_type_string(PhpType::literal_int(
+                    value.to_string(),
+                ))];
             }
             return vec![ResolvedType::from_type_string(PhpType::int())];
         }

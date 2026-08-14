@@ -13060,6 +13060,58 @@ function probe(mixed $value, int $flags): void {
     );
 }
 
+/// A flags argument written through one level of indirection still names the
+/// same bit: a constant whose value is another constant, a constant built
+/// from a `|` chain of them, and a local variable holding such a chain.
+#[test]
+fn hover_json_encode_reads_a_flag_through_a_constant_alias() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///json_encode_constant_flags.php";
+    let content = r#"<?php
+class Encoder {
+    const FLAGS = JSON_THROW_ON_ERROR;
+    const COMBO = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
+
+    public function probe(mixed $value, int $options): void {
+        $aliased = json_encode($value, self::FLAGS);
+        $aliased;
+        $combined = json_encode($value, self::COMBO);
+        $combined;
+        $ored = json_encode($value, $options | self::FLAGS);
+        $ored;
+        $local = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
+        $fromLocal = json_encode($value, $local);
+        $fromLocal;
+        $other = json_encode($value, self::COMBO & JSON_PRETTY_PRINT);
+        $other;
+    }
+}
+"#;
+
+    for (line, name) in [
+        (7, "$aliased"),
+        (9, "$combined"),
+        (11, "$ored"),
+        (14, "$fromLocal"),
+    ] {
+        let out = hover_text(
+            &hover_at(&backend, uri, content, line, 10).unwrap_or_else(|| panic!("hover {name}")),
+        )
+        .to_string();
+        assert!(
+            out.contains("string") && !out.contains("false"),
+            "{name}: the flag rules out the false branch: {out}"
+        );
+    }
+
+    let other =
+        hover_text(&hover_at(&backend, uri, content, 16, 10).expect("hover $other")).to_string();
+    assert!(
+        other.contains("false"),
+        "a mask the flag is masked out of leaves the declared union: {other}"
+    );
+}
+
 /// `+=` on arrays is an array union in PHP, not numeric addition.
 /// The inferred type must be `array`, not `int|float`.
 #[test]

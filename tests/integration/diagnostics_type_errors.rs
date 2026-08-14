@@ -9725,6 +9725,56 @@ function test(mixed $value): void {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// The flag is still the flag when it is reached through a constant: one that
+/// aliases it, one that ORs it with another, and a local variable holding such
+/// a mask.
+#[test]
+fn json_encode_reads_throw_on_error_through_a_constant() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+const ENCODE_FLAGS = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
+
+class Encoder {
+    const FLAGS = JSON_THROW_ON_ERROR;
+
+    public function test(mixed $value, int $options): void {
+        useString(json_encode($value, self::FLAGS));
+        useString(json_encode($value, ENCODE_FLAGS));
+        useString(json_encode($value, $options | self::FLAGS));
+        $mask = JSON_UNESCAPED_SLASHES | self::FLAGS;
+        useString(json_encode($value, $mask));
+    }
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A constant defined in terms of itself has no value to fold, and folding it
+/// must terminate rather than chase the cycle.
+#[test]
+fn a_cyclic_constant_leaves_the_declared_union() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+class Encoder {
+    const A = self::B;
+    const B = self::A;
+
+    public function test(mixed $value): void {
+        useString(json_encode($value, self::A));
+    }
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("false"),
+        "the failure branch stands when the flag cannot be read, got {messages:?}"
+    );
+}
+
 /// Without the flag the failure branch is real and still reported.
 #[test]
 fn json_encode_without_throw_on_error_may_be_false() {

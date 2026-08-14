@@ -16,7 +16,7 @@
 //! `json_decode()` needs nothing here. It is declared `mixed`, so it carries
 //! no failure branch for the flag to remove.
 
-use crate::php_type::{LiteralValue, PhpType, TypeKind};
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 use super::conditional::{ArgTypeResolver, split_text_args};
@@ -101,7 +101,7 @@ fn bitmask_sets_flag(
             arg_type_resolver
                 .and_then(|resolve| resolve(term))
                 .as_ref()
-                .and_then(literal_int_value)
+                .and_then(super::const_fold::literal_int_value)
         });
         value.is_some_and(|value| value & bit != 0)
     })
@@ -135,14 +135,6 @@ fn split_bitwise_or(text: &str) -> Vec<&str> {
     }
     parts.push(&text[start..]);
     parts
-}
-
-/// The value of a literal-integer type, or `None` for anything else.
-fn literal_int_value(ty: &PhpType) -> Option<i64> {
-    match ty.as_literal() {
-        Some(LiteralValue::Int(raw)) => crate::php_type::parse_php_int_literal(raw),
-        _ => None,
-    }
 }
 
 /// `ty` without its `false` member, or `None` when it has none to drop.

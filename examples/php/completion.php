@@ -1366,6 +1366,12 @@ class ClosureLiteralDemo
 
 class ConditionalReturnDemo
 {
+    /** A flag reached through a constant is still the same flag. */
+    public const JSON_FLAGS = JSON_THROW_ON_ERROR;
+
+    /** And so is one built out of several. */
+    public const JSON_COMBO = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
+
     public function demo(): void
     {
         $container = new Scaffolding\Container();
@@ -1458,6 +1464,17 @@ class ConditionalReturnDemo
         // `false`, so the failure branch cannot happen at this call site.
         $json = json_encode(['ok' => true], JSON_THROW_ON_ERROR);
         strtoupper($json);                        // string, not string|false
+
+        // The flag counts wherever it is spelled: a constant that holds it,
+        // a constant that ORs it with another, and a mask kept in a variable
+        // all fold to the value the bit is tested against.
+        $aliased = json_encode(['ok' => true], self::JSON_FLAGS);
+        strtoupper($aliased);                     // constant alias → string
+        $combined = json_encode(['ok' => true], self::JSON_COMBO);
+        strtoupper($combined);                    // constant of a mask → string
+        $mask = JSON_UNESCAPED_SLASHES | self::JSON_FLAGS;
+        $fromMask = json_encode(['ok' => true], $mask);
+        strtoupper($fromMask);                    // mask in a variable → string
 
         // More builtins whose shape an argument decides. Only the
         // all-elements form of `pathinfo()` returns the component array;

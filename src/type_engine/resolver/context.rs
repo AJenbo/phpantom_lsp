@@ -271,9 +271,20 @@ impl<'a> VarResolutionCtx<'a> {
         self.loaders.function_loader
     }
 
-    /// Convenience accessor for the constant loader.
-    pub fn constant_loader(&self) -> ConstantLoaderFn<'a> {
-        self.loaders.constant_loader
+    /// The value of the global constant `name`, as
+    /// `Some(Some(value))` when it is known, `Some(None)` when the constant
+    /// exists without a readable value, and `None` when it is not found.
+    ///
+    /// Falls back to the attached `Backend`, which is where the loader
+    /// closure reads from anyway: a context built from a [`ResolutionCtx`]
+    /// (which carries no constant loader) would otherwise report every
+    /// global constant unknown, so a variable assigned one would resolve to
+    /// nothing on that path while resolving fine on others.
+    pub(crate) fn lookup_constant(&self, name: &str) -> Option<Option<String>> {
+        match self.loaders.constant_loader {
+            Some(loader) => loader(name),
+            None => self.backend?.lookup_global_constant(name),
+        }
     }
 
     /// Clone this context with a different `cursor_offset`.

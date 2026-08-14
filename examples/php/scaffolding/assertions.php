@@ -702,6 +702,11 @@ function runDemoAssertions(): void
 
     // ── Flag-keyed return type (json_encode + JSON_THROW_ON_ERROR) ───────
     assert(json_encode(['ok' => true], JSON_THROW_ON_ERROR) === '{"ok":true}', 'the flag makes the failure branch a JsonException instead of false');
+    assert(ConditionalReturnDemo::JSON_FLAGS === JSON_THROW_ON_ERROR, 'a constant holding the flag holds its value');
+    assert((ConditionalReturnDemo::JSON_COMBO & JSON_THROW_ON_ERROR) !== 0, 'a constant OR-ing the flag with another still sets its bit');
+    assert(json_encode(['ok' => true], ConditionalReturnDemo::JSON_FLAGS) === '{"ok":true}', 'the flag counts when it is reached through a constant');
+    $jsonMask = JSON_UNESCAPED_SLASHES | ConditionalReturnDemo::JSON_FLAGS;
+    assert(json_encode(['url' => 'a/b'], $jsonMask) === '{"url":"a/b"}', 'a mask kept in a variable sets the same bits');
 
     // ── More argument-decided builtins ───────────────────────────────────
     assert(is_array(pathinfo('/tmp/report.csv')), 'the all-elements form returns the component array');

@@ -48,11 +48,14 @@ namespace PsalmTest_binary_operation_5 {
     $e = 15 >> 2;
     $f = "a" & "b";
 
-    assertType('int', $a);
-    assertType('int', $b);
-    assertType('int', $c);
-    assertType('int', $d);
-    assertType('int', $e);
+    // Psalm widens a bitwise operation on literals to `int`; PHPantom folds
+    // it to the value PHP computes, as PHPStan does, so a mask assigned to a
+    // variable can still be bit-tested at the call it is passed to.
+    assertType('4', $a);
+    assertType('3', $b);
+    assertType('7', $c);
+    assertType('4', $d);
+    assertType('3', $e);
     assertType('string', $f);
 }
 
@@ -63,8 +66,9 @@ namespace PsalmTest_binary_operation_6 {
     $c = (true xor false);
     $d = (false xor false);
 
-    assertType('int', $a);
-    assertType('int', $b);
+    // Folded, as in the bitwise block above.
+    assertType('5', $a);
+    assertType('2', $b);
     assertType('bool', $c);
     assertType('bool', $d);
 }

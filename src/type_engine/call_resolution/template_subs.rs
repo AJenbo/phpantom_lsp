@@ -756,6 +756,7 @@ impl Backend {
             && let Some(Some(value)) = backend.constant_loader()(trimmed)
             && let Some(ty) =
                 crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(&value)
+                    .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
         {
             return Some(ty);
         }

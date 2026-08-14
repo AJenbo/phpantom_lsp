@@ -1073,10 +1073,15 @@ fn resolve_rhs_expression_inner<'b>(
                 }
                 _ => {}
             }
-            if let Some(loader) = ctx.constant_loader()
-                && let Some(maybe_value) = loader(name_clean)
+            if let Some(maybe_value) = ctx.lookup_constant(name_clean)
                 && let Some(ref value) = maybe_value
-                && let Some(ts) = infer_type_from_constant_value(value)
+                && let Some(ts) = infer_type_from_constant_value(value).or_else(|| {
+                    crate::type_engine::call_resolution::folded_global_constant_type(
+                        name_clean,
+                        value,
+                        &ctx.as_resolution_ctx(),
+                    )
+                })
             {
                 return vec![ResolvedType::from_type_string(ts)];
             }

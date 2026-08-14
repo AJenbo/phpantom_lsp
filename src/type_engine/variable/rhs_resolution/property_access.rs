@@ -166,9 +166,19 @@ pub(super) fn resolve_rhs_property_access(
                                 return ResolvedType::from_classes_with_hint(resolved, th.clone());
                             }
                         }
-                        // No type_hint — infer from the initializer value.
+                        // No type_hint — infer from the initializer value,
+                        // folding an initialiser that names other constants
+                        // (`const FLAGS = JSON_THROW_ON_ERROR;`) to the value
+                        // it holds.
                         if let Some(ref val) = c.value
-                            && let Some(ts) = infer_type_from_constant_value(val)
+                            && let Some(ts) = infer_type_from_constant_value(val).or_else(|| {
+                                crate::type_engine::call_resolution::folded_class_constant_type(
+                                    cls,
+                                    &const_name,
+                                    val,
+                                    &ctx.as_resolution_ctx(),
+                                )
+                            })
                         {
                             let resolved =
                                 crate::type_engine::type_resolution::type_hint_to_classes_typed(

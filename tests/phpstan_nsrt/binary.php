@@ -170,12 +170,12 @@ class Foo
 
 		// ── Bitwise operators: int operands ─────────────────────────────
 
-		assertType('int', 5 & 3);
+		assertType('1', 5 & 3);
 		assertType('int', $integer & 3);
 		assertType('int', $integer & $integer);
-		assertType('int', 5 | 3);
+		assertType('7', 5 | 3);
 		assertType('int', $integer | 3);
-		assertType('int', 5 ^ 3);
+		assertType('6', 5 ^ 3);
 		assertType('int', $integer ^ 3);
 
 		// ── Bitwise: string operands ────────────────────────────────────
