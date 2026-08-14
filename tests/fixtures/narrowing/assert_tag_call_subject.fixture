@@ -1,0 +1,28 @@
+// test: a @phpstan-assert applies to a call argument, not just a variable
+// feature: hover
+// expect: $kept = Widget
+// expect_absent: ?Widget
+---
+<?php
+
+class Widget { public function spin(): void {} }
+
+class Holder {
+    public function find(string $key): ?Widget { return null; }
+}
+
+class Assert
+{
+    /** @phpstan-assert !null $actual */
+    public static function assertNotNull(mixed $actual): void {}
+}
+
+class MyTest extends Assert
+{
+    public function testIt(Holder $holder): void
+    {
+        static::assertNotNull($holder->find('a'));
+        $kept = $holder->find('a');
+        echo $ke<>pt;
+    }
+}

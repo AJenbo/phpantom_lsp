@@ -359,6 +359,16 @@ function runDemoAssertions(): void
     assert(Scaffolding\StaticAssert::isRock(new Scaffolding\Rock()) === true, 'Scaffolding\StaticAssert::isRock(Scaffolding\Rock) must return true');
     assert(Scaffolding\StaticAssert::isNotRock(new Scaffolding\Banana()) === true, 'Scaffolding\StaticAssert::isNotRock(Scaffolding\Banana) must return true');
 
+    // ── Pseudo-type assertions ──────────────────────────────────────────
+    $handle = fopen('php://memory', 'rb');
+    Scaffolding\StaticAssert::assertIsResource($handle);
+    assert(is_resource($handle), 'Scaffolding\StaticAssert::assertIsResource() accepts a real handle');
+    fclose($handle);
+
+    $nothing = null;
+    Scaffolding\StaticAssert::assertIsNull($nothing);
+    assert($nothing === null, 'Scaffolding\StaticAssert::assertIsNull() accepts null');
+
     // ── Null-init + foreach reassignment (B11) ──────────────────────────
     $pens = [new Scaffolding\Pen('blue'), new Scaffolding\Pen('red')];
     $found = null;

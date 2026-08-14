@@ -1,0 +1,23 @@
+// test: a @phpstan-assert of a pseudo-type narrows its argument to it
+// feature: hover
+// `resource` names no class, so it has to travel the type-guard channel
+// the `is_resource()` check uses rather than the instanceof one.
+// expect: $kept = resource
+---
+<?php
+
+class Assert
+{
+    /** @phpstan-assert resource $actual */
+    public static function assertIsResource(mixed $actual): void {}
+}
+
+class MyTest extends Assert
+{
+    public function testIt(mixed $handle): void
+    {
+        static::assertIsResource($handle);
+        $kept = $handle;
+        echo $ke<>pt;
+    }
+}

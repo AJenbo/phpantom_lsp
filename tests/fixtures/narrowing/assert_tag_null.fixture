@@ -1,0 +1,22 @@
+// test: a @psalm-assert null narrows its argument to null
+// feature: hover
+// expect: $kept = null
+// expect_absent: ?string
+---
+<?php
+
+class Assert
+{
+    /** @psalm-assert null $actual */
+    public static function assertNull(mixed $actual): void {}
+}
+
+class MyTest extends Assert
+{
+    public function testIt(?string $value): void
+    {
+        static::assertNull($value);
+        $kept = $value;
+        echo $ke<>pt;
+    }
+}

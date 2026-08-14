@@ -2362,6 +2362,22 @@ class StaticAssert
             throw new \InvalidArgumentException('Did not expect string');
         }
     }
+
+    /** @phpstan-assert resource $value */
+    public static function assertIsResource(mixed $value): void
+    {
+        if (!is_resource($value)) {
+            throw new \InvalidArgumentException('Expected resource');
+        }
+    }
+
+    /** @psalm-assert null $value */
+    public static function assertIsNull(mixed $value): void
+    {
+        if ($value !== null) {
+            throw new \InvalidArgumentException('Expected null');
+        }
+    }
 }
 
 // ─── Pipe Operator / Pass-by-Reference / Interface Template / Generic Assert ─

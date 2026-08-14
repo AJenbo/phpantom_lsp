@@ -931,6 +931,14 @@ class AssertConditionReexportDemo extends Scaffolding\StaticAssert
         $mixedValue = self::pickStringOrRock();   // string|Scaffolding\Rock
         self::assertIsNotString($mixedValue);
         $mixedValue->crush();                     // narrowed to Scaffolding\Rock
+
+        // A pseudo-type the class hierarchy knows nothing about narrows
+        // just as well: `resource` and `null` travel the same channel the
+        // matching is_resource() / === null check does.
+        $handle = Scaffolding\getUnknownValue();  // mixed
+        self::assertIsResource($handle);          // narrowed to resource
+        $nothing = Scaffolding\getUnknownValue(); // mixed
+        self::assertIsNull($nothing);             // narrowed to null
     }
 
     /** @return string|Scaffolding\Rock */

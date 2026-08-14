@@ -184,24 +184,20 @@ that receiver, unless the callee is declared `@phpstan-pure` /
 `$obj->get()` form has always had it), but keying calls with arguments
 widens the surface.
 
-### B157. `@phpstan-assert` tags on called methods are ignored
+### B176. `iterable` is not a type guard
 
-**Impact: Medium-High · Effort: Medium**
+**Impact: Low-Medium · Effort: Low-Medium**
 
-PHPUnit's assertions declare their effect in phpDoc
-(`@phpstan-assert resource $actual` on `assertIsResource()`,
-`@psalm-assert =ExpectedType $actual` on `assertInstanceOf()`, and so
-on). PHPantom honours several assertions (`assertNotFalse`,
-`assertIsArray`, and `assertNotNull` all narrow correctly) but the
-coverage comes from hard-coded knowledge, not the tags: in the same
-sweep `assertIsResource` and `assertInstanceOf` (mock intersections)
-left their argument untouched (~6 sites in test suites).
+`is_iterable($x)` narrows nothing, and neither does a
+`@phpstan-assert iterable $actual` tag (PHPUnit's `assertIsIterable`).
+`iterable` names no class, so the instanceof channel cannot carry it,
+and the type-guard channel has no kind for it the way it does for
+`array`, `string`, `callable` and the rest. The assertion is read and
+then silently dropped.
 
-**Fix:** read `@phpstan-assert` / `@phpstan-assert-if-true` /
-`@phpstan-assert-if-false` (and the `@psalm-assert` aliases,
-including the `=` exact-type prefix) from called
-functions/methods and apply them as type specifications; drop the
-hard-coded PHPUnit list in favour of the tags.
+**Fix:** add an `iterable` guard kind alongside the others, mapping to
+`array|Traversable` for the inclusion test so a union narrows to the
+members that can be iterated.
 
 ## Laravel
 

@@ -275,6 +275,10 @@ fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
             "numeric" => Some(TypeGuardKind::Numeric),
             "callable" => Some(TypeGuardKind::Callable),
             "scalar" => Some(TypeGuardKind::Scalar),
+            // `assertIsResource`, and the two states PHP's own stubs
+            // spell a handle in once it has been opened or closed.
+            "resource" | "open-resource" | "closed-resource" => Some(TypeGuardKind::Resource),
+            "null" => Some(TypeGuardKind::Null),
             _ => None,
         },
         _ => None,

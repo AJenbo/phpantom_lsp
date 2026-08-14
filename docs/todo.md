@@ -29,10 +29,10 @@ within the same impact tier.
 | B141 | [A `never` conditional branch does not assert the condition](todo/bugs.md#b141-a-never-conditional-branch-does-not-assert-the-condition) | Medium-High | Medium      |
 | B147 | [Array literals are not tuples: slot reads return the union of all elements](todo/bugs.md#b147-array-literals-are-not-tuples-slot-reads-return-the-union-of-all-elements) | Medium-High | Medium |
 | B144 | [`preg_match` `$matches` is shapeless](todo/bugs.md#b144-preg_match-matches-is-shapeless) (depends on B147)                                | Medium-High | Medium      |
-| B157 | [`@phpstan-assert` tags on called methods are ignored](todo/bugs.md#b157-phpstan-assert-tags-on-called-methods-are-ignored)                                | Medium-High | Medium      |
 | B168 | [`Request` input accessors deserve precise per-argument types](todo/bugs.md#b168-request-input-accessors-deserve-precise-per-argument-types)               | Medium-High | Medium      |
 | B169 | [Blade `@if` narrowing does not reach `@include`d variables](todo/bugs.md#b169-blade-if-narrowing-does-not-reach-included-variables)                       | Medium-High | Medium      |
 | B143 | [A constant built from another constant does not fold to its value](todo/bugs.md#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value) | Medium | Medium |
+| B176 | [`iterable` is not a type guard](todo/bugs.md#b176-iterable-is-not-a-type-guard)                                                                          | Low-Medium  | Low-Medium  |
 | B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
 | B175 | [A call's recorded check survives a statement that could change what it returns](todo/bugs.md#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns) | Medium | Medium |
 | B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state) (depends on B147)                   | Medium      | Medium-High |
