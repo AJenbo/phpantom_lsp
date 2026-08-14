@@ -935,6 +935,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b174-assertthis-instanceof-x-does-not-narrow-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B174. <code>assert($this instanceof X)</code> does not narrow <code>$this</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -956,6 +967,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b177-a-doubly-negated-truthiness-guard-does-not-narrow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B177. A doubly negated truthiness guard does not narrow
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -969,45 +991,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b167-factory-createmake-keep-the-collection-half-on-single-model-chains" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B167. Factory <code>create()</code>/<code>make()</code> keep the collection half on single-model chains
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b168-request-input-accessors-deserve-precise-per-argument-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B168. <code>Request</code> input accessors deserve precise per-argument types
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b169-blade-if-narrowing-does-not-reach-included-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1614,6 +1597,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b174-assertthis-instanceof-x-does-not-narrow-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B174. <code>assert($this instanceof X)</code> does not narrow <code>$this</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1635,6 +1629,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b177-a-doubly-negated-truthiness-guard-does-not-narrow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B177. A doubly negated truthiness guard does not narrow
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1648,45 +1653,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b167-factory-createmake-keep-the-collection-half-on-single-model-chains" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B167. Factory <code>create()</code>/<code>make()</code> keep the collection half on single-model chains
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b168-request-input-accessors-deserve-precise-per-argument-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B168. <code>Request</code> input accessors deserve precise per-argument types
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b169-blade-if-narrowing-does-not-reach-included-variables" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1848,6 +1814,18 @@ generic array only for non-constant keys.</p>
 auto-vivification), merge <code>+=</code> like an array-shape union, and make
 constant shapes satisfy their generic supertypes.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
+<h3 id="b174-assertthis-instanceof-x-does-not-narrow-this">B174. <code>assert($this instanceof X)</code> does not narrow <code>$this</code><a class="headerlink" href="#b174-assertthis-instanceof-x-does-not-narrow-this" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
+<p>A Pest test closure is bound to whatever <code>pest()-&gt;extends(…)</code> names,
+which no expression in the test file says, so the suites write
+<code>assert($this instanceof TestCase);</code> as the first line of the closure
+to tell an analyser what it is bound to. The assertion is ignored for
+<code>$this</code> (it narrows an ordinary variable), so every helper the base
+class provides is reported <code>unknown_member</code> against Pest's default
+<code>PHPUnit\Framework\TestCase</code> — ~21 sites in one project's browser
+suite alone. Narrowing <code>$this</code> the way any other subject is narrowed
+clears them; reading <code>pest()-&gt;extends(…)-&gt;in(…)</code> to bind the closure
+in the first place would clear them without the assertion.</p>
 <h3 id="b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns">B175. A call's recorded check survives a statement that could change what it returns<a class="headerlink" href="#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">if ($stmt-&gt;fetch(&#39;id&#39;) !== false) {</span>
@@ -1877,39 +1855,17 @@ then silently dropped.</p>
 <p><strong>Fix:</strong> add an <code>iterable</code> guard kind alongside the others, mapping to
 <code>array|Traversable</code> for the inclusion test so a union narrows to the
 members that can be iterated.</p>
+<h3 id="b177-a-doubly-negated-truthiness-guard-does-not-narrow">B177. A doubly negated truthiness guard does not narrow<a class="headerlink" href="#b177-a-doubly-negated-truthiness-guard-does-not-narrow" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
+<p><code>if (!(!$user))</code> and Blade's <code>@unless (!$user)</code>, which compiles to it,
+leave <code>$user</code> as <code>User|null</code> inside the guard, while the single-negation
+and comparison spellings (<code>if ($user)</code>, <code>if (!($user === null))</code>,
+<code>@unless ($user === null)</code>) all narrow. The negation is applied to the
+operand rather than folded, so the inner <code>!</code> re-negates a proof the
+outer one had already inverted. Found while confirming the Blade
+<code>@include</code> narrowing, not from a sample-project site.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b167-factory-createmake-keep-the-collection-half-on-single-model-chains">B167. Factory <code>create()</code>/<code>make()</code> keep the collection half on single-model chains<a class="headerlink" href="#b167-factory-createmake-keep-the-collection-half-on-single-model-chains" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
-<p>The shipped factory-count narrowing misses chains that pass through
-<code>for()</code>/<code>has()</code>/<code>state()</code> (<code>$factory-&gt;for($brand)-&gt;create()</code> reports
-<code>ProductCollection|Product</code>) and the count-argument static form
-(<code>Product::factory($n)-&gt;create()</code> should be pure
-<code>Collection&lt;int, Product&gt;</code>). Track the single-vs-collection state
-across the whole fluent chain, in both directions. 8 sites.</p>
-<h3 id="b168-request-input-accessors-deserve-precise-per-argument-types">B168. <code>Request</code> input accessors deserve precise per-argument types<a class="headerlink" href="#b168-request-input-accessors-deserve-precise-per-argument-types" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p><code>$request-&gt;header('User-Agent', '')</code> reports <code>string|array|null</code>
-against a <code>string</code> parameter — with a string default the real type is
-<code>string</code>. <code>query()</code> with no key returns the full <code>array</code>;
-<code>file('key')</code> is <code>UploadedFile|null</code> for a scalar key (larastan wraps
-it in a benevolent union; resolving on the key/default is more
-precise). Model the conditional shapes natively for
-<code>header</code>/<code>query</code>/<code>input</code>/<code>cookie</code>/<code>file</code>. 5 sites. (Unguarded
-<code>query('x')</code> uses that really can receive arrays were patched in the
-sample sources as genuine.)</p>
-<h3 id="b169-blade-if-narrowing-does-not-reach-included-variables">B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables<a class="headerlink" href="#b169-blade-if-narrowing-does-not-reach-included-variables" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>@if ($product)
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>@endif
-</code></pre></div>
-<p>An inherited variable is checked against the template's <em>declared</em>
-signature type at the <code>@include</code> site, ignoring the enclosing Blade
-control flow that provably narrows it (4 sites in two projects). Use
-the flow-narrowed scope at the include position — the compiled
-virtual PHP already contains the real <code>if</code>, so the walker has the
-narrowing; it is the include-contract check that reads the wrong
-scope.</p>
+<p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b173-classes-shipped-inside-a-dependencys-phar-are-invisible">B173. Classes shipped inside a dependency's phar are invisible<a class="headerlink" href="#b173-classes-shipped-inside-a-dependencys-phar-are-invisible" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
