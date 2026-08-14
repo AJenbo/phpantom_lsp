@@ -979,17 +979,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B149. <code>instanceof</code> narrowing extends the union instead of filtering it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1001,10 +990,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver" class="md-nav__link">
+  <a href="#b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B154. A check on a nullsafe chain does not narrow the receiver
+        B177. A branch-local proof about an untyped subject escapes the join
       </span>
     </span>
   </a>
@@ -1016,17 +1005,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B155. A checked call expression is forgotten by the next identical call
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b156-assert-still-misses-some-provable-conditions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B156. <code>assert()</code> still misses some provable conditions
       </span>
     </span>
   </a>
@@ -1060,17 +1038,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B159. An inline <code>@var</code> re-pins the variable on every read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b163-an-int-assigned-to-a-float-property-is-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B163. An <code>int</code> assigned to a <code>float</code> property is reported
       </span>
     </span>
   </a>
@@ -1823,17 +1790,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B149. <code>instanceof</code> narrowing extends the union instead of filtering it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1845,10 +1801,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver" class="md-nav__link">
+  <a href="#b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B154. A check on a nullsafe chain does not narrow the receiver
+        B177. A branch-local proof about an untyped subject escapes the join
       </span>
     </span>
   </a>
@@ -1860,17 +1816,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B155. A checked call expression is forgotten by the next identical call
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b156-assert-still-misses-some-provable-conditions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B156. <code>assert()</code> still misses some provable conditions
       </span>
     </span>
   </a>
@@ -1904,17 +1849,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B159. An inline <code>@var</code> re-pins the variable on every read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b163-an-int-assigned-to-a-float-property-is-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B163. An <code>int</code> assigned to a <code>float</code> property is reported
       </span>
     </span>
   </a>
@@ -2257,23 +2191,6 @@ generic array only for non-constant keys.</p>
 auto-vivification), merge <code>+=</code> like an array-shape union, and make
 constant shapes satisfy their generic supertypes.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it">B149. <code>instanceof</code> narrowing extends the union instead of filtering it<a class="headerlink" href="#b149-instanceof-narrowing-extends-the-union-instead-of-filtering-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$obj = $container-&gt;get(&#39;config&#39;);       // object|null</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">assert($obj instanceof Configuration);</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">return $obj;                            // reported object|null|Configuration</span>
-</code></pre></div>
-<p><code>assert($x instanceof T)</code> (and the <code>if (!$x instanceof T) { throw }</code>
-guard) <em>adds</em> <code>T</code> to the union instead of replacing it (5 sites in
-PDepend alone). Related <code>instanceof</code> defects seen in the same sweep:
-the fall-through of <code>if (!$v instanceof C) { return; }</code> removes other
-classes but not scalar/array members of the union (2 sites); negated
-<code>instanceof</code> inside a branch doesn't narrow the branch at all
-(3 sites); and a successful check on an interface produces the bare
-interface instead of <code>Receiver&amp;Interface</code>, which then fails the
-declared return type (2 sites).</p>
-<p><strong>Fix:</strong> implement <code>instanceof</code> as union filtering/intersection in
-both polarities, for <code>assert()</code> and guard forms alike.</p>
 <h3 id="b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point">B150. Branch-local reassignment and narrowing are wrong at the join point<a class="headerlink" href="#b150-branch-local-reassignment-and-narrowing-are-wrong-at-the-join-point" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <p>Two inverse defects at <code>if</code>/<code>else</code> merges (~5 sites):</p>
@@ -2289,28 +2206,33 @@ both polarities, for <code>assert()</code> and guard forms alike.</p>
 <p><strong>Fix:</strong> at the merge, each branch contributes its end-state (declared
 type transformed by that branch's assignments/narrowings), and the
 join is the union of branch end-states — nothing more, nothing less.</p>
-<h3 id="b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver">B154. A check on a nullsafe chain does not narrow the receiver<a class="headerlink" href="#b154-a-check-on-a-nullsafe-chain-does-not-narrow-the-receiver" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$image = Productimage::where(…)-&gt;first();       // Productimage|null</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">if ($image?-&gt;file_id !== null) {</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    $this-&gt;scheduleDeletion($image-&gt;file_id);</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    $this-&gt;repo-&gt;delete($image);                // reported Productimage|null</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
+<h3 id="b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join">B177. A branch-local proof about an untyped subject escapes the join<a class="headerlink" href="#b177-a-branch-local-proof-about-an-untyped-subject-escapes-the-join" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$version = $row-&gt;version;      // stdClass property: no type</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">if ($version instanceof Foo) { }</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">$version;                      // reported Foo, should stay untyped</span>
 </code></pre></div>
-<p>If <code>$image</code> were null the chain yields <code>null</code> and the comparison
-fails, so inside the branch the receiver is non-null. The same holds
-for a truthy check (<code>if (!$product?-&gt;translation?-&gt;is_live) return;</code>
-proves <code>$product</code> non-null afterwards) and for <code>===</code> against a
-non-nullable RHS. 5 sites in four projects.</p>
-<p><strong>Fix:</strong> when a condition proves a nullsafe chain's result non-null
-(or compares it to a type that excludes the short-circuit <code>null</code>),
-narrow every receiver in the chain to non-null in that branch.</p>
+<p>Narrowing a subject the scope has no type for <em>establishes</em> that type
+(this is what lets <code>assert($x instanceof Foo)</code> and
+<code>if (!is_string($x)) { return; }</code> work at all), but the branch merge
+cannot tell the resulting entry apart from a branch-local assignment:
+a name absent on one incoming path and present on the other is adopted
+wholesale, so the proof survives a join it should not. The negated form
+leaks the same way, from the implicit-else path back into the body.</p>
+<p>Harmless while the alternative is no information at all, and long-standing
+— it predates the <code>instanceof</code>/type-guard narrowing work that made it
+visible. Found while fixing the condition-proof handling, not by a sample
+project.</p>
+<p><strong>Fix:</strong> distinguish "no entry" from "unknown" in <code>ScopeState</code> so the merge
+can widen a narrowed-from-nothing entry back to unknown, rather than
+adopting it. Overlaps <a href="../type-inference/#t29-definite-vs-possible-variable-existence-tracking">T29</a>,
+which needs the same distinction for variable existence.</p>
 <h3 id="b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call">B155. A checked call expression is forgotten by the next identical call<a class="headerlink" href="#b155-a-checked-call-expression-is-forgotten-by-the-next-identical-call" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">if (mb_strpos($slug, $marker) !== false) {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    $slug = mb_substr($slug, 0, mb_strpos($slug, $marker));  // reported int|false</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">}</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$from = $this-&gt;option(&#39;from&#39;) ? Carbon::parse($this-&gt;option(&#39;from&#39;)) : null;</span>
 </code></pre></div>
 <p>Narrowing is keyed on variables only; a structurally identical
 side-effect-free call repeated inside the guarded scope re-resolves
@@ -2320,17 +2242,6 @@ identity.</p>
 <p><strong>Fix:</strong> key the narrowing store by a canonical expression form
 (receiver chain + arguments) for deterministic/pure calls, and
 invalidate entries when a statement could change their inputs.</p>
-<h3 id="b156-assert-still-misses-some-provable-conditions">B156. <code>assert()</code> still misses some provable conditions<a class="headerlink" href="#b156-assert-still-misses-some-provable-conditions" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Follow-ups to the shipped <code>assert()</code> work, each reproduced in the
-sweep: <code>assert(is_string($version))</code> on a value read from a
-<code>stdClass</code> property inside a <code>foreach</code> leaves <code>mixed</code>;
-<code>assert($weights !== [])</code> does not produce <code>non-empty-array</code> (so a
-subsequent <code>array_key_last</code> keeps <code>null</code>); <code>assert(isset($m[0]))</code>
-does not remove <code>null</code> from the following offset read.</p>
-<p><strong>Fix:</strong> route these condition shapes through the same reconciler the
-<code>if</code> forms use; the gaps are in subject kinds (property-of-mixed,
-array offset) and in the <code>!== []</code> → non-empty rule.</p>
 <h3 id="b157-phpstan-assert-tags-on-called-methods-are-ignored">B157. <code>@phpstan-assert</code> tags on called methods are ignored<a class="headerlink" href="#b157-phpstan-assert-tags-on-called-methods-are-ignored" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
 <p>PHPUnit's assertions declare their effect in phpDoc
@@ -2354,35 +2265,25 @@ list's literals (⊆ <code>string</code>), removing <code>null</code>. Requires 
 expression keying for method-call needles. 2 sites.</p>
 <h3 id="b159-an-inline-var-re-pins-the-variable-on-every-read">B159. An inline <code>@var</code> re-pins the variable on every read<a class="headerlink" href="#b159-an-inline-var-re-pins-the-variable-on-every-read" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @var null|list&lt;array{…}&gt; $cached */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$cached = Cache::get(self::KEY);</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">if ($cached !== null) {</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported null|list&lt;…&gt;</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @var null|list&lt;array{…}&gt; $cached */</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$cached = Cache::get(self::KEY);</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">if ($cached !== null) {</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    return array_slice($cached, 0, $limit);   // reported null|list&lt;…&gt;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A plain <code>!== null</code> guard that works on any ordinary variable does
 nothing here — and a later reassignment (<code>$x = []; … $x = narrow();</code>)
 is also overridden by the annotation. The <code>@var</code> should seed the
 assignment it documents and then submit to normal flow narrowing
 (3 sites).</p>
-<h3 id="b163-an-int-assigned-to-a-float-property-is-reported">B163. An <code>int</code> assigned to a <code>float</code> property is reported<a class="headerlink" href="#b163-an-int-assigned-to-a-float-property-is-reported" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p>A leftover from the shipped arithmetic-precision work: an <code>int</code> value
-assigned to a <code>float</code>-typed property is reported instead of accepting
-the standard numeric widening PHP performs even under
-<code>declare(strict_types=1)</code>.</p>
-<p>No site for this reproduces any more — not in the ten-project sweep,
-and not in the promoted-constructor, static-property, <code>+=</code>,
-<code>@var</code>-only, nullable, and array-element forms. Confirm it still
-happens before working on it.</p>
 <h3 id="b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join">B174. A <code>break</code> that leaves a loop early is missing from the post-loop join<a class="headerlink" href="#b174-a-break-that-leaves-a-loop-early-is-missing-from-the-post-loop-join" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$a = &#39;x&#39;;</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">do {</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    if (rand(0, 1)) { break; }   // leaves with $a === &#39;x&#39;</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    $a = 1;</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">} while (rand(0, 1));</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">$a;                              // reported 1, should be &#39;x&#39;|1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$a = &#39;x&#39;;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">do {</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    if (rand(0, 1)) { break; }   // leaves with $a === &#39;x&#39;</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    $a = 1;</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">} while (rand(0, 1));</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">$a;                              // reported 1, should be &#39;x&#39;|1</span>
 </code></pre></div>
 <p>The state a <code>break</code> carries out of a loop does not reach the post-loop
 merge, so only the paths that ran to the end of the body contribute. The
@@ -2439,9 +2340,9 @@ precise). Model the conditional shapes natively for
 sample sources as genuine.)</p>
 <h3 id="b169-blade-if-narrowing-does-not-reach-included-variables">B169. Blade <code>@if</code> narrowing does not reach <code>@include</code>d variables<a class="headerlink" href="#b169-blade-if-narrowing-does-not-reach-included-variables" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>@if ($product)
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>@endif
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>@if ($product)
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    @include(&#39;products.edit.page-links-product&#39;)   {{-- expects non-null $product --}}
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>@endif
 </code></pre></div>
 <p>An inherited variable is checked against the template's <em>declared</em>
 signature type at the <code>@include</code> site, ignoring the enclosing Blade
@@ -2463,17 +2364,17 @@ phar (or its extracted stubs) is feasible.</p>
 <p><strong>Impact: Low · Effort: Low</strong></p>
 <p>The member name in a <code>@property</code> tag emits the <code>method</code> semantic
 token, while the same name emits <code>property</code> everywhere it is used:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/**</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x"> * @property string $displayName    &lt;- `displayName` highlights as a method</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x"> * @method string shout(string $x)  &lt;- correct</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x"> */</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">class Demo</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">{</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">    public function demo(): string</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">    {</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">        return $this-&gt;displayName;  // highlights as a property, as it should</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="x">    }</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/**</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x"> * @property string $displayName    &lt;- `displayName` highlights as a method</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x"> * @method string shout(string $x)  &lt;- correct</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x"> */</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">class Demo</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">{</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">    public function demo(): string</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">    {</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">        return $this-&gt;displayName;  // highlights as a property, as it should</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">    }</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>Both tags produce a <code>MemberDeclaration</code> span, and
 <code>classify_member_declaration</code> looks the name up in the enclosing
