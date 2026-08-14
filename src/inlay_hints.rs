@@ -1295,4 +1295,44 @@ function build(): void {
         assert!(!is_obvious_single_param("customFunc", "value"));
         assert!(!is_obvious_single_param("new Foo", "bar"));
     }
+
+    #[test]
+    fn a_standalone_function_gets_a_reference_count() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+function helper(): void {}
+
+helper();
+helper();
+"#;
+
+        let hints = declaration_hints(&backend, uri, content);
+
+        assert_eq!(
+            hint_on_line(&hints, 1).as_deref(),
+            Some(" 2 references"),
+            "a function declared outside a class is counted like a class is"
+        );
+    }
+
+    #[test]
+    fn a_file_of_only_functions_still_gets_hints() {
+        // The declaration walk starts from the file's classes, and a
+        // function belongs to none, so a file holding nothing else used
+        // to leave that walk before emitting anything.
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+function unused(): void {}
+"#;
+
+        let hints = declaration_hints(&backend, uri, content);
+
+        assert_eq!(
+            hint_on_line(&hints, 1).as_deref(),
+            Some(" 0 references"),
+            "a file with no classes at all still reports its functions"
+        );
+    }
 }

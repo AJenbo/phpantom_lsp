@@ -34,6 +34,7 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| B174 | [Reference counts stay at zero until the next edit](todo/bugs.md#b174-reference-counts-stay-at-zero-until-the-next-edit)                                   | Low-Medium  | Low         |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions

@@ -243,27 +243,24 @@ impl Backend {
 
             // An import names the function qualified (`use function
             // Foo\bar;`) and an aliased call does not name it at all, so
-            // neither can take the new name as written.
+            // neither can take the new name as written.  A location that
+            // yields no text is one an alias keeps naming under its own
+            // name, and editing it would break a file that compiles.
             if let Some((ref old_short, case_insensitive)) = import_aware_target {
-                match import_aware_edit_text(
+                if let Some(text) = import_aware_edit_text(
                     loc_content.as_deref(),
                     location.range,
                     old_short,
                     new_name,
                     case_insensitive,
                 ) {
-                    Some(text) => {
-                        changes
-                            .entry(location.uri.clone())
-                            .or_default()
-                            .push(TextEdit {
-                                range: location.range,
-                                new_text: text,
-                            });
-                    }
-                    // The alias keeps naming the function under its own
-                    // name, so the call sites that use it still compile.
-                    None => {}
+                    changes
+                        .entry(location.uri.clone())
+                        .or_default()
+                        .push(TextEdit {
+                            range: location.range,
+                            new_text: text,
+                        });
                 }
                 continue;
             }

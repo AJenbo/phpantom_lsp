@@ -42,3 +42,18 @@ No outstanding items.
 ## Docblock handling
 
 No outstanding items.
+
+## Miscellaneous
+
+### B174. Reference counts stay at zero until the next edit
+
+**Impact: Low-Medium · Effort: Low**
+
+A file opened before the initial project index finishes shows `0
+references` above every declaration, because the counts are computed
+from an index that is still filling. `inlay_hint_refresh` is sent when
+a `didChange` parse commits a new symbol map (`server.rs`) and when
+pending member reference counts finish (`reference_counts.rs`), but not
+when the initial index completes, so the stale zeros sit there until
+something else happens to trigger a refresh. Send the same refresh once
+indexing finishes.
