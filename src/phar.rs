@@ -60,16 +60,34 @@ impl PharArchive {
         // 1. Find the stub end marker.
         let marker_pos = memmem::find(data, HALT_COMPILER_MARKER)?;
 
-        // The manifest starts after the marker + a line ending (\r\n or \n).
+        // PHP writes `?>\r\n` after the marker and its reader skips a
+        // `\r\n` or `\n` if one is there, but it does not insist on one:
+        // hand-built archives exist whose manifest starts at the marker.
+        // Try the longest terminator first, since a manifest whose length
+        // field happens to begin with 0x0A would otherwise be read one
+        // byte short.  Each candidate is fully validated, so a wrong guess
+        // fails rather than yielding a bogus index.
         let after_marker = marker_pos + HALT_COMPILER_MARKER.len();
-        let manifest_start = if data.get(after_marker..after_marker + 2) == Some(b"\r\n") {
-            after_marker + 2
+        let mut manifest_start = after_marker;
+        if data.get(after_marker..after_marker + 2) == Some(b"\r\n") {
+            manifest_start = after_marker + 2;
         } else if data.get(after_marker..after_marker + 1) == Some(b"\n") {
-            after_marker + 1
-        } else {
-            return None;
-        };
+            manifest_start = after_marker + 1;
+        }
 
+        Self::parse_manifest_at(path, data, manifest_start).or_else(|| {
+            (manifest_start != after_marker)
+                .then(|| Self::parse_manifest_at(path, data, after_marker))
+                .flatten()
+        })
+    }
+
+    /// Parse the manifest that starts at `manifest_start`.
+    ///
+    /// Returns `None` when the bytes there do not describe a valid
+    /// manifest, which is what lets [`parse`](Self::parse) treat the
+    /// stub's line ending as optional.
+    fn parse_manifest_at(path: &Path, data: &[u8], manifest_start: usize) -> Option<Self> {
         let mut cursor = manifest_start;
 
         // 2. Parse the manifest header.
@@ -371,6 +389,62 @@ mod tests {
 
         let paths: Vec<&str> = archive.file_paths().collect();
         assert_eq!(paths, vec!["zeta.php", "alpha.php", "mid.php"]);
+    }
+
+    /// Rebuild `bytes` with the stub's trailing line ending replaced.
+    ///
+    /// `build_test_phar` emits `__HALT_COMPILER(); ?>\n`; the manifest is
+    /// position-independent, so swapping that one byte is enough to
+    /// produce the other stub spellings.
+    fn with_terminator(bytes: &[u8], terminator: &[u8]) -> Vec<u8> {
+        let pos =
+            memmem::find(bytes, HALT_COMPILER_MARKER).expect("marker") + HALT_COMPILER_MARKER.len();
+        let mut out = bytes[..pos].to_vec();
+        out.extend_from_slice(terminator);
+        out.extend_from_slice(&bytes[pos + 1..]);
+        out
+    }
+
+    #[test]
+    fn stub_line_ending_is_optional() {
+        // PHP's own reader accepts a manifest that starts right at the
+        // marker; phars built by hand (e.g. pdepend's 0.1.1 release) do.
+        let base = build_test_phar(&[("src/Foo.php", b"<?php class Foo {}")]);
+
+        for terminator in [&b""[..], &b"\n"[..], &b"\r\n"[..]] {
+            let bytes = with_terminator(&base, terminator);
+            let (_dir, archive) = parse_test_phar(&bytes)
+                .unwrap_or_else(|| panic!("should parse with {terminator:?}"));
+            assert_eq!(
+                archive.read_file("src/Foo.php").as_deref(),
+                Some(&b"<?php class Foo {}"[..]),
+                "terminator {terminator:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_terminator_with_newline_shaped_manifest_length() {
+        // With no line ending, the manifest length's low byte sits right
+        // after the marker.  Pad the archive until that byte is 0x0A so it
+        // looks like the `\n` the reader would skip; the skipped-byte
+        // reading must fail validation and fall back to the real offset.
+        let mut padding = 0usize;
+        let bytes = loop {
+            assert!(padding < 512, "no padding produced a 0x0A length byte");
+            let name = format!("src/{}.php", "a".repeat(padding + 1));
+            let base = build_test_phar(&[(name.as_str(), b"<?php class Foo {}")]);
+            let candidate = with_terminator(&base, b"");
+            let pos = memmem::find(&candidate, HALT_COMPILER_MARKER).expect("marker")
+                + HALT_COMPILER_MARKER.len();
+            if candidate[pos] == b'\n' {
+                break candidate;
+            }
+            padding += 1;
+        };
+
+        let (_dir, archive) = parse_test_phar(&bytes).expect("should fall back past the false \\n");
+        assert_eq!(archive.file_paths().count(), 1);
     }
 
     #[test]

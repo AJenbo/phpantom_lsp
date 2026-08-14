@@ -201,20 +201,3 @@ and comparison spellings (`if ($user)`, `if (!($user === null))`,
 operand rather than folded, so the inner `!` re-negates a proof the
 outer one had already inverted. Found while confirming the Blade
 `@include` narrowing, not from a sample-project site.
-
-## Laravel
-
-No outstanding items.
-
-## Miscellaneous
-
-### B173. Classes shipped inside a dependency's phar are invisible
-
-**Impact: Low-Medium · Effort: Medium**
-
-A project extending PHPStan (`vendor/phpstan/phpstan` ships
-`phpstan.phar` + stub headers) gets `mixed` for every
-`PHPStan\Type\*` value, cascading into downstream false positives
-(1 site — a custom extension calling `getConstantStrings()`). Check
-what the package's `bootstrap.php` exposes and whether indexing the
-phar (or its extracted stubs) is feasible.

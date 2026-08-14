@@ -30,7 +30,6 @@ within the same impact tier.
 | B174 | [`assert($this instanceof X)` does not narrow `$this`](todo/bugs.md#b174-assertthis-instanceof-x-does-not-narrow-this)                                     | Medium-High | Low-Medium  |
 | B143 | [A constant built from another constant does not fold to its value](todo/bugs.md#b143-a-constant-built-from-another-constant-does-not-fold-to-its-value) | Medium | Medium |
 | B176 | [`iterable` is not a type guard](todo/bugs.md#b176-iterable-is-not-a-type-guard)                                                                          | Low-Medium  | Low-Medium  |
-| B173 | [Classes shipped inside a dependency's phar are invisible](todo/bugs.md#b173-classes-shipped-inside-a-dependencys-phar-are-invisible)                      | Low-Medium  | Medium      |
 | B175 | [A call's recorded check survives a statement that could change what it returns](todo/bugs.md#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns) | Medium | Medium |
 | B177 | [A doubly negated truthiness guard does not narrow](todo/bugs.md#b177-a-doubly-negated-truthiness-guard-does-not-narrow)                                    | Low         | Low-Medium  |
 | B148 | [Element writes do not refine tracked array state](todo/bugs.md#b148-element-writes-do-not-refine-tracked-array-state) (depends on B147)                   | Medium      | Medium-High |
