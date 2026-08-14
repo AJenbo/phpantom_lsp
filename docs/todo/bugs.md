@@ -18,28 +18,7 @@ per-project inventory. Entries filed later say where they came from.
 
 ## Crashes
 
-### B159. Inferring a method's return type panics on a multi-byte file
-
-**Impact: Medium · Effort: Low**
-
-`infer_body_return_type` (`type_engine/call_resolution/target_cache.rs`)
-slices `content[..offset]` with the method's recorded `name_offset`. When
-that offset does not land on a character boundary of the content it read
-back — the file changed, or the URI resolved to a different file than the
-one the offset was recorded against — the slice panics rather than
-returning `None`, and the panic aborts the diagnostic worker for the whole
-file. The bounds check above it only compares against `content.len()`, so
-any file with multi-byte characters can hit it:
-
-```
-panicked at type_engine/call_resolution/target_cache.rs:246:
-end byte index 245419 is not a char boundary; it is inside '─'
-```
-
-Counting the newlines before the offset does not need a slice at all, so
-the fix is to count over the bytes and drop the panicking index. Found
-while working on constant resolution, by pointing `analyze` at a
-directory of unrelated files.
+No outstanding items.
 
 ## Type comparison
 

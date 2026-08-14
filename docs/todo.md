@@ -99,7 +99,6 @@ unlikely to move the needle for most users.
 | D17 | [`docblock_native_mismatch` only judges nullability](todo/diagnostics.md#d17-docblock_native_mismatch-only-judges-nullability)                                              | Low         | Medium      |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B160 | [A second `namespace` block silences the argument-type check](todo/bugs.md#b160-a-second-namespace-block-silences-the-argument-type-check)                                  | Medium-High | Low-Medium  |
-| B159 | [Inferring a method's return type panics on a multi-byte file](todo/bugs.md#b159-inferring-a-methods-return-type-panics-on-a-multi-byte-file)                               | Medium      | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

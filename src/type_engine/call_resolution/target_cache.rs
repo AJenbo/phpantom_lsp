@@ -238,12 +238,18 @@ fn infer_body_return_type(
 
     let content = backend.get_file_content(&file_uri)?;
 
-    // Convert method name_offset to a 0-based line number.
+    // Convert method name_offset to a 0-based line number.  The offset
+    // was recorded against the file as it was parsed, which need not be
+    // the content read back here, so count over the bytes rather than
+    // slicing the string: a `\n` byte never appears inside a multi-byte
+    // character, but an offset landing mid-character would panic a
+    // string slice.
     let offset = method.name_offset as usize;
-    if offset >= content.len() {
+    let bytes = content.as_bytes();
+    if offset >= bytes.len() {
         return None;
     }
-    let func_line = content[..offset].matches('\n').count();
+    let func_line = bytes[..offset].iter().filter(|&&b| b == b'\n').count();
 
     // Walk backwards from the method name to find the function
     // keyword line (the declaration may start on an earlier line).
@@ -299,5 +305,39 @@ pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
     TypeEngineCaches {
         _callable_target: with_callable_target_cache(),
         _body_infer: with_body_infer_memo(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_fixtures::{make_backend, make_method};
+
+    /// A recorded `name_offset` that no longer lines up with the content
+    /// read back (the file changed, or the URI resolved elsewhere) can
+    /// land inside a multi-byte character.  Inference must give up
+    /// quietly instead of panicking and taking the file's whole
+    /// diagnostic pass with it.
+    #[test]
+    fn offset_inside_multibyte_char_does_not_panic() {
+        let backend = make_backend();
+        let uri = "file:///app/Box.php";
+        let content = "<?php\n// ──────\nclass Box\n{\n    public function size()\n    {\n        return 1;\n    }\n}\n";
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+        backend
+            .symbols
+            .fqn_uri_index
+            .write()
+            .insert("Box".to_string(), uri.to_string());
+
+        // The first `─` occupies bytes 9..12, so byte 10 is not a
+        // character boundary.
+        let mut method = make_method("size", None);
+        method.name_offset = 10;
+
+        assert!(try_infer_body_return_type(&backend, "Box", &method).is_none());
     }
 }
