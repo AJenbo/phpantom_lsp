@@ -1903,12 +1903,12 @@ is just to store the value; context-aware filtering can follow later.</p>
 fix above, so both should be implemented together.</p>
 <hr />
 <h2 id="t4-non-empty-type-narrowing-and-propagation">T4. Non-empty-* type narrowing and propagation<a class="headerlink" href="#t4-non-empty-type-narrowing-and-propagation" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
 <p>PHPStan tracks <code>non-empty-string</code> and <code>non-empty-array</code> through
 built-in functions. These narrowings don't directly enable
 class-based completion, but they improve hover type display and
-would catch bugs if we add diagnostics. All three sub-items share
-the same implementation pattern (function-name-triggered type
+would catch bugs if we add diagnostics. The first three sub-items
+share the same implementation pattern (function-name-triggered type
 narrowing in conditions or return types) and should be implemented
 together.</p>
 <p><strong>String containment narrowing.</strong> When <code>str_contains($haystack,
@@ -1927,6 +1927,24 @@ range types against <code>count()</code> / <code>sizeof()</code> calls. See
 <code>escapeshellarg()</code>, <code>escapeshellcmd()</code>, <code>preg_quote()</code>,
 <code>rawurlencode()</code>, or <code>rawurldecode()</code> should return
 <code>non-empty-string</code>. See <code>NonEmptyStringFunctionsReturnTypeExtension</code>.</p>
+<p><strong>Element writes produce a non-empty array.</strong> After <code>$a[$k] = $v</code> or
+<code>$a[] = $v</code> the array holds at least one element, so PHPStan reports
+<code>non-empty-array&lt;K, V&gt;</code> / <code>non-empty-list&lt;V&gt;</code>. We report the
+possibly-empty spellings, which loses the guarantee that <code>reset()</code>,
+<code>array_pop()</code> and friends return a value rather than <code>false</code>.</p>
+<p>Emitting the non-empty spelling from the write helpers
+(<code>merge_push_type</code>, <code>merge_keyed_type</code> in
+<code>type_engine/variable/resolution.rs</code>) is a two-line change, but it is
+only half the work: every place that joins branches has to relax the
+guarantee again when one side never ran. A <code>foreach</code> whose body writes
+a key merges the pre-loop scope back in at exit, and today that join
+either drops the <code>array{}</code> alternative outright (reporting
+<code>non-empty-array</code> after a loop that may not have iterated at all) or
+keeps it as a separate union member (<code>array{}|non-empty-list&lt;string&gt;</code>,
+whose offset reads then carry a spurious <code>null</code>). Both spellings are
+wrong; the join has to widen <code>non-empty-X</code> to <code>X</code> instead. So the work
+is a possibly-empty widening at each join point, not a change to the
+write helpers.</p>
 <hr />
 <h2 id="t5-fiber-type-resolution">T5. Fiber type resolution<a class="headerlink" href="#t5-fiber-type-resolution" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Effort: Low</strong></p>
