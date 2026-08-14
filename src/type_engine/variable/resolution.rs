@@ -296,12 +296,14 @@ pub(crate) fn resolve_variable_types(
 /// forward walker ([`resolve_variable_types`]) and converts the result
 /// to a `PhpType`, incorporating:
 ///
-/// - Inline `/** @var Type $var */` docblock overrides (unless the
-///   cursor is inside the RHS of a self-referential assignment).
 /// - The forward walker's branch-aware narrowing.
-/// - Proper preference logic: the forward walker result wins when it
-///   applies narrowing (e.g. array shape key null-stripping through
-///   guard clauses); the `@var` override wins otherwise.
+/// - Inline `/** @var Type $var */` docblocks, as a fallback for the
+///   positions the walker cannot reach (a Blade template, a variable
+///   with no assignment in the file at all).  An annotation the walker
+///   *did* see has already been applied to the assignment it documents,
+///   and the walker's answer accounts for everything that happened to
+///   the variable since — a reassignment, a `!== null` guard — so it
+///   wins.
 ///
 /// Consumers: hover, go-to-type-definition, find-references (variable
 /// subject resolution), deprecated diagnostics, code actions.
@@ -355,19 +357,7 @@ pub(crate) fn resolve_variable_php_type(
     );
 
     if !resolved.is_empty() {
-        let joined = ResolvedType::types_joined(&resolved);
-
-        // When the forward walk produced a result and we have a @var
-        // override, prefer the forward walk when it narrowed the type
-        // (shape entries with condition-based null stripping).
-        if let Some(ref vo) = var_override {
-            if !vo.equivalent(&joined) && vo.shape_entries().is_some() {
-                return Some(joined);
-            }
-            return Some(vo.clone());
-        }
-
-        return Some(joined);
+        return Some(ResolvedType::types_joined(&resolved));
     }
 
     // 3. Parameter definition site fallback.

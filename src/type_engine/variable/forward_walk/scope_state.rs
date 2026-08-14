@@ -52,6 +52,16 @@ pub(crate) struct ScopeState {
     /// the assertion from the expression it was assigned, so testing it
     /// narrows the original subject.
     pub assertions: AtomMap<Vec<VarAssertion>>,
+
+    /// No value can reach this program point.
+    ///
+    /// Set when a condition narrows some variable down to nothing — the
+    /// implicit else of `if ($v instanceof AbstractNode)` where `$v` is
+    /// already an `AbstractNode`, for instance.  Such a path contributes
+    /// nothing to a join: the types it carries describe a run of the
+    /// program that cannot happen, and merging them widens the result
+    /// back to the pre-branch type the branch was supposed to replace.
+    pub unreachable: bool,
 }
 
 impl ScopeState {
@@ -59,6 +69,7 @@ impl ScopeState {
         Self {
             locals: AtomMap::default(),
             assertions: AtomMap::default(),
+            unreachable: false,
         }
     }
 
@@ -139,11 +150,42 @@ impl ScopeState {
         });
     }
 
+    /// Whether two scopes say the same thing about every name they hold.
+    ///
+    /// A cheap stand-in for a full structural comparison: the two sides of
+    /// the check that matters are clones of one another, so a shared
+    /// `class_info` compares by pointer and never walks a class.
+    fn describes_same_state_as(&self, other: &ScopeState) -> bool {
+        if self.locals.len() != other.locals.len() || self.assertions != other.assertions {
+            return false;
+        }
+        self.locals.iter().all(|(name, types)| {
+            other.locals.get(name).is_some_and(|theirs| {
+                types.len() == theirs.len()
+                    && types.iter().zip(theirs).all(|(a, b)| {
+                        a.type_string == b.type_string
+                            && match (&a.class_info, &b.class_info) {
+                                (Some(x), Some(y)) => Arc::ptr_eq(x, y),
+                                (None, None) => true,
+                                _ => false,
+                            }
+                    })
+            })
+        })
+    }
+
     /// Merge another scope into `self`.
     ///
     /// For each variable:
-    /// - Present in both: union the type sets (variable was assigned
-    ///   in both branches).
+    /// - Present in both, both typed: union the type sets (variable was
+    ///   assigned in both branches).
+    /// - Present in both, either side untyped: untyped, because an entry
+    ///   with no types stands for a value that exists and could be
+    ///   anything.  Unknown is the *top* of the type lattice, not the
+    ///   bottom, so joining it with a type yields unknown again — this is
+    ///   what stops a branch-local proof about an untyped subject
+    ///   (`if ($version instanceof Foo)` on a `stdClass` property) from
+    ///   escaping the join.
     /// - Present in only one: keep it with the existing types (variable
     ///   was assigned in only one branch — it *might* have those types).
     ///
@@ -153,7 +195,28 @@ impl ScopeState {
     /// dropped because the superset already covers it.  Without this,
     /// narrowed types from non-exiting if-branches leak into the
     /// post-merge scope and pollute subsequent narrowing operations.
+    ///
+    /// An unreachable scope is the identity of the join: it describes a
+    /// run that cannot happen, so it neither contributes types nor
+    /// swallows the other side's.
     pub fn merge_branch(&mut self, other: &ScopeState) {
+        if other.unreachable {
+            return;
+        }
+        if self.unreachable {
+            self.clone_from(other);
+            return;
+        }
+        // Two paths that agree on everything join to what they already
+        // say.  This is the common shape for a loop or `switch` exit
+        // edge — the trailing `break;` of an arm leaves with exactly the
+        // state the arm ends with — and skipping the union keeps a
+        // token-dispatch `switch` with fifty arms from re-unioning the
+        // whole scope once per arm.
+        if self.describes_same_state_as(other) {
+            return;
+        }
+
         // A boolean only still stands for a check if every incoming path
         // agrees on it.  A check one branch established (or reassigned
         // out from under) says nothing about the joined program point.
@@ -163,6 +226,18 @@ impl ScopeState {
         }
 
         for (name, other_types) in &other.locals {
+            // An entry both paths carry but at least one of them has no
+            // type for is unknown at the join.  Only a name the other
+            // path never bound at all is adopted wholesale: that is a
+            // branch-local assignment, which the walker reports as a
+            // possible type rather than dropping.
+            if let Some(existing) = self.locals.get(name)
+                && (existing.is_empty() || other_types.is_empty())
+            {
+                self.locals.insert(*name, Vec::new());
+                continue;
+            }
+
             let entry = self.locals.entry(*name).or_default();
 
             // Merge other_types into entry.  When an incoming entry
@@ -246,7 +321,8 @@ impl ScopeState {
                         // If j is a strict subset of i, drop j.
                         if types[j] != types[i]
                             && (types[j].is_subset_of(&types[i])
-                                || array_snapshot_covered_by(&types[j], &types[i]))
+                                || array_snapshot_covered_by(&types[j], &types[i])
+                                || intersection_covered_by(&types[j], &types[i]))
                         {
                             keep[j] = false;
                         }
@@ -284,6 +360,26 @@ fn array_snapshot_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
         && cover.is_array_like()
         && !matches!(cover.kind(), crate::php_type::TypeKind::Named(_))
         && covered.is_subtype_of(cover)
+}
+
+/// Whether an intersection produced by one branch is already covered by
+/// a sibling alternative.
+///
+/// `if ($r instanceof Verbose) { … }` narrows `$r` to `Base&Verbose` for
+/// the length of the branch.  The path that skipped the branch still has
+/// a plain `Base`, and every `Base&Verbose` is a `Base`, so the join is
+/// `Base` — keeping both would report `Base|Base&Verbose` and leave the
+/// branch-local proof visible after the branch it belongs to.
+///
+/// Only a part named verbatim by the covering type counts.  Widening a
+/// part to its parent would need the class loader, and the case that
+/// matters (a branch narrowing the very type the sibling path carries)
+/// names it exactly.
+fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
+    let crate::php_type::TypeKind::Intersection(parts) = covered.kind() else {
+        return false;
+    };
+    parts.iter().any(|part| part.equivalent(cover))
 }
 
 /// Drop virtual members from `existing`'s class_info that the `incoming`

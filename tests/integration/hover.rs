@@ -12419,7 +12419,7 @@ class Cat extends Animal {}
 $a = rand(0,1) ? new Dog() : new Cat();
 
 while ($a instanceof Dog) {
-    break;
+    $a = rand(0,1) ? new Dog() : new Cat();
 }
 $result = $a;
 "#;

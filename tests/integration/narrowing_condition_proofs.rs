@@ -249,6 +249,116 @@ function f(array $rows): void {
     assert!(text.contains("string"), "expected string, got: {text}");
 }
 
+/// The proof only holds where the branch does.  An entry the scope has no
+/// type for stands for a value that could be anything, and joining that
+/// with the branch's `Configuration` is still anything — otherwise a bare
+/// `if` would type a variable the code never learned anything about.
+#[test]
+fn a_proof_about_an_unknown_subject_does_not_outlive_its_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///guard_join.php";
+    let content = format!(
+        r#"<?php{SCAFFOLD}
+/** @param list<stdClass> $rows */
+function f(array $rows): void {{
+    foreach ($rows as $row) {{
+        $version = $row->version;
+        if ($version instanceof Configuration) {{
+        }}
+        $version; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        !text.contains("Configuration"),
+        "the branch-local proof must not survive the join, got: {text}"
+    );
+}
+
+/// The negated spelling proves the same thing on the implicit-else path,
+/// and leaks the same way if the join adopts it.
+#[test]
+fn a_negated_proof_about_an_unknown_subject_does_not_outlive_its_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///guard_join_negated.php";
+    let content = format!(
+        r#"<?php{SCAFFOLD}
+/** @param list<stdClass> $rows */
+function f(array $rows): void {{
+    foreach ($rows as $row) {{
+        $version = $row->version;
+        if (!$version instanceof Configuration) {{
+        }}
+        $version; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        !text.contains("Configuration"),
+        "the implicit-else proof must not survive the join, got: {text}"
+    );
+}
+
+// ─── Each branch contributes its end state, and only that ──────────────────
+
+/// The implicit else of a check the subject already satisfies describes a
+/// run that cannot happen, so the reassignment the branch made is the only
+/// thing the join has to carry.
+#[test]
+fn a_reassignment_under_an_always_true_check_survives_the_join() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_reassign.php";
+    let content = format!(
+        r#"<?php{SCAFFOLD}
+function f(AbstractNode $v): void {{
+    if ($v instanceof AbstractNode) {{
+        $v = $v->getNode();
+    }}
+    $v; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Node"), "expected Node, got: {text}");
+    assert!(
+        !text.contains("AbstractNode"),
+        "the impossible else path carries no AbstractNode to the join, got: {text}"
+    );
+}
+
+/// The other direction: a branch that only narrowed hands the join an
+/// intersection its sibling path already covers, so the declared type is
+/// what comes out.
+#[test]
+fn a_branch_local_intersection_collapses_back_at_the_join() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_narrow.php";
+    let content = format!(
+        r#"<?php{SCAFFOLD}
+interface Verbose {{}}
+function f(Node $r): void {{
+    if ($r instanceof Verbose) {{
+    }}
+    $r; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Node"), "expected Node, got: {text}");
+    assert!(
+        !text.contains("Verbose"),
+        "the branch-local intersection must not survive the join, got: {text}"
+    );
+}
+
 // ─── A null check on an array element refines that element ─────────────────
 
 /// A generic `array<int, string|null>` has no per-key slot to refine, so
@@ -295,5 +405,63 @@ function f(array $m): void {
     assert!(
         !text.contains("null"),
         "the assertion rules out null for this element, got: {text}"
+    );
+}
+
+// ─── An inline `@var` seeds the assignment, then flows ─────────────────────
+
+/// The annotation describes what the assignment produced, not what the
+/// variable is at every later read: an ordinary `!== null` guard has to
+/// strip the null half the same way it would without the annotation.
+#[test]
+fn an_inline_var_annotation_submits_to_a_later_null_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///var_then_guard.php";
+    let content = r#"<?php
+class Cache {
+    /** @return mixed */
+    public static function get(string $key) { return null; }
+}
+function f(): void {
+    /** @var null|list<int> $cached */
+    $cached = Cache::get('key');
+    if ($cached !== null) {
+        $cached; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("list<int>"),
+        "expected list<int>, got: {text}"
+    );
+    assert!(
+        !text.contains("null"),
+        "the `!== null` guard rules out the null half, got: {text}"
+    );
+}
+
+/// A reassignment below the annotation wins over it, exactly as it would
+/// over any other type the walker had established.
+#[test]
+fn an_inline_var_annotation_yields_to_a_later_reassignment() {
+    let backend = create_test_backend();
+    let uri = "file:///var_then_reassign.php";
+    let content = r#"<?php
+class Ticket {}
+function f(): void {
+    /** @var array<int> $item */
+    $item = [];
+    $item = new Ticket();
+    $item; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("Ticket"), "expected Ticket, got: {text}");
+    assert!(
+        !text.contains("array"),
+        "the reassignment replaces the annotated type, got: {text}"
     );
 }

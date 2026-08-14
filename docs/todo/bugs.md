@@ -164,52 +164,6 @@ constant shapes satisfy their generic supertypes.
 
 ## Narrowing
 
-### B150. Branch-local reassignment and narrowing are wrong at the join point
-
-**Impact: Medium-High · Effort: Medium**
-
-Two inverse defects at `if`/`else` merges (~5 sites):
-
-- A reassignment inside a branch is *not* applied after the join:
-  `if ($v instanceof AbstractNode) { $v = $v->getNode(); }` still
-  carries `AbstractNode` afterwards; `if ($r instanceof User)
-  { $r = $r->getToken(); }` still carries `User`.
-- A narrowing *does* leak past the join: after
-  `if ($r instanceof Verbose) { … }` the post-if type keeps the
-  branch-narrowed member instead of re-merging to the declared type.
-
-**Fix:** at the merge, each branch contributes its end-state (declared
-type transformed by that branch's assignments/narrowings), and the
-join is the union of branch end-states — nothing more, nothing less.
-
-### B177. A branch-local proof about an untyped subject escapes the join
-
-**Impact: Low-Medium · Effort: Medium**
-
-```php
-$version = $row->version;      // stdClass property: no type
-if ($version instanceof Foo) { }
-$version;                      // reported Foo, should stay untyped
-```
-
-Narrowing a subject the scope has no type for *establishes* that type
-(this is what lets `assert($x instanceof Foo)` and
-`if (!is_string($x)) { return; }` work at all), but the branch merge
-cannot tell the resulting entry apart from a branch-local assignment:
-a name absent on one incoming path and present on the other is adopted
-wholesale, so the proof survives a join it should not. The negated form
-leaks the same way, from the implicit-else path back into the body.
-
-Harmless while the alternative is no information at all, and long-standing
-— it predates the `instanceof`/type-guard narrowing work that made it
-visible. Found while fixing the condition-proof handling, not by a sample
-project.
-
-**Fix:** distinguish "no entry" from "unknown" in `ScopeState` so the merge
-can widen a narrowed-from-nothing entry back to unknown, rather than
-adopting it. Overlaps [T29](type-inference.md#t29-definite-vs-possible-variable-existence-tracking),
-which needs the same distinction for variable existence.
-
 ### B155. A checked call expression is forgotten by the next identical call
 
 **Impact: Medium-High · Effort: Medium-High**
@@ -258,51 +212,6 @@ hard-coded PHPUnit list in favour of the tags.
 proves on the fall-through that the needle is one of the constant
 list's literals (⊆ `string`), removing `null`. Requires B155's
 expression keying for method-call needles. 2 sites.
-
-### B159. An inline `@var` re-pins the variable on every read
-
-**Impact: Medium · Effort: Medium**
-
-```php
-/** @var null|list<array{…}> $cached */
-$cached = Cache::get(self::KEY);
-if ($cached !== null) {
-    return array_slice($cached, 0, $limit);   // reported null|list<…>
-}
-```
-
-A plain `!== null` guard that works on any ordinary variable does
-nothing here — and a later reassignment (`$x = []; … $x = narrow();`)
-is also overridden by the annotation. The `@var` should seed the
-assignment it documents and then submit to normal flow narrowing
-(3 sites).
-
-### B174. A `break` that leaves a loop early is missing from the post-loop join
-
-**Impact: Medium · Effort: Medium**
-
-```php
-$a = 'x';
-do {
-    if (rand(0, 1)) { break; }   // leaves with $a === 'x'
-    $a = 1;
-} while (rand(0, 1));
-$a;                              // reported 1, should be 'x'|1
-```
-
-The state a `break` carries out of a loop does not reach the post-loop
-merge, so only the paths that ran to the end of the body contribute. The
-inverse shows up in a nested loop, where a `break` out of the *inner*
-loop loses the assignment it made: `foreach { foreach { … $b = 1;
-break; } } $b;` reports the pre-loop value alone. Both forms are visible
-in Psalm's `falseToBool` loop tests (the three `// SKIP` assertions in
-`tests/psalm_assertions/loop_do.php` and `loop_foreach.php`), which were
-only passing while every boolean widened to `bool` and made the merge
-result the same either way.
-
-**Fix:** record each `break`'s scope state as an exit edge of the loop it
-leaves, and union those edges into the post-loop scope alongside the
-normal fall-through.
 
 ## Laravel
 

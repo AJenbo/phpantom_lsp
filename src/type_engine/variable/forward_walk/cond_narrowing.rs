@@ -787,6 +787,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
+            let had_types = !scope.get(var_name).is_empty();
             let mut results = scope.get(var_name).to_vec();
             for cls_type in &classes {
                 ResolvedType::apply_narrowing(&mut results, |class_list| {
@@ -795,6 +796,8 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             }
             if !results.is_empty() {
                 scope.set(var_name, results);
+            } else if had_types {
+                scope.unreachable = true;
             }
             continue;
         }
@@ -829,12 +832,19 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // Inverse of positive instanceof → exclusion.
                 // Exclusion does NOT strip null (`!instanceof` is
                 // true for null values).
+                let had_types = !scope.get(var_name).is_empty();
                 let mut results = scope.get(var_name).to_vec();
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_exclusion(&extraction.class_type, &var_ctx, classes)
                 });
                 if !results.is_empty() {
                     scope.set(var_name, results);
+                } else if had_types {
+                    // Every alternative the variable had was excluded, so
+                    // nothing can reach this path: `$v` was already an
+                    // `AbstractNode` and this is the else of
+                    // `if ($v instanceof AbstractNode)`.
+                    scope.unreachable = true;
                 }
             }
         }
@@ -3516,20 +3526,6 @@ pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &m
     }
 }
 
-/// Check whether a statement exits via `break` or `continue` (loop-local
-/// exit) rather than `return` or `throw` (function exit).
-///
-/// When an if-branch exits via `break`/`continue`, the variable
-/// assignments made in that branch still flow to the post-loop scope.
-/// The if-merge should include these branch scopes in the surviving
-/// set so that the merged post-if scope reflects the assignments.
-pub(crate) fn exits_via_loop_control(stmt: &Statement<'_>) -> bool {
-    match stmt {
-        Statement::Break(_) | Statement::Continue(_) => true,
-        Statement::Block(block) => block.statements.last().is_some_and(exits_via_loop_control),
-        _ => false,
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::split_array_access_key;

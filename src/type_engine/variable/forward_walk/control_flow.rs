@@ -162,6 +162,7 @@ pub(crate) fn process_if_statement_body<'b>(
 
     // Cursor is AFTER the if/else block.  We need to merge all branches.
     let pre_if_scope = scope.clone();
+    let pre_if_unreachable = pre_if_scope.unreachable;
 
     // Walk each branch independently and merge results.
     let mut then_scope = scope.clone();
@@ -213,11 +214,11 @@ pub(crate) fn process_if_statement_body<'b>(
         (None, false)
     };
 
-    // Merge: collect all surviving (non-exiting) branch scopes.
-    // Branches that exit via break/continue are loop-local exits —
-    // their variable assignments flow to the post-loop scope, so
-    // they must be included in the merge alongside truly surviving
-    // branches.
+    // Merge: collect all surviving (non-exiting) branch scopes.  A branch
+    // that returns, throws, or jumps out of the enclosing loop does not
+    // reach the statement after the `if`, so it contributes nothing here;
+    // a `break`/`continue` branch reaches the loop's own join instead,
+    // which `record_exit_edge` has already been handed.
     //
     // When there is no else clause, the pre-if scope represents the
     // implicit "condition was false" path.  We apply inverse condition
@@ -227,28 +228,16 @@ pub(crate) fn process_if_statement_body<'b>(
     let mut implicit_else_scope;
     let mut surviving_scopes: Vec<&ScopeState> = Vec::new();
 
-    let then_exits_via_loop = exits_via_loop_control(body.statement);
-    if !then_exits || then_exits_via_loop {
+    if !then_exits {
         surviving_scopes.push(&then_scope);
     }
-    for (idx, (ei_scope, ei_exits)) in elseif_scopes.iter().enumerate() {
-        if !ei_exits
-            || body
-                .else_if_clauses
-                .iter()
-                .nth(idx)
-                .is_some_and(|ei| exits_via_loop_control(ei.statement))
-        {
+    for (ei_scope, ei_exits) in elseif_scopes.iter() {
+        if !ei_exits {
             surviving_scopes.push(ei_scope);
         }
     }
     if let Some(ref es) = else_scope {
-        if !else_exits
-            || body
-                .else_clause
-                .as_ref()
-                .is_some_and(|ec| exits_via_loop_control(ec.statement))
-        {
+        if !else_exits {
             surviving_scopes.push(es);
         }
     } else {
@@ -272,10 +261,27 @@ pub(crate) fn process_if_statement_body<'b>(
         surviving_scopes.insert(0, &implicit_else_scope);
     }
 
+    // A branch whose condition proved impossible describes a run that
+    // cannot happen.  Dropping it is what makes a reassignment inside
+    // `if ($v instanceof AbstractNode) { $v = $v->getNode(); }` the
+    // post-if type of `$v` when `$v` was already an `AbstractNode`: the
+    // implicit else has no value to carry.  If every path is impossible
+    // the whole `if` is, and the pre-if scope is the least surprising
+    // answer.
+    if surviving_scopes.iter().any(|s| !s.unreachable) {
+        surviving_scopes.retain(|s| !s.unreachable);
+    }
+
     if surviving_scopes.is_empty() {
-        // All branches exit — theoretically unreachable code after.
-        // Keep the pre-if scope.
+        // Every branch returns, throws, or jumps, and the branches cover
+        // every case: nothing falls out of the bottom of this `if`.  The
+        // pre-if types are the least surprising answer for a cursor in
+        // the dead code that follows, but a join further out must not
+        // count this path — an enclosing loop whose body always `break`s
+        // has no fall-through edge, only the break edges.
         *scope = pre_if_scope;
+        scope.unreachable = true;
+        return;
     } else if surviving_scopes.len() == 1 {
         *scope = surviving_scopes[0].clone();
     } else {
@@ -307,9 +313,7 @@ pub(crate) fn process_if_statement_body<'b>(
     // and there are no elseif/else branches, apply inverse narrowing.
     // This applies to ALL exit types (return, throw, break, continue)
     // because the code after the if in the current scope does not
-    // execute in that path.  Break/continue branch scopes are already
-    // included in `surviving_scopes` above so their variable
-    // assignments are preserved in the merge.
+    // execute in that path.
     if enclosing_stmt.span().end.offset < ctx.cursor_offset
         && then_exits
         && body.else_if_clauses.is_empty()
@@ -318,6 +322,12 @@ pub(crate) fn process_if_statement_body<'b>(
         apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
         apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
     }
+
+    // Impossibility is a property of one branch's path conditions, not of
+    // the join: the statement after the `if` is reached by whichever branch
+    // *was* possible.  Restoring the pre-if reachability keeps a dropped
+    // branch from erasing the rest of the walk.
+    scope.unreachable = pre_if_unreachable;
 }
 
 /// Process if with colon-delimited body.
@@ -409,6 +419,7 @@ pub(crate) fn process_if_colon_body<'b>(
 
     // Cursor is after the if — merge branches.
     let pre_if_scope = scope.clone();
+    let pre_if_unreachable = pre_if_scope.unreachable;
 
     let mut then_scope = scope.clone();
     apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
@@ -471,28 +482,16 @@ pub(crate) fn process_if_colon_body<'b>(
     let mut implicit_else_scope;
     let mut surviving_scopes: Vec<&ScopeState> = Vec::new();
 
-    let then_exits_via_loop = body.statements.last().is_some_and(exits_via_loop_control);
-    if !then_exits || then_exits_via_loop {
+    if !then_exits {
         surviving_scopes.push(&then_scope);
     }
-    for (idx, (ei_scope, ei_exits)) in elseif_scopes.iter().enumerate() {
-        if !ei_exits
-            || body
-                .else_if_clauses
-                .iter()
-                .nth(idx)
-                .is_some_and(|ei| ei.statements.last().is_some_and(exits_via_loop_control))
-        {
+    for (ei_scope, ei_exits) in elseif_scopes.iter() {
+        if !ei_exits {
             surviving_scopes.push(ei_scope);
         }
     }
     if let Some(ref es) = else_scope {
-        if !else_exits
-            || body
-                .else_clause
-                .as_ref()
-                .is_some_and(|ec| ec.statements.last().is_some_and(exits_via_loop_control))
-        {
+        if !else_exits {
             surviving_scopes.push(es);
         }
     } else {
@@ -514,10 +513,17 @@ pub(crate) fn process_if_colon_body<'b>(
         surviving_scopes.insert(0, &implicit_else_scope);
     }
 
+    // See `process_if_statement_body` for why impossible paths are
+    // dropped before the join.
+    if surviving_scopes.iter().any(|s| !s.unreachable) {
+        surviving_scopes.retain(|s| !s.unreachable);
+    }
+
     if surviving_scopes.is_empty() {
-        // All branches exit — theoretically unreachable code after.
-        // Keep the pre-if scope.
+        // See `process_if_statement_body`: no path falls out of the bottom.
         *scope = pre_if_scope;
+        scope.unreachable = true;
+        return;
     } else if surviving_scopes.len() == 1 {
         *scope = surviving_scopes[0].clone();
     } else {
@@ -542,6 +548,12 @@ pub(crate) fn process_if_colon_body<'b>(
         apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
         apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
     }
+
+    // Impossibility is a property of one branch's path conditions, not of
+    // the join: the statement after the `if` is reached by whichever branch
+    // *was* possible.  Restoring the pre-if reachability keeps a dropped
+    // branch from erasing the rest of the walk.
+    scope.unreachable = pre_if_unreachable;
 }
 
 /// Check whether an if/elseif/else branch terminates, so its
@@ -969,20 +981,34 @@ pub(crate) enum LoopSeedPoint {
 /// the one the loop entry established.  So whenever the discovery context
 /// suppressed the cursor and no walk has honoured it yet, a last walk
 /// runs with the real one.
+///
+/// [`LoopWalk::fold_exit_edges`] says whether the `continue` states
+/// collected by the body walk belong in `scope`.  They join at the *end*
+/// of the body, so a caller asking about a position above that point must
+/// not see them — after `if (!$line) { continue; }` the guard has already
+/// ruled the falsy `$line` out.
 fn walk_loop_body_to_fixed_point<'b>(
     body_stmts: &[&'b Statement<'b>],
     scope: &mut ScopeState,
-    pre_loop_scope: &ScopeState,
-    assignment_depth: u32,
-    ctx: &ForwardWalkCtx<'_>,
-    discovery_ctx: &ForwardWalkCtx<'_>,
+    walk: LoopWalk<'_>,
     mut seed: impl FnMut(&mut ScopeState, LoopSeedPoint),
 ) {
+    let LoopWalk {
+        pre_loop_scope,
+        assignment_depth,
+        fold_exit_edges,
+        ctx,
+        discovery_ctx,
+    } = walk;
     let re_walks = assignment_depth.saturating_sub(1);
 
     // ── Initial walk (always performed) ─────────────────────────
     let initial_ctx = if re_walks > 0 { discovery_ctx } else { ctx };
+    clear_exit_frame();
     walk_body_forward(body_stmts.iter().copied(), scope, initial_ctx);
+    if fold_exit_edges {
+        drain_continue_edges(scope);
+    }
     let mut walked_at_cursor = re_walks == 0;
 
     // ── Re-walk iterations (only if types changed) ──────────────
@@ -1000,18 +1026,42 @@ fn walk_loop_body_to_fixed_point<'b>(
         // Use the real context on the final iteration so diagnostic
         // snapshots and cursor handling are correct.
         let is_final = iteration + 1 >= re_walks;
+        clear_exit_frame();
         walk_body_forward(
             body_stmts.iter().copied(),
             scope,
             if is_final { ctx } else { discovery_ctx },
         );
+        if fold_exit_edges {
+            drain_continue_edges(scope);
+        }
         walked_at_cursor = is_final;
     }
 
     if !walked_at_cursor && discovery_ctx.cursor_offset != ctx.cursor_offset {
         *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
+        clear_exit_frame();
         walk_body_forward(body_stmts.iter().copied(), scope, ctx);
+        if fold_exit_edges {
+            drain_continue_edges(scope);
+        }
     }
+}
+
+/// How one loop's body should be walked.
+struct LoopWalk<'a> {
+    /// The types that were known before the loop, which the body may not
+    /// have run at all.
+    pre_loop_scope: &'a ScopeState,
+    /// How many walks it takes for the body's assignment chain to settle.
+    assignment_depth: u32,
+    /// Whether the loop's own exit edges belong in the answer — false when
+    /// the caller is asking about a position inside the body.
+    fold_exit_edges: bool,
+    /// The real walk context, cursor and all.
+    ctx: &'a ForwardWalkCtx<'a>,
+    /// The context the discovery walks use, which may ignore the cursor.
+    discovery_ctx: &'a ForwardWalkCtx<'a>,
 }
 
 /// The entry scope of the next walk of a loop body: the previous walk
@@ -1227,13 +1277,17 @@ pub(crate) fn process_foreach<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
+    push_exit_frame();
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        &pre_loop_scope,
-        assignment_depth,
-        ctx,
-        &discovery_ctx,
+        LoopWalk {
+            pre_loop_scope: &pre_loop_scope,
+            assignment_depth,
+            fold_exit_edges: !cursor_in_body,
+            ctx,
+            discovery_ctx: &discovery_ctx,
+        },
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -1262,6 +1316,8 @@ pub(crate) fn process_foreach<'b>(
         },
     );
 
+    let exits = pop_exit_frame();
+
     // The iterable might be empty, so the loop body might not execute
     // at all.  Merge with the pre-loop scope.
     let post_loop = scope.clone();
@@ -1273,7 +1329,8 @@ pub(crate) fn process_foreach<'b>(
     // The pre-loop sentinel value (e.g. `null` from `$tag = null`) must
     // not survive as a possible post-loop type for the foreach target
     // variable — override it with the post-loop value from the body walk.
-    if is_non_empty_array_literal(foreach.expression) {
+    // A body that never falls out of its own bottom has no such value.
+    if is_non_empty_array_literal(foreach.expression) && !post_loop.unreachable {
         let target_var = match &foreach.target {
             ForeachTarget::Value(val) => extract_foreach_var_name(val.value),
             ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.value),
@@ -1284,6 +1341,12 @@ pub(crate) fn process_foreach<'b>(
         {
             scope.set(vn, post_val.clone());
         }
+    }
+
+    // A path that broke out never reached the end of the body, so the
+    // fall-through alone does not describe it.
+    if !cursor_in_body {
+        merge_exit_edges(scope, &exits.breaks);
     }
 
     leave_loop(loop_depth);
@@ -1815,13 +1878,17 @@ pub(crate) fn process_while<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
+    push_exit_frame();
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        &pre_loop_scope,
-        assignment_depth,
-        ctx,
-        &discovery_ctx,
+        LoopWalk {
+            pre_loop_scope: &pre_loop_scope,
+            assignment_depth,
+            fold_exit_edges: !cursor_in_body,
+            ctx,
+            discovery_ctx: &discovery_ctx,
+        },
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -1831,6 +1898,7 @@ pub(crate) fn process_while<'b>(
             apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
         },
     );
+    let exits = pop_exit_frame();
 
     // When the cursor is inside the loop body (completion path), keep
     // the scope with condition narrowing applied.  The post-loop
@@ -1851,6 +1919,10 @@ pub(crate) fn process_while<'b>(
     // loop exited).  Apply the inverse of the condition to narrow types.
     // For example: `while ($a) { $a = $a->parent; }` => after loop, $a is null.
     apply_condition_narrowing_inverse(while_stmt.condition, scope, ctx);
+
+    // A `break` leaves without re-testing the condition, so its state
+    // joins *after* the inverse narrowing rather than being narrowed by it.
+    merge_exit_edges(scope, &exits.breaks);
 
     // Remove synthetic property access keys that were seeded by
     // condition narrowing.  These represent narrowed types that only
@@ -1946,13 +2018,17 @@ pub(crate) fn process_for<'b>(
         loop_depth,
     );
 
+    push_exit_frame();
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        &pre_loop_scope,
-        assignment_depth,
-        ctx,
-        &discovery_ctx,
+        LoopWalk {
+            pre_loop_scope: &pre_loop_scope,
+            assignment_depth,
+            fold_exit_edges: !cursor_in_body,
+            ctx,
+            discovery_ctx: &discovery_ctx,
+        },
         |next_scope, point| match point {
             // The update clause runs after the body, so its reassignments
             // are what the next iteration starts from.  The initialisers
@@ -1974,6 +2050,7 @@ pub(crate) fn process_for<'b>(
             }
         },
     );
+    let exits = pop_exit_frame();
 
     // Record a snapshot at each increment expression so that member
     // accesses in the update clause (e.g. `$p = $p->next()`, also on the
@@ -2018,6 +2095,10 @@ pub(crate) fn process_for<'b>(
         apply_condition_narrowing_inverse(last_cond, scope, ctx);
     }
 
+    // A `break` leaves without re-testing the condition, so its state
+    // joins after the inverse narrowing.
+    merge_exit_edges(scope, &exits.breaks);
+
     // Remove synthetic property access keys that were seeded by condition
     // narrowing; they only hold inside the loop body where the conditions
     // were true.
@@ -2049,18 +2130,28 @@ pub(crate) fn process_do_while<'b>(
 
     let pre_loop_scope = scope.clone();
 
+    // A caller asking about a position inside the body is asking about a
+    // point the loop's exit edges have not reached yet.
+    let body_span = dw.statement.span();
+    let cursor_in_body =
+        ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
+
     // ── Assignment-depth-bounded loop iteration ─────────────────
     let body_stmts: Vec<&Statement<'b>> = vec![dw.statement];
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
+    push_exit_frame();
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        &pre_loop_scope,
-        assignment_depth,
-        ctx,
-        ctx,
+        LoopWalk {
+            pre_loop_scope: &pre_loop_scope,
+            assignment_depth,
+            fold_exit_edges: !cursor_in_body,
+            ctx,
+            discovery_ctx: ctx,
+        },
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -2069,12 +2160,21 @@ pub(crate) fn process_do_while<'b>(
             seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
         },
     );
+    let exits = pop_exit_frame();
 
     // After the do-while loop, the condition evaluated to false (that's
     // why the loop exited).  Apply the inverse of the condition to narrow
     // types.  For example: `do { $a = getA(); } while ($a !== null);`
     // => after loop, $a is null.
     apply_condition_narrowing_inverse(dw.condition, scope, ctx);
+
+    // A `break` leaves without re-testing the condition, so its state
+    // joins after the inverse narrowing.  This is the only way the state
+    // before an early `break` reaches the code after the loop: the body
+    // always runs, so there is no pre-loop scope to merge with.
+    if !cursor_in_body {
+        merge_exit_edges(scope, &exits.breaks);
+    }
 
     leave_loop(loop_depth);
 }
@@ -2199,8 +2299,24 @@ pub(crate) fn process_switch<'b>(
         return;
     }
 
+    // PHP counts a `switch` as a breakable structure: a `break;` in a case
+    // arm leaves the switch (and must not be attributed to an enclosing
+    // loop, which is what a `break 2` would target).  Each arm owns the
+    // jumps written inside it, so the state a `break` left with is folded
+    // straight back into that arm's own contribution — for the trailing
+    // `break;` that closes almost every arm the two are the same state,
+    // and `merge_branch` recognises that and does nothing.
     let mut branch_scopes: Vec<ScopeState> = Vec::new();
     let mut has_default = false;
+
+    let walk_arm = |stmts: &[&Statement<'b>], branch_scopes: &mut Vec<ScopeState>| {
+        let mut case_scope = pre_switch_scope.clone();
+        push_exit_frame();
+        walk_body_forward(stmts.iter().copied(), &mut case_scope, ctx);
+        let arm_exits = pop_exit_frame();
+        merge_exit_edges(&mut case_scope, &arm_exits.breaks);
+        branch_scopes.push(case_scope);
+    };
 
     // Walk cases, accumulating fall-through groups.
     let mut accumulated_stmts: Vec<&Statement<'b>> = Vec::new();
@@ -2216,18 +2332,13 @@ pub(crate) fn process_switch<'b>(
         }
 
         accumulated_stmts.extend(stmts);
-
-        let mut case_scope = pre_switch_scope.clone();
-        walk_body_forward(accumulated_stmts.iter().copied(), &mut case_scope, ctx);
-        branch_scopes.push(case_scope);
+        walk_arm(&accumulated_stmts, &mut branch_scopes);
         accumulated_stmts.clear();
     }
 
     // Handle trailing fall-through cases (empty cases at the end).
     if !accumulated_stmts.is_empty() {
-        let mut case_scope = pre_switch_scope.clone();
-        walk_body_forward(accumulated_stmts.iter().copied(), &mut case_scope, ctx);
-        branch_scopes.push(case_scope);
+        walk_arm(&accumulated_stmts, &mut branch_scopes);
     }
 
     if branch_scopes.is_empty() {

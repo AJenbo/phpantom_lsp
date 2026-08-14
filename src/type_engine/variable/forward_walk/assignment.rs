@@ -67,6 +67,15 @@ pub(crate) fn process_statement<'b>(
         Statement::Block(block) => {
             walk_body_forward(block.statements.iter(), scope, ctx);
         }
+        // A jump out of a loop carries the types it holds *here* to the
+        // loop's join, not to the statement that follows it.  The loop
+        // that owns the edge folds it back in.
+        Statement::Break(brk) => {
+            record_exit_edge(exit_level(brk.level), true, scope);
+        }
+        Statement::Continue(cont) => {
+            record_exit_edge(exit_level(cont.level), false, scope);
+        }
         Statement::Unset(unset_stmt) => {
             for val in unset_stmt.values.iter() {
                 if let Expression::Variable(Variable::Direct(dv)) = val {
