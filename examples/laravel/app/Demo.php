@@ -165,16 +165,18 @@ class Demo
     // ── Model Factories (has*/for*/trashed dynamic methods) ─────────────────
     // Laravel's Factory::__call() resolves has{Relationship}(),
     // for{Relationship}(), and trashed() at runtime. PHPantom derives the
-    // model from the factory naming convention (BlogAuthorFactory →
-    // App\Models\BlogAuthor) and synthesizes these from the model's
-    // relationships. Each returns the factory (static), so the fluent chain
-    // continues into create()/make(), which return the model.
+    // model from the concrete factory's naming convention (BlogAuthorFactory
+    // → App\Models\BlogAuthor), even through the shared BaseFactory parent,
+    // and synthesizes these from the model's relationships. Each returns the
+    // factory (static), so the fluent chain continues into the build methods,
+    // which return the model.
 
     public function factories(): void
     {
-        // Convention-based create()/make() return the associated model.
-        BlogAuthor::factory()->create();            // → BlogAuthor
-        BlogAuthor::factory()->make()->displayName; // make() → BlogAuthor
+        // Single-model build methods return the associated model.
+        BlogAuthor::factory()->create();                 // → BlogAuthor
+        BlogAuthor::factory()->make()->displayName;      // make() → BlogAuthor
+        BlogAuthor::factory()->makeOne()->displayName;   // makeOne() → BlogAuthor
 
         // has{Relationship}() — one per relationship on the model.
         BlogAuthor::factory()->hasPosts(3);         // HasMany posts   → factory
@@ -193,6 +195,12 @@ class Demo
         BlogPost::factory()->forAuthor()->trashed()->create(); // → BlogPost
     }
 
+    protected function makeOneAuthor(BlogAuthor $author): BlogAuthor
+    {
+        return BlogAuthor::factory()->makeOne(
+            $author->only(['name', 'email']),
+        );
+    }
 
     // ── Factory count state ─────────────────────────────────────────────────
     // create()/make() build one model, or a Collection of them once the

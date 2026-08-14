@@ -112,6 +112,35 @@ impl MergeDedup {
 
 use crate::virtual_members::laravel::{factory_to_model_fqn, is_factory_class};
 
+/// Find the first factory name in a Laravel Factory hierarchy whose
+/// conventional model exists, searching from the leaf towards the base.
+///
+/// This second, bounded walk runs only for an unannotated Laravel factory.
+/// Keeping it off the main inheritance walk avoids convention work for every
+/// non-factory class while still finding a useful name behind wrapper classes.
+fn conventional_factory_model(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<String> {
+    let mut current = ClassRef::Borrowed(class);
+
+    for _ in 0..MAX_INHERITANCE_DEPTH {
+        if let Some(model_fqn) = factory_to_model_fqn(&current.fqn())
+            && class_loader(&model_fqn).is_some()
+        {
+            return Some(model_fqn);
+        }
+
+        let parent_name = current.parent_class?;
+        if is_factory_class(&parent_name) {
+            return None;
+        }
+        current = ClassRef::Owned(class_loader(&parent_name)?);
+    }
+
+    None
+}
+
 /// Resolve a class together with all inherited members from its parent
 /// chain.
 ///
@@ -216,19 +245,19 @@ pub(crate) fn resolve_class_with_inheritance(
         // ── Convention-based Factory fallback ────────────────────
         // When a factory class extends `Factory` without
         // `@extends Factory<Model>`, derive the model class from
-        // the naming convention (e.g. `Database\Factories\UserFactory`
-        // → `App\Models\User`) and substitute `TModel` automatically.
-        if level_subs.is_empty()
+        // the concrete factory's naming convention (e.g.
+        // `Database\Factories\UserFactory` → `App\Models\User`) and
+        // substitute `TModel` automatically.
+        if is_factory_class(parent_name)
             && !parent.template_params.is_empty()
-            && is_factory_class(parent_name)
+            && !parent
+                .template_params
+                .iter()
+                .any(|param| level_subs.contains_key(param.as_str()))
+            && let Some(model_fqn) = conventional_factory_model(class, class_loader)
         {
-            let factory_fqn = current.fqn();
-            if let Some(model_fqn) = factory_to_model_fqn(&factory_fqn)
-                && class_loader(&model_fqn).is_some()
-            {
-                for param in &parent.template_params {
-                    level_subs.insert(param.to_string(), PhpType::named(atom(&model_fqn)));
-                }
+            for param in &parent.template_params {
+                level_subs.insert(param.to_string(), PhpType::named(atom(&model_fqn)));
             }
         }
 

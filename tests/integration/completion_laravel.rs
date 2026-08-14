@@ -379,8 +379,12 @@ namespace Illuminate\\Database\\Eloquent\\Factories;
  * @template TModel of \\Illuminate\\Database\\Eloquent\\Model
  */
 class Factory {
+    /** @return TModel */
+    public function createOne(array $attributes = []) {}
     /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */
     public function create(array $attributes = []) {}
+    /** @return TModel */
+    public function makeOne(array $attributes = []) {}
     /** @return \\Illuminate\\Database\\Eloquent\\Collection<int, TModel>|TModel */
     public function make(array $attributes = []) {}
     /** @return static */
@@ -8218,6 +8222,100 @@ class UserFactory extends Factory {
         methods.contains(&"greet"),
         "make() should resolve back to User, got methods: {:?}",
         methods
+    );
+}
+
+#[tokio::test]
+async fn test_factory_methods_through_intermediate_base_return_model_type() {
+    let draft_php = "\
+<?php
+namespace App\\Models;
+use Database\\Factories\\DraftFactory;
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+use Illuminate\\Database\\Eloquent\\Model;
+/**
+ * @method static DraftFactory factory(callable|array|int|null $count = null, callable|array $state = [])
+ */
+class Draft extends Model {
+    /** @use HasFactory<DraftFactory> */
+    use HasFactory;
+    public function draftOnly(): void {}
+    public function only(array $keys): array { return []; }
+}
+";
+
+    let base_factory_php = "\
+<?php
+namespace Database\\Factories;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+/** @template TState of array */
+abstract class BaseFactory extends Factory {}
+";
+
+    let factory_php = "\
+<?php
+namespace Database\\Factories;
+class DraftFactory extends BaseFactory {
+    public function definition(): array { return []; }
+}
+";
+
+    let factory_harness_php = "\
+<?php
+namespace Database\\Factories;
+class DraftFactoryHarness extends DraftFactory {}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Draft.php", draft_php),
+        ("database/factories/BaseFactory.php", base_factory_php),
+        ("database/factories/DraftFactory.php", factory_php),
+        (
+            "database/factories/DraftFactoryHarness.php",
+            factory_harness_php,
+        ),
+    ]);
+    backend.initialized(InitializedParams {}).await;
+
+    let content = "<?php\nnamespace App;\nuse App\\Models\\Draft;\nuse Database\\Factories\\DraftFactoryHarness;\nclass Service {\n    public function makeOneDraft(Draft $article): Draft {\n        return Draft::factory()->makeOne(\n            $article->only(['title', 'body', 'user_id'])\n        );\n    }\n    public function createOneDraft(): Draft {\n        return Draft::factory()->createOne();\n    }\n    public function makeDraft(): Draft {\n        return Draft::factory()->make();\n    }\n    public function createDraft(): Draft {\n        return Draft::factory()->create();\n    }\n    public function makeFromHarness(DraftFactoryHarness $factory): Draft {\n        return $factory->makeOne();\n    }\n}\n";
+    let uri = Url::from_file_path(dir.path().join("src/Service.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: content.to_string(),
+            },
+        })
+        .await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
+    let return_mismatches: Vec<_> = diags
+        .into_iter()
+        .filter(|d| {
+            matches!(&d.code, Some(NumberOrString::String(code)) if code == "type_mismatch_return")
+        })
+        .collect();
+    assert!(
+        return_mismatches.is_empty(),
+        "factory methods inherited through a base factory should return Draft, got: {return_mismatches:?}"
+    );
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Completion.php",
+        "<?php\nuse App\\Models\\Draft;\nDraft::factory()->makeOne()->\n",
+        2,
+        29,
+    )
+    .await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"draftOnly"),
+        "makeOne() should resolve to Draft, got methods: {methods:?}"
     );
 }
 
