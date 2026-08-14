@@ -980,8 +980,39 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
 
 // ─── Use statement extractor ────────────────────────────────────────────────
 
+/// What a `use` item imports.
+///
+/// The three kinds live in separate PHP symbol tables, so each one has
+/// to be indexed as the symbol it actually names — a `use function`
+/// item indexed as a class reference resolves to nothing, which is what
+/// leaves the import line unnavigable.
+#[derive(Clone, Copy)]
+enum UseItemKind {
+    Class,
+    Function,
+    Constant,
+}
+
+impl UseItemKind {
+    /// Read the kind off a `use` statement's type keyword.
+    fn from_type(r#type: &UseType<'_>) -> Self {
+        if r#type.is_function() {
+            Self::Function
+        } else if r#type.is_const() {
+            Self::Constant
+        } else {
+            Self::Class
+        }
+    }
+}
+
 pub(super) fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
-    fn register_use_item(item: &UseItem<'_>, prefix: Option<&str>, spans: &mut Vec<SymbolSpan>) {
+    fn register_use_item(
+        item: &UseItem<'_>,
+        prefix: Option<&str>,
+        item_kind: UseItemKind,
+        spans: &mut Vec<SymbolSpan>,
+    ) {
         let raw = bytes_to_str(item.name.value());
         let full = if let Some(prefix) = prefix {
             format!("{}\\{}", prefix, raw)
@@ -992,49 +1023,60 @@ pub(super) fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<Sym
         // leading `\`), so force `is_fqn = true`.  `class_ref_span`
         // derives the flag from a leading `\` which use statements omit.
         let name = crate::atom::atom(strip_fqn_prefix(&full));
-        spans.push(SymbolSpan {
-            start: item.name.span().start.offset,
-            end: item.name.span().end.offset,
-            kind: SymbolKind::ClassReference {
+        let kind = match item_kind {
+            UseItemKind::Class => SymbolKind::ClassReference {
                 name,
                 is_fqn: true,
                 context: ClassRefContext::UseImport,
             },
+            // Not a call site, but the same symbol a call site names, so
+            // definition, hover, references and rename all reach it the
+            // way they reach any other mention of the function.  The
+            // diagnostics that would otherwise read this as a call skip
+            // `use` statement lines already.
+            UseItemKind::Function => SymbolKind::FunctionCall {
+                name,
+                is_definition: false,
+                is_docblock_reference: false,
+            },
+            UseItemKind::Constant => SymbolKind::ConstantReference { name },
+        };
+        spans.push(SymbolSpan {
+            start: item.name.span().start.offset,
+            end: item.name.span().end.offset,
+            kind,
         });
     }
 
     match &use_stmt.items {
         UseItems::Sequence(seq) => {
             for use_item in seq.items.iter() {
-                register_use_item(use_item, None, spans);
+                register_use_item(use_item, None, UseItemKind::Class, spans);
             }
         }
         UseItems::TypedSequence(typed_seq) => {
-            // Only class imports (not function/const).
-            if !typed_seq.r#type.is_function() && !typed_seq.r#type.is_const() {
-                for use_item in typed_seq.items.iter() {
-                    register_use_item(use_item, None, spans);
-                }
+            let item_kind = UseItemKind::from_type(&typed_seq.r#type);
+            for use_item in typed_seq.items.iter() {
+                register_use_item(use_item, None, item_kind, spans);
             }
         }
         UseItems::TypedList(list) => {
-            if !list.r#type.is_function() && !list.r#type.is_const() {
-                let prefix = bytes_to_str(list.namespace.value());
-                for use_item in list.items.iter() {
-                    register_use_item(use_item, Some(prefix), spans);
-                }
+            let item_kind = UseItemKind::from_type(&list.r#type);
+            let prefix = bytes_to_str(list.namespace.value());
+            for use_item in list.items.iter() {
+                register_use_item(use_item, Some(prefix), item_kind, spans);
             }
         }
         UseItems::MixedList(list) => {
             let prefix = bytes_to_str(list.namespace.value());
             for use_item in list.items.iter() {
-                // MixedList items are MaybeTypedUseItem — skip function/const.
-                if let Some(ref typ) = use_item.r#type
-                    && (typ.is_function() || typ.is_const())
-                {
-                    continue;
-                }
-                register_use_item(&use_item.item, Some(prefix), spans);
+                // `use Foo\{Bar, function baz, const QUX};` — an item
+                // without its own type keyword is a class import.
+                let item_kind = use_item
+                    .r#type
+                    .as_ref()
+                    .map_or(UseItemKind::Class, UseItemKind::from_type);
+                register_use_item(&use_item.item, Some(prefix), item_kind, spans);
             }
         }
     }
