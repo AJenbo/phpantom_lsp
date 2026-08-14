@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786749090856,
+  "lastUpdate": 1786751765154,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21487,6 +21487,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ff5946866c75ff30e01b0e6c6d196b550b66c8b4",
+          "message": "Update embedded phpstorm-stubs to latest master\n\nPin moves from f6dd2dd (2026-04-29) to 5f68c1021b (2026-08-14),\npicking up PHP 8.6 stub coverage and various signature/return-type\nfixes (Redis, FFI, enchant, xmlreader, openssl_x509_parse,\nhtmlspecialchars default flags). Full test suite passes unchanged;\nnone of the upstream fixes overlap with our stub_patches.rs\nworkarounds or the open bugs in docs/todo/bugs.md.",
+          "timestamp": "2026-08-15T01:21:17+02:00",
+          "tree_id": "45b7227d5a973e53441b7986a4b041f3f799d50c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ff5946866c75ff30e01b0e6c6d196b550b66c8b4"
+        },
+        "date": 1786751758170,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.6,
             "unit": "MiB"
           }
         ]
