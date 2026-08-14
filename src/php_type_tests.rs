@@ -852,10 +852,25 @@ fn join_shapes_nullable_side_makes_join_nullable() {
 }
 
 #[test]
-fn join_shapes_rejects_positional_entries_and_non_shapes() {
-    // List-style shapes have no keys to join on.
+fn join_shapes_pairs_an_appended_slot_by_index() {
+    // The entry an append adds beside named keys occupies the index it
+    // sits at, so the branch that did not append leaves it optional
+    // rather than producing a second variant of the whole shape. The
+    // index comes along, since a positional spelling would count the
+    // entries after an absent one out at the wrong index.
+    let appended = PhpType::parse("array{name: string, Pen}");
+    assert_eq!(
+        appended.join_shapes(&PhpType::parse("array{name: string}")),
+        Some(PhpType::parse("array{name: string, 0?: Pen}"))
+    );
+    // Two bare lists of values describe unrelated arrays, so pairing
+    // their slots up would invent a row neither one holds.
     let positional = PhpType::parse("array{int, string}");
     let keyed = PhpType::parse("array{a: int}");
+    assert_eq!(
+        positional.join_shapes(&PhpType::parse("array{float}")),
+        None
+    );
     assert_eq!(positional.join_shapes(&keyed), None);
     assert_eq!(keyed.join_shapes(&positional), None);
     // Non-shape types never join.
@@ -2556,6 +2571,33 @@ mod subtype_tests {
             PhpType::named(atom("non-empty-list"))
                 .is_subtype_of(&PhpType::named(atom("non-empty-array")))
         );
+    }
+
+    /// A shape answers the `non-empty-…` and `list` promises from its own
+    /// entries: a required key makes it non-empty, and keys running
+    /// `0, 1, 2, …` make it a list.
+    #[test]
+    fn shape_satisfies_the_array_families_its_entries_promise() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(is_subtype("array{name: string}", "non-empty-array"));
+        assert!(is_subtype(
+            "array{name: string}",
+            "non-empty-array<string, string>"
+        ));
+        assert!(!is_subtype("array{}", "non-empty-array"));
+        assert!(!is_subtype("array{}", "non-empty-array<int, string>"));
+        // Every entry may be absent, so the shape may be the empty array.
+        assert!(!is_subtype("array{name?: string}", "non-empty-array"));
+
+        assert!(is_subtype("array{string, int}", "list<string|int>"));
+        assert!(is_subtype("array{0: string, 1: int}", "list"));
+        assert!(is_subtype("array{string}", "non-empty-list<string>"));
+        assert!(!is_subtype("array{name: string}", "list"));
+        // A hole in the sequence is not a list.
+        assert!(!is_subtype("array{0: string, 2: int}", "list<string|int>"));
+        assert!(!is_subtype("array{0?: string, 1: int}", "list<string|int>"));
     }
 
     #[test]

@@ -2747,6 +2747,34 @@ class ShapeMethodDemo
 
         return $kit;
     }
+
+    /**
+     * A write refines what the array already holds rather than replacing
+     * it. An append takes the next free key beside the keys already
+     * tracked, an append below a key extends what that key holds, and a
+     * write into an array declared by key and value type leaves both
+     * standing — the keys it held before the write are still there.
+     *
+     * @param array<string, Scaffolding\Pen> $byName
+     * @return array{tool: Scaffolding\Pen, Scaffolding\Pencil}
+     */
+    public function writesRefineTheTrackedArray(array $byName, string $name): array
+    {
+        $kit = ['tool' => new Scaffolding\Pen()];
+        $kit[] = new Scaffolding\Pencil();
+
+        $kit['tool']->write();            // Scaffolding\Pen — kept across the append
+        $kit[0]->sketch();                // Scaffolding\Pencil — the appended slot
+
+        $shelf = ['pens' => [new Scaffolding\Pen()]];
+        $shelf['pens'][] = new Scaffolding\Pen();
+        $shelf['pens'][1]->write();       // Scaffolding\Pen — the append is what it holds
+
+        $byName['spare'] = new Scaffolding\Pen();
+        $byName[$name]->write();          // Scaffolding\Pen — every other key survives the write
+
+        return $kit;
+    }
 }
 
 

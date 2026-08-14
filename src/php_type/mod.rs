@@ -516,6 +516,39 @@ pub(crate) fn is_decimal_int_array_key(content: &str) -> bool {
             .is_ok_and(|parsed| parsed.to_string() == content)
 }
 
+/// The runtime array key each shape entry occupies, in order.
+///
+/// A positional entry takes the next free integer index, mirroring the
+/// literal or the sequence of appends it was tracked from, and an explicit
+/// integer key moves that cursor past itself. Returns `None` once an entry
+/// that may be absent leaves a later positional entry's index in doubt,
+/// since pairing two shapes up is only decidable when both sides' keys are.
+pub(crate) fn runtime_shape_keys(entries: &[ShapeEntry]) -> Option<Vec<String>> {
+    let mut next: i64 = 0;
+    let mut shifted = false;
+    let mut keys = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match entry.key.as_deref() {
+            None => {
+                if shifted {
+                    return None;
+                }
+                keys.push(next.to_string());
+                next = next.checked_add(1)?;
+                shifted |= entry.optional;
+            }
+            Some(key) => {
+                if let Ok(index) = key.parse::<i64>() {
+                    next = next.max(index.checked_add(1)?);
+                    shifted |= entry.optional;
+                }
+                keys.push(key.to_string());
+            }
+        }
+    }
+    Some(keys)
+}
+
 impl fmt::Display for LiteralValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -2180,39 +2213,59 @@ impl PhpType {
         }
     }
 
-    /// Join two keyed shape entry lists (see [`join_shapes`]).
+    /// Join two shape entry lists (see [`join_shapes`]).
     ///
-    /// Keys from `a` keep their order; keys only in `b` follow in `b`'s
-    /// order.  Returns `None` when either side has positional (unkeyed)
-    /// entries.
+    /// Entries are paired by the key they occupy at runtime, so a
+    /// positional entry an append added beside named keys lines up with
+    /// the index it sits at. Keys from `a` keep their order; keys only in
+    /// `b` follow in `b`'s order. Returns `None` when either side's keys
+    /// are not decidable, and when either side is a bare list of values:
+    /// two literals written slot by slot describe unrelated arrays, and
+    /// pairing their slots up would invent a row neither one holds.
     ///
     /// [`join_shapes`]: Self::join_shapes
     fn join_shape_entries(a: &[ShapeEntry], b: &[ShapeEntry]) -> Option<Vec<ShapeEntry>> {
-        if a.iter().any(|e| e.key.is_none()) || b.iter().any(|e| e.key.is_none()) {
+        fn is_value_list(entries: &[ShapeEntry]) -> bool {
+            entries.iter().any(|entry| entry.key.is_none())
+                && !entries.iter().any(|entry| {
+                    entry
+                        .key
+                        .as_deref()
+                        .is_some_and(|k| k.parse::<i64>().is_err())
+                })
+        }
+        if is_value_list(a) || is_value_list(b) {
             return None;
         }
+        let keys_a = runtime_shape_keys(a)?;
+        let keys_b = runtime_shape_keys(b)?;
+        // An entry that may be absent no longer sits at the index a
+        // positional spelling counts it out at, so it takes its key along.
+        let entry =
+            |source: &ShapeEntry, key: &String, value_type: PhpType, optional: bool| ShapeEntry {
+                key: match &source.key {
+                    Some(key) => Some(key.clone()),
+                    None if optional => Some(key.clone()),
+                    None => None,
+                },
+                value_type,
+                optional,
+            };
         let mut joined: Vec<ShapeEntry> = Vec::with_capacity(a.len().max(b.len()));
-        for ea in a {
-            match b.iter().find(|eb| eb.key == ea.key) {
-                Some(eb) => joined.push(ShapeEntry {
-                    key: ea.key.clone(),
-                    value_type: Self::join_values(&ea.value_type, &eb.value_type),
-                    optional: ea.optional || eb.optional,
-                }),
-                None => joined.push(ShapeEntry {
-                    key: ea.key.clone(),
-                    value_type: ea.value_type.clone(),
-                    optional: true,
-                }),
+        for (ea, key) in a.iter().zip(&keys_a) {
+            match keys_b.iter().position(|other| other == key) {
+                Some(index) => joined.push(entry(
+                    ea,
+                    key,
+                    Self::join_values(&ea.value_type, &b[index].value_type),
+                    ea.optional || b[index].optional,
+                )),
+                None => joined.push(entry(ea, key, ea.value_type.clone(), true)),
             }
         }
-        for eb in b {
-            if !a.iter().any(|ea| ea.key == eb.key) {
-                joined.push(ShapeEntry {
-                    key: eb.key.clone(),
-                    value_type: eb.value_type.clone(),
-                    optional: true,
-                });
+        for (eb, key) in b.iter().zip(&keys_b) {
+            if !keys_a.contains(key) {
+                joined.push(entry(eb, key, eb.value_type.clone(), true));
             }
         }
         Some(joined)

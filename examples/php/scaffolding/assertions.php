@@ -1263,6 +1263,13 @@ function runDemoAssertions(): void
     assert($unioned['spare'] instanceof Scaffolding\Pencil,
         '+= adds the key only the right side contributes');
 
+    // ── Writes refine the tracked array ─────────────────────────────────
+    $refined = $shapeDemo->writesRefineTheTrackedArray(['first' => new Scaffolding\Pen()], 'spare');
+    assert($refined['tool'] instanceof Scaffolding\Pen,
+        'An append leaves the keys the array already holds alone');
+    assert($refined[0] instanceof Scaffolding\Pencil,
+        'An append takes the next free integer key');
+
     // ── Ambiguous variables ─────────────────────────────────────────────
     if (rand(0, 1)) {
         $ambiguous = new Scaffolding\Lamp();

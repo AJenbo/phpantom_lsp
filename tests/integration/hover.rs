@@ -484,6 +484,80 @@ function test(array $words): void {
 }
 
 #[test]
+fn hover_refines_a_tracked_shape_through_an_element_write() {
+    let backend = create_test_backend();
+    let uri = "file:///shape-writes.php";
+    let content = r#"<?php
+class Pen {}
+function test(string $key): void {
+    $row = ['name' => 'Alice'];
+    $row[] = new Pen();
+
+    $groups = ['pens' => [new Pen()]];
+    $groups['pens'][] = new Pen();
+
+    $slots = ['first' => 1];
+    $slots[$key] = 2;
+
+    echo $row, $groups, $slots;
+}
+"#;
+
+    let row = hover_at(&backend, uri, content, 12, 10).expect("hover on $row");
+    assert!(
+        hover_text(&row).contains("$row = array{name: 'Alice', Pen}"),
+        "an append takes the next free key beside the ones already tracked: {}",
+        hover_text(&row)
+    );
+
+    let groups = hover_at(&backend, uri, content, 12, 16).expect("hover on $groups");
+    assert!(
+        hover_text(&groups).contains("$groups = array{pens: list<Pen>}"),
+        "an append below a key refines what that key holds instead of \
+         leaving the literal it was initialised with: {}",
+        hover_text(&groups)
+    );
+
+    let slots = hover_at(&backend, uri, content, 12, 26).expect("hover on $slots");
+    assert!(
+        hover_text(&slots).contains("$slots = array<string, int>"),
+        "a dynamic key may land on any entry, so the shape widens: {}",
+        hover_text(&slots)
+    );
+}
+
+#[test]
+fn hover_keeps_the_key_domain_of_an_array_written_by_key() {
+    let backend = create_test_backend();
+    let uri = "file:///keyed-writes.php";
+    let content = r#"<?php
+/**
+ * @param array<string, int> $counts
+ * @param array<string, list<string>> $words
+ */
+function test(array $counts, array $words): void {
+    $counts['total'] = 0;
+    $words['nouns'][] = 'pen';
+    echo $counts, $words;
+}
+"#;
+
+    let counts = hover_at(&backend, uri, content, 8, 10).expect("hover on $counts");
+    assert!(
+        hover_text(&counts).contains("$counts = array<string, int>"),
+        "a write to one key says nothing about the keys already there: {}",
+        hover_text(&counts)
+    );
+
+    let words = hover_at(&backend, uri, content, 8, 20).expect("hover on $words");
+    assert!(
+        hover_text(&words).contains("$words = array<string, list<string>>"),
+        "an append below a key builds on the value type the array declares: {}",
+        hover_text(&words)
+    );
+}
+
+#[test]
 fn hover_keeps_an_array_access_object_across_an_append() {
     let backend = create_test_backend();
     let uri = "file:///append-offset-set.php";
@@ -527,6 +601,26 @@ function test(): void {
     assert!(
         text.contains("$config = array{first: 1, slot: Slot}"),
         "`+=` should keep the left key and add only what the right side contributes: {text}"
+    );
+}
+
+#[test]
+fn hover_takes_the_right_hand_keys_of_a_plus_equals_onto_an_untracked_array() {
+    let backend = create_test_backend();
+    let uri = "file:///array-plus-untracked.php";
+    let content = r#"<?php
+class Slot {}
+function test($config): void {
+    $config += ['slot' => new Slot()];
+    echo $config;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 4, 10).expect("hover on $config");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$config = array<string, Slot>"),
+        "an untracked left side still gets what the right side contributes: {text}"
     );
 }
 

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use super::{
-    enrich_builder_type_in_scope, merge_keyed_type, merge_push_type, normalize_array_key_type,
+    ArrayWriteKey, enrich_builder_type_in_scope, merge_array_plus, merge_keyed_type,
+    merge_nested_array_write, merge_push_type, normalize_array_key_type,
 };
 use crate::atom::atom;
 use crate::php_type::PhpType;
@@ -987,6 +988,95 @@ fn collection_key_normalization_preserves_non_numeric_string_domains() {
             .unwrap()
             .to_string(),
         "int"
+    );
+}
+
+/// An element write refines what the variable already tracks. It never
+/// leaves a tracked shape untouched, and never rebuilds a keyed array as a
+/// shape that claims the written key is the only one there.
+#[test]
+fn element_writes_refine_the_type_they_are_written_into() {
+    let write = |base: &str, keys: Vec<ArrayWriteKey>, value: &str| {
+        merge_nested_array_write(&PhpType::parse(base), &keys, &PhpType::parse(value)).to_string()
+    };
+    let shape = |key: &str| ArrayWriteKey::Shape(key.to_string());
+
+    // An append lands on the next free integer key, keeping the keys the
+    // shape already tracks.
+    assert_eq!(
+        write("array{name: string}", vec![ArrayWriteKey::Append], "User"),
+        "array{name: string, User}"
+    );
+    assert_eq!(
+        write("array{5: string}", vec![ArrayWriteKey::Append], "User"),
+        "array{5: string, 6: User}"
+    );
+    // The same append one level down refines that entry rather than
+    // leaving the value it was initialised with. The entry is a literal's
+    // positional shape, so appending to it gives up the arity that literal
+    // spelled out.
+    assert_eq!(
+        write(
+            "array{rows: array{'first'}}",
+            vec![shape("rows"), ArrayWriteKey::Append],
+            "string",
+        ),
+        "array{rows: list<string>}"
+    );
+    // A dynamic key may land on any entry, so the shape widens instead of
+    // standing still.
+    assert_eq!(
+        write(
+            "array{name: string}",
+            vec![ArrayWriteKey::Keyed(PhpType::string())],
+            "int",
+        ),
+        "array<string, string|int>"
+    );
+    // A keyed array keeps its key and value types through a literal-key
+    // write and through an append.
+    assert_eq!(
+        write("array<string, int>", vec![shape("name")], "int"),
+        "array<string, int>"
+    );
+    assert_eq!(
+        write("array<string, int>", vec![ArrayWriteKey::Append], "int"),
+        "array<string|int, int>"
+    );
+    // An auto-vivified level starts from what the base says sits there.
+    assert_eq!(
+        write(
+            "array<string, list<string>>",
+            vec![shape("words"), ArrayWriteKey::Append],
+            "string",
+        ),
+        "array<string, list<string>>"
+    );
+}
+
+/// `+` unions two shapes key by key, and positional entries have keys —
+/// the index they sit at.
+#[test]
+fn array_plus_unions_positional_entries_by_index() {
+    let plus = |lhs: &str, rhs: &str| {
+        merge_array_plus(&PhpType::parse(lhs), &PhpType::parse(rhs)).to_string()
+    };
+
+    assert_eq!(
+        plus("list{int, string}", "list{float}"),
+        "list{int, string}"
+    );
+    assert_eq!(
+        plus("list{int}", "list{float, string}"),
+        "list{int, string}"
+    );
+    assert_eq!(
+        plus("array{int, string}", "array{slot: Pen}"),
+        "array{int, string, slot: Pen}"
+    );
+    assert_eq!(
+        plus("array{name: string}", "array{Pen}"),
+        "array{name: string, 0: Pen}"
     );
 }
 

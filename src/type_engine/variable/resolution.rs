@@ -21,6 +21,7 @@ use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{
     LiteralValue, PhpType, ShapeEntry, TypeKind, is_decimal_int_array_key, is_keyword_type,
+    runtime_shape_keys,
 };
 use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
 
@@ -1623,13 +1624,14 @@ pub(super) enum ArrayWriteKey {
 /// bare `array` produces:
 ///   `array{data: array<int, array{earnings: Decimal}>}`
 ///
-/// A dynamic write onto an existing non-empty shape leaves the shape
-/// unchanged (the literal keys already tracked are worth more than a
-/// widened `array<K, V>`), matching the single-segment behaviour.
+/// A dynamic write onto an existing shape may land on any of its keys, so
+/// the shape widens to the `array<K, V>` its entries and the written pair
+/// describe together.
 ///
 /// A trailing [`ArrayWriteKey::Append`] appends to the innermost level,
 /// so `$rows[$id][] = $name` starting from `array{}` produces
-/// `array<int, list<string>>`.
+/// `array<int, list<string>>`. Appending to a shape that tracks literal
+/// keys adds the entry PHP's next free integer key would take.
 pub(super) fn merge_nested_array_write(
     base: &PhpType,
     keys: &[ArrayWriteKey],
@@ -1647,11 +1649,6 @@ pub(super) fn merge_nested_array_write(
             }
         }
         ArrayWriteKey::Keyed(key_type) => {
-            // Preserve an existing non-empty shape rather than widening
-            // it to a generic array and losing its literal keys.
-            if base.shape_entries().is_some_and(|e| !e.is_empty()) {
-                return base.clone();
-            }
             let inner_merged = if keys.len() == 1 {
                 value_type.clone()
             } else {
@@ -1662,24 +1659,72 @@ pub(super) fn merge_nested_array_write(
         }
         ArrayWriteKey::Append => {
             debug_assert_eq!(keys.len(), 1, "`[]` is only valid as the last segment");
-            // Appending under a named key would have to invent a
-            // positional entry beside it, so a shape that tracks literal
-            // keys is left alone — those keys are worth more than a
-            // widened `list<T>`. A positional shape (`[$a, $b]`) has no
-            // such keys and takes the general mutation treatment: the
-            // arity a literal spelled out stops describing an array that
-            // is still being appended to, all the more so from inside a
-            // loop, where the number of appends is not the number of
-            // times the walker sees the statement.
-            if base
-                .shape_entries()
-                .is_some_and(|e| e.iter().any(|entry| entry.key.is_some()))
+            // A shape that tracks literal keys keeps them, and the append
+            // lands on the next free integer key beside them. A positional
+            // shape (`[$a, $b]`) has no such keys and takes the general
+            // mutation treatment instead: the arity a literal spelled out
+            // stops describing an array that is still being appended to,
+            // all the more so from inside a loop, where the number of
+            // appends is not the number of times the walker sees the
+            // statement.
+            if let TypeKind::ArrayShape(entries) = base.kind()
+                && entries.iter().any(|entry| entry.key.is_some())
             {
-                return base.clone();
+                return append_to_shape(base, entries, value_type);
             }
             merge_push_type(base, value_type)
         }
     }
+}
+
+/// Extend a tracked shape with the entry a `[]` append writes.
+///
+/// PHP hands an append the next free integer key, so the shape keeps every
+/// key it already tracks and gains one more. When that index is not
+/// knowable — an optional integer-keyed entry may or may not be there, and
+/// shifts every index after it — the shape widens to `array<K, V>` instead.
+fn append_to_shape(base: &PhpType, entries: &[ShapeEntry], value_type: &PhpType) -> PhpType {
+    let Some(index) = next_append_index(entries) else {
+        return merge_keyed_type(base, &PhpType::int(), value_type);
+    };
+    // A positional entry is read back by counting the positional entries
+    // before it, so it only spells the same key the append writes while no
+    // explicit integer key has moved the index along.
+    let positional_count = entries.iter().filter(|entry| entry.key.is_none()).count() as i64;
+    let mut merged = entries.to_vec();
+    merged.push(ShapeEntry {
+        key: (index != positional_count).then(|| index.to_string()),
+        value_type: value_type.widen_scalar_literals(),
+        optional: false,
+    });
+    let shape = PhpType::array_shape(merged);
+    if base.is_list_shape() && index == positional_count {
+        PhpType::as_list_shape(shape)
+    } else {
+        shape
+    }
+}
+
+/// The integer key a `[]` append writes to a shape holding `entries`.
+///
+/// Positional entries take the next free index in order, an explicit
+/// integer key raises the cursor past itself, and string keys leave it
+/// alone. Returns `None` when an optional integer-keyed entry leaves the
+/// next index unknowable.
+fn next_append_index(entries: &[ShapeEntry]) -> Option<i64> {
+    let mut next: i64 = 0;
+    for entry in entries {
+        let index = match entry.key.as_deref() {
+            None => Some(next),
+            Some(key) => key.parse::<i64>().ok(),
+        };
+        let Some(index) = index else { continue };
+        if entry.optional {
+            return None;
+        }
+        next = next.max(index.checked_add(1)?);
+    }
+    Some(next)
 }
 
 /// The type an inner write should build on for the shape entry `key`.
@@ -1689,9 +1734,15 @@ pub(super) fn merge_nested_array_write(
 /// starting point — it lets the nested merge below build a precise type
 /// instead of unioning against `mixed`.
 fn shape_slot_base(base: &PhpType, key: &str) -> PhpType {
-    base.shape_value_type(key)
-        .cloned()
-        .unwrap_or_else(|| PhpType::array_shape(Vec::new()))
+    if let Some(value) = base.shape_value_type(key) {
+        return value.clone();
+    }
+    // A base that tracks one value type for every key already describes
+    // what sits under this one, tracked or not.
+    if matches!(base.kind(), TypeKind::ArrayShape(_)) {
+        return PhpType::array_shape(Vec::new());
+    }
+    keyed_slot_base(base)
 }
 
 /// The type an inner write should build on below a dynamic key segment.
@@ -1739,6 +1790,23 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
 ///
 /// Returns `PhpType::array_shape(entries)` with the merged entries.
 fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
+    // A base that tracks key and value types instead of individual keys
+    // (`array<string, int>`, `list<User>`, `User[]`) still holds whatever
+    // it held before the write. Rebuilding it as a one-entry shape would
+    // claim the written key is the only one there, so the write folds into
+    // the tracked pair instead.
+    if base.is_array_like()
+        && !matches!(base.kind(), TypeKind::ArrayShape(_))
+        && base.iterable_key_type().is_some()
+    {
+        let key_type = if is_decimal_int_array_key(key) {
+            PhpType::int()
+        } else {
+            PhpType::string()
+        };
+        return merge_keyed_type(base, &key_type, value_type);
+    }
+
     let mut entries: Vec<ShapeEntry> = Vec::new();
 
     // Copy existing shape entries from the base type, skipping the
@@ -1771,6 +1839,16 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
 /// Returns `PhpType::list(elem_type)` or
 /// `PhpType::named("array")` when no element types are available.
 pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
+    // A base that already holds string keys stays a keyed array: an append
+    // adds an integer key beside them, it does not make the value a list.
+    if base.is_array_like()
+        && base
+            .iterable_key_type()
+            .is_some_and(|key| !key.is_subtype_of(&PhpType::int()))
+    {
+        return merge_keyed_type(base, &PhpType::int(), value_type);
+    }
+
     let mut elem_types: Vec<PhpType> = Vec::new();
     let value_type = value_type.widen_scalar_literals();
 
@@ -1882,15 +1960,22 @@ pub(super) fn merge_keyed_type(
 pub(super) fn merge_array_plus(lhs: &PhpType, rhs: &PhpType) -> PhpType {
     if let (TypeKind::ArrayShape(lhs_entries), TypeKind::ArrayShape(rhs_entries)) =
         (lhs.kind(), rhs.kind())
-        // Positional entries carry no key to match on, so their union is
-        // not decidable from the shapes alone.
-        && lhs_entries.iter().chain(rhs_entries).all(|e| e.key.is_some())
+        && let Some(lhs_keys) = runtime_shape_keys(lhs_entries)
+        && let Some(rhs_keys) = runtime_shape_keys(rhs_entries)
     {
+        // Two positional shapes union index by index, so their entries stay
+        // positional. Once either side spells a key out, the entries behind
+        // it no longer sit at their own index.
+        let all_positional = lhs_entries
+            .iter()
+            .chain(rhs_entries)
+            .all(|entry| entry.key.is_none());
         let mut entries: Vec<ShapeEntry> = Vec::with_capacity(lhs_entries.len());
-        for entry in lhs_entries {
-            let rhs_match = rhs_entries
+        for (entry, key) in lhs_entries.iter().zip(&lhs_keys) {
+            let rhs_match = rhs_keys
                 .iter()
-                .find(|other| other.key == entry.key)
+                .position(|other| other == key)
+                .map(|index| &rhs_entries[index])
                 .filter(|_| entry.optional);
             match rhs_match {
                 // An optional left key may be absent at runtime, in which
@@ -1906,13 +1991,24 @@ pub(super) fn merge_array_plus(lhs: &PhpType, rhs: &PhpType) -> PhpType {
                 None => entries.push(entry.clone()),
             }
         }
-        entries.extend(
-            rhs_entries
-                .iter()
-                .filter(|entry| !lhs_entries.iter().any(|left| left.key == entry.key))
-                .cloned(),
-        );
-        return PhpType::array_shape(entries);
+        for (entry, key) in rhs_entries.iter().zip(&rhs_keys) {
+            if lhs_keys.contains(key) {
+                continue;
+            }
+            entries.push(ShapeEntry {
+                key: entry
+                    .key
+                    .clone()
+                    .or_else(|| (!all_positional).then(|| key.clone())),
+                ..entry.clone()
+            });
+        }
+        let merged = PhpType::array_shape(entries);
+        return if all_positional && lhs.is_list_shape() && rhs.is_list_shape() {
+            PhpType::as_list_shape(merged)
+        } else {
+            merged
+        };
     }
 
     let Some(rhs_value) = rhs.iterable_element_type().filter(|v| !v.is_empty()) else {

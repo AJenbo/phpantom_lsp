@@ -223,8 +223,22 @@ impl PhpType {
 
         // ── ArrayShape <: array / iterable ──────────────────────────
         if let TypeKind::ArrayShape(entries) = self.kind() {
+            // A shape satisfies a `non-empty-…` supertype only when it
+            // names a key that is always there. `array{}` never does, and
+            // neither does a shape whose every entry is optional.
+            let is_non_empty = entries.iter().any(|entry| !entry.optional);
+            // `list{…}` says so outright; a shape tracked from a literal or
+            // from appends says so by holding `0, 1, 2, …` in order.
+            let is_list = self.is_list_shape() || shape_keys_are_sequential(entries);
+
             if let TypeKind::Named(sup) = supertype.kind() {
-                return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
+                return match sup.to_ascii_lowercase().as_str() {
+                    "array" | "iterable" => true,
+                    "non-empty-array" => is_non_empty,
+                    "list" => is_list,
+                    "non-empty-list" => is_list && is_non_empty,
+                    _ => false,
+                };
             }
 
             // ArrayShape <: array<K, V>  (or other generic array-like)
@@ -232,6 +246,12 @@ impl PhpType {
             if let TypeKind::Generic(g) = supertype.kind()
                 && is_array_like_name(&g.name)
             {
+                if is_non_empty_array_name(&g.name) && !is_non_empty {
+                    return false;
+                }
+                if is_list_name(&g.name) && !is_list {
+                    return false;
+                }
                 match g.args.len() {
                     // array<V> — only check values.
                     1 => {
@@ -420,6 +440,29 @@ fn array_like_key_value(generic: &GenericType) -> Option<(PhpType, &PhpType)> {
         [key, value] => Some((key.clone(), value)),
         _ => None,
     }
+}
+
+/// Whether a shape's entries occupy the keys `0, 1, 2, …` a `list`
+/// promises.
+///
+/// Positional entries take the next index, an explicit key must spell that
+/// same index out, and a string key rules the shape out entirely. Optional
+/// entries are only allowed at the end: an absent one in the middle would
+/// leave a hole in the sequence.
+fn shape_keys_are_sequential(entries: &[ShapeEntry]) -> bool {
+    let mut seen_optional = false;
+    for (position, entry) in (0_i64..).zip(entries) {
+        if seen_optional && !entry.optional {
+            return false;
+        }
+        seen_optional |= entry.optional;
+        match entry.key.as_deref() {
+            None => {}
+            Some(key) if key.parse::<i64>() == Ok(position) => {}
+            Some(_) => return false,
+        }
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------

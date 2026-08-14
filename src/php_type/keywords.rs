@@ -254,6 +254,15 @@ pub fn is_array_like_name(name: &str) -> bool {
     )
 }
 
+/// Returns `true` for array-like type names that promise at least one
+/// element.
+pub fn is_non_empty_array_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "non-empty-array" | "non-empty-list"
+    )
+}
+
 /// Returns `true` for array-like type names that guarantee sequential
 /// integer keys starting at zero.
 pub fn is_list_name(name: &str) -> bool {

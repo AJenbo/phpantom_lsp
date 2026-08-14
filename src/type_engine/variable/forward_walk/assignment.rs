@@ -1762,9 +1762,17 @@ pub(crate) fn infer_addition_result_type(
 ) -> PhpType {
     let lhs_is_array = lhs_types.iter().any(|rt| rt.type_string.is_array_like());
     let rhs_is_array = rhs_types.iter().any(|rt| rt.type_string.is_array_like());
-    if lhs_is_array && rhs_is_array {
+    if rhs_is_array && (lhs_is_array || lhs_types.is_empty()) {
+        // An operand with no tracked type still gets everything the array
+        // beside it contributes: `+` only accepts arrays, so whatever it
+        // held was one too.
+        let lhs_type = if lhs_types.is_empty() {
+            PhpType::array()
+        } else {
+            ResolvedType::types_joined(lhs_types)
+        };
         return super::super::resolution::merge_array_plus(
-            &ResolvedType::types_joined(lhs_types),
+            &lhs_type,
             &ResolvedType::types_joined(rhs_types),
         );
     }
