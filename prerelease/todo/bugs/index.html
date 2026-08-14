@@ -931,56 +931,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b174-assertthis-instanceof-x-does-not-narrow-this" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B174. <code>assert($this instanceof X)</code> does not narrow <code>$this</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B175. A call's recorded check survives a statement that could change what it returns
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b176-iterable-is-not-a-type-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. <code>iterable</code> is not a type guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b177-a-doubly-negated-truthiness-guard-does-not-narrow" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B177. A doubly negated truthiness guard does not narrow
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1554,56 +1504,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b174-assertthis-instanceof-x-does-not-narrow-this" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B174. <code>assert($this instanceof X)</code> does not narrow <code>$this</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B175. A call's recorded check survives a statement that could change what it returns
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b176-iterable-is-not-a-type-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. <code>iterable</code> is not a type guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b177-a-doubly-negated-truthiness-guard-does-not-narrow" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B177. A doubly negated truthiness guard does not narrow
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1736,56 +1636,7 @@ generic array only for non-constant keys.</p>
 auto-vivification), merge <code>+=</code> like an array-shape union, and make
 constant shapes satisfy their generic supertypes.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b174-assertthis-instanceof-x-does-not-narrow-this">B174. <code>assert($this instanceof X)</code> does not narrow <code>$this</code><a class="headerlink" href="#b174-assertthis-instanceof-x-does-not-narrow-this" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Effort: Low-Medium</strong></p>
-<p>A Pest test closure is bound to whatever <code>pest()-&gt;extends(…)</code> names,
-which no expression in the test file says, so the suites write
-<code>assert($this instanceof TestCase);</code> as the first line of the closure
-to tell an analyser what it is bound to. The assertion is ignored for
-<code>$this</code> (it narrows an ordinary variable), so every helper the base
-class provides is reported <code>unknown_member</code> against Pest's default
-<code>PHPUnit\Framework\TestCase</code> — ~21 sites in one project's browser
-suite alone. Narrowing <code>$this</code> the way any other subject is narrowed
-clears them; reading <code>pest()-&gt;extends(…)-&gt;in(…)</code> to bind the closure
-in the first place would clear them without the assertion.</p>
-<h3 id="b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns">B175. A call's recorded check survives a statement that could change what it returns<a class="headerlink" href="#b175-a-calls-recorded-check-survives-a-statement-that-could-change-what-it-returns" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">if ($stmt-&gt;fetch(&#39;id&#39;) !== false) {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $stmt-&gt;execute();</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $row = $stmt-&gt;fetch(&#39;id&#39;);   // still reported non-false</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>A call key is dropped when a variable it <em>reads</em> is written, but not
-when an intervening statement could change the state behind the
-receiver. Any call on the same receiver, a by-reference write the
-walker does not model as an assignment, or a global mutation leaves the
-recorded check standing. PHPStan invalidates every remembered
-expression rooted at a receiver when an impure call is made on it.</p>
-<p><strong>Fix:</strong> invalidate the keys rooted at a receiver when a call is made on
-that receiver, unless the callee is declared <code>@phpstan-pure</code> /
-<code>@psalm-pure</code>. This predates expression keying (the argument-less
-<code>$obj-&gt;get()</code> form has always had it), but keying calls with arguments
-widens the surface.</p>
-<h3 id="b176-iterable-is-not-a-type-guard">B176. <code>iterable</code> is not a type guard<a class="headerlink" href="#b176-iterable-is-not-a-type-guard" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Low-Medium</strong></p>
-<p><code>is_iterable($x)</code> narrows nothing, and neither does a
-<code>@phpstan-assert iterable $actual</code> tag (PHPUnit's <code>assertIsIterable</code>).
-<code>iterable</code> names no class, so the instanceof channel cannot carry it,
-and the type-guard channel has no kind for it the way it does for
-<code>array</code>, <code>string</code>, <code>callable</code> and the rest. The assertion is read and
-then silently dropped.</p>
-<p><strong>Fix:</strong> add an <code>iterable</code> guard kind alongside the others, mapping to
-<code>array|Traversable</code> for the inclusion test so a union narrows to the
-members that can be iterated.</p>
-<h3 id="b177-a-doubly-negated-truthiness-guard-does-not-narrow">B177. A doubly negated truthiness guard does not narrow<a class="headerlink" href="#b177-a-doubly-negated-truthiness-guard-does-not-narrow" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Low-Medium</strong></p>
-<p><code>if (!(!$user))</code> and Blade's <code>@unless (!$user)</code>, which compiles to it,
-leave <code>$user</code> as <code>User|null</code> inside the guard, while the single-negation
-and comparison spellings (<code>if ($user)</code>, <code>if (!($user === null))</code>,
-<code>@unless ($user === null)</code>) all narrow. The negation is applied to the
-operand rather than folded, so the inner <code>!</code> re-negates a proof the
-outer one had already inverted. Found while confirming the Blade
-<code>@include</code> narrowing, not from a sample-project site.</p>
+<p>No outstanding items.</p>
 
 
 
