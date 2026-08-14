@@ -130,6 +130,48 @@ pub(crate) enum ClassRefContext {
     /// backed enum (`value-of<Suit>`) is the one genuine class operand, so
     /// the reference is still recorded and still navigable.
     TypeOperatorOperand,
+    /// As the target of a `@see` or `{@see …}` docblock tag.
+    ///
+    /// `@see` legally carries URIs, prose, and naming suggestions in
+    /// addition to FQSENs, so an unresolvable target is not an error.
+    DocblockSee,
+}
+
+/// How a [`SymbolKind::MemberAccess`] span names its member.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DocblockMemberRef {
+    /// A real `->` / `?->` / `::` access written in PHP code.
+    No,
+    /// The target of a `@see` or `{@see …}` tag.
+    ///
+    /// `@see` legally carries URIs, prose, and naming suggestions in
+    /// addition to FQSENs, so a target that resolves to nothing is not an
+    /// error.
+    See,
+    /// PHPUnit coverage metadata: a `@covers` / `@uses` tag, a `@covers
+    /// ::name` under a `@coversDefaultClass`, or a `#[CoversMethod]` /
+    /// `#[UsesMethod]` attribute.
+    ///
+    /// Unlike `@see`, the target names a code unit that has to exist —
+    /// PHPUnit errors out on coverage metadata that names nothing — so it
+    /// is still checked.
+    Coverage,
+}
+
+impl DocblockMemberRef {
+    /// Whether the member is *named* rather than accessed, which is what
+    /// earns the relaxed member lookup: the subject is a class name rather
+    /// than a runtime expression, and a property hook or an `@method` is a
+    /// legitimate target.
+    pub(crate) fn is_reference(self) -> bool {
+        !matches!(self, Self::No)
+    }
+
+    /// Whether a target that resolves to nothing is acceptable rather than
+    /// a diagnostic.
+    pub(crate) fn tolerates_missing_target(self) -> bool {
+        matches!(self, Self::See)
+    }
 }
 
 /// The subject (LHS) text of a [`SymbolKind::MemberAccess`] span.
@@ -216,11 +258,12 @@ pub(crate) enum SymbolKind {
         member_name: Atom,
         is_static: bool,
         is_method_call: bool,
-        /// `true` when this span was extracted from a docblock reference
-        /// (e.g. `@see Order::$channel_type`) rather than real PHP code.
-        /// Diagnostics skip these because the subject is a class name,
-        /// not a runtime expression.
-        is_docblock_reference: bool,
+        /// Whether this span was extracted from a docblock tag or a
+        /// coverage attribute (e.g. `@see Order::$channel_type`) rather
+        /// than real PHP code, and if so which kind.  A named member gets
+        /// a relaxed lookup because the subject is a class name rather
+        /// than a runtime expression.
+        docblock_ref: DocblockMemberRef,
         /// `true` when this span was synthesised from a two-element
         /// `[Class::class, 'method']` / `[$obj, 'method']` array literal
         /// rather than a real `->`/`::` access.  These spans are a
@@ -268,11 +311,16 @@ pub(crate) enum SymbolKind {
     FunctionCall {
         name: Atom,
         is_definition: bool,
-        /// `true` when this span was extracted from an unqualified
-        /// `@see`-family docblock reference (`{@see covers()}`) rather than
-        /// real PHP code.  Such a reference names a member of the class the
-        /// docblock documents before it names a global function, which is
-        /// how phpDocumentor and PHPStorm read it.
+        /// `true` when this span was extracted from an unqualified `@see`
+        /// reference (`{@see covers()}`) rather than real PHP code.  Such a
+        /// reference names a member of the class the docblock documents
+        /// before it names a global function, which is how phpDocumentor
+        /// and PHPStorm read it, and `@see` legally carries prose besides
+        /// an FQSEN, so a name that resolves to nothing is not an error.
+        ///
+        /// PHPUnit coverage metadata shares the `@see` emitter but neither
+        /// reading applies to it, so `retag_as_covers_target` clears this;
+        /// see [`DocblockMemberRef`] for the member equivalent.
         is_docblock_reference: bool,
     },
 

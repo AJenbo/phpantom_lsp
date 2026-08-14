@@ -86,12 +86,16 @@ impl Backend {
 
             // Only check references with a known context.  Attribute
             // usages (`#[Foo]`) are valid on any instantiable class, and a
-            // coverage target names a code unit rather than using it, so
-            // both are skipped just like `Other` — before the class lookup
-            // below, which would be pure waste for them.
+            // coverage target or a `@see` target names a code unit rather
+            // than using it, so all three are skipped just like `Other` —
+            // before the class lookup below, which would be pure waste for
+            // them.
             if matches!(
                 ref_ctx,
-                ClassRefContext::Other | ClassRefContext::Attribute | ClassRefContext::CoversTarget
+                ClassRefContext::Other
+                    | ClassRefContext::Attribute
+                    | ClassRefContext::CoversTarget
+                    | ClassRefContext::DocblockSee
             ) {
                 continue;
             }
@@ -358,7 +362,8 @@ fn check_kind_in_context(
         | ClassRefContext::UseImport
         | ClassRefContext::Attribute
         | ClassRefContext::CoversTarget
-        | ClassRefContext::TypeOperatorOperand => None,
+        | ClassRefContext::TypeOperatorOperand
+        | ClassRefContext::DocblockSee => None,
     }
 }
 

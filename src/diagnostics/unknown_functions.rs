@@ -130,6 +130,14 @@ impl Backend {
                 _ => continue,
             };
 
+            // `@see` legally carries URIs, prose, and naming suggestions in
+            // addition to FQSENs, so a target that resolves to nothing is
+            // not an error.  PHPUnit coverage metadata shares the emitter
+            // but clears the flag, so `@covers` is still checked.
+            if is_docblock_reference {
+                continue;
+            }
+
             // Skip spans on `use` statement lines.
             if is_offset_in_ranges(span.start, &use_line_ranges) {
                 continue;
@@ -158,18 +166,6 @@ impl Backend {
 
             // ── Skip functions guarded by function_exists() ──────────────
             if existence_guards.is_function_guarded(name, span.start) {
-                continue;
-            }
-
-            // ── An unqualified `@see` reference may name a member ───────
-            // The global-function lookup runs first because it is by far
-            // the cheaper of the two; which one answers does not change
-            // whether the reference is dangling.
-            if is_docblock_reference
-                && self
-                    .docblock_scope_member(&ctx.file, content, span.start, name)
-                    .is_some()
-            {
                 continue;
             }
 

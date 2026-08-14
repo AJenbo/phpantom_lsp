@@ -299,49 +299,54 @@ impl Backend {
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
-            let (
-                subject_text,
-                member_name,
-                is_static,
-                is_method_call,
-                is_docblock_ref,
-                is_nullsafe,
-            ) = match &span.kind {
-                SymbolKind::MemberAccess {
-                    subject_text,
-                    member_name,
-                    is_static,
-                    is_method_call,
-                    is_docblock_reference,
-                    is_array_callable,
-                    is_nullsafe,
-                } => {
-                    // A `[Class::class, 'method']` / `[$obj, 'method']`
-                    // array literal is only a callable when it flows into
-                    // a callable-typed context (a callable parameter,
-                    // `is_callable`, or a direct invocation).  Without
-                    // type-flow analysis we cannot tell such an array
-                    // apart from a plain data pair like
-                    // `return [[Foo::class, 'name'], ...]`, so we do not
-                    // validate its second element as a method.  The span
-                    // still drives navigation, hover, and semantic tokens,
-                    // which only surface information when the member
-                    // actually resolves.
-                    if *is_array_callable {
-                        continue;
-                    }
-                    (
+            let (subject_text, member_name, is_static, is_method_call, docblock_ref, is_nullsafe) =
+                match &span.kind {
+                    SymbolKind::MemberAccess {
                         subject_text,
                         member_name,
-                        *is_static,
-                        *is_method_call,
-                        *is_docblock_reference,
-                        *is_nullsafe,
-                    )
-                }
-                _ => continue,
-            };
+                        is_static,
+                        is_method_call,
+                        docblock_ref,
+                        is_array_callable,
+                        is_nullsafe,
+                    } => {
+                        // A `[Class::class, 'method']` / `[$obj, 'method']`
+                        // array literal is only a callable when it flows into
+                        // a callable-typed context (a callable parameter,
+                        // `is_callable`, or a direct invocation).  Without
+                        // type-flow analysis we cannot tell such an array
+                        // apart from a plain data pair like
+                        // `return [[Foo::class, 'name'], ...]`, so we do not
+                        // validate its second element as a method.  The span
+                        // still drives navigation, hover, and semantic tokens,
+                        // which only surface information when the member
+                        // actually resolves.
+                        if *is_array_callable {
+                            continue;
+                        }
+                        (
+                            subject_text,
+                            member_name,
+                            *is_static,
+                            *is_method_call,
+                            *docblock_ref,
+                            *is_nullsafe,
+                        )
+                    }
+                    _ => continue,
+                };
+
+            // `@see` legally carries URIs, prose, and naming suggestions in
+            // addition to FQSENs, so a target that resolves to nothing is
+            // not an error.  PHPUnit coverage metadata, which shares the
+            // emitter, is still checked: it names a code unit that must
+            // exist.
+            if docblock_ref.tolerates_missing_target() {
+                continue;
+            }
+
             let subject_text = subject_text.as_str(content);
+            let is_docblock_ref = docblock_ref.is_reference();
 
             // ── Skip the magic `::class` constant ───────────────────
             if member_name == "class" && is_static {

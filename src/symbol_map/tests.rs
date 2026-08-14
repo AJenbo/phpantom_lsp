@@ -3927,13 +3927,13 @@ fn see_tag_self_member_spans_emitted() {
             subject_text,
             member_name,
             is_static,
-            is_docblock_reference,
+            docblock_ref,
             ..
         } => {
             assert_eq!(subject_text.as_str(php), "self");
             assert_eq!(member_name, "bar");
             assert!(*is_static);
-            assert!(*is_docblock_reference);
+            assert_eq!(*docblock_ref, DocblockMemberRef::See);
         }
         other => panic!("Expected MemberAccess for bar, got {:?}", other),
     }

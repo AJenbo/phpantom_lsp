@@ -531,7 +531,7 @@ final class QodanaChecker
     }
 
     #[test]
-    fn still_flags_see_naming_nothing_in_scope() {
+    fn no_diagnostic_for_see_naming_nothing_in_scope() {
         let php = r#"<?php
 /**
  * {@see covers()} names nothing.
@@ -543,14 +543,14 @@ final class QodanaChecker
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("covers")),
-            "A @see reference that matches no member and no function is still dangling, got: {:?}",
+            diags.is_empty(),
+            "@see legally carries prose and naming suggestions; unresolvable targets are not errors, got: {:?}",
             diags,
         );
     }
 
     #[test]
-    fn still_flags_see_in_a_docblock_that_documents_no_class() {
+    fn no_diagnostic_for_see_in_a_docblock_that_documents_no_class() {
         let php = r#"<?php
 /**
  * {@see covers()} names nothing.
@@ -564,8 +564,30 @@ final class QodanaChecker
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("covers")),
-            "A function's docblock must not borrow members from a later class, got: {:?}",
+            diags.is_empty(),
+            "@see legally carries prose and naming suggestions; unresolvable targets are not errors, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_see_with_free_text_prose() {
+        let php = r#"<?php
+class Widget
+{
+    /**
+     * @see the vendor manual "Widget Format v2" on page 3
+     */
+    public function encode(string $content): string
+    {
+        return $content;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "@see with free-text prose should not produce diagnostics, got: {:?}",
             diags,
         );
     }

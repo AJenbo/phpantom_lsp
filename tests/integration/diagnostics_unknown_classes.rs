@@ -1238,4 +1238,34 @@ class Report
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    /// `@see ShortWidget as a potential shorter name` suggests a name; it
+    /// does not reference one, so the class need not exist.
+    #[test]
+    fn no_false_positive_for_see_naming_suggestion() {
+        let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+class Widget
+{
+    /**
+     * @see ShortWidget as a potential shorter name
+     */
+    public function longName(): string
+    {
+        return 'widget';
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "a @see naming suggestion must not be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }

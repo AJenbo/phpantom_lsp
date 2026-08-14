@@ -171,7 +171,7 @@ pub(super) fn try_emit_coverage_attribute_spans(
             // the relaxed lookup a docblock reference gets is the right one:
             // `#[CoversMethod]` is also how a property hook is targeted.
             is_method_call: false,
-            is_docblock_reference: true,
+            docblock_ref: DocblockMemberRef::Coverage,
             is_array_callable: false,
             is_nullsafe: false,
         },

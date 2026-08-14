@@ -12808,3 +12808,101 @@ namespace App {
         "belongsTo()->withTrashed()->first()->displayName() should resolve end to end, got: {diags:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Docblock references: `@see` versus PHPUnit coverage metadata
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `@see` legally carries prose and naming suggestions besides an FQSEN, so a
+/// member it names need not exist. All three spellings the tag accepts are
+/// covered: `::`, the legacy `#` fragment, and `self::`.
+#[test]
+fn no_diagnostic_for_see_member_that_names_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///see_member.php";
+    let text = r#"<?php
+class Widget
+{
+    /**
+     * @see Widget::maybeLater as a name we could adopt
+     * @see Widget#alsoNotThere for the legacy spelling
+     * @see self::neitherThis
+     */
+    public function encode(): string { return ''; }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a @see member that resolves to nothing must not be flagged, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// PHPUnit coverage metadata shares the `@see` emitter but not its leniency:
+/// PHPUnit errors out on a target that names nothing, so a dangling one is a
+/// real problem in all three spellings (a `@covers` FQSEN, `@covers ::name`
+/// under a `@coversDefaultClass`, and the `#[CoversMethod]` attribute).
+#[test]
+fn flags_a_coverage_target_that_names_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///covers_member.php";
+    let text = r#"<?php
+class Widget
+{
+    public function encode(): string { return ''; }
+}
+
+/**
+ * @covers \Widget::nonExistentMethod
+ */
+class WidgetTest {}
+
+/**
+ * @coversDefaultClass \Widget
+ */
+class DefaultClassTest
+{
+    /**
+     * @covers ::alsoMissing
+     */
+    public function testThing(): void {}
+}
+
+#[\PHPUnit\Framework\Attributes\CoversMethod(Widget::class, 'missingViaAttribute')]
+class AttributeTest {}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    for name in ["nonExistentMethod", "alsoMissing", "missingViaAttribute"] {
+        assert!(
+            diags.iter().any(|d| d.message.contains(name)),
+            "coverage metadata naming the missing `{name}` must be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// A coverage target that does resolve stays quiet, so the check above is not
+/// simply flagging every coverage tag.
+#[test]
+fn no_diagnostic_for_a_coverage_target_that_resolves() {
+    let backend = create_test_backend();
+    let uri = "file:///covers_ok.php";
+    let text = r#"<?php
+class Widget
+{
+    public function encode(): string { return ''; }
+}
+
+/**
+ * @covers \Widget::encode
+ */
+class WidgetTest {}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a coverage target that resolves must not be flagged, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

@@ -29,8 +29,8 @@ use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 
 use super::{
-    ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolSpan, TemplateParamDef,
-    self_static_parent_kind,
+    ClassRefContext, DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind, SymbolSpan,
+    TemplateParamDef, self_static_parent_kind,
 };
 use crate::util::strip_fqn_prefix;
 
@@ -511,10 +511,13 @@ fn emit_covers_tag_symbol(
 
 /// Mark every reference among `spans` as PHPUnit coverage metadata.
 ///
-/// Besides tagging the class references, this undoes the `@see` emitter's
-/// assumption that a bare lowercase name may be a member of the enclosing
-/// class: a coverage target that names no class is a *global* function, and
-/// PHPUnit spells the test class's own members `::name` instead.
+/// Besides tagging the class references, this undoes two of the `@see`
+/// emitter's assumptions.  A bare lowercase name may be a member of the
+/// enclosing class under `@see`, but a coverage target that names no class is
+/// a *global* function and PHPUnit spells the test class's own members
+/// `::name` instead.  And where `@see` tolerates a target that resolves to
+/// nothing, because the tag legally carries prose, coverage metadata names a
+/// code unit PHPUnit insists exists.
 pub(super) fn retag_as_covers_target(spans: &mut [SymbolSpan]) {
     for span in spans {
         match &mut span.kind {
@@ -525,6 +528,9 @@ pub(super) fn retag_as_covers_target(spans: &mut [SymbolSpan]) {
                 is_docblock_reference,
                 ..
             } => *is_docblock_reference = false,
+            SymbolKind::MemberAccess { docblock_ref, .. } => {
+                *docblock_ref = DocblockMemberRef::Coverage;
+            }
             _ => {}
         }
     }
@@ -572,7 +578,7 @@ fn emit_covers_reference(
             member_name: crate::atom::atom(member),
             is_static: true,
             is_method_call: false,
-            is_docblock_reference: true,
+            docblock_ref: DocblockMemberRef::Coverage,
             is_array_callable: false,
             is_nullsafe: false,
         },
@@ -1122,7 +1128,13 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         // carries the correct `is_fqn` flag. Passing the stripped
         // `clean_class` would drop the flag and make downstream
         // consumers re-prefix the current namespace, doubling it.
-        emit_identifier_span(class_part, class_start, class_end, spans);
+        emit_identifier_span_in(
+            class_part,
+            class_start,
+            class_end,
+            ClassRefContext::DocblockSee,
+            spans,
+        );
 
         let member_start = file_offset + sep_pos as u32 + 2 - prefix_len;
         let is_property = member_part.starts_with('$');
@@ -1141,7 +1153,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                     member_name: crate::atom::atom(member_name),
                     is_static: true,
                     is_method_call: false,
-                    is_docblock_reference: true,
+                    docblock_ref: DocblockMemberRef::See,
                     is_array_callable: false,
                     is_nullsafe: false,
                 },
@@ -1165,7 +1177,13 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
 
         let class_start = file_offset;
         let class_end = file_offset + class_part.len() as u32 - prefix_len;
-        emit_identifier_span(class_part, class_start, class_end, spans);
+        emit_identifier_span_in(
+            class_part,
+            class_start,
+            class_end,
+            ClassRefContext::DocblockSee,
+            spans,
+        );
 
         let member_start = file_offset + sep_pos as u32 + 1 - prefix_len;
         let member_end = member_start + member_part.len() as u32;
@@ -1177,7 +1195,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 member_name: crate::atom::atom(member_part),
                 is_static: false,
                 is_method_call: false,
-                is_docblock_reference: true,
+                docblock_ref: DocblockMemberRef::See,
                 is_array_callable: false,
                 is_nullsafe: false,
             },
@@ -1206,7 +1224,12 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         if first_char.is_ascii_uppercase() {
             let start = file_offset;
             let end = file_offset + reference.len() as u32 - prefix_len;
-            spans.push(class_ref_span(start, end, reference));
+            spans.push(class_ref_span_ctx(
+                start,
+                end,
+                reference,
+                ClassRefContext::DocblockSee,
+            ));
         } else {
             let start = file_offset;
             let end = file_offset + reference.len() as u32 - prefix_len;

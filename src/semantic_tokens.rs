@@ -313,7 +313,7 @@ impl Backend {
                     is_static,
                     is_method_call,
                     subject_text,
-                    is_docblock_reference,
+                    docblock_ref,
                     is_array_callable: _,
                     is_nullsafe: _,
                 } => {
@@ -329,7 +329,7 @@ impl Backend {
                         member_name,
                         *is_static,
                         *is_method_call,
-                        *is_docblock_reference,
+                        docblock_ref.is_reference(),
                         static_property_syntax,
                         span.start,
                         ctx,

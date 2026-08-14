@@ -111,6 +111,14 @@ impl Backend {
                 _ => continue,
             };
 
+            // `@see` legally carries URIs, prose, and naming suggestions in
+            // addition to FQSENs, so a target that resolves to nothing is
+            // not an error.  PHPUnit coverage metadata shares the emitter
+            // but carries `CoversTarget`, so `@covers` is still checked.
+            if ref_context == ClassRefContext::DocblockSee {
+                continue;
+            }
+
             // Resolve the name to a fully-qualified form, then check
             // whether PHPantom can find the class.
             //

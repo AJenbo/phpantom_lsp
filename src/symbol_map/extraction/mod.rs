@@ -12,9 +12,9 @@ use super::docblock::{
     extract_docblock_symbols_covering, get_docblock_text_with_offset, is_navigable_type,
 };
 use super::{
-    CallSite, ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap,
-    SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite, ViewReceiverClass,
-    ViewReceiverSite,
+    CallSite, ClassRefContext, DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind,
+    SymbolMap, SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite,
+    ViewReceiverClass, ViewReceiverSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::util::strip_fqn_prefix;
