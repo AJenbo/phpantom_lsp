@@ -14,8 +14,12 @@ each bug's row lives in the current sprint/backlog.
 All entries below come from the 2026-08-15 sample-project sweep (46
 diagnostics across ten projects). 45 were false positives, filed here as
 **B49–B74**; the one genuine finding (an unguarded `SimpleXMLElement`
-child lookup) was patched directly in `luxplus-backoffice`'s sample
-source.
+child lookup) was patched directly in a sample source.
+
+Where several of those turned out to share one area of the engine, they
+have since been merged into a grouped entry that carries every repro as
+a numbered sub-case (**B75** so far). A grouped entry is still one task
+and one PR.
 
 ## Crashes
 
@@ -53,9 +57,75 @@ the unrefined `string|false`.
 folding, evaluate its initializer expression the same way an untyped
 constant's is evaluated, rather than substituting the declared type.
 
-### B67. `str_replace()`'s return type ignores the `$subject` argument
+## Standard-library return types
 
-**Impact: Low-Medium · Complexity: Medium**
+### B75. A builtin's return type is not derived from the arguments actually passed
+
+**Impact: Medium · Complexity: Medium-High**
+
+Six standard-library functions whose resolved return type is wider than
+what the arguments prove. They are grouped as one task because they all
+run through the same pair of mechanisms and the fixes have to keep those
+two in agreement about which one owns each function:
+
+- **`src/stub_patches.rs`** — templates and conditional returns grafted
+  onto the embedded stub (`patch_array_map`,
+  `patch_array_key_value_generics`, `patch_replace_family`, …).
+- **`src/type_engine/variable/array_func_rules.rs`** — rules driven by
+  the *resolved* argument types, with the classification lists in
+  `src/type_engine/variable/mod.rs` (`ARRAY_PRESERVING_FUNCS`,
+  `ARRAY_ELEMENT_FUNCS`) deciding which rule a function gets.
+
+Each cause below was confirmed against a release build on a minimal
+repro rather than inferred from the original report; three of the six
+turned out to have a different cause than first assumed, noted inline.
+
+#### 1. A `\`-qualified call misses every array-function rule
+
+```php
+/** @param list<int> $r */
+function sum(array $r): int { return \array_sum($r); }   // reported: got int|float
+
+/** @param list<User> $us */
+function pop(array $us): void { $u = \array_pop($us); $u->name(); }   // $u is mixed
+```
+
+Dropping the leading `\` makes both correct. `func_name` in
+`type_engine/variable/rhs_resolution/calls.rs` is the raw identifier
+text, so `"\\array_sum"` never matches the rule table. The Laravel
+container branch a few lines above already normalizes with
+`trim_start_matches('\\')`; the array-function branches below it do not.
+
+This is the widest of the six: it silently disables the rules for
+*every* entry in `ARRAY_PRESERVING_FUNCS` and `ARRAY_ELEMENT_FUNCS`
+whenever the call is written fully qualified, which is the house style
+in a fair amount of library code.
+
+**Fix:** normalize the callee name once, where `func_name` is bound, and
+use the normalized form for all the rule lookups that follow.
+
+#### 2. `array_chunk()`'s elements are the source array's elements
+
+```php
+/** @param array<int, int> $ids */
+function dispatch(array $ids): void
+{
+    foreach (array_chunk($ids, 500) as $chunk) {
+        new BatchJob($chunk);   // reported: expects array<int,int>, got int
+    }
+}
+```
+
+`array_chunk` is listed in `ARRAY_PRESERVING_FUNCS`, so it is told to
+hand back the input's element type unchanged. It is the one function in
+that list that adds a level of nesting rather than rearranging entries.
+
+**Fix:** drop it from `ARRAY_PRESERVING_FUNCS` and give it its own rule
+returning `list<array<TKey, TValue>>` (or `list<list<TValue>>` when
+`$preserve_keys` is absent or `false`) from an `array<TKey, TValue>`
+input.
+
+#### 3. `str_replace()`'s conditional return is not decided for a `??` subject
 
 ```php
 function clean(?string $error): ?string
@@ -64,15 +134,89 @@ function clean(?string $error): ?string
 }
 ```
 
-`str_replace($search, $replace, $subject)` only returns an `array` when
-`$subject` is an array; for a `string` subject it always returns
-`string`. The stub reports the full overloaded union regardless of the
-argument actually passed.
+The stub-patch side is already right: `patch_replace_family` gives
+`str_replace`/`str_ireplace` a conditional return keyed on `$subject`,
+and it resolves correctly for a plain variable, a literal, a nested call
+(`trim($s)`), and a variable pre-assigned from `$s ?? ''`. It fails only
+when the argument expression *is* the coalesce. The condition evaluator
+gets no type for a `??` expression argument and falls back to the
+unrefined union, so this is an argument-resolution gap, not the missing
+dynamic-return rule the original report called for.
 
-**Fix:** add a dynamic-return-type rule (alongside the existing
-argument-dependent-return-type mechanism) that resolves `str_replace()`
-and `str_ireplace()`'s return type from `$subject`'s resolved type:
-`string` in → `string` out, `array` in → `array` out.
+**Fix:** resolve a coalesce expression's type when collecting argument
+types for conditional-return evaluation (the union of the left operand
+with `null` stripped and the right operand). Worth checking which other
+argument expression shapes come back untyped on the same path.
+
+#### 4. `max()`/`min()` return `mixed` for every call shape
+
+```php
+function takesInt(int $n): void {}
+
+takesInt(max("a", "b"));   // accepted: max() resolves to mixed
+/** @var list<string> $ss */
+takesInt(max($ss));        // accepted for the same reason
+```
+
+Neither overload is modelled. The original report assumed the
+single-iterable form was already handled and only the scalar-arguments
+form was missing; both return `mixed`.
+
+**Fix:** add a rule covering both shapes — the union of the resolved
+argument types for the variadic form (collapsing to a single type when
+they agree), and the element type for the single-iterable form.
+
+#### 5. `array_key_first`/`array_key_last` keep `null` after a non-empty proof
+
+```php
+/** @param array<int, float> $weights */
+function pick(array $weights): int
+{
+    assert($weights !== []);
+    return array_key_last($weights);   // reported: got int|null
+}
+```
+
+`patch_array_key_value_generics` types these as `TKey|null`, which is
+correct in general — the `null` only happens for an empty array. Nothing
+consults the argument's proven emptiness to drop it.
+
+**Fix:** drop the `null` arm when the array argument is provably
+non-empty: an `assert()`/guard-clause emptiness check, a `non-empty-*`
+type, or a literal with entries. `key()` carries the same `TKey|null`
+patch and should follow.
+
+#### 6. `array_map()` loses the key type for a function-name string callback
+
+```php
+$ids = explode(',', $csv);              // array<int, string>
+$ids = array_map('intval', $ids);       // reported: got array<int|string, int>
+
+foreach ($ids as $key => $id) {
+    setWeight($key);   // expects int, got int|string
+}
+```
+
+The closure form (`fn (string $s): int => (int) $s`) keeps `int` keys;
+only the name-string form widens, with or without an intervening
+`array_filter`. The value type is right in both, so the callback's
+return is being resolved either way — it is the key that falls back to
+the stub's unbound `TKey`.
+
+**Fix:** make the single-array key-preservation path match on "callback
+is any callable" rather than on an inline closure. Note that
+`array_func_raw_type` currently answers `array_map` with a bare
+`PhpType::list(...)` regardless of the input's key type, so the two
+mechanisms need to be reconciled here rather than patched independently.
+
+#### Verification
+
+Each sub-case has a self-contained repro above; add a fixture or
+integration test per sub-case. Once this lands, re-check
+[B60](#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring),
+whose two examples do not reproduce in isolation and may be downstream
+of the key-type handling here or of
+[B58](#b58-the-array-union-operator--does-not-preserve-a-previously-narrowed-key-type).
 
 ## Narrowing
 
@@ -525,34 +669,6 @@ returns its full union.
 
 ## Array types
 
-### B56. `array_key_first`/`array_key_last` are not narrowed non-null after a non-empty guard
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-```php
-/** @param array<int, float> $weights */
-function pick(array $weights): int
-{
-    assert($weights !== []);
-    foreach ($weights as $key => $weight) {
-        if ($weight > 0.5) {
-            return $key;
-        }
-    }
-    return array_key_last($weights);   // reported: got int|null
-}
-```
-
-`array_key_first()`/`array_key_last()` only return `null` for an empty
-array. `assert($weights !== [])` proves `$weights` is non-empty for the
-rest of the function, so the call should resolve to plain `int` (the
-array's key type), not `int|null`.
-
-**Fix:** add a dynamic-return-type rule for `array_key_first`/
-`array_key_last` that drops `null` from the return type when the array
-argument is provably non-empty (an `assert()`/guard-clause emptiness
-check, or a literal with entries).
-
 ### B58. The array union operator (`+`) does not preserve a previously narrowed key type
 
 **Impact: Medium · Complexity: High**
@@ -586,29 +702,6 @@ to `int|string` instead of keeping `string`.
 operand's *actual* (possibly narrowed) key type, not re-derive a wider
 key type from the operands' declared/generic shapes.
 
-### B59. `max()`/`min()` with scalar arguments return `mixed` instead of the arguments' common type
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-function nextLine(int $current, int $extra): void
-{
-    $line = max($current - 1 - $extra, 0);   // resolves to mixed, not int
-    $result[++$line] = 'x';                  // array key ends up int|string instead of int
-}
-```
-
-Calling `max()`/`min()` with two or more scalar arguments (as opposed to
-a single iterable argument) resolves to `mixed` rather than the
-arguments' common type (`int` when every argument is `int`). Using the
-result as an array key then widens the key type, cascading into
-unrelated array-shape mismatches downstream.
-
-**Fix:** add a dynamic-return-type rule for the scalar-arguments overload
-of `max`/`min` that returns the union of the resolved argument types
-(collapsing to a single type when they agree), matching how the
-single-iterable-argument overload is presumably already handled.
-
 ### B60. Array keys built from loop-index arithmetic or `array_keys()` still widen to `int|string`
 
 **Impact: Medium · Complexity: High**
@@ -636,64 +729,18 @@ function lineMapping(string $contents): array
 Both examples only ever produce `int` (arithmetic on a sequential
 `foreach` index) or `string` (`array_keys()` on an `array<string, ...>`)
 keys, yet the resolved type includes the other half of `array-key`.
-Unlike B58 and B59, neither a `+` merge nor `max()`/`min()` appears in
-either example, so this may be a separate residual cause rather than a
-duplicate of those two — worth re-checking once B58 and B59 are fixed,
-since either could be an indirect contributor via code paths not shown
-in this trimmed repro.
+Neither example reproduces on its own against a release build, so this
+may be a residual symptom of a cause elsewhere rather than a defect of
+its own — the two candidates being the `+` merge below and the
+key-type handling in
+[B75](#b75-a-builtins-return-type-is-not-derived-from-the-arguments-actually-passed),
+either of which could contribute via code paths not shown in this
+trimmed repro.
 
-**Fix:** re-run this project's diagnostics once B58/B59 land; if either
+**Fix:** re-run this project's diagnostics once B58/B75 land; if either
 site still reports the widened key type, isolate the exact expression
 `array_keys()`/the loop-index write goes through and trace where the
 `int`-only or `string`-only key type gets joined with its opposite.
-
-### B68. `array_chunk()`'s return element type resolves to the source array's element type
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param array<int, int> $ids */
-function dispatch(array $ids): void
-{
-    foreach (array_chunk($ids, 500) as $chunk) {
-        new BatchJob($chunk);   // reported: expects array<int,int>, got int
-    }
-}
-```
-
-`array_chunk()` always returns an array of arrays — each `$chunk` should
-be `array<int, int>` here, matching the source array's element type
-wrapped in a list. PHPantom instead resolves `$chunk` to plain `int`, as
-though it reused the source array's *element* type as the chunk type
-rather than wrapping it.
-
-**Fix:** fix `array_chunk()`'s dynamic-return-type rule to return
-`list<array<TKey, TValue>>` (or the tightest list-shape it can prove)
-given a `array<TKey, TValue>` input, not `list<TValue>`.
-
-### B69. `array_map()` with a builtin function-name string callback does not preserve the source array's key type
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$ids = explode(',', $csv);       // array<int, string>
-$ids = array_filter($ids);       // array<int, string>
-$ids = array_map('intval', $ids); // reported: got array<int|string, int>
-
-foreach ($ids as $key => $id) {
-    setWeight($key);   // expects int, got int|string
-}
-```
-
-`array_map()` with a single array argument already preserves the
-source's key type when the callback is a closure (per the same fix that
-landed B58's `array_filter` case). It does not when the callback is
-passed as a builtin function *name string* (`'intval'`) instead of a
-closure — an easy-to-miss second call shape for the same rule.
-
-**Fix:** confirm the single-array `array_map()` key-preservation rule
-matches on "callback is any callable, closure or name-string", not just
-on closures.
 
 ### B61. `isset()` narrowing is not propagated through a multi-level chained array-dimension fetch
 
@@ -722,34 +769,3 @@ survives instead.
 array-dimension expression (not just a single level) when proving an
 optional shape key present, matching the depth the array-shape resolver
 itself supports for reads.
-
-### B73. `array_sum()` on a `@var`-annotated `list<int>` from a method call still returns `int|float`
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-class Repo
-{
-    /** @return list<int> */
-    public function counts(): array { /* ... */ }
-
-    public function total(): int
-    {
-        /** @var list<int> */
-        $result = $this->counts();
-        return \array_sum($result);   // reported: got int|float
-    }
-}
-```
-
-`array_sum()` should narrow to `int` when every element of its argument
-is `int`. This resolves correctly for a plain array literal assigned
-under the same `@var list<int>` annotation, but not when the annotated
-variable is assigned from a method call whose own declared return type
-already is `list<int>` — an unnecessary-looking annotation that
-shouldn't change the outcome, but does.
-
-**Fix:** compare how the inline `@var` annotation interacts with an
-already-typed call expression on the right-hand side versus a literal;
-one of the two appears to skip re-deriving the element type that
-`array_sum()`'s rule reads.
