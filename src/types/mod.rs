@@ -570,6 +570,13 @@ pub struct MethodInfo {
     /// arguments) are substituted into this type before it replaces the
     /// receiver's tracked type.
     pub self_out: Option<PhpType>,
+    /// Whether the method is declared side-effect free via `@pure`,
+    /// `@phpstan-pure` or `@psalm-pure`.
+    ///
+    /// A call to an impure method can change anything reachable from its
+    /// receiver, so the forward walker drops the checks it recorded about
+    /// that receiver.  A pure call cannot, so those checks survive it.
+    pub is_pure: bool,
 }
 
 impl MethodInfo {
@@ -607,6 +614,7 @@ impl MethodInfo {
             && self.throws == other.throws
             && self.if_this_is == other.if_this_is
             && self.self_out == other.self_out
+            && self.is_pure == other.is_pure
             && self.parameters.len() == other.parameters.len()
             && self
                 .parameters
@@ -667,6 +675,7 @@ impl MethodInfo {
             throws: Vec::new(),
             if_this_is: None,
             self_out: None,
+            is_pure: false,
         }
     }
 
@@ -702,6 +711,7 @@ impl MethodInfo {
             throws: Vec::new(),
             if_this_is: None,
             self_out: None,
+            is_pure: false,
         }
     }
 }
@@ -1270,6 +1280,9 @@ pub struct FunctionInfo {
     /// overload.  A diagnostic is only emitted when the call is
     /// incompatible with ALL signatures.
     pub overloads: Vec<Vec<ParameterInfo>>,
+    /// Whether the function is declared side-effect free via `@pure`,
+    /// `@phpstan-pure` or `@psalm-pure`.  See [`MethodInfo::is_pure`].
+    pub is_pure: bool,
 }
 
 impl FunctionInfo {

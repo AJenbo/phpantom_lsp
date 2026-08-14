@@ -182,12 +182,158 @@ pub(crate) fn process_expression_statement<'b>(
 
     process_pass_by_ref(expr, scope, ctx);
 
+    // Sits between the passes that *read* the statement's expressions and
+    // the passes that record what it *proves*.  The reads above see the
+    // state the call itself saw; a proof below describes the value the
+    // call handed back, so it must outlive the call's own invalidation
+    // (`assertNotNull($holder->find('a'))` proves something about the very
+    // call it makes).
+    process_receiver_mutation(expr, scope, ctx);
+
     process_assert_narrowing(expr, scope, ctx);
 
     process_self_out_narrowing(expr, scope, ctx);
 
     // Process increment/decrement: $a++, ++$a, $a--, --$a.
     process_increment_decrement(expr, scope, ctx);
+}
+
+/// Drop what an impure call could have changed behind its receiver.
+///
+/// A check is only worth remembering while the thing it was made about
+/// still holds. `if ($stmt->fetch('id') !== false)` proves something about
+/// `$stmt`'s current row; `$stmt->execute()` moves to another one, so the
+/// proof describes a state the program has left. Every synthetic key read
+/// through the receiver goes with it.
+///
+/// A callee declared `@pure` / `@phpstan-pure` / `@psalm-pure` promises it
+/// changed nothing, so the keys survive it.
+pub(crate) fn process_receiver_mutation<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let mut receivers: Vec<String> = Vec::new();
+    collect_impure_call_receivers(expr, scope, ctx, &mut receivers);
+    for receiver in receivers {
+        scope.invalidate_receiver_state(&receiver);
+    }
+}
+
+/// Walk `expr` for method calls whose receiver has state worth
+/// invalidating, collecting each receiver key at most once.
+fn collect_impure_call_receivers<'b>(
+    expr: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    out: &mut Vec<String>,
+) {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            collect_impure_call_receivers(inner.expression, scope, ctx, out)
+        }
+        Expression::Assignment(assignment) => {
+            collect_impure_call_receivers(assignment.rhs, scope, ctx, out)
+        }
+        Expression::Binary(bin) => {
+            collect_impure_call_receivers(bin.lhs, scope, ctx, out);
+            collect_impure_call_receivers(bin.rhs, scope, ctx, out);
+        }
+        Expression::UnaryPrefix(unary) => {
+            collect_impure_call_receivers(unary.operand, scope, ctx, out)
+        }
+        Expression::Call(call) => {
+            let (object, method, args) = match call {
+                Call::Method(mc) => (Some(mc.object), Some(&mc.method), &mc.argument_list),
+                Call::NullSafeMethod(mc) => (Some(mc.object), Some(&mc.method), &mc.argument_list),
+                Call::Function(fc) => (None, None, &fc.argument_list),
+                Call::StaticMethod(sc) => (None, None, &sc.argument_list),
+            };
+            // A chained call's receiver is itself a call, and an argument
+            // may hold one too, so both are searched.
+            if let Some(object) = object {
+                collect_impure_call_receivers(object, scope, ctx, out);
+            }
+            for arg in args.arguments.iter() {
+                collect_impure_call_receivers(arg.value(), scope, ctx, out);
+            }
+
+            let (Some(object), Some(ClassLikeMemberSelector::Identifier(ident))) = (object, method)
+            else {
+                return;
+            };
+            let Some(receiver) = narrowing::expr_to_subject_key(object) else {
+                return;
+            };
+            // Nothing is recorded through this receiver, so there is
+            // nothing a call on it could invalidate.  Checked before the
+            // class lookup below, which is the expensive half: the great
+            // majority of calls reach this and stop.
+            if !scope_reads_receiver(scope, &receiver) {
+                return;
+            }
+            if callee_is_pure(object, bytes_to_str(ident.value), scope, ctx) {
+                return;
+            }
+            if !out.contains(&receiver) {
+                out.push(receiver);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether the scope holds any synthetic key read through `receiver`.
+fn scope_reads_receiver(scope: &ScopeState, receiver: &str) -> bool {
+    let reads = |key: &str| {
+        key != receiver && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
+    };
+    scope.locals.keys().any(|k| reads(k))
+        || scope
+            .assertions
+            .values()
+            .any(|checks| checks.iter().any(|c| reads(&c.subject)))
+}
+
+/// Whether the method `object->method_name()` resolves to a declaration
+/// annotated `@pure`.
+///
+/// An unresolvable receiver or method counts as impure: dropping a check
+/// costs precision, keeping a stale one costs correctness.
+fn callee_is_pure(
+    object: &Expression<'_>,
+    method_name: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let class_names: Vec<String> = match object {
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
+            vec![ctx.current_class.name.to_string()]
+        }
+        _ => {
+            let Some(key) = narrowing::expr_to_subject_key(object) else {
+                return false;
+            };
+            scope
+                .get(&key)
+                .iter()
+                .filter_map(|rt| rt.type_string.base_name().map(str::to_owned))
+                .collect()
+        }
+    };
+    if class_names.is_empty() {
+        return false;
+    }
+    class_names.iter().all(|name| {
+        (ctx.class_loader)(name).is_some_and(|cls| {
+            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                &cls,
+                ctx.class_loader,
+                ctx.resolved_class_cache,
+            );
+            merged.get_method(method_name).is_some_and(|m| m.is_pure)
+        })
+    })
 }
 
 pub(crate) fn process_by_ref_closure_captures<'b>(

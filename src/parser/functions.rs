@@ -407,6 +407,10 @@ impl Backend {
                         param.apply_null_default();
                     }
 
+                    // `@pure` promises the call changes nothing, which is what
+                    // lets a check recorded about an argument survive it.
+                    let is_pure = info.as_ref().is_some_and(docblock::declares_pure);
+
                     let func_tpl_atoms: Vec<crate::atom::Atom> =
                         func_template_params.iter().map(|s| atom(s)).collect();
                     // Merge overloaded function declarations: when a
@@ -447,6 +451,7 @@ impl Backend {
                             throws,
                             is_polyfill: false,
                             overloads: Vec::new(),
+                            is_pure,
                         });
                     }
                 }

@@ -121,6 +121,17 @@ pub fn extract_self_out_type_from_info(info: &DocblockInfo) -> Option<PhpType> {
     Some(PhpType::parse(&tag.type_text()?))
 }
 
+/// Whether the docblock declares the function or method side-effect free.
+///
+/// PHPStan and Psalm both spell it `@pure` and also accept their
+/// vendor-prefixed forms.  None of the three is a tag the parser models, so
+/// they arrive as `TagKind::Other` and are matched by name.
+pub fn declares_pure(info: &DocblockInfo) -> bool {
+    info.tags
+        .iter()
+        .any(|t| matches!(t.name.as_ref(), "pure" | "phpstan-pure" | "psalm-pure"))
+}
+
 /// Extract the PHP version from a `@removed` PHPDoc tag.
 ///
 /// Handles the format `@removed X.Y` where `X.Y` is a PHP version

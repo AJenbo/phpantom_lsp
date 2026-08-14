@@ -128,6 +128,31 @@ impl ScopeState {
         });
     }
 
+    /// Drop what an impure call on `receiver` could have changed: every
+    /// synthetic key rooted at it, and every check whose subject is one.
+    ///
+    /// The receiver keeps its own type — a call does not replace the
+    /// object the variable holds — but anything *read through* it is a
+    /// question the call may now answer differently. That covers a
+    /// property path (`$stmt->row`), an element (`$stmt["id"]`), and a
+    /// recorded call (`$stmt->fetch('id')`), which is the case that
+    /// matters: proving `$stmt->fetch('id') !== false` says nothing about
+    /// what the same call returns once `$stmt->execute()` has run.
+    pub fn invalidate_receiver_state(&mut self, receiver: &str) {
+        let reads_receiver = |key: &str| {
+            key != receiver
+                && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
+        };
+        self.locals.retain(|key, _| !reads_receiver(key));
+        if self.assertions.is_empty() {
+            return;
+        }
+        self.assertions.retain(|_, checks| {
+            checks.retain(|c| !reads_receiver(&c.subject));
+            !checks.is_empty()
+        });
+    }
+
     /// Drop the checks that writing to `var_name` invalidates: whatever
     /// the variable itself stood for, plus every check whose subject
     /// reads it.  A boolean only describes the value its subject held

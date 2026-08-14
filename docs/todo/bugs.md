@@ -136,30 +136,6 @@ constant shapes satisfy their generic supertypes.
 
 ## Narrowing
 
-### B175. A call's recorded check survives a statement that could change what it returns
-
-**Impact: Medium · Effort: Medium**
-
-```php
-if ($stmt->fetch('id') !== false) {
-    $stmt->execute();
-    $row = $stmt->fetch('id');   // still reported non-false
-}
-```
-
-A call key is dropped when a variable it *reads* is written, but not
-when an intervening statement could change the state behind the
-receiver. Any call on the same receiver, a by-reference write the
-walker does not model as an assignment, or a global mutation leaves the
-recorded check standing. PHPStan invalidates every remembered
-expression rooted at a receiver when an impure call is made on it.
-
-**Fix:** invalidate the keys rooted at a receiver when a call is made on
-that receiver, unless the callee is declared `@phpstan-pure` /
-`@psalm-pure`. This predates expression keying (the argument-less
-`$obj->get()` form has always had it), but keying calls with arguments
-widens the surface.
-
 ### B177. A doubly negated truthiness guard does not narrow
 
 **Impact: Low · Effort: Low-Medium**

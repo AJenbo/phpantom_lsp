@@ -180,6 +180,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
                     throws: vec![],
                     is_polyfill: false,
                     overloads: vec![],
+                    is_pure: false,
                 },
             ),
         );

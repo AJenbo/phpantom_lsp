@@ -104,6 +104,16 @@ function runDemoAssertions(): void
         'a name the shelf does not carry yields null, so nothing is proved about that call',
     );
 
+    // ── A proof lasts only as long as the state it was made about ───────
+    assert(
+        (new CompoundNarrowingDemo())->callInvalidation(new Scaffolding\SpecimenHolder()) === 'specimens',
+        'a pure call leaves the checked call answering the same thing',
+    );
+    $shelf = new Scaffolding\SpecimenHolder();
+    assert($shelf->shelfLabel() === 'specimens', 'the pure call is genuinely side-effect free');
+    $shelf->restock();
+    assert($shelf->item instanceof Scaffolding\Banana, 'restock() really does change what the holder carries');
+
     // ── Two checks that both hold make one value of both types ──────────
     $compound = new CompoundNarrowingDemo();
     assert(

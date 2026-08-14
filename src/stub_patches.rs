@@ -1077,6 +1077,7 @@ mod tests {
             template_bindings: Vec::new(),
             is_polyfill: false,
             overloads: Vec::new(),
+            is_pure: false,
         }
     }
 

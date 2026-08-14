@@ -1,0 +1,23 @@
+// test: a call on a different receiver leaves the check standing
+// feature: hover
+// The invalidation is rooted at the receiver the call is made on, so
+// `$other->execute()` says nothing about what `$stmt` holds.
+// expect: $row = array<string, string>
+// expect_absent: false
+---
+<?php
+
+class Stmt {
+    /** @return array<string, string>|false */
+    public function fetch(string $key) { return false; }
+
+    public function execute(): bool { return true; }
+}
+
+function run(Stmt $stmt, Stmt $other): void {
+    if ($stmt->fetch('id') !== false) {
+        $other->execute();
+        $row = $stmt->fetch('id');
+        echo $r<>ow;
+    }
+}

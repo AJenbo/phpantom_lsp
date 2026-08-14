@@ -1,0 +1,24 @@
+// test: a call declared @phpstan-pure does not drop the receiver's checks
+// feature: hover
+// `columnCount()` promises it changed nothing, so what the guard proved
+// about `$stmt->fetch('id')` is still true after it.
+// expect: $row = array<string, string>
+// expect_absent: false
+---
+<?php
+
+class Stmt {
+    /** @return array<string, string>|false */
+    public function fetch(string $key) { return false; }
+
+    /** @phpstan-pure */
+    public function columnCount(): int { return 0; }
+}
+
+function run(Stmt $stmt): void {
+    if ($stmt->fetch('id') !== false) {
+        $stmt->columnCount();
+        $row = $stmt->fetch('id');
+        echo $r<>ow;
+    }
+}

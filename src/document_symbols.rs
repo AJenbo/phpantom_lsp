@@ -584,6 +584,7 @@ mod tests {
             throws: vec![],
             if_this_is: None,
             self_out: None,
+            is_pure: false,
         };
         let detail = build_method_detail(&method);
         assert_eq!(detail, Some("(): void".to_string()));
@@ -643,6 +644,7 @@ mod tests {
             throws: vec![],
             if_this_is: None,
             self_out: None,
+            is_pure: false,
         };
         let detail = build_method_detail(&method);
         assert_eq!(
@@ -772,6 +774,7 @@ mod tests {
             throws: Vec::new(),
             is_polyfill: false,
             overloads: vec![],
+            is_pure: false,
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

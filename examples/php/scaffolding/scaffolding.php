@@ -1953,6 +1953,18 @@ class SpecimenHolder
     {
         return $name === 'rock' ? new Rock() : null;
     }
+
+    /** Restocks the shelf, so what `lookUp()` answers afterwards may differ. */
+    public function restock(): void
+    {
+        $this->item = new Banana();
+    }
+
+    /** @phpstan-pure */
+    public function shelfLabel(): string
+    {
+        return 'specimens';
+    }
 }
 
 // ─── Ambiguous Variable Support Classes ─────────────────────────────────────

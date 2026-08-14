@@ -1,0 +1,23 @@
+// test: an impure call on the receiver drops the check recorded through it
+// feature: hover
+// Proving `$stmt->fetch('id') !== false` says something about the row the
+// statement is on.  `$stmt->execute()` moves to another one, so the same
+// call can hand back the sentinel again and the recorded proof is stale.
+// expect: $row = array<string, string>|false
+---
+<?php
+
+class Stmt {
+    /** @return array<string, string>|false */
+    public function fetch(string $key) { return false; }
+
+    public function execute(): bool { return true; }
+}
+
+function run(Stmt $stmt): void {
+    if ($stmt->fetch('id') !== false) {
+        $stmt->execute();
+        $row = $stmt->fetch('id');
+        echo $r<>ow;
+    }
+}

@@ -335,6 +335,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
         throws: Vec::new(),
         if_this_is: None,
         self_out: None,
+        is_pure: false,
     };
 
     apply_substitution_to_method(&mut method, &subs);
@@ -400,6 +401,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
             throws: Vec::new(),
             if_this_is: None,
             self_out: None,
+            is_pure: false,
         })]
         .into(),
         ..ClassInfo::default()

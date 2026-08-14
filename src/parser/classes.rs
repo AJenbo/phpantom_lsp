@@ -1290,6 +1290,12 @@ impl Backend {
                         .as_ref()
                         .and_then(docblock::extract_self_out_type_from_info);
 
+                    // `@pure` promises the call changes nothing, which is what
+                    // lets a check recorded about the receiver survive it.
+                    let is_pure = method_docblock_info
+                        .as_ref()
+                        .is_some_and(docblock::declares_pure);
+
                     methods.push(MethodInfo {
                         name,
                         name_offset,
@@ -1319,6 +1325,7 @@ impl Backend {
                         if_this_is: method_docblock_text
                             .and_then(crate::docblock::extract_if_this_is_type),
                         self_out,
+                        is_pure,
                     });
                     method_bodies.push((methods.len() - 1, &method.body));
                 }

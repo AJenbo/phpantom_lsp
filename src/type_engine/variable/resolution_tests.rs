@@ -2285,5 +2285,6 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         throws: Vec::new(),
         is_polyfill: false,
         overloads: vec![],
+        is_pure: false,
     }
 }
