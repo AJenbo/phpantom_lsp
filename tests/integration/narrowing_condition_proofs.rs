@@ -814,3 +814,208 @@ function process(?Agreement $agreement): void {{
         "the reassigned receiver is not what the guard proved, got: {errors:?}"
     );
 }
+
+// ─── Comparing a chain to a value that cannot be null proves it ran ─────────
+
+const COMPARE_SCAFFOLD: &str = r#"
+final class NodeX {
+    public function getParent(): ?NodeX { return null; }
+    public function getChild(): NodeX { return $this; }
+    public function getInner(): object { return $this; }
+    public function maybeInner(): ?object { return null; }
+}
+"#;
+
+/// A `?->` chain that short-circuited would hold `null`, and `null` is
+/// never identical to a value whose type excludes it — so the comparison
+/// succeeding proves the chain ran, receivers and all.  The plain `->`
+/// links written after the `?->` are part of the same chain.
+#[test]
+fn a_chain_compared_to_a_non_nullable_value_narrows_the_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_identity.php";
+    let content = format!(
+        r#"<?php
+{COMPARE_SCAFFOLD}
+function strip(NodeX $n): void {{
+    $parent = $n->getParent();
+    if ($parent?->getChild()->getInner() === $n->getInner()) {{
+        $parent; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("NodeX"), "expected NodeX, got: {text}");
+    assert!(
+        !text.contains("null") && !text.contains("?NodeX"),
+        "the chain cannot have short-circuited inside the branch, got: {text}"
+    );
+}
+
+/// The mirror image: a `!==` that failed is an `===` that held, so the
+/// else branch carries the same proof.
+#[test]
+fn a_failing_inequality_narrows_the_receiver_in_the_else_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_identity_else.php";
+    let content = format!(
+        r#"<?php
+{COMPARE_SCAFFOLD}
+function strip(NodeX $n): void {{
+    $parent = $n->getParent();
+    if ($parent?->getChild()->getInner() !== $n->getInner()) {{
+        return;
+    }}
+    $parent; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("NodeX"), "expected NodeX, got: {text}");
+    assert!(
+        !text.contains("null") && !text.contains("?NodeX"),
+        "the chain cannot have short-circuited past the guard, got: {text}"
+    );
+}
+
+/// Nothing is proven when the other side can be null too: both sides
+/// being `null` is one of the ways the comparison succeeds.
+#[test]
+fn a_chain_compared_to_a_nullable_value_leaves_the_receiver_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_identity_nullable.php";
+    let content = format!(
+        r#"<?php
+{COMPARE_SCAFFOLD}
+function strip(NodeX $n): void {{
+    $parent = $n->getParent();
+    if ($parent?->getChild()->getInner() === $n->maybeInner()) {{
+        $parent; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("?NodeX") || text.contains("null"),
+        "a nullable comparand proves nothing, got: {text}"
+    );
+}
+
+// ─── A `match (true)` arm's conditions hold inside its result ───────────────
+
+const MATCH_SCAFFOLD: &str = r#"
+function takesInt(int $i): void {}
+/** @param list<int> $args */
+function takesList(array $args): void {}
+"#;
+
+/// The `!== null` conjuncts of an arm's condition prove the values
+/// non-null within that arm's result, exactly as the equivalent `if`
+/// does.
+#[test]
+fn a_match_true_arm_narrows_inside_its_result() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_narrowing.php";
+    let content = format!(
+        r#"<?php
+{MATCH_SCAFFOLD}
+function label(?int $buy, string $kind): void {{
+    $value = match (true) {{
+        $kind === 'xy' && $buy !== null => $buy,
+        default => 0,
+    }};
+    takesInt($value);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arm's own condition rules the null out, got: {errors:?}"
+    );
+}
+
+/// The proof reaches the elements of an array the arm builds, not just a
+/// value it returns directly.
+#[test]
+fn a_match_true_arm_narrows_the_array_it_builds() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_array.php";
+    let content = format!(
+        r#"<?php
+{MATCH_SCAFFOLD}
+function label(?int $buy, ?int $pay): void {{
+    $textArgs = match (true) {{
+        $buy !== null && $pay !== null => [$buy, $pay],
+        default => [],
+    }};
+    takesList($textArgs);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the elements are what the condition proved them to be, got: {errors:?}"
+    );
+}
+
+/// An arm runs when *any* of its conditions matched, so a fact only one
+/// of them establishes is not a fact in the body.
+#[test]
+fn an_arm_condition_that_only_sometimes_proves_it_narrows_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_partial.php";
+    let content = format!(
+        r#"<?php
+{MATCH_SCAFFOLD}
+function label(?int $buy, ?int $pay): void {{
+    $value = match (true) {{
+        $buy !== null, $pay !== null => $buy,
+        default => 0,
+    }};
+    takesInt($value);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "only one of the two conditions rules the null out, got: {errors:?}"
+    );
+}
+
+/// Reaching a later arm means every arm above it was tested and failed,
+/// so the `default` sees the inverse of their conditions.
+#[test]
+fn a_later_arm_sees_the_inverse_of_the_arms_above_it() {
+    let backend = create_test_backend();
+    let uri = "file:///match_arm_default.php";
+    let content = format!(
+        r#"<?php
+{MATCH_SCAFFOLD}
+function label(?int $buy): void {{
+    $value = match (true) {{
+        $buy === null => 0,
+        default => $buy,
+    }};
+    takesInt($value);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the arm above ruled the null out, got: {errors:?}"
+    );
+}

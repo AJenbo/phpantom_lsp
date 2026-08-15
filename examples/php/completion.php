@@ -487,6 +487,117 @@ class CompoundNarrowingDemo
 }
 
 
+// ── `match (true)` Arm Narrowing ───────────────────────────────────────────
+// A `match (true)` arm's condition proves inside the arm's result exactly
+// what the equivalent `if` proves inside its body, and it proves it for
+// whatever the result builds, not just for a value it names directly.
+// Reaching a later arm means every arm above it was tested and failed, so
+// the `default` reads what their conditions ruled out.
+
+class MatchArmNarrowingDemo
+{
+    public function describe(Scaffolding\SpecimenHolder $holder, string $name): string
+    {
+        $specimen = $holder->lookUp($name);       // Scaffolding\Rock|Scaffolding\Banana|null
+        return match (true) {
+            $specimen instanceof Scaffolding\Rock => $specimen->crush(),
+            $specimen !== null => (string) $specimen->weigh(),   // null ruled out by this arm
+            default => 'nothing',
+        };
+    }
+
+    /**
+     * The arm's proof reaches the elements of an array it builds, so this
+     * is a list of plain floats rather than of nullable ones.
+     *
+     * @return list<float>
+     */
+    public function weights(Scaffolding\SpecimenHolder $holder): array
+    {
+        $first = $holder->lookUp('rock');         // Scaffolding\Rock|Scaffolding\Banana|null
+        $second = $holder->lookUp('banana');      // same, and this one is null
+
+        return match (true) {
+            $first !== null && $second !== null => [$first->weigh(), $second->weigh()],
+            $first !== null => [$first->weigh()],
+            default => [],
+        };
+    }
+
+    /**
+     * An arm listing several conditions runs when any one of them matched,
+     * so only what all of them prove holds inside it: here both name the
+     * same class, and neither says anything about `$other`.
+     */
+    public function eitherCondition(Scaffolding\SpecimenHolder $holder): string
+    {
+        $specimen = $holder->lookUp('rock');
+        $other = $holder->lookUp('banana');
+
+        return match (true) {
+            $specimen instanceof Scaffolding\Rock,
+            $specimen instanceof Scaffolding\Rock && $other !== null => $specimen->crush(),
+            default => 'nothing',
+        };
+    }
+
+    /** The `default` sees the inverse of every arm above it. */
+    public function fallback(Scaffolding\SpecimenHolder $holder): float
+    {
+        $specimen = $holder->lookUp('rock');
+
+        return match (true) {
+            $specimen === null => 0.0,
+            default => $specimen->weigh(),        // the arm above ruled the null out
+        };
+    }
+}
+
+
+// ── A `?->` Chain Compared to a Value That Cannot Be Null ───────────────────
+// A chain that short-circuited holds `null`, and `null` is never identical
+// to a value whose type excludes it.  So the comparison holding proves the
+// chain ran, which is a proof about every receiver it would have
+// short-circuited on, including through the plain `->` links written after
+// the `?->`.
+
+class NullsafeComparisonDemo
+{
+    public function sameWeight(Scaffolding\SpecimenHolder $holder): string
+    {
+        $specimen = $holder->lookUp('rock');      // Scaffolding\Rock|Scaffolding\Banana|null
+
+        if ($specimen?->weigh() === $holder->item->weigh()) {
+            return (string) $specimen->weigh();   // null dropped: the chain must have run
+        }
+
+        // The `!==` spelling proves the same thing where it fails.
+        if ($specimen?->weigh() !== $holder->item->weigh()) {
+            return 'different';
+        }
+
+        return (string) $specimen->weigh();       // null dropped past the guard too
+    }
+
+    /**
+     * Nothing is proved when the other side can be null as well: both
+     * sides holding `null` is one of the ways the comparison succeeds.
+     */
+    public function bothMayBeNull(Scaffolding\SpecimenHolder $holder): string
+    {
+        $specimen = $holder->lookUp('rock');
+
+        if ($specimen?->weigh() === $holder->lookUp('banana')?->weigh()) {
+            // Try: put the cursor after the `?->` below.  `$specimen` is
+            // still `Scaffolding\Rock|Scaffolding\Banana|null` here.
+            return (string) $specimen?->weigh();
+        }
+
+        return 'different';
+    }
+}
+
+
 // ── Scalar Guards in Compound Conditions and Ternaries ──────────────────────
 // The `is_*` family, null checks, and comparisons narrow wherever they are
 // written: each operand of a negated `||` guard, both arms of a ternary in any

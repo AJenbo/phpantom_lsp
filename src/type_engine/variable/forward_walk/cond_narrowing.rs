@@ -2364,21 +2364,114 @@ pub(crate) fn apply_nullsafe_receiver_narrowing<'b>(
 ) {
     let mut proven: Vec<&Expression<'_>> = Vec::new();
     collect_proven_non_null_exprs(condition, truthy, &mut proven);
+
+    let mut keys: Vec<String> = Vec::new();
     for expr in proven {
         for key in nullsafe_receiver_keys(expr) {
-            seed_synthetic_key_if_needed(&key, scope, ctx);
-            strip_null_from_scope(&key, scope);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
         }
+    }
+
+    // A chain compared identical to a value that cannot be null held a
+    // non-null value itself, which is the same proof about its receivers.
+    let mut compared: Vec<(&Expression<'_>, &Expression<'_>)> = Vec::new();
+    collect_identity_compared_chains(condition, truthy, &mut compared);
+    for (chain, comparand) in compared {
+        let chain_keys: Vec<String> = nullsafe_receiver_keys(chain)
+            .into_iter()
+            .filter(|key| !keys.contains(key))
+            .collect();
+        // Resolving the comparand is the expensive half, so it happens
+        // only once the cheap half has found receivers still to prove.
+        if chain_keys.is_empty() || expr_accepts_null(comparand, scope, ctx) {
+            continue;
+        }
+        keys.extend(chain_keys);
+    }
+
+    for key in keys {
+        seed_synthetic_key_if_needed(&key, scope, ctx);
+        strip_null_from_scope(&key, scope);
+    }
+}
+
+/// Whether the value `expr` evaluates to could be `null`.
+///
+/// An expression that resolves to nothing counts as nullable: an unknown
+/// value is not a proof.
+fn expr_accepts_null(expr: &Expression<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) -> bool {
+    let scope_snapshot = scope.locals.clone();
+    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
+        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
+    };
+    let var_ctx = build_var_ctx("", ctx, &scope_resolver);
+    crate::type_engine::variable::resolution::resolve_arg_raw_type(expr, &var_ctx)
+        .is_none_or(|ty| ty.accepts_null())
+}
+
+/// Collect the `(chain, comparand)` pairs of every identity comparison the
+/// condition proves held, where one side is a `?->` chain.
+///
+/// `$x?->m() === $rhs` succeeding means the chain did not short-circuit,
+/// provided `$rhs` cannot itself be `null` — which the caller decides,
+/// since it costs a type resolution.  `$x?->m() !== $rhs` failing is the
+/// same proof, so the else branch of a `!==` narrows too.
+fn collect_identity_compared_chains<'b>(
+    condition: &'b Expression<'b>,
+    truthy: bool,
+    out: &mut Vec<(&'b Expression<'b>, &'b Expression<'b>)>,
+) {
+    match condition {
+        Expression::Parenthesized(inner) => {
+            collect_identity_compared_chains(inner.expression, truthy, out);
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            collect_identity_compared_chains(prefix.operand, !truthy, out);
+        }
+        Expression::Binary(bin) => {
+            // `A && B` proves both when true; `A || B` proves neither
+            // operand held when false.
+            let decomposes = match bin.operator {
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => truthy,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => !truthy,
+                _ => false,
+            };
+            if decomposes {
+                collect_identity_compared_chains(bin.lhs, truthy, out);
+                collect_identity_compared_chains(bin.rhs, truthy, out);
+                return;
+            }
+            // Only identity qualifies: `null == false` and `null == 0` are
+            // both true, so a loose comparison proves nothing.
+            let holds = match bin.operator {
+                BinaryOperator::Identical(_) => truthy,
+                BinaryOperator::NotIdentical(_) => !truthy,
+                _ => false,
+            };
+            if holds {
+                out.push((bin.lhs, bin.rhs));
+                out.push((bin.rhs, bin.lhs));
+            }
+        }
+        _ => {}
     }
 }
 
 /// The scope keys of every receiver a nullsafe chain short-circuits on,
-/// outermost first.  Empty when `expr` is not a nullsafe chain.
+/// outermost first.  Empty when `expr` holds no `?->` link.
+///
+/// The walk peels plain `->` links too, because a `?->` short-circuits the
+/// rest of the chain written after it: `$a?->b()->c()` is `null` whenever
+/// `$a` is, so a proof about the whole chain is a proof about `$a`.  Only
+/// the `?->` receivers are recorded — a plain link's receiver is one the
+/// chain would have thrown on, not short-circuited.
 fn nullsafe_receiver_keys(expr: &Expression<'_>) -> Vec<String> {
     let mut keys = Vec::new();
     let mut node = expr;
-    while let Some(receiver) = nullsafe_receiver(node) {
-        if let Some(key) = narrowing::expr_to_subject_key(receiver) {
+    while let Some((receiver, nullsafe)) = chain_receiver(node) {
+        if nullsafe && let Some(key) = narrowing::expr_to_subject_key(receiver) {
             keys.push(key);
         }
         node = receiver;
@@ -2448,12 +2541,15 @@ fn scope_value_is_nullable(key: &str, scope: &ScopeState) -> bool {
             .any(|rt| rt.type_string.non_null_type().is_some() || rt.type_string == PhpType::null())
 }
 
-/// The receiver a nullsafe access short-circuits on, when `expr` is one.
-fn nullsafe_receiver<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+/// The receiver one link of a member chain is applied to, paired with
+/// whether that link is the nullsafe `?->`.
+fn chain_receiver<'b>(expr: &'b Expression<'b>) -> Option<(&'b Expression<'b>, bool)> {
     match expr {
-        Expression::Parenthesized(inner) => nullsafe_receiver(inner.expression),
-        Expression::Access(Access::NullSafeProperty(pa)) => Some(pa.object),
-        Expression::Call(Call::NullSafeMethod(mc)) => Some(mc.object),
+        Expression::Parenthesized(inner) => chain_receiver(inner.expression),
+        Expression::Access(Access::NullSafeProperty(pa)) => Some((pa.object, true)),
+        Expression::Call(Call::NullSafeMethod(mc)) => Some((mc.object, true)),
+        Expression::Access(Access::Property(pa)) => Some((pa.object, false)),
+        Expression::Call(Call::Method(mc)) => Some((mc.object, false)),
         _ => None,
     }
 }

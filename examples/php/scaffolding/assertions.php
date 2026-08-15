@@ -132,6 +132,40 @@ function runDemoAssertions(): void
         'assert() proves the extra interface without losing the declared class',
     );
 
+    // ── `match (true)` arm narrowing ────────────────────────────────────
+    $armDemo = new MatchArmNarrowingDemo();
+    $shelfForArms = new Scaffolding\SpecimenHolder();
+    assert(
+        $armDemo->describe($shelfForArms, 'rock') === 'smash!',
+        "lookUp('rock') is a Scaffolding\\Rock, so the instanceof arm runs",
+    );
+    assert(
+        $armDemo->describe($shelfForArms, 'banana') === 'nothing',
+        'a null specimen matches neither arm, so the default runs',
+    );
+    assert(
+        $armDemo->weights($shelfForArms) === [5.0],
+        "only lookUp('rock') answers, so the second arm builds a one-element list of floats",
+    );
+    assert(
+        $armDemo->eitherCondition($shelfForArms) === 'smash!',
+        'the first of the two conditions is enough to enter the arm',
+    );
+    assert($armDemo->fallback($shelfForArms) === 5.0, 'the default runs with the null already ruled out');
+
+    // ── A `?->` chain compared to a value that cannot be null ───────────
+    $chainDemo = new NullsafeComparisonDemo();
+    $shelfForChain = new Scaffolding\SpecimenHolder();
+    assert(
+        $shelfForChain->lookUp('rock')?->weigh() === $shelfForChain->item->weigh(),
+        'the demo relies on a Scaffolding\Rock weighing what the holder carries weighs',
+    );
+    assert($chainDemo->sameWeight($shelfForChain) === '5', 'the chain ran, so the comparison holds');
+    assert(
+        $chainDemo->bothMayBeNull($shelfForChain) === 'different',
+        "lookUp('banana') is null, so the two chains are not identical",
+    );
+
     // ── Discriminating-property narrowing ───────────────────────────────
     $discriminant = new PropertyDiscriminantDemo();
     assert(

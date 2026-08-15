@@ -318,6 +318,25 @@ impl<'a> VarResolutionCtx<'a> {
         }
     }
 
+    /// The types an enclosing ternary branch or `match` arm proved about a
+    /// subject, if it proved anything.
+    ///
+    /// `key` is a subject key: a variable name (with or without the leading
+    /// `$`) or a property path such as `$a->b`.  Every consumer that reads a
+    /// subject's type has to go through here, or it silently resolves the
+    /// branch against the type the subject had *before* the condition was
+    /// tested.
+    pub(crate) fn arm_narrowed(&self, key: &str) -> Option<&Vec<crate::types::ResolvedType>> {
+        if self.match_arm_narrowing.is_empty() {
+            return None;
+        }
+        match self.match_arm_narrowing.get(key) {
+            Some(found) => Some(found),
+            None if key.starts_with('$') => None,
+            None => self.match_arm_narrowing.get(&format!("${key}")),
+        }
+    }
+
     /// Clone this context with match-arm instanceof narrowings applied.
     ///
     /// All other fields are preserved.  This is used when descending

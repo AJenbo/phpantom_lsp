@@ -310,6 +310,13 @@ fn infer_element_type<'b>(
         Expression::Variable(Variable::Direct(dv)) => {
             let var_text = bytes_to_str(dv.name).to_string();
             let offset = value.span().start.offset as usize;
+            // A `[$x]` written inside a ternary branch or `match` arm whose
+            // condition proved something about `$x` builds an array of what
+            // was proven, not of the type `$x` had before the test.  The
+            // scope entry below still describes the statement as a whole.
+            if let Some(narrowed) = ctx.arm_narrowed(&var_text) {
+                return Some(crate::types::ResolvedType::types_joined(narrowed));
+            }
             // When a scope variable resolver is available (i.e. we are
             // inside the forward walker), read the variable's type
             // directly from the in-progress ScopeState instead of
