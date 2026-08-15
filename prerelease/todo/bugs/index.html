@@ -924,23 +924,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b176-find-references-on-a-global-constant-always-includes-its-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. Find References on a global constant always includes its declaration
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1507,23 +1490,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b176-find-references-on-a-global-constant-always-includes-its-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. Find References on a global constant always includes its declaration
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1576,27 +1542,7 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b176-find-references-on-a-global-constant-always-includes-its-declaration">B176. Find References on a global constant always includes its declaration<a class="headerlink" href="#b176-find-references-on-a-global-constant-always-includes-its-declaration" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Effort: Medium</strong></p>
-<p><code>find_constant_references</code> ignores its <code>include_declaration</code> parameter:
-every match is a <code>SymbolKind::ConstantReference</code> span, and unlike
-<code>SymbolKind::FunctionCall</code> (which carries <code>is_definition</code>),
-<code>ConstantReference</code> does not distinguish a constant's declaration site
-(<code>const BAR = 1;</code>) from a use of it (<code>echo BAR;</code>) -- both are extracted
-with the same span kind (<code>symbol_map/extraction/statements.rs</code>). So a
-"Find References" request with <code>includeDeclaration: false</code> still
-returns the declaration line for a global constant, unlike functions,
-methods, and properties.</p>
-<p>Fixing this properly means giving <code>ConstantReference</code> an <code>is_definition</code>
-flag the way <code>FunctionCall</code> has one, set at the declaration site in
-<code>extract_from_statement</code>'s <code>Statement::Constant</code> arm and cleared
-everywhere else <code>ConstantReference</code> is emitted (<code>Expression::ConstantAccess</code>,
-the <code>use const</code> import case in <code>class_like.rs</code>), then having
-<code>find_constant_references</code> skip definition spans when
-<code>include_declaration</code> is <code>false</code>. That touches the span extraction,
-the reference index (<code>reference_index.rs</code> pattern-matches
-<code>ConstantReference</code> by name only) and every other match on the enum
-variant, so it is not a one-line change.</p>
+<p>No outstanding items.</p>
 
 
 
