@@ -57,9 +57,9 @@ pub(super) fn resolve_binary_result_type<'b>(
     ) {
         let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
         let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
-        let is_division = matches!(binary.operator, BinaryOperator::Division(_));
+        let op_kind = ArithmeticOpKind::from_binary_operator(&binary.operator);
         return Some(vec![ResolvedType::from_type_string(
-            infer_arithmetic_result_type(&lhs_types, &rhs_types, is_division),
+            infer_arithmetic_result_type(&lhs_types, &rhs_types, op_kind),
         )]);
     }
 
@@ -179,27 +179,66 @@ fn classify_php_type(ty: &PhpType, saw_float: &mut bool, saw_int: &mut bool) -> 
     }
 }
 
+/// Which arithmetic operator is being inferred, distinguishing the two
+/// operators whose `int op int` case can still produce a `float` at
+/// runtime from the ones that cannot.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArithmeticOpKind {
+    /// `/` / `/=`: an uneven division produces a float (e.g. `7 / 2`).
+    Division,
+    /// `**` / `**=`: overflow or a negative exponent produces a float
+    /// (e.g. `2 ** 64`, `2 ** -1`).
+    Exponentiation,
+    /// `-`, `*` and their compound forms: `int op int` always stays `int`.
+    Other,
+}
+
+impl ArithmeticOpKind {
+    pub(crate) fn from_binary_operator(operator: &BinaryOperator<'_>) -> Self {
+        match operator {
+            BinaryOperator::Division(_) => Self::Division,
+            BinaryOperator::Exponentiation(_) => Self::Exponentiation,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// Infer the result type of an arithmetic operation based on operand types,
 /// following PHP's numeric type promotion rules.
 ///
-/// - `int op int` → `int` (for `+`, `-`, `*`, `**`)
+/// - `int op int` → `int` (for `+`, `-`, `*`)
 /// - `int op float` or `float op int` → `float`
 /// - `float op float` → `float`
-/// - `int / int` → `int|float` (division can produce either)
+/// - `int / int` or `int ** int` → benevolent `int|float` (either can
+///   produce a float depending on the operand values)
 /// - Anything else → `int|float`
 pub(crate) fn infer_arithmetic_result_type(
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
-    is_division: bool,
+    op_kind: ArithmeticOpKind,
 ) -> PhpType {
     let lhs = classify_numeric_operand(lhs_types);
     let rhs = classify_numeric_operand(rhs_types);
     match (lhs, rhs) {
         // Both are known int (not float): int op int.
         (Some(false), Some(false)) => {
-            if is_division {
-                // int / int can return float (e.g. 7/2 = 3.5).
-                PhpType::union(vec![PhpType::int(), PhpType::float()])
+            if op_kind != ArithmeticOpKind::Other {
+                // int / int can return float (e.g. 7/2 = 3.5), and
+                // int ** int can too (overflow, or a negative exponent, e.g.
+                // 2 ** 64 or 2 ** -1) — but in both cases the float half only
+                // materialises for particular operand *values*, which no
+                // annotation on the operands can rule out. Enforcing the
+                // whole union would turn every `$total / $count` or
+                // `$base ** $exp` handed to an `int` parameter into a
+                // mismatch, so the union is tagged benevolent: one branch
+                // satisfying a target is enough. PHPStan resolves both
+                // operators to `__benevolent<int|float>` for the same
+                // reason.
+                //
+                // Only this branch is tagged. When an operand is already
+                // `int|float` the union is the operand's own, not one the
+                // operator invented, and it stays strict.
+                PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::float()]))
             } else {
                 PhpType::int()
             }
@@ -242,7 +281,7 @@ pub(crate) fn infer_addition_result_type(
     if lhs_is_array || rhs_is_array {
         return PhpType::array();
     }
-    infer_arithmetic_result_type(lhs_types, rhs_types, false)
+    infer_arithmetic_result_type(lhs_types, rhs_types, ArithmeticOpKind::Other)
 }
 
 /// The bitwise operator `operator` is, or `None` for every other binary

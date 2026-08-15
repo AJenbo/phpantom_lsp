@@ -61,7 +61,9 @@ use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
 use instantiation::resolve_rhs_instantiation;
 use property_access::resolve_rhs_property_access;
 
-pub(crate) use arithmetic::{infer_addition_result_type, infer_arithmetic_result_type};
+pub(crate) use arithmetic::{
+    ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
+};
 
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
 pub(crate) use calls::{

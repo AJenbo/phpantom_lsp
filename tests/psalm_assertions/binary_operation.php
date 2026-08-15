@@ -88,7 +88,7 @@ namespace PsalmTest_binary_operation_7 {
 namespace PsalmTest_binary_operation_8 {
     $b = 4 ** 5;
 
-    assertType('int', $b);
+    assertType('int|float', $b);
 }
 
 // Test: bitwiseNot

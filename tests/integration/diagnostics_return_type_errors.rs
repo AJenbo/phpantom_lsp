@@ -4164,7 +4164,12 @@ function to_whole_days(int $length): int
 }
 
 #[test]
-fn strict_types_flags_int_division_returned_as_int() {
+fn strict_types_allows_int_division_returned_as_int() {
+    // Under strict_types the float half of `int / int` is no longer
+    // coerced away, but whether it appears at all depends on the operand
+    // *values* rather than on their types, so the union `int / int`
+    // produces is benevolent: one branch fitting the return type is
+    // enough.
     let php = r#"<?php
 declare(strict_types=1);
 
@@ -4175,8 +4180,50 @@ function to_whole_days(int $length): int
 "#;
     let diags = collect(php);
     assert!(
+        !has_return_error(&diags),
+        "int/int returned as int should be allowed under strict_types, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+/// The benevolence above belongs to the division operator, not to unions
+/// at large: a declared `int|float` still has to fit the return type whole.
+#[test]
+fn strict_types_flags_declared_int_float_union_returned_as_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param int|float $length */
+function to_whole_days($length): int
+{
+    return $length;
+}
+"#;
+    let diags = collect(php);
+    assert!(
         has_return_error(&diags),
-        "Under strict_types=1, int/int returned as int should be flagged, got: {:?}",
+        "A declared int|float returned as int should be flagged, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+/// `int ** int` gets the same benevolent treatment as `int / int`: PHP
+/// promotes the result to `float` on overflow or a negative exponent, a
+/// property of the values rather than the operands' types.
+#[test]
+fn strict_types_allows_int_exponentiation_returned_as_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function pow2(int $exp): int
+{
+    return 2 ** $exp;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "int**int returned as int should be allowed under strict_types, got: {:?}",
         return_error_messages(&diags)
     );
 }

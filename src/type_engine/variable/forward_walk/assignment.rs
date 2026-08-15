@@ -12,7 +12,9 @@ use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
 
-use super::super::rhs_resolution::{infer_addition_result_type, infer_arithmetic_result_type};
+use super::super::rhs_resolution::{
+    ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
+};
 
 // ─── Statement processing ───────────────────────────────────────────────────
 
@@ -1681,8 +1683,12 @@ pub(crate) fn process_compound_assignment<'b>(
         | AssignmentOperator::Exponentiation(_) => {
             let lhs_types = scope.get(&var_name).to_vec();
             let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-            let is_division = matches!(assignment.operator, AssignmentOperator::Division(_));
-            infer_arithmetic_result_type(&lhs_types, &rhs_types, is_division)
+            let op_kind = match assignment.operator {
+                AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
+                AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
+                _ => ArithmeticOpKind::Other,
+            };
+            infer_arithmetic_result_type(&lhs_types, &rhs_types, op_kind)
         }
         AssignmentOperator::Coalesce(_) | AssignmentOperator::Assign(_) => return, // handled above / elsewhere
     };
@@ -1758,11 +1764,13 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                     vec![]
                 };
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                let is_division = matches!(assignment.operator, AssignmentOperator::Division(_));
+                let op_kind = match assignment.operator {
+                    AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
+                    AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
+                    _ => ArithmeticOpKind::Other,
+                };
                 Some(infer_arithmetic_result_type(
-                    &lhs_types,
-                    &rhs_types,
-                    is_division,
+                    &lhs_types, &rhs_types, op_kind,
                 ))
             }
             AssignmentOperator::Coalesce(_) => {

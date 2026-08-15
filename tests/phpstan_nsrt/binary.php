@@ -75,7 +75,7 @@ class Foo
 		assertType('int', 1 - 1);
 		assertType('int|float', 1 / 2);
 		assertType('int', 1 * 1);
-		assertType('int', 1 ** 1);
+		assertType('int|float', 1 ** 1);
 		assertType('int', 1 % 1);
 
 		// ── Arithmetic: literal float op float ──────────────────────────
@@ -108,7 +108,7 @@ class Foo
 		// ── Arithmetic: variable int operations ─────────────────────────
 
 		assertType('int', $integer * 10);
-		assertType('int', $integer ** $integer);
+		assertType('int|float', $integer ** $integer);
 		assertType('int|float', $integer / $integer);
 		assertType('int', $otherInteger + 1);
 		assertType('float', $otherInteger + 1.0);

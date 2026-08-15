@@ -2527,7 +2527,11 @@ class Job {
 }
 
 #[test]
-fn strict_types_flags_int_division_assigned_to_int_property() {
+fn strict_types_allows_int_division_assigned_to_int_property() {
+    // Under strict_types the float half of `int / int` is no longer
+    // coerced away, but whether it appears at all depends on the operand
+    // *values* rather than on their types, so the union `int / int`
+    // produces is benevolent: one branch fitting the property is enough.
     let php = r#"<?php
 declare(strict_types=1);
 
@@ -2541,8 +2545,56 @@ class Job {
 "#;
     let diags = collect(php);
     assert!(
+        property_error_messages(&diags).is_empty(),
+        "int/int assigned to an int property should be allowed under strict_types, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+/// The benevolence above belongs to the division operator, not to unions
+/// at large: a declared `int|float` still has to fit the property whole.
+#[test]
+fn strict_types_flags_declared_int_float_union_assigned_to_int_property() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Job {
+    public int $timeout = 3600;
+
+    /** @param int|float $max */
+    public function __construct($max) {
+        $this->timeout = $max;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
         !property_error_messages(&diags).is_empty(),
-        "Under strict_types=1, int/int assigned to int property should be flagged, got: {:?}",
+        "A declared int|float assigned to an int property should be flagged, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+/// `int ** int` gets the same benevolent treatment as `int / int`: PHP
+/// promotes the result to `float` on overflow or a negative exponent, a
+/// property of the values rather than the operands' types.
+#[test]
+fn strict_types_allows_int_exponentiation_assigned_to_int_property() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Job {
+    public int $delay = 1;
+
+    public function __construct(int $base, int $attempt) {
+        $this->delay = $base ** $attempt;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        property_error_messages(&diags).is_empty(),
+        "int**int assigned to an int property should be allowed under strict_types, got: {:?}",
         property_error_messages(&diags)
     );
 }

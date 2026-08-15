@@ -4222,6 +4222,180 @@ function test(): void {
     );
 }
 
+// ─── int / int reaching an int parameter ────────────────────────────────────
+
+/// `int / int` is `int|float`, but the float half only turns up when the
+/// division does not come out even, which is a property of the values and
+/// not of the operands' types.  Enforcing the whole union would flag every
+/// `$total / $count` handed to an `int` parameter, so the union the
+/// operator produces is benevolent and one branch fitting is enough.
+#[test]
+fn strict_types_allows_int_division_passed_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+function test(int $total, int $count): void {
+    takes_int($total / $count);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "int/int passed to an int parameter should be allowed under strict_types, got: {diags:?}"
+    );
+}
+
+/// The same through a variable, since the marker has to survive being
+/// stored in the scope and read back out.
+#[test]
+fn strict_types_allows_int_division_through_a_variable() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+function test(int $total, int $count): void {
+    $per = $total / $count;
+    takes_int($per);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An int/int result held in a variable should reach an int parameter, got: {diags:?}"
+    );
+}
+
+/// …and through `/=`, which infers its result the same way.
+#[test]
+fn strict_types_allows_int_division_assignment_operator() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+function test(int $total, int $count): void {
+    $total /= $count;
+    takes_int($total);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An int/int result built with /= should reach an int parameter, got: {diags:?}"
+    );
+}
+
+/// The benevolence belongs to the division operator, not to unions at
+/// large.  A declared `int|float` still has to satisfy the parameter with
+/// every member, which is what keeps the union rule worth having.
+#[test]
+fn strict_types_flags_declared_int_float_union_passed_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+/** @param int|float $v */
+function test($v): void {
+    takes_int($v);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A declared int|float passed to an int parameter should be flagged, got: {diags:?}"
+    );
+}
+
+/// A division whose operand is *already* `int|float` inherits that union
+/// rather than inventing one, so it stays strict.
+#[test]
+fn strict_types_flags_division_of_an_int_float_union_passed_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+/** @param int|float $v */
+function test($v, int $count): void {
+    takes_int($v / $count);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Dividing a declared int|float should stay strict, got: {diags:?}"
+    );
+}
+
+// ─── int ** int reaching an int parameter ───────────────────────────────────
+
+/// `int ** int` is `int|float`, since PHP promotes the result to a float
+/// on overflow (`2 ** 64`) or a negative exponent (`2 ** -1`) — a property
+/// of the values rather than of the operands' types, so the union is
+/// benevolent the same way `int / int` is.
+#[test]
+fn strict_types_allows_int_exponentiation_passed_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+function test(int $base, int $exp): void {
+    takes_int($base ** $exp);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "int**int passed to an int parameter should be allowed under strict_types, got: {diags:?}"
+    );
+}
+
+/// …and through `**=`, which infers its result the same way.
+#[test]
+fn strict_types_allows_int_exponentiation_assignment_operator() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+function test(int $base, int $exp): void {
+    $base **= $exp;
+    takes_int($base);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An int**int result built with **= should reach an int parameter, got: {diags:?}"
+    );
+}
+
+/// An exponentiation whose operand is *already* `int|float` inherits that
+/// union rather than inventing one, so it stays strict.
+#[test]
+fn strict_types_flags_exponentiation_of_an_int_float_union_passed_to_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+/** @param int|float $v */
+function test($v, int $exp): void {
+    takes_int($v ** $exp);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Exponentiating a declared int|float should stay strict, got: {diags:?}"
+    );
+}
+
 #[test]
 fn flags_string_passed_to_bool() {
     let php = r#"<?php
