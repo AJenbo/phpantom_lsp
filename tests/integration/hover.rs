@@ -14700,3 +14700,64 @@ fn hover_namespaced_constant_through_every_spelling() {
         );
     }
 }
+
+/// `__LINE__` is the only magic constant PHP gives a number; the rest are
+/// strings, and `__CLASS__` keeps the class identity the way `Foo::class`
+/// does so `new $class` and `class-string` parameters still work.
+#[test]
+fn hover_magic_constants_carry_their_own_types() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+
+trait Probe {
+    public function inTrait(): void {
+        $traitClass = __CLASS__;
+    }
+}
+
+class Widget {
+    public function probe(): void {
+        $line = __LINE__;
+        $file = __FILE__;
+        $dir = __DIR__;
+        $class = __CLASS__;
+        $trait = __TRAIT__;
+        $namespace = __NAMESPACE__;
+        $method = __METHOD__;
+        $function = __FUNCTION__;
+        $sum = __LINE__ + 3;
+    }
+}
+
+$outsideAnyClass = __CLASS__;
+"#;
+    for (var, want) in [
+        ("$traitClass", "class-string"),
+        ("$line", "int"),
+        ("$file", "string"),
+        ("$dir", "string"),
+        ("$class", "class-string<Widget>"),
+        ("$trait", "string"),
+        ("$namespace", "string"),
+        ("$method", "string"),
+        ("$function", "string"),
+        ("$sum", "int"),
+        ("$outsideAnyClass", "string"),
+    ] {
+        let needle = format!("{var} = ");
+        let line = content
+            .lines()
+            .position(|l| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
+            as u32;
+        let hover = hover_at(&backend, uri, content, line, 9)
+            .unwrap_or_else(|| panic!("no hover for {var}"));
+        assert!(
+            hover_text(&hover).contains(&format!("{var} = {want}")),
+            "{var} should be {want}, got: {}",
+            hover_text(&hover)
+        );
+    }
+}

@@ -34,7 +34,7 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B85  | [A magic constant is not recognised as an arithmetic operand](todo/bugs.md#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand) | Low-Medium  | Low         |
+| B86  | [`int / int` reaching an `int` position is reported in a non-strict file](todo/bugs.md#b86-int--int-reaching-an-int-position-is-reported-in-a-non-strict-file) | Medium      | Low         |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions

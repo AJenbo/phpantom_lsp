@@ -43,7 +43,7 @@ use mago_syntax::cst::*;
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
-use crate::types::{ClassInfo, ResolvedType};
+use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::type_resolution;
@@ -1118,6 +1118,12 @@ fn resolve_rhs_expression_inner<'b>(
         Expression::Binary(binary) if binary.operator.is_concatenation() => {
             vec![ResolvedType::from_type_string(PhpType::string())]
         }
+        // ── Magic constants: `__LINE__`, `__FILE__`, `__CLASS__`, … ─
+        Expression::MagicConstant(magic) => {
+            vec![ResolvedType::from_type_string(magic_constant_type(
+                magic, ctx,
+            ))]
+        }
         // ── Global constant access: `PHP_EOL`, `SORT_ASC`, etc. ────
         Expression::ConstantAccess(ca) => {
             let name = bytes_to_str(ca.name.value()).to_string();
@@ -1158,6 +1164,29 @@ fn resolve_rhs_expression_inner<'b>(
         // expressions not handled above should use the raw-type
         // inference pipeline.
         _ => vec![],
+    }
+}
+
+/// The type a magic constant holds.
+///
+/// `__LINE__` is the only one PHP gives a number; every other magic
+/// constant is a string. `__CLASS__` narrows further to
+/// `class-string<Foo>`, the way `Foo::class` does, so the class identity
+/// survives into `new $class` and `class-string` parameters. A trait body
+/// only knows it will be *some* class name at runtime (the using class,
+/// not the trait), so it gets a bare `class-string`, and code outside any
+/// class-like gets the plain `string` the empty value is.
+fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
+    match magic {
+        MagicConstant::Line(_) => PhpType::int(),
+        MagicConstant::Class(_) if ctx.current_class.name.is_empty() => PhpType::string(),
+        MagicConstant::Class(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
+            PhpType::class_string(None)
+        }
+        MagicConstant::Class(_) => {
+            PhpType::class_string(Some(PhpType::named(ctx.current_class.fqn())))
+        }
+        _ => PhpType::string(),
     }
 }
 

@@ -4080,3 +4080,64 @@ function giveString(): string {
         return_error_messages(&diags)
     );
 }
+
+// ─── Magic constants as arithmetic and string operands ─────────────────────
+
+#[test]
+fn a_line_magic_constant_added_to_an_int_stays_an_int() {
+    let php = r#"<?php
+function getEndLineOfThisFile(): int
+{
+    return __LINE__ + 3;
+}
+
+function offsetFromLine(int $offset): int
+{
+    return __LINE__ - $offset;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "`__LINE__` is an int, so arithmetic on it stays an int, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn the_string_magic_constants_satisfy_a_string_return_type() {
+    let php = r#"<?php
+class Widget
+{
+    public function file(): string { return __FILE__; }
+    public function dir(): string { return __DIR__; }
+    public function method(): string { return __METHOD__; }
+    public function function_(): string { return __FUNCTION__; }
+    public function namespace_(): string { return __NAMESPACE__; }
+    public function class_(): string { return __CLASS__; }
+    public function trait_(): string { return __TRAIT__; }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "Every magic constant but `__LINE__` is a string, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn a_line_magic_constant_still_fails_an_array_return_type() {
+    let php = r#"<?php
+function lines(): array
+{
+    return __LINE__ + 1;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_return_error(&diags),
+        "`__LINE__ + 1` is an int, which an `array` return type rejects, got: {:?}",
+        return_error_messages(&diags)
+    );
+}

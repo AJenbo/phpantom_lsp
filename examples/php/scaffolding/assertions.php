@@ -1763,6 +1763,13 @@ function runDemoAssertions(): void
     assert($magic->demo() === 'Ada LovelaceADA', 'both instance magic members dispatch at runtime');
     assert(SemanticMagicMemberDemo::slogan() === 'built with PHPantom', 'static::brand() from a static method reaches __callStatic');
 
+    // ── Magic constants ─────────────────────────────────────────────────
+    $magicConst = new MagicConstantDemo();
+    assert(is_int($magicConst->lineOffset()), '__LINE__ + 3 really is an int');
+    assert(str_contains($magicConst->describe(), 'completion.php'), '__FILE__ is the demo file');
+    assert(str_starts_with($magicConst->describe(), MagicConstantDemo::class . '::describe'), '__METHOD__ names the class and the method');
+    assert(class_exists($magicConst->ownName()), '__CLASS__ is a class-string');
+
     echo "All assertions passed.\n";
 }
 

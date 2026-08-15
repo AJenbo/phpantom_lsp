@@ -4829,3 +4829,34 @@ class BenevolentBuiltinDemo
 // `strpos()` is deliberately not on the list: its `false` means "not found",
 // which is an answer the caller is meant to read, so
 // `takesInt(strpos($h, $n))` is still reported.
+
+// ── Magic constants ────────────────────────────────────────────────────────
+//
+// PHP's magic constants are values like any other, and each carries its own
+// type: `__LINE__` is an int, the rest are strings.  `__CLASS__` keeps the
+// class it names, the way `Foo::class` does, so the name it produces still
+// satisfies a `class-string` parameter.
+
+class MagicConstantDemo
+{
+    public function lineOffset(): int
+    {
+        // Try: hover `__LINE__` — int, so the sum below is an int too
+        return __LINE__ + 3;                        // int, not int|float
+    }
+
+    public function describe(): string
+    {
+        $file = __FILE__;                           // string
+        $method = __METHOD__;                       // string
+
+        // Try: `$method->` — nothing, a string has no members
+        return $method . ' in ' . basename($file);
+    }
+
+    /** @return class-string */
+    public function ownName(): string
+    {
+        return __CLASS__;                           // class-string<MagicConstantDemo>
+    }
+}
