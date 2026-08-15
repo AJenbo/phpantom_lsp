@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B51  | [`instanceof` does not eliminate a class from a union in the guarded branch](todo/bugs.md#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch) | High        | High        |
-| B57  | [A typed class constant loses its literal value](todo/bugs.md#b57-a-typed-class-constant-loses-its-literal-value)                                           | Medium      | Medium      |
 | B75  | [A builtin's return type is not derived from the arguments actually passed](todo/bugs.md#b75-a-builtins-return-type-is-not-derived-from-the-arguments-actually-passed) (six sub-cases, one PR) | Medium      | Medium-High |
 | B58  | [The array union operator (`+`) does not preserve a previously narrowed key type](todo/bugs.md#b58-the-array-union-operator--does-not-preserve-a-previously-narrowed-key-type) | Medium      | High        |
 | B62  | [PHPUnit's `assertNotNull`/`assertNotFalse` are not recognized as narrowing assertions](todo/bugs.md#b62-phpunits-assertnotnullassertnotfalse-are-not-recognized-as-narrowing-assertions) | Medium      | Medium      |

@@ -9931,6 +9931,31 @@ class Encoder {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// A declared type on the constant (PHP 8.3 typed class constants) does not
+/// hide the value behind it: `const int FLAGS = …` still folds to the mask its
+/// initialiser computes.
+#[test]
+fn json_encode_reads_throw_on_error_through_a_typed_constant() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+class Encoder {
+    private const int DEFAULT_OPTIONS = JSON_HEX_TAG | JSON_THROW_ON_ERROR;
+    private const int ALIAS = self::DEFAULT_OPTIONS;
+
+    public function test(mixed $value, int $options): void {
+        useString(json_encode($value, self::DEFAULT_OPTIONS));
+        useString(json_encode($value, self::ALIAS));
+        useString(json_encode($value, $options | self::DEFAULT_OPTIONS));
+        $mask = JSON_UNESCAPED_SLASHES | self::DEFAULT_OPTIONS;
+        useString(json_encode($value, $mask));
+    }
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// A constant defined in terms of itself has no value to fold, and folding it
 /// must terminate rather than chase the cycle.
 #[test]

@@ -27,35 +27,7 @@ No outstanding items.
 
 ## Type comparison
 
-### B57. A typed class constant loses its literal value
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-final class Json
-{
-    private const int DEFAULT_OPTIONS = JSON_HEX_TAG | JSON_THROW_ON_ERROR;
-
-    public static function encode(mixed $value, int $options = 0): string
-    {
-        return json_encode($value, $options | self::DEFAULT_OPTIONS);   // reported: got string|false
-    }
-}
-```
-
-`json_encode()`'s return type narrows to plain `string` (dropping
-`false`) when the resolved `$flags` argument provably has
-`JSON_THROW_ON_ERROR` set — the flag makes a failure throw instead of
-returning `false`. That bitwise fold works when `DEFAULT_OPTIONS` is a
-plain untyped `const`, but PHP 8.3's typed class constants
-(`const int NAME = expr`) resolve to the declared type (`int`) instead
-of the constant-folded literal value of `expr`, so the downstream
-bitwise-OR reasoning never sees `JSON_THROW_ON_ERROR` and falls back to
-the unrefined `string|false`.
-
-**Fix:** when reading a typed class constant's value for constant
-folding, evaluate its initializer expression the same way an untyped
-constant's is evaluated, rather than substituting the declared type.
+No outstanding items.
 
 ## Standard-library return types
 

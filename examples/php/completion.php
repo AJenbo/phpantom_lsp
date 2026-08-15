@@ -1407,6 +1407,9 @@ class ConditionalReturnDemo
     /** And so is one built out of several. */
     public const JSON_COMBO = JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR;
 
+    /** A declared type says what the constant may hold, not what it holds. */
+    public const int JSON_TYPED = JSON_HEX_TAG | JSON_THROW_ON_ERROR;
+
     public function demo(): void
     {
         $container = new Scaffolding\Container();
@@ -1529,6 +1532,8 @@ class ConditionalReturnDemo
         $mask = JSON_UNESCAPED_SLASHES | self::JSON_FLAGS;
         $fromMask = json_encode(['ok' => true], $mask);
         strtoupper($fromMask);                    // mask in a variable → string
+        $typed = json_encode(['ok' => true], self::JSON_TYPED);
+        strtoupper($typed);                       // typed constant → string
 
         // More builtins whose shape an argument decides. Only the
         // all-elements form of `pathinfo()` returns the component array;

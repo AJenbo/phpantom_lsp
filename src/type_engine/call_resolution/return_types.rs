@@ -1999,20 +1999,30 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
         ctx.resolved_class_cache,
     );
     if let Some(constant) = merged.constants.iter().find(|c| c.name == _member) {
-        // Typed class constant — use its declared type.
-        if let Some(ref hint) = constant.type_hint {
-            return Some(hint.clone());
-        }
-        // Untyped constant — infer the value type from the initializer
-        // so template params bind to the constant's value (e.g. `int`)
-        // rather than the owning class.
+        // Infer the value type from the initializer so template params bind
+        // to the constant's value (e.g. `int`) rather than the owning class.
+        //
+        // A declared type (PHP 8.3's `const int NAME = …`) says what the
+        // constant may hold, not what it does hold, so the initialiser is
+        // still the sharper answer and is read first. It only stands in for
+        // the declaration when it refines it: an initialiser naming an enum
+        // case resolves to the case's class, which the structural check
+        // rejects, leaving the declared type as before.
         if let Some(ref val) = constant.value {
-            if let Some(ty) =
+            let inferred =
                 crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(val)
-            {
+                    .or_else(|| folded_class_constant_type(&merged, _member, val, ctx));
+            if let Some(ty) = inferred.filter(|ty| {
+                constant
+                    .type_hint
+                    .as_ref()
+                    .is_none_or(|hint| ty.is_subtype_of(hint))
+            }) {
                 return Some(ty);
             }
-            return folded_class_constant_type(&merged, _member, val, ctx);
+        }
+        if let Some(ref hint) = constant.type_hint {
+            return Some(hint.clone());
         }
     }
 

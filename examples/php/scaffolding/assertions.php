@@ -753,6 +753,8 @@ function runDemoAssertions(): void
     assert(json_encode(['ok' => true], ConditionalReturnDemo::JSON_FLAGS) === '{"ok":true}', 'the flag counts when it is reached through a constant');
     $jsonMask = JSON_UNESCAPED_SLASHES | ConditionalReturnDemo::JSON_FLAGS;
     assert(json_encode(['url' => 'a/b'], $jsonMask) === '{"url":"a/b"}', 'a mask kept in a variable sets the same bits');
+    assert((ConditionalReturnDemo::JSON_TYPED & JSON_THROW_ON_ERROR) !== 0, 'a declared type does not replace the value the constant holds');
+    assert(json_encode(['ok' => true], ConditionalReturnDemo::JSON_TYPED) === '{"ok":true}', 'the flag counts when the constant is typed');
 
     // ── More argument-decided builtins ───────────────────────────────────
     assert(is_array(pathinfo('/tmp/report.csv')), 'the all-elements form returns the component array');
