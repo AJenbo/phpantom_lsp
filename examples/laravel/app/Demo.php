@@ -22,6 +22,7 @@ use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
 use Database\Factories\BlogAuthorFactory;
+use Database\Factories\EditorialFactory;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
@@ -167,10 +168,11 @@ class Demo
     // Laravel's Factory::__call() resolves has{Relationship}(),
     // for{Relationship}(), and trashed() at runtime. PHPantom derives the
     // model from the concrete factory's naming convention (BlogAuthorFactory
-    // → App\Models\BlogAuthor), even through the shared BaseFactory parent,
-    // and synthesizes these from the model's relationships. Each returns the
-    // factory (static), so the fluent chain continues into the build methods,
-    // which return the model.
+    // → App\Models\BlogAuthor), even through the shared BaseFactory parent.
+    // A factory's explicit $model property takes priority when its name is not
+    // conventional. PHPantom synthesizes the dynamic methods from whichever
+    // model the factory names. Each returns the factory (static), so the fluent
+    // chain continues into the build methods, which return the model.
 
     public function factories(): void
     {
@@ -178,6 +180,11 @@ class Demo
         BlogAuthor::factory()->create();                 // → BlogAuthor
         BlogAuthor::factory()->make()->displayName;      // make() → BlogAuthor
         BlogAuthor::factory()->makeOne()->displayName;   // makeOne() → BlogAuthor
+
+        // EditorialFactory does not match the model's name. Its protected
+        // $model property takes precedence over the naming convention.
+        EditorialFactory::new()->makeOne()->displayName;         // → BlogAuthor
+        EditorialFactory::new()->count(2)->make()->emails();     // → AuthorCollection
 
         // has{Relationship}() — one per relationship on the model.
         BlogAuthor::factory()->hasPosts(3);         // HasMany posts   → factory

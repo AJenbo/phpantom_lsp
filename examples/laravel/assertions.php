@@ -317,6 +317,22 @@ check(
     $authorFactory->makeOne() instanceof \App\Models\BlogAuthor
 );
 
+// EditorialFactory cannot be paired by name. Laravel reads its explicit
+// protected $model property before trying that convention.
+$editorialFactory = \Database\Factories\EditorialFactory::new();
+check(
+    'EditorialFactory declares BlogAuthor through its model property',
+    $editorialFactory->modelName() === \App\Models\BlogAuthor::class
+);
+check(
+    'EditorialFactory::makeOne() builds one BlogAuthor',
+    $editorialFactory->makeOne() instanceof \App\Models\BlogAuthor
+);
+check(
+    'EditorialFactory count builds the BlogAuthor collection',
+    $editorialFactory->count(2)->make() instanceof \App\Models\AuthorCollection
+);
+
 // has{Relationship} is valid because posts() is a real relationship, and it
 // returns the factory so the chain continues into create()/make().
 check(

@@ -8321,6 +8321,251 @@ class DraftFactoryHarness extends DraftFactory {}
 
 // ─── Factory count-conditional return types ─────────────────────────────────
 
+const EXPLICIT_MODEL_USE_FACTORY_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Attributes;
+class UseFactory {
+    public function __construct(public string $factoryClass) {}
+}
+";
+
+const EXPLICIT_MODEL_DRAFT_PHP: &str = "\
+<?php
+namespace App\\Models\\Documents;
+use Database\\Factories\\DraftFactory;
+use Illuminate\\Database\\Eloquent\\Attributes\\UseFactory;
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+use Illuminate\\Database\\Eloquent\\Model;
+#[UseFactory(DraftFactory::class)]
+class Draft extends Model {
+    /** @use HasFactory<DraftFactory> */
+    use HasFactory;
+    public function draftOnly(): void {}
+}
+";
+
+const EXPLICIT_MODEL_CONVENTIONAL_DRAFT_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Draft extends Model {
+    public function wrongModelOnly(): void {}
+}
+";
+
+const EXPLICIT_MODEL_DOCUMENT_FACTORY_PHP: &str = "\
+<?php
+namespace Database\\Factories;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+abstract class DocumentFactory extends Factory {}
+";
+
+const EXPLICIT_MODEL_DRAFT_FACTORY_PHP: &str = "\
+<?php
+namespace Database\\Factories;
+use App\\Models\\Documents\\Draft;
+/** @extends DocumentFactory<Draft> */
+class DraftFactory extends DocumentFactory {
+    protected $model = Draft::class;
+    public function definition(): array { return []; }
+    public function factoryOnly(): void {}
+}
+";
+
+fn explicit_model_factory_workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
+    make_workspace(&[
+        (
+            "vendor/illuminate/Eloquent/Attributes/UseFactory.php",
+            EXPLICIT_MODEL_USE_FACTORY_PHP,
+        ),
+        ("src/Models/Documents/Draft.php", EXPLICIT_MODEL_DRAFT_PHP),
+        (
+            "src/Models/Draft.php",
+            EXPLICIT_MODEL_CONVENTIONAL_DRAFT_PHP,
+        ),
+        (
+            "database/factories/DocumentFactory.php",
+            EXPLICIT_MODEL_DOCUMENT_FACTORY_PHP,
+        ),
+        (
+            "database/factories/DraftFactory.php",
+            EXPLICIT_MODEL_DRAFT_FACTORY_PHP,
+        ),
+    ])
+}
+
+async fn complete_after_explicit_model_factory_chain(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    relative_path: &str,
+    expr: &str,
+) -> Vec<String> {
+    let line = format!("{expr}->");
+    let content = format!("<?php\nuse App\\Models\\Documents\\Draft;\n{line}\n");
+    let items = complete_at(
+        backend,
+        dir,
+        relative_path,
+        &content,
+        2,
+        line.chars().count() as u32,
+    )
+    .await;
+
+    method_names(&items)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn assert_explicit_factory_builds_draft(expr: &str, methods: &[String]) {
+    assert!(
+        methods.iter().any(|method| method == "draftOnly"),
+        "`{expr}` should resolve to the Draft named by the factory's $model property, got: {methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|method| method == "factoryOnly"),
+        "`{expr}` should resolve to Draft, never DraftFactory, got: {methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|method| method == "wrongModelOnly"),
+        "`{expr}` should prefer the factory's $model property over its conventional model, got: {methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|method| method == "all"),
+        "`{expr}` should resolve to one Draft, not a Collection, got: {methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_factory_model_property_resolves_single_model_returns_through_base() {
+    let (backend, dir) = explicit_model_factory_workspace();
+
+    let factory_methods = complete_after_explicit_model_factory_chain(
+        &backend,
+        &dir,
+        "src/explicit_factory_selection.php",
+        "Draft::factory()",
+    )
+    .await;
+    assert!(
+        factory_methods.iter().any(|method| method == "factoryOnly"),
+        "@use HasFactory<DraftFactory> should select the non-conventional factory, got: {factory_methods:?}"
+    );
+
+    for (index, expr) in [
+        "Draft::factory()->makeOne()",
+        "Draft::factory()->createOne()",
+        "Draft::factory()->make()",
+        "Draft::factory()->create()",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = format!("src/explicit_factory_single_{index}.php");
+        let methods =
+            complete_after_explicit_model_factory_chain(&backend, &dir, &path, expr).await;
+        assert_explicit_factory_builds_draft(expr, &methods);
+    }
+
+    let content = "<?php\nnamespace App\\Services;\nuse App\\Models\\Documents\\Draft;\nuse Database\\Factories\\DraftFactory;\nclass DraftService {\n    public function makeOneDraft(): Draft {\n        return Draft::factory()->makeOne();\n    }\n    public function createOneDraft(): Draft {\n        return Draft::factory()->createOne();\n    }\n    public function makeDraft(): Draft {\n        return Draft::factory()->make();\n    }\n    public function createDraft(): Draft {\n        return Draft::factory()->create();\n    }\n    public function incorrectlyReturnsFactory(): DraftFactory {\n        return Draft::factory()->makeOne();\n    }\n}\n";
+    let uri = Url::from_file_path(dir.path().join("src/DraftService.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: content.to_string(),
+            },
+        })
+        .await;
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
+    let return_mismatches: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code == "type_mismatch_return"
+            )
+        })
+        .collect();
+    assert_eq!(
+        return_mismatches.len(),
+        1,
+        "all four build methods should satisfy Draft return types, while makeOne() must still fail a DraftFactory return, got: {return_mismatches:?}"
+    );
+    assert_eq!(
+        return_mismatches[0].message,
+        "Return type App\\Models\\Documents\\Draft is incompatible with declared return type Database\\Factories\\DraftFactory",
+        "the mismatch should name the built model rather than Eloquent's base Model"
+    );
+}
+
+#[tokio::test]
+async fn test_factory_model_property_one_methods_ignore_count_through_base() {
+    let (backend, dir) = explicit_model_factory_workspace();
+
+    for (index, expr) in [
+        "Draft::factory(2)->makeOne()",
+        "Draft::factory(2)->createOne()",
+        "Draft::factory()->count(2)->makeOne()",
+        "Draft::factory()->count(2)->createOne()",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = format!("src/explicit_factory_one_count_{index}.php");
+        let methods =
+            complete_after_explicit_model_factory_chain(&backend, &dir, &path, expr).await;
+        assert_explicit_factory_builds_draft(expr, &methods);
+    }
+}
+
+#[tokio::test]
+async fn test_factory_model_property_resolves_counted_collection_elements_through_base() {
+    let (backend, dir) = explicit_model_factory_workspace();
+
+    for (index, expr) in [
+        "Draft::factory(2)->make()",
+        "Draft::factory(2)->create()",
+        "Draft::factory()->count(2)->make()",
+        "Draft::factory()->count(2)->create()",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let collection_path = format!("src/explicit_factory_collection_{index}.php");
+        let collection_methods =
+            complete_after_explicit_model_factory_chain(&backend, &dir, &collection_path, expr)
+                .await;
+        assert!(
+            collection_methods.iter().any(|method| method == "all")
+                && collection_methods.iter().any(|method| method == "first"),
+            "`{expr}` should resolve to an Eloquent Collection, got: {collection_methods:?}"
+        );
+        assert!(
+            !collection_methods
+                .iter()
+                .any(|method| method == "draftOnly" || method == "factoryOnly"),
+            "`{expr}` should resolve to the Collection itself, got: {collection_methods:?}"
+        );
+
+        let element_expr = format!("{expr}->first()");
+        let element_path = format!("src/explicit_factory_collection_element_{index}.php");
+        let element_methods = complete_after_explicit_model_factory_chain(
+            &backend,
+            &dir,
+            &element_path,
+            &element_expr,
+        )
+        .await;
+        assert_explicit_factory_builds_draft(&element_expr, &element_methods);
+    }
+}
+
 /// A model + convention-based factory pair, shared by the
 /// count-conditional tests below.
 const COUNT_USER_PHP: &str = "\
@@ -8646,6 +8891,38 @@ async fn test_factory_with_an_int_typed_argument_builds_a_collection() {
     );
 }
 
+#[tokio::test]
+async fn test_factory_count_with_a_null_value_builds_a_single_model() {
+    let messages = factory_argument_mismatches(concat!(
+        "$count = null;\n",
+        "needsUser(User::factory()->count($count)->create());",
+    ))
+    .await;
+    assert!(
+        messages.is_empty(),
+        "count(null) clears the stored count even when null comes through a variable, got: {messages:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_factory_count_with_a_nullable_int_keeps_the_union() {
+    let messages = factory_argument_mismatches(concat!(
+        "function build(?int $count): void {\n",
+        "    needsUser(User::factory()->count($count)->create());\n",
+        "}",
+    ))
+    .await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "a nullable count keeps Laravel's declared model-or-collection union, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains('|'),
+        "the nullable count must not be narrowed to only the collection branch, got: {messages:?}"
+    );
+}
+
 /// The same call with an array of state instead of a count.
 #[tokio::test]
 async fn test_factory_with_an_array_typed_argument_builds_a_single_model() {
@@ -8740,37 +9017,59 @@ class UserFactory extends Factory {
         ("database/factories/UserFactory.php", annotated_factory_php),
     ]);
 
-    let single = complete_at(
-        &backend,
-        &dir,
-        "src/test.php",
-        "<?php\nuse App\\Models\\User;\nUser::factory()->create()->\n",
-        2,
-        28,
-    )
-    .await;
-    let single = method_names(&single);
-    assert!(
-        single.contains(&"greet") && !single.contains(&"all"),
-        "an annotated factory without a count should build one User, got: {:?}",
-        single
-    );
+    for (index, expr) in [
+        "User::factory()->makeOne()",
+        "User::factory()->createOne()",
+        "User::factory()->make()",
+        "User::factory()->create()",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let line = format!("{expr}->");
+        let content = format!("<?php\nuse App\\Models\\User;\n{line}\n");
+        let items = complete_at(
+            &backend,
+            &dir,
+            &format!("src/annotated_factory_single_{index}.php"),
+            &content,
+            2,
+            line.chars().count() as u32,
+        )
+        .await;
+        let methods = method_names(&items);
+        assert!(
+            methods.contains(&"greet") && !methods.contains(&"all"),
+            "`{expr}` on an annotated factory should build one User, got: {methods:?}"
+        );
+    }
 
-    let many = complete_at(
-        &backend,
-        &dir,
-        "src/test2.php",
-        "<?php\nuse App\\Models\\User;\nUser::factory()->count(2)->create()->\n",
-        2,
-        38,
-    )
-    .await;
-    let many = method_names(&many);
-    assert!(
-        many.contains(&"all") && !many.contains(&"greet"),
-        "an annotated factory with a count should build a Collection, got: {:?}",
-        many
-    );
+    for (index, expr) in [
+        "User::factory(2)->make()",
+        "User::factory(2)->create()",
+        "User::factory()->count(2)->make()",
+        "User::factory()->count(2)->create()",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let line = format!("{expr}->");
+        let content = format!("<?php\nuse App\\Models\\User;\n{line}\n");
+        let items = complete_at(
+            &backend,
+            &dir,
+            &format!("src/annotated_factory_many_{index}.php"),
+            &content,
+            2,
+            line.chars().count() as u32,
+        )
+        .await;
+        let methods = method_names(&items);
+        assert!(
+            methods.contains(&"all") && !methods.contains(&"greet"),
+            "`{expr}` on an annotated factory should build a Collection, got: {methods:?}"
+        );
+    }
 }
 
 /// A factory reached through a variable carries the count it was built

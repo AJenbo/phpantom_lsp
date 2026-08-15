@@ -1,7 +1,7 @@
 //! Parse-time extraction of Eloquent model metadata from the AST.
 //!
 //! This module builds the [`LaravelMetadata`] attached to every parsed
-//! class: `$casts`/`casts()`, `$attributes`, `$dates`,
+//! class: factory `$model`, `$casts`/`casts()`, `$attributes`, `$dates`,
 //! `$fillable`/`$guarded`/`$hidden`/`$visible`/`$appends`, `$timestamps` and the
 //! `CREATED_AT`/`UPDATED_AT` constants, the `#[Connection]`/`#[Table]`
 //! attributes (and their property fallbacks), custom builder/collection
@@ -19,7 +19,7 @@ use crate::atom::{Atom, atom, bytes_to_str, last_segment};
 use crate::parser::DocblockCtx;
 use crate::php_type::PhpType;
 use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotRelation};
-use crate::util::strip_fqn_prefix;
+use crate::util::{strip_fqn_prefix, unescape_php_string_literal};
 
 use super::{extract_pivot_using, extract_with_pivot_columns, infer_relationship_from_body};
 
@@ -306,6 +306,81 @@ fn extract_custom_collection_from_new_collection(methods: &[MethodInfo]) -> Opti
     }
 
     Some(return_type.clone())
+}
+
+/// Extract the model class explicitly configured on a Laravel factory.
+///
+/// A `SomeModel::class` initializer follows PHP class-name resolution, so
+/// its written name is left for the normal name-resolution pass. A quoted
+/// class name is already a runtime string and is therefore marked absolute
+/// before that pass, preventing the factory's namespace from being prepended.
+fn extract_factory_model<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    content: &str,
+) -> Option<PhpType> {
+    for member in members {
+        let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
+            plain,
+        )) = member
+        else {
+            continue;
+        };
+
+        for item in plain.items.iter() {
+            let var_name = bytes_to_str(item.variable().name);
+            if var_name.strip_prefix('$').unwrap_or(var_name) != "model" {
+                continue;
+            }
+            let class_like::property::PropertyItem::Concrete(concrete) = item else {
+                continue;
+            };
+
+            if let Expression::Access(Access::ClassConstant(access)) = concrete.value
+                && matches!(
+                    &access.constant,
+                    ClassLikeConstantSelector::Identifier(constant)
+                        if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
+                )
+                && let Expression::Identifier(identifier) = access.class
+            {
+                let name = bytes_to_str(identifier.value()).trim();
+                if !name.is_empty()
+                    && !name.eq_ignore_ascii_case("self")
+                    && !name.eq_ignore_ascii_case("static")
+                    && !name.eq_ignore_ascii_case("parent")
+                {
+                    return Some(PhpType::named(atom(name)));
+                }
+                continue;
+            }
+
+            if !matches!(concrete.value, Expression::Literal(Literal::String(_))) {
+                continue;
+            }
+
+            let span = concrete.value.span();
+            let start = span.start.offset as usize;
+            let end = span.end.offset as usize;
+            let Some(raw) = content.get(start..end) else {
+                continue;
+            };
+            let Some(name) = unescape_php_string_literal(raw.trim()) else {
+                continue;
+            };
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let absolute = if name.starts_with('\\') {
+                name.to_string()
+            } else {
+                format!("\\{name}")
+            };
+            return Some(PhpType::named(atom(&absolute)));
+        }
+    }
+
+    None
 }
 
 /// Extract Eloquent cast definitions from a class's members.
@@ -920,6 +995,8 @@ pub(crate) fn extract_laravel_metadata<'a>(
     content: &str,
     doc_ctx: Option<&DocblockCtx<'a>>,
 ) -> LaravelMetadata {
+    let factory_model = extract_factory_model(class.members.iter(), content);
+
     let custom_collection =
         extract_custom_collection(&class.attribute_lists, use_generics, methods, content);
 
@@ -972,6 +1049,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
         .flatten();
 
     LaravelMetadata {
+        factory_model,
         custom_collection,
         casts_definitions,
         dates_definitions,
@@ -997,6 +1075,8 @@ pub(crate) fn extract_laravel_metadata<'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::Backend;
     use crate::atom::atom;
 
@@ -1079,5 +1159,60 @@ class Passport {
         assert_eq!(laravel.primary_key.as_deref(), Some("passport_number"));
         assert_eq!(laravel.key_type.as_deref(), Some("string"));
         assert!(laravel.has_get_key_name_method);
+    }
+
+    #[test]
+    fn laravel_factory_model_property_is_extracted_and_resolved() {
+        let src = r#"<?php
+namespace Database\Factories;
+
+use App\Models\Draft as DraftModel;
+
+class ClassConstantFactory {
+    protected $model = DraftModel::class;
+}
+
+class StringFactory {
+    protected $model = 'Domain\\Models\\PublishedDraft';
+}
+
+class DynamicFactory {
+    protected $model = model_name();
+}
+
+class InterpolatedFactory {
+    protected $model = "App\\Models\\$model";
+}
+"#;
+        let mut classes: Vec<_> = Backend::parse_php_versioned_with_namespaces(src, None)
+            .into_iter()
+            .map(|(class, _)| class)
+            .collect();
+        let use_map = HashMap::from([("DraftModel".to_string(), "App\\Models\\Draft".to_string())]);
+        Backend::resolve_parent_class_names(
+            &mut classes,
+            &use_map,
+            &Some("Database\\Factories".to_string()),
+        );
+
+        let model_type = |class_name: &str| {
+            classes
+                .iter()
+                .find(|class| class.name == atom(class_name))
+                .and_then(|class| class.laravel())
+                .and_then(|laravel| laravel.factory_model.as_ref())
+                .map(ToString::to_string)
+        };
+
+        assert_eq!(
+            model_type("ClassConstantFactory").as_deref(),
+            Some("App\\Models\\Draft")
+        );
+        assert_eq!(
+            model_type("StringFactory").as_deref(),
+            Some("Domain\\Models\\PublishedDraft")
+        );
+        assert_eq!(model_type("DynamicFactory"), None);
+        assert_eq!(model_type("InterpolatedFactory"), None);
     }
 }

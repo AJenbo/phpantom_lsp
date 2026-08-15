@@ -1428,6 +1428,16 @@ impl Backend {
                 class.laravel_mut().custom_builder = Some(builder.resolve_names(&resolver));
             }
 
+            // Resolve a Laravel factory's explicitly configured model class
+            // to an FQN. Class-constant initializers follow the file's imports
+            // and namespace; literal class strings were marked absolute while
+            // being extracted and therefore remain unchanged.
+            if let Some(model) = class.laravel().and_then(|l| l.factory_model.clone()) {
+                let resolver =
+                    |name: &str| -> String { Self::resolve_name(name, use_map, namespace) };
+                class.laravel_mut().factory_model = Some(model.resolve_names(&resolver));
+            }
+
             // Resolve a facade's `getFacadeAccessor()` class reference to an
             // FQN so the concrete class it forwards to is loadable from any
             // file, not just the one that imported it.

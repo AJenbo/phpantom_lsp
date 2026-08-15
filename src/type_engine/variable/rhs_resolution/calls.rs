@@ -1528,10 +1528,19 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     // returns the factory itself, so the count state the chain has built
     // up so far travels on to the result — which is what lets a `create()`
     // several statements and one variable later still know what it builds.
+    // The argument type is resolved lazily: only a non-literal argument to
+    // Laravel's nullable `count()` needs it to distinguish int, null and a
+    // value that could be either.
+    let first_arg_type = || {
+        let arg = argument_list.arguments.first()?;
+        let resolved = resolve_rhs_expression(arg.value(), ctx);
+        (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+    };
     let fluent_count = crate::virtual_members::laravel::fluent_factory_count(
         &receiver_resolved,
         &method_name,
         arg_refs.first().copied(),
+        &first_arg_type,
         &rctx,
     );
 

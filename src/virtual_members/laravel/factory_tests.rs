@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::inheritance::resolve_class_with_inheritance;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, no_loader};
 use std::sync::Arc;
@@ -148,6 +149,95 @@ fn has_factory_extends_generic_empty_args() {
     let mut class = make_class("UserFactory");
     class.extends_generics = vec![(atom("Factory"), vec![])];
     assert!(!has_factory_extends_generic(&class));
+}
+
+fn generic_document_factory_classes() -> (ClassInfo, ClassInfo) {
+    let mut document_factory = make_class("DocumentFactory");
+    document_factory.file_namespace = Some(atom("Database\\Factories"));
+    document_factory.parent_class = Some(atom(FACTORY_FQN));
+    document_factory.template_params = vec![atom("TModel")];
+    document_factory.template_param_bounds.insert(
+        atom("TModel"),
+        PhpType::named(atom("Illuminate\\Database\\Eloquent\\Model")),
+    );
+    document_factory.extends_generics =
+        vec![(atom(FACTORY_FQN), vec![PhpType::named(atom("TModel"))])];
+
+    let mut factory_base = make_class(FACTORY_FQN);
+    factory_base.template_params = vec![atom("TModel")];
+    factory_base
+        .methods
+        .push(Arc::new(make_method("makeOne", Some("TModel"))));
+
+    (document_factory, factory_base)
+}
+
+#[test]
+fn unbound_factory_generic_yields_to_declared_model() {
+    let mut factory = make_class("DraftFactory");
+    factory.file_namespace = Some(atom("Database\\Factories"));
+    factory.parent_class = Some(atom("Database\\Factories\\DocumentFactory"));
+    factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\Draft")));
+
+    let (document_factory, factory_base) = generic_document_factory_classes();
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
+            FACTORY_FQN => Some(Arc::new(factory_base.clone())),
+            _ => None,
+        }
+    };
+
+    assert_eq!(
+        factory_model_type(&factory, &loader).map(|model| model.to_string()),
+        Some("App\\Models\\Draft".to_string())
+    );
+
+    let resolved = resolve_class_with_inheritance(&factory, &loader);
+    assert_eq!(
+        resolved
+            .get_method_ci("makeOne")
+            .and_then(|method| method.return_type_str())
+            .as_deref(),
+        Some("App\\Models\\Draft")
+    );
+}
+
+#[test]
+fn explicit_base_model_binding_remains_authoritative() {
+    let mut factory = make_class("DraftFactory");
+    factory.file_namespace = Some(atom("Database\\Factories"));
+    factory.parent_class = Some(atom("Database\\Factories\\DocumentFactory"));
+    factory.extends_generics = vec![(
+        atom("Database\\Factories\\DocumentFactory"),
+        vec![PhpType::named(atom(
+            "Illuminate\\Database\\Eloquent\\Model",
+        ))],
+    )];
+    factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\Draft")));
+
+    let (document_factory, factory_base) = generic_document_factory_classes();
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
+            FACTORY_FQN => Some(Arc::new(factory_base.clone())),
+            _ => None,
+        }
+    };
+
+    assert_eq!(
+        factory_model_type(&factory, &loader).map(|model| model.to_string()),
+        Some("Illuminate\\Database\\Eloquent\\Model".to_string())
+    );
+
+    let resolved = resolve_class_with_inheritance(&factory, &loader);
+    assert_eq!(
+        resolved
+            .get_method_ci("makeOne")
+            .and_then(|method| method.return_type_str())
+            .as_deref(),
+        Some("Illuminate\\Database\\Eloquent\\Model")
+    );
 }
 
 // ── build_factory_model_methods tests ───────────────────────────────
@@ -336,6 +426,38 @@ fn factory_provider_synthesizes_has_and_for_relationship_methods() {
     // create()/make() are still present alongside the relationship methods.
     assert!(result.methods.iter().any(|m| m.name == "create"));
     assert!(result.methods.iter().any(|m| m.name == "make"));
+}
+
+#[test]
+fn factory_provider_uses_declared_model_for_relationship_methods() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\EditorialFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+    factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\BlogAuthor")));
+
+    let mut model = make_class("App\\Models\\BlogAuthor");
+    model.methods.push(Arc::new(make_method(
+        "posts",
+        Some("HasMany<App\\Models\\BlogPost, $this>"),
+    )));
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        (name == "App\\Models\\BlogAuthor").then(|| Arc::new(model.clone()))
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+    assert!(
+        result
+            .methods
+            .iter()
+            .any(|method| method.name == "hasPosts")
+    );
+    assert!(
+        result
+            .methods
+            .iter()
+            .any(|method| method.name == "forPosts")
+    );
 }
 
 #[test]

@@ -1,5 +1,8 @@
 use super::*;
 use crate::test_fixtures::{make_class, no_loader};
+use std::cell::Cell;
+
+const FACTORY_BASE_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
 
 /// Parse a receiver expression the way the resolver hands it to
 /// [`chain_count`]: the text to the left of the final `->create()`.
@@ -155,16 +158,83 @@ fn count_call_builds_many() {
 }
 
 #[test]
-fn count_with_variable_builds_many() {
-    // `count(?int $count)` only takes an integer or null, so a variable
-    // argument that is not literally `null` sets a count.
-    assert_eq!(count_of("User::factory()->count($n)"), FactoryCount::Many);
+fn count_with_non_literal_argument_is_unknown_from_syntax() {
+    for argument in ["$n", "self::COUNT", "count($rows)"] {
+        assert_eq!(
+            count_of(&format!("User::factory()->count({argument})")),
+            FactoryCount::Unknown,
+            "{argument} could resolve to either int or null"
+        );
+    }
 }
 
 #[test]
 fn count_zero_builds_many() {
     // `count(0)` yields an empty collection, not a single model.
     assert_eq!(count_of("User::factory()->count(0)"), FactoryCount::Many);
+}
+
+#[test]
+fn literal_count_arguments_do_not_resolve_their_type() {
+    let should_not_resolve =
+        || -> Option<PhpType> { panic!("literal count arguments settle from syntax") };
+
+    for literal in ["3", "-2", "1_000", "0x10"] {
+        assert_eq!(
+            count_argument_count(Some(literal), &should_not_resolve),
+            FactoryCount::Many,
+            "{literal} is an integer literal"
+        );
+    }
+    assert_eq!(
+        count_argument_count(Some("null"), &should_not_resolve),
+        FactoryCount::One
+    );
+}
+
+#[test]
+fn resolved_count_argument_type_selects_only_certain_branches() {
+    let count_for =
+        |type_name: &str| count_argument_count(Some("$count"), &|| Some(PhpType::parse(type_name)));
+
+    assert_eq!(count_for("int"), FactoryCount::Many);
+    assert_eq!(count_for("positive-int"), FactoryCount::Many);
+    assert_eq!(count_for("null"), FactoryCount::One);
+    assert_eq!(count_for("?int"), FactoryCount::Unknown);
+    assert_eq!(count_for("int|null"), FactoryCount::Unknown);
+    assert_eq!(count_for("mixed"), FactoryCount::Unknown);
+}
+
+#[test]
+fn an_ordinary_count_call_never_resolves_its_argument_for_factory_state() {
+    let receiver = vec![ResolvedType::from_arc(Arc::new(make_class(
+        "Illuminate\\Database\\Query\\Builder",
+    )))];
+    let resolutions = Cell::new(0);
+    let first_arg_type = || {
+        resolutions.set(resolutions.get() + 1);
+        Some(PhpType::string())
+    };
+    let ctx = ResolutionCtx {
+        current_class: None,
+        all_classes: &[],
+        content: "",
+        cursor_offset: 0,
+        class_loader: &no_loader,
+        backend: None,
+        laravel_macro_this_resolver: None,
+        resolved_class_cache: None,
+        function_loader: None,
+        scope_var_resolver: None,
+        is_in_static_method: false,
+        preserve_static: false,
+    };
+
+    assert_eq!(
+        fluent_factory_count(&receiver, "count", Some("$column"), &first_arg_type, &ctx),
+        None
+    );
+    assert_eq!(resolutions.get(), 0);
 }
 
 #[test]
@@ -297,6 +367,64 @@ fn model_type_ignores_generics_for_other_parents() {
         factory_model_type(&factory, &no_loader),
         None,
         "only an @extends Factory<…> annotation names the model"
+    );
+}
+
+#[test]
+fn model_type_prefers_declared_property_over_convention() {
+    let mut factory = make_class("DraftFactory");
+    factory.file_namespace = Some(atom("Database\\Factories"));
+    factory.parent_class = Some(atom(FACTORY_BASE_FQN));
+    factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Domain\\PublishedDraft")));
+
+    let mut factory_base = make_class(FACTORY_BASE_FQN);
+    factory_base.template_params = vec![atom("TModel")];
+    let conventional_model = make_class("App\\Models\\Draft");
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            FACTORY_BASE_FQN => Some(Arc::new(factory_base.clone())),
+            "App\\Models\\Draft" => Some(Arc::new(conventional_model.clone())),
+            _ => None,
+        }
+    };
+
+    assert_eq!(
+        factory_model_type(&factory, &loader).map(|ty| ty.to_string()),
+        Some("App\\Domain\\PublishedDraft".to_string())
+    );
+}
+
+#[test]
+fn model_type_prefers_forwarded_generic_over_declared_property() {
+    let mut factory = make_class("DraftFactory");
+    factory.parent_class = Some(atom("Database\\Factories\\DocumentFactory"));
+    factory.extends_generics = vec![(
+        atom("Database\\Factories\\DocumentFactory"),
+        vec![PhpType::named(atom("App\\Domain\\PublishedDraft"))],
+    )];
+    factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\WrongDraft")));
+
+    let mut document_factory = make_class("DocumentFactory");
+    document_factory.file_namespace = Some(atom("Database\\Factories"));
+    document_factory.parent_class = Some(atom(FACTORY_BASE_FQN));
+    document_factory.template_params = vec![atom("TModel")];
+    document_factory.extends_generics =
+        vec![(atom(FACTORY_BASE_FQN), vec![PhpType::named(atom("TModel"))])];
+
+    let mut factory_base = make_class(FACTORY_BASE_FQN);
+    factory_base.template_params = vec![atom("TModel")];
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
+            FACTORY_BASE_FQN => Some(Arc::new(factory_base.clone())),
+            _ => None,
+        }
+    };
+
+    assert_eq!(
+        factory_model_type(&factory, &loader).map(|ty| ty.to_string()),
+        Some("App\\Domain\\PublishedDraft".to_string())
     );
 }
 
