@@ -106,9 +106,15 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
         Backend::resolve_inline_arg_raw_type(self.arg_text(index)?, self.ctx)
     }
 
-    fn is_false_literal(&self, index: usize) -> bool {
-        self.arg_text(index)
-            .is_some_and(|arg| arg.eq_ignore_ascii_case("false"))
+    fn bool_literal(&self, index: usize) -> Option<bool> {
+        let arg = self.arg_text(index)?;
+        if arg.eq_ignore_ascii_case("true") {
+            Some(true)
+        } else if arg.eq_ignore_ascii_case("false") {
+            Some(false)
+        } else {
+            None
+        }
     }
 
     fn has_arg(&self, index: usize) -> bool {
@@ -116,8 +122,17 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     }
 
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
-        crate::completion::source::helpers::extract_closure_return_type_from_text(
-            self.arg_text(index)?,
+        let text = self.arg_text(index)?;
+        crate::completion::source::helpers::extract_closure_return_type_from_text(text).or_else(
+            || {
+                // See the AST counterpart: a callable string names a
+                // function whose declared return the call hands back.
+                let name =
+                    crate::type_engine::variable::array_func_rules::callable_string_function_name(
+                        text,
+                    )?;
+                (self.ctx.function_loader?)(name, 0)?.return_type
+            },
         )
     }
 

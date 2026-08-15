@@ -36,13 +36,15 @@ pub(crate) mod rhs_resolution;
 // `array_values` is deliberately absent: it renumbers the keys, so it
 // preserves the element type but not the key type. Its `list<TValue>`
 // result comes from the stub patch in `crate::stub_patches` instead.
+// `array_chunk` is absent for a different reason: it adds a level of
+// nesting rather than rearranging entries, so it has its own rule in
+// `array_func_rules`.
 pub(crate) const ARRAY_PRESERVING_FUNCS: &[&str] = &[
     "array_filter",
     "array_unique",
     "array_reverse",
     "array_slice",
     "array_splice",
-    "array_chunk",
     "array_diff",
     "array_diff_assoc",
     "array_diff_key",

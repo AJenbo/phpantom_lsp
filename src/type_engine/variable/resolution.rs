@@ -2166,15 +2166,21 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         let from_docblock =
             docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
                 .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
-        if let Some(raw) = from_docblock {
-            return Some(raw);
+
+        // With the forward walker active its scope is a map read, cheap
+        // enough to consult alongside the annotation.  Without it the
+        // fallback below is a full re-resolution of the variable, so an
+        // annotation that already answered is taken as-is.
+        if ctx.scope_var_resolver.is_none()
+            && let Some(annotated) = from_docblock
+        {
+            return Some(annotated);
         }
 
-        // No docblock — resolve the variable's type to extract the
-        // raw iterable type.  This handles cases like
-        // `$users = $this->getUsers(); array_pop($users)` where
-        // `$users` has no `@var` annotation but was assigned from a
-        // method returning `list<User>`.
+        // Resolve the variable's type to extract the raw iterable type.
+        // This handles cases like `$users = $this->getUsers();
+        // array_pop($users)` where `$users` has no `@var` annotation but was
+        // assigned from a method returning `list<User>`.
         //
         // When a scope_var_resolver is available (forward walker is
         // active), read from the in-progress ScopeState.  Falling
@@ -2200,11 +2206,27 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
                 ctx.loaders,
             )
         };
-        if !resolved.is_empty() {
-            let joined = crate::types::ResolvedType::types_joined(&resolved);
-            if joined.extract_value_type(true).is_some() {
-                return Some(joined);
+        let from_scope = (!resolved.is_empty())
+            .then(|| crate::types::ResolvedType::types_joined(&resolved))
+            // `skip_scalar` stays off: a `list<int>` carries an element type
+            // every bit as usable as a `list<User>`, and asking whether the
+            // element is non-scalar drops every scalar-element array back to
+            // the annotation the walker has since narrowed.
+            .filter(|joined| joined.extract_value_type(false).is_some());
+
+        match (from_docblock, from_scope) {
+            // The annotation is where the walker's own type came from, so
+            // when the two disagree the walker has narrowed it since
+            // (`assert($a !== [])` proving `non-empty-array`) and its answer
+            // is the one that describes the value at this call.  Anything
+            // wider than the annotation is the walker having lost the
+            // generics on the way through, and the annotation still stands.
+            (Some(annotated), Some(scoped)) if scoped.is_subtype_of(&annotated) => {
+                return Some(scoped);
             }
+            (Some(annotated), _) => return Some(annotated),
+            (None, Some(scoped)) => return Some(scoped),
+            (None, None) => {}
         }
     }
     // Fall back to the unified pipeline (method calls, etc.)

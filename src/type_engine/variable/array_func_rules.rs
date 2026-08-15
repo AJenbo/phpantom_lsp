@@ -17,7 +17,7 @@
 /// the handful of questions the rules ask about an argument, and the
 /// rules stay in one place so a fix to `array_map`'s element type
 /// reaches every consumer.
-use crate::php_type::{PhpType, TypeKind, is_array_like_name};
+use crate::php_type::{PhpType, TypeKind, is_array_like_name, is_non_empty_array_name};
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -27,8 +27,10 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// `list<User>`), or `None` when it cannot be resolved.
     fn arg_raw_type(&self, index: usize) -> Option<PhpType>;
 
-    /// Whether the argument at `index` is the literal `false`.
-    fn is_false_literal(&self, index: usize) -> bool;
+    /// The argument at `index` when it is written as a `true` or `false`
+    /// literal, `None` for every other expression (including one that
+    /// merely *resolves* to a bool).
+    fn bool_literal(&self, index: usize) -> Option<bool>;
 
     /// Whether an argument was written at `index`.
     ///
@@ -38,9 +40,10 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// `array_filter($a, $cb)` differ only in this.
     fn has_arg(&self, index: usize) -> bool;
 
-    /// The return type declared on the closure or arrow function at
-    /// `index`.  `None` when the argument is not an inline function or
-    /// declares no return type.
+    /// The return type the callback at `index` declares: the `: T` hint of
+    /// an inline closure or arrow function, or the declared return of the
+    /// function a callable string names (`'intval'`).  `None` when the
+    /// argument is neither, or declares no return type.
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType>;
 
     /// The return type inferred from the body of the closure or arrow
@@ -73,6 +76,12 @@ pub(in crate::type_engine) fn array_func_raw_type(
     func_name: &str,
     args: &dyn ArrayFuncArgs,
 ) -> Option<PhpType> {
+    // A fully-qualified call (`\array_filter($a)`) carries the leading
+    // separator in its identifier text, while every table below is keyed on
+    // the bare name.  Normalising here covers both the AST and the
+    // text-driven caller at once.
+    let func_name = func_name.trim_start_matches('\\');
+
     // Type-preserving functions: output array has same element type.
     if ARRAY_PRESERVING_FUNCS
         .iter()
@@ -112,12 +121,30 @@ pub(in crate::type_engine) fn array_func_raw_type(
         }
     }
 
+    // `array_chunk` is the one splitter that adds a level of nesting rather
+    // than rearranging entries: the result's elements are arrays of the
+    // input's elements. The chunks are renumbered from zero unless
+    // `$preserve_keys` asks for the original keys back.
+    if func_name.eq_ignore_ascii_case("array_chunk") {
+        let raw = args.arg_raw_type(0)?.generalized_array();
+        let value = raw.extract_value_type(false)?.clone();
+        let chunk = if args.bool_literal(2) == Some(true) {
+            match array_key_domain(&raw) {
+                Some(key) => PhpType::generic_array(key, value),
+                None => PhpType::generic_array_val(value),
+            }
+        } else {
+            PhpType::list(value)
+        };
+        // The outer array is always renumbered, whatever the inner keys do.
+        return Some(PhpType::list(chunk));
+    }
+
     // array_map: callback is first arg, array is second.
     // The callback's return type determines the output element type.
-    if func_name.eq_ignore_ascii_case("array_map")
-        && let Some(element_type) = array_map_element_type(args)
-    {
-        return Some(PhpType::list(element_type.widen_scalar_literals()));
+    if func_name.eq_ignore_ascii_case("array_map") {
+        let element = array_map_element_type(args)?.widen_scalar_literals();
+        return Some(array_map_container(element, args));
     }
 
     // iterator_to_array: converts an iterator to an array, preserving
@@ -132,7 +159,7 @@ pub(in crate::type_engine) fn array_func_raw_type(
             .map(|value| value.widen_scalar_literals());
         // `preserve_keys: false` renumbers the result, so the key type
         // the iterator declared no longer describes it.
-        if args.is_false_literal(1) {
+        if args.bool_literal(1) == Some(false) {
             return Some(val.map_or_else(PhpType::array, PhpType::list));
         }
         let key = raw
@@ -162,6 +189,10 @@ pub(in crate::type_engine) fn array_func_element_type(
     func_name: &str,
     args: &dyn ArrayFuncArgs,
 ) -> Option<PhpType> {
+    // See the matching note in [`array_func_raw_type`]: `\array_pop($a)`
+    // reaches here spelled with its leading separator.
+    let func_name = func_name.trim_start_matches('\\');
+
     if ARRAY_ELEMENT_FUNCS
         .iter()
         .any(|f| f.eq_ignore_ascii_case(func_name))
@@ -178,6 +209,24 @@ pub(in crate::type_engine) fn array_func_element_type(
     // cannot be expressed as a `@template` on the stub: `array<TValue>` with
     // `@return TValue` would answer `string` for `array_sum(list<string>)`
     // rather than the `int|float` PHP actually produces.
+    // `max`/`min` hand back one of the values they were given, which the
+    // stub can only spell as `mixed`.
+    if func_name.eq_ignore_ascii_case("max") || func_name.eq_ignore_ascii_case("min") {
+        return min_max_type(args);
+    }
+
+    // The key readers are stubbed `TKey|null` because an empty array has no
+    // key to report. An argument that proves it has entries rules that out.
+    if func_name.eq_ignore_ascii_case("array_key_first")
+        || func_name.eq_ignore_ascii_case("array_key_last")
+        || func_name.eq_ignore_ascii_case("key")
+    {
+        let raw = args.arg_raw_type(0)?;
+        return is_provably_non_empty(&raw)
+            .then(|| array_key_domain(&raw))
+            .flatten();
+    }
+
     if matches!(func_name, "array_sum" | "array_product") {
         let element = args.arg_raw_type(0)?.iterable_element_type()?;
         let members: Vec<&PhpType> = match element.kind() {
@@ -203,6 +252,120 @@ pub(in crate::type_engine) fn array_func_element_type(
     }
 
     None
+}
+
+/// The function a callable string names (`'intval'`, `"\\strlen"`), with
+/// any leading namespace separator stripped.
+///
+/// PHP resolves a callable string against the global namespace, ignoring
+/// the calling file's `use` table, so the name needs no further
+/// qualification. Returns `None` for anything that is not a plain quoted
+/// name: a `'Foo::bar'` string or a `[$obj, 'method']` pair names a method,
+/// which the callers here do not resolve.
+pub(in crate::type_engine) fn callable_string_function_name(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    let inner = trimmed
+        .strip_prefix('\'')
+        .and_then(|rest| rest.strip_suffix('\''))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix('"'))
+        })?;
+    let name = inner.trim_start_matches('\\');
+    let is_name = !name.is_empty()
+        && !name.starts_with(|c: char| c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\');
+    is_name.then_some(name)
+}
+
+/// The type of `max()`/`min()`'s result.
+///
+/// PHP gives the function two shapes: handed a single iterable it compares
+/// the entries and returns one of them, and handed several values it
+/// compares those. Either way the result is one of the values that went in,
+/// so the answer is a member of what was passed rather than a new type.
+///
+/// Returns `None` as soon as one argument cannot be resolved, since a union
+/// missing a member would be narrower than the call can promise.
+fn min_max_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if !args.has_arg(1) {
+        return args.arg_raw_type(0)?.iterable_element_type();
+    }
+
+    let mut members = Vec::new();
+    let mut index = 0;
+    while args.has_arg(index) {
+        members.push(args.arg_raw_type(index)?.widen_scalar_literals());
+        index += 1;
+    }
+    match members.len() {
+        0 => None,
+        1 => members.pop(),
+        _ => Some(PhpType::union(members)),
+    }
+}
+
+/// The key type an array-like carries, as a domain a caller may report
+/// verbatim.
+///
+/// [`PhpType::iterable_key_type`] answers `int` for the shapes that name
+/// only a value type (`array<T>`, `T[]`, bare `array`), which is the useful
+/// guess for iteration but an over-claim for anything reporting a key back
+/// to the user. Those come back as `None` here so the caller can decline
+/// rather than invent an `int` the argument never promised.
+fn array_key_domain(ty: &PhpType) -> Option<PhpType> {
+    (!ty.has_open_key_domain())
+        .then(|| ty.iterable_key_type())
+        .flatten()
+}
+
+/// Whether `ty` promises at least one entry.
+fn is_provably_non_empty(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(name) => is_non_empty_array_name(name.as_str()),
+        TypeKind::Generic(g) => is_non_empty_array_name(g.name.as_str()),
+        // An optional entry (`array{a?: int}`) can be the only one there is,
+        // so a shape is only non-empty once one entry is required.
+        TypeKind::ArrayShape(entries) => entries.iter().any(|entry| !entry.optional),
+        TypeKind::Union(members) => members.iter().all(is_provably_non_empty),
+        _ => false,
+    }
+}
+
+/// The container `array_map` returns around `element`.
+///
+/// Handed one array, PHP runs the callback over each entry and keeps the
+/// keys; handed several it zips them into a fresh list.
+fn array_map_container(element: PhpType, args: &dyn ArrayFuncArgs) -> PhpType {
+    if args.has_arg(2) {
+        return PhpType::list(element);
+    }
+    let Some(input) = args.arg_raw_type(1).map(|ty| ty.generalized_array()) else {
+        return PhpType::list(element);
+    };
+    // A `list` input keeps its `0, 1, 2, …` keys, which is more than the
+    // `array<int, T>` its key type alone would say.
+    if is_list_type(&input) {
+        return PhpType::list(element);
+    }
+    match input.iterable_key_type() {
+        Some(key) => PhpType::generic_array(key, element),
+        None => PhpType::list(element),
+    }
+}
+
+/// Whether `ty` promises the sequential integer keys a `list` has.
+fn is_list_type(ty: &PhpType) -> bool {
+    match ty.raw_kind() {
+        TypeKind::Named(name) => crate::php_type::is_list_name(name.as_str()),
+        TypeKind::Generic(g) => crate::php_type::is_list_name(g.name.as_str()),
+        TypeKind::ListShape(_) => true,
+        TypeKind::Union(members) => members.iter().all(is_list_type),
+        _ => false,
+    }
 }
 
 /// Rebuild an iterable type with its element narrowed to the members that

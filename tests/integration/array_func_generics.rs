@@ -476,3 +476,120 @@ function probe(string $contents, int $start): void {
         ],
     );
 }
+
+/// The array-function rules are keyed on the bare function name, but a call
+/// written `\array_sum($x)` reaches them spelled with the leading namespace
+/// separator. Writing the separator used to disable every one of them.
+#[test]
+fn a_fully_qualified_call_still_gets_the_array_rules() {
+    let content = r#"<?php
+class User {}
+/**
+ * @param list<int> $counts
+ * @param list<User> $users
+ */
+function probe(array $counts, array $users): void {
+    $total = \array_sum($counts);
+    $last = \array_pop($users);
+    $kept = \array_filter($users);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$total", "int"),
+            ("$last", "User"),
+            ("$kept", "list<User>"),
+        ],
+    );
+}
+
+/// `array_chunk()` is the one splitter that adds a level of nesting rather
+/// than rearranging entries, so its elements are arrays of the input's
+/// elements. Grouping it with the type-preserving functions handed back the
+/// input's element type and reported each chunk as a single entry.
+#[test]
+fn array_chunk_nests_the_elements_it_groups() {
+    let content = r#"<?php
+/**
+ * @param array<int, string> $ids
+ * @param array<string, int> $byName
+ */
+function probe(array $ids, array $byName): void {
+    $batches = array_chunk($ids, 500);
+    $keyed = array_chunk($byName, 10, true);
+    $renumbered = array_chunk($byName, 10, false);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$batches", "list<list<string>>"),
+            ("$keyed", "list<array<string, int>>"),
+            ("$renumbered", "list<list<int>>"),
+        ],
+    );
+}
+
+/// `array_key_first`/`array_key_last`/`key` are stubbed `TKey|null` because
+/// an empty array has no key to report. An argument that proves it has
+/// entries rules the `null` out; one that does not keeps it.
+#[test]
+fn the_key_readers_drop_null_for_a_non_empty_array() {
+    let content = r#"<?php
+/**
+ * @param array<int, float> $weights
+ * @param non-empty-array<string, int> $tallies
+ */
+function probe(array $weights, array $tallies): void {
+    $maybe = array_key_last($weights);
+    assert($weights !== []);
+    $proven = array_key_last($weights);
+    $declared = array_key_first($tallies);
+    $current = key($tallies);
+    $literal = array_key_first(['a' => 1, 'b' => 2]);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$maybe", "int|null"),
+            ("$proven", "int"),
+            ("$declared", "string"),
+            ("$current", "string"),
+            ("$literal", "string"),
+        ],
+    );
+}
+
+/// `array_map()` resolves its element type from the callback's return, which
+/// used to mean an inline closure only. A callable string names a function
+/// whose declared return says the same thing, and either way the single-array
+/// form keeps the input's keys instead of renumbering them into a list.
+#[test]
+fn array_map_reads_a_named_callback_and_keeps_the_input_keys() {
+    let content = r#"<?php
+/**
+ * @param array<int, string> $rows
+ * @param array<string, string> $byName
+ * @param list<string> $lines
+ */
+function probe(array $rows, array $byName, array $lines): void {
+    $named = array_map('intval', $rows);
+    $inline = array_map(fn (string $s): int => (int) $s, $rows);
+    $keyed = array_map('intval', $byName);
+    $sequential = array_map('intval', $lines);
+    $zipped = array_map('str_repeat', $lines, $lines);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$named", "array<int, int>"),
+            ("$inline", "array<int, int>"),
+            ("$keyed", "array<string, int>"),
+            ("$sequential", "list<int>"),
+            ("$zipped", "list<string>"),
+        ],
+    );
+}

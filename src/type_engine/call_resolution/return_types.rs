@@ -2143,6 +2143,31 @@ pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Opti
             return Some(PhpType::literal_int(value.to_string()));
         }
     }
+    // `??` binds looser than `?:`, so it is split first: the left operand of
+    // `$a ?? $b ?: $c` is `$a` and the right is the whole ternary.  The
+    // coalesce only yields its left operand when that operand is not null,
+    // so the `null` arm cannot survive into the result.
+    if let Some((left, right)) = split_top_level_coalesce(text) {
+        // A left operand that is only ever null contributes nothing, which
+        // `non_null_type` reports as `None` — the same answer an unresolvable
+        // operand gives, and the right operand carries the result either way.
+        let left_ty = Backend::resolve_arg_text_to_type(left, ctx).and_then(|ty| {
+            if ty.is_null() {
+                None
+            } else {
+                Some(ty.non_null_type().unwrap_or(ty))
+            }
+        });
+        let right_ty = Backend::resolve_arg_text_to_type(right, ctx);
+        return match (left_ty, right_ty) {
+            (Some(l), Some(r)) if l == r => Some(l),
+            (Some(l), Some(r)) => Some(PhpType::union(vec![l, r])),
+            (Some(l), None) => Some(l),
+            (None, Some(r)) => Some(r),
+            (None, None) => None,
+        };
+    }
+
     if let Some((left, right)) = split_top_level_elvis(text) {
         let left_ty = Backend::resolve_arg_text_to_type(left, ctx);
         let right_ty = Backend::resolve_arg_text_to_type(right, ctx);
@@ -2208,6 +2233,62 @@ fn contains_top_level_concat(text: &str) -> bool {
         }
     }
     false
+}
+
+/// Split `text` at the first top-level null-coalescing operator (`??`),
+/// respecting quotes, parens/brackets, and the `?->` and `?:` operators
+/// (neither of which is this).
+///
+/// `??` is right-associative, so splitting at the *first* one leaves the
+/// rest of a `$a ?? $b ?? $c` chain in the right operand for the caller to
+/// resolve the same way. The assignment form `??=` is not an expression
+/// operator and is left alone.
+fn split_top_level_coalesce(text: &str) -> Option<(&str, &str)> {
+    let bytes = text.as_bytes();
+    let mut depth: u32 = 0;
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' | b'"' => {
+                quote = Some(b);
+                i += 1;
+            }
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'?' if depth == 0 && bytes[i..].starts_with(b"??") => {
+                if bytes[i..].starts_with(b"??=") {
+                    return None;
+                }
+                let left = text[..i].trim();
+                let right = text[i + 2..].trim();
+                if left.is_empty() || right.is_empty() {
+                    return None;
+                }
+                return Some((left, right));
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// Split `text` at a top-level elvis operator (`?:`), respecting quotes,

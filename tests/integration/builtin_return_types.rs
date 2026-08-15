@@ -238,3 +238,62 @@ function probe(\SimpleXMLElement $xml, string $path): void {
         ],
     );
 }
+
+/// `str_replace()`'s conditional return is decided by the subject's type,
+/// which means the subject expression has to resolve to one. A `??` argument
+/// came back untyped and left the call carrying both branches.
+#[test]
+fn a_coalesce_argument_decides_a_conditional_return() {
+    let content = r#"<?php
+/**
+ * @param array<string, string> $rows
+ */
+function probe(?string $error, ?array $rows, string $fallback): void {
+    $coalesced = str_replace('Error: ', '', $error ?? '');
+    $chained = str_replace('Error: ', '', $error ?? $fallback);
+    $arrayArm = str_replace('Error: ', '', $rows ?? []);
+    $eitherArm = str_replace('Error: ', '', $error ?? $rows);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$coalesced", "string"),
+            ("$chained", "string"),
+            ("$arrayArm", "array<array-key, string>"),
+            ("$eitherArm", "array<array-key, string>|string"),
+        ],
+    );
+}
+
+/// `max()`/`min()` hand back one of the values they were given: an element of
+/// a single iterable argument, or one of the arguments themselves. The stubs
+/// can only say `mixed`, which lets any result through unchecked.
+#[test]
+fn min_and_max_answer_with_the_values_they_compare() {
+    let content = r#"<?php
+/**
+ * @param list<string> $names
+ * @param array<int, float> $weights
+ */
+function probe(array $names, array $weights, int $count, mixed $anything): void {
+    $letter = max("a", "b");
+    $widest = max($names);
+    $mixedNumbers = min(1, 2.5);
+    $lightest = min($weights);
+    $bounded = max($count, 0);
+    $unknown = max($anything, $anything);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$letter", "string"),
+            ("$widest", "string"),
+            ("$mixedNumbers", "int|float"),
+            ("$lightest", "float"),
+            ("$bounded", "int"),
+            ("$unknown", "mixed"),
+        ],
+    );
+}

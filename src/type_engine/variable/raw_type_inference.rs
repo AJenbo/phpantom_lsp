@@ -376,11 +376,12 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         super::resolution::resolve_arg_raw_type(expr, self.ctx)
     }
 
-    fn is_false_literal(&self, index: usize) -> bool {
-        matches!(
-            super::resolution::nth_arg_expr(self.args, index),
-            Some(Expression::Literal(Literal::False(_)))
-        )
+    fn bool_literal(&self, index: usize) -> Option<bool> {
+        match super::resolution::nth_arg_expr(self.args, index)? {
+            Expression::Literal(Literal::True(_)) => Some(true),
+            Expression::Literal(Literal::False(_)) => Some(false),
+            _ => None,
+        }
     }
 
     fn has_arg(&self, index: usize) -> bool {
@@ -397,6 +398,14 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
                 .return_type_hint
                 .as_ref()
                 .map(|rth| extract_hint_type(&rth.hint)),
+            // `array_map('intval', $xs)` names its callback instead of
+            // spelling it out; the named function's own return type is what
+            // the call produces.
+            Expression::Literal(Literal::String(s)) => {
+                let name =
+                    super::array_func_rules::callable_string_function_name(bytes_to_str(s.raw))?;
+                (self.ctx.loaders.function_loader?)(name, 0)?.return_type
+            }
             _ => None,
         }
     }

@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B51  | [`instanceof` does not eliminate a class from a union in the guarded branch](todo/bugs.md#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch) | High        | High        |
-| B75  | [A builtin's return type is not derived from the arguments actually passed](todo/bugs.md#b75-a-builtins-return-type-is-not-derived-from-the-arguments-actually-passed) (six sub-cases, one PR) | Medium      | Medium-High |
 | B62  | [PHPUnit's `assertNotNull`/`assertNotFalse` are not recognized as narrowing assertions](todo/bugs.md#b62-phpunits-assertnotnullassertnotfalse-are-not-recognized-as-narrowing-assertions) | Medium      | Medium      |
 | B70  | [`is_array()` does not narrow a union-typed parameter before an array-dimension fetch](todo/bugs.md#b70-is_array-does-not-narrow-a-union-typed-parameter-before-an-array-dimension-fetch) | Medium      | High        |
 | B52  | [A reassigned-in-guard variable is not merged as excluding its bad value](todo/bugs.md#b52-a-variable-reassigned-inside-a-guard-that-catches-its-bad-value-is-not-merged-as-excluding-that-value) | Medium      | High        |
