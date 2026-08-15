@@ -105,13 +105,16 @@ pub(crate) fn resolve_target_classes_expr(
         }
     }
 
-    // Cache key per link, computed once and reused for the probe below and
-    // the store in `resolve_chain_link`.  `None` marks a link that must not
-    // be cached.
-    let cache_keys: Vec<Option<String>> = spine
-        .iter()
-        .map(|(node, _)| chain_cache_key(node, ctx))
-        .collect();
+    // Cache key per link, reused for the probe below and the store in
+    // `resolve_chain_link`.  `None` marks a link that must not be cached.
+    //
+    // Keys are built as the probe reaches each link, never up front: a key
+    // serializes its whole sub-expression, so building one per link costs
+    // O(depth²) for the spine.  The probe usually answers at the outermost
+    // link (a repeated chain prefix is already cached), which would leave
+    // every key below it built and thrown away — the dominant cost on a
+    // long fluent chain.
+    let mut cache_keys: Vec<Option<String>> = Vec::with_capacity(spine.len());
 
     // Probe the outermost link inward for an answer that does not depend on
     // the receiver, mirroring the checks the recursive form made on its way
@@ -120,6 +123,7 @@ pub(crate) fn resolve_target_classes_expr(
     let mut receiver: Option<Vec<ResolvedType>> = None;
     let mut unresolved = spine.len();
     for (index, &(node, _)) in spine.iter().enumerate() {
+        cache_keys.push(chain_cache_key(node, ctx));
         let hit = cache_keys[index]
             .as_deref()
             .and_then(lookup_chain_cache)

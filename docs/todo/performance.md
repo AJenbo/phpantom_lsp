@@ -898,9 +898,12 @@ once per link:
    result would make it linear.
 
 2. **Chain cache keys are rebuilt per link.** `chain_cache_key` calls
-   `SubjectExpr::to_subject_text` for every link of the spine, again
-   rendering the whole prefix. The keys of a spine are prefixes of one
-   another, so one render plus per-link lengths would do.
+   `SubjectExpr::to_subject_text`, which renders the whole prefix. A
+   spine the chain cache answers at its outermost link only pays for one
+   key, but a cold spine, or any resolution running without the cache
+   active, needs a key per link and so renders O(n²) bytes. The keys of a
+   spine are prefixes of one another, so one render plus per-link lengths
+   would do.
 
 **Where to look:** `symbol_map/extraction/expressions/calls.rs` for the
 first, `chain_cache_key` in `type_engine/resolver/mod.rs` for the second.
@@ -967,3 +970,77 @@ not just recorded for later inspection:
 `benchmark-pr` jobs; `benches/memory_usage.py`; `benches/references.rs`
 and `benches/laravel_completion.rs` for benches that exist but aren't
 CI-gated yet.
+
+---
+
+## P52. The diagnostic benchmarks measure a path no consumer takes
+
+**Impact: Medium · Complexity: Low**
+
+`bench_diagnostics_phpactor_fixtures` in `benches/completion.rs` calls
+four collectors directly:
+
+```rust
+backend.collect_deprecated_diagnostics(&uri, content, &mut out);
+backend.collect_unused_import_diagnostics(&uri, content, &mut out);
+backend.collect_unknown_class_diagnostics(&uri, content, &mut out);
+backend.collect_unknown_member_diagnostics(&uri, content, &mut out);
+```
+
+No consumer does this. Every real caller goes through
+`collect_slow_diagnostics_observed`, which first activates the chain
+resolution cache, the type-engine caches, and the forward-walked
+diagnostic scope cache, then runs the collectors in an order chosen so
+later ones read what earlier ones cached. The benchmark activates none
+of them and runs `deprecated_usage` first, cold, where production runs
+it last against warm caches.
+
+The result is a tracked number that moves for reasons users never
+experience. On the `method_chain` fixture the benchmark reports roughly
+twice the time the production pass takes on the same file while running
+a quarter of the collectors, and an optimisation to the cached path
+shows up as a fraction of its real effect: making chain cache keys lazy
+measured -25% on the production pass and -3.7% here, because without an
+active cache the probe never hits early and every key is needed anyway.
+
+Point the benchmark at `collect_slow_diagnostics`, so it measures what
+an editor keystroke and an `analyze` run actually pay for. This resets
+the tracked history for `diagnostics/fixture/*` once, which is worth it
+for a number that tracks the real path. Keep a separate uncached case
+only if there is a consumer that runs collectors without the guards.
+
+**Where to look:** `bench_diagnostics_phpactor_fixtures` in
+`benches/completion.rs`; `collect_slow_diagnostics_observed` in
+`diagnostics/mod.rs` for the guards and the collector order.
+
+---
+
+## P53. The deprecated collector deep-copies a class per member access
+
+**Impact: Medium · Complexity: Low**
+
+`collect_deprecated_diagnostics` resolves each member access to a class
+and then clones the whole `ClassInfo` out of the `Arc` it just got:
+
+```rust
+.and_then(|name| self.find_or_load_class(&name))
+.map(|arc| ClassInfo::clone(&arc));
+```
+
+`resolve_variable_subject` does the same on its own path, and the
+per-variable cache stores `Option<ClassInfo>` rather than
+`Option<Arc<ClassInfo>>`, so its hits clone too. The class is only ever
+read afterwards (`get_method`, `get_property`, and a `&ClassInfo`
+argument to `resolve_class_fully_cached`), so every one of those copies
+is wasted, and the cost scales with the class's member count: a file
+whose accesses land on a large resolved class (an Eloquent `Builder`, a
+facade's concrete binding) pays for a full copy of its methods,
+properties, and constants once per access.
+
+Hold `Arc<ClassInfo>` through the collector instead. Both producers
+already have one, deref coercion covers the read sites, and the
+`enclosing_class` clone a few lines below is the same pattern.
+
+**Where to look:** `collect_deprecated_diagnostics` and
+`resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
+`var_type_cache` declaration at the top of the collector.
