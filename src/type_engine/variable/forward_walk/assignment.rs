@@ -110,8 +110,7 @@ pub(crate) fn process_statement<'b>(
                 // Record `&&` and `||` chain snapshots so that member
                 // accesses after an instanceof/null guard see the
                 // narrowed type.  E.g. `return $x instanceof Foo && $x->bar()`
-                record_and_chain_snapshots(val, scope, ctx);
-                record_or_chain_snapshots(val, scope, ctx);
+                record_short_circuit_snapshots(val, scope, ctx);
 
                 // Record narrowed snapshots inside match(true) arms
                 // and ternary instanceof branches.
@@ -168,8 +167,7 @@ pub(crate) fn process_expression_statement<'b>(
     // so that member accesses after an instanceof/null guard see the
     // narrowed type.  E.g. `$x instanceof Foo && $x->bar()` as an
     // expression statement.
-    record_and_chain_snapshots(expr, scope, ctx);
-    record_or_chain_snapshots(expr, scope, ctx);
+    record_short_circuit_snapshots(expr, scope, ctx);
 
     // Record narrowed snapshots inside match(true) arms and ternary
     // instanceof branches within this expression.

@@ -227,98 +227,64 @@ fn record_branch_snapshots<'b>(
 ) {
     record_scope_snapshot(expr.span().start.offset, scope);
     record_scope_snapshot_recursive(expr, scope);
-    record_and_chain_snapshots(expr, scope, ctx);
-    record_or_chain_snapshots(expr, scope, ctx);
+    record_short_circuit_snapshots(expr, scope, ctx);
     record_match_ternary_snapshots(expr, scope, ctx);
 }
 
-/// Record intermediate scope snapshots within `&&` chains.
+/// Which short-circuit operator joins a chain's operands.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChainKind {
+    /// `&&` / `and`: every operand after the first runs only when all
+    /// the ones before it were truthy.
+    And,
+    /// `||` / `or`: every operand after the first runs only when all
+    /// the ones before it were falsy.
+    Or,
+}
+
+/// The short-circuit operator at the root of an expression, if any.
 ///
-/// When the diagnostic scope cache is active and an expression contains
-/// a `&&` chain, this function:
-///
-/// 1. Collects the operands left-to-right.
-/// 2. For each operand after the first, applies instanceof and null
-///    narrowing from all previous operands to a temporary scope.
-/// 3. Records a scope snapshot at the operand's byte offset so that
-///    diagnostic member-access lookups within the operand see the
-///    narrowed types.
-///
-/// This fixes patterns like:
-/// - `return $x instanceof Foo && $x->bar()` — `$x` narrowed to `Foo`
-///   for the `$x->bar()` span.
-/// - `$x !== null && $x->method()` — `$x` narrowed to non-null for
-///   the `$x->method()` span.
-///
-/// The narrowing is applied only to snapshots — it does NOT mutate the
-/// caller's scope, so subsequent statements see the original types.
-pub(crate) fn record_and_chain_snapshots<'b>(
-    expr: &'b Expression<'b>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    if !is_diagnostic_scope_active() {
-        return;
-    }
-
-    let operands = collect_and_chain_operands(expr);
-    if operands.len() < 2 {
-        // Not a `&&` chain — nothing to do.  The scope snapshot at
-        // the statement boundary already covers single expressions.
-        // Match(true) and ternary narrowing are handled separately
-        // by `record_match_ternary_snapshots`.
-        return;
-    }
-
-    // Apply narrowing cumulatively: each operand sees the narrowing
-    // from all previous operands.
-    let mut narrowed_scope = scope.clone();
-    for (i, operand) in operands.iter().enumerate() {
-        if i == 0 {
-            // First operand: apply its narrowing for subsequent operands.
-            apply_condition_narrowing(operand, &mut narrowed_scope, ctx);
-            continue;
-        }
-
-        // Record a snapshot at this operand's start offset so that
-        // member accesses within it see the narrowed types.
-        record_scope_snapshot(operand.span().start.offset, &narrowed_scope);
-
-        // Also recurse into sub-expressions of this operand that might
-        // contain member accesses at deeper byte offsets.  For example,
-        // `is_array($x->errorInfo)` — the access `$x->errorInfo` is
-        // inside a function call argument.
-        record_scope_snapshot_recursive(operand, &narrowed_scope);
-
-        // Refine nested `&&` / `||` chains inside this operand on top of
-        // the accumulated narrowing.  E.g. `$a && ($b instanceof Foo ||
-        // $c) && $a->m()` — the inner `||` operands narrow independently.
-        // These overwrite the coarser snapshots recorded above at the
-        // offsets that carry intra-chain narrowing.
-        record_and_chain_snapshots(operand, &narrowed_scope, ctx);
-        record_or_chain_snapshots(operand, &narrowed_scope, ctx);
-
-        // Apply this operand's narrowing for the next operand.
-        apply_condition_narrowing(operand, &mut narrowed_scope, ctx);
+/// Cheaper than calling the operand collectors just to learn the shape:
+/// this answers the question without allocating, so the descent below
+/// can walk a whole expression tree and only pay for the nodes that
+/// actually are chains.
+fn short_circuit_kind(expr: &Expression<'_>) -> Option<ChainKind> {
+    match expr {
+        Expression::Binary(bin) => match bin.operator {
+            BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => Some(ChainKind::And),
+            BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => Some(ChainKind::Or),
+            _ => None,
+        },
+        Expression::Parenthesized(inner) => short_circuit_kind(inner.expression),
+        _ => None,
     }
 }
 
-/// Record intermediate scope snapshots within `||` chains.
+/// Record intermediate scope snapshots within every `&&` / `||` chain
+/// an expression contains.
 ///
-/// The right operand of `||` executes only when every preceding
-/// operand evaluated to false, so each operand after the first sees
-/// the *inverse* narrowing of all operands before it. This is the
-/// mirror of [`record_and_chain_snapshots`]:
+/// A chain proves something about its own operands: the right operand of
+/// `&&` runs only when the left was truthy, and the right operand of
+/// `||` only when the left was falsy.  For each operand after the first
+/// this records a scope snapshot carrying the accumulated proof, so that
+/// diagnostic lookups inside that operand see the narrowed types:
 ///
-/// - `!$x instanceof Foo || $x->bar()` — `$x` narrowed to `Foo` for
-///   the `$x->bar()` span (the negation of `!$x instanceof Foo`).
-/// - `$x === null || $x->method()` — `$x` narrowed to non-null for
-///   the `$x->method()` span.
+/// - `$x instanceof Foo && $x->bar()` — `$x` is `Foo` for `$x->bar()`.
+/// - `$x === null || $x->method()` — `$x` is non-null for `$x->method()`.
 ///
-/// As with the `&&` variant, the narrowing is applied only to
-/// snapshots — it does NOT mutate the caller's scope, so subsequent
-/// statements see the original types.
-pub(crate) fn record_or_chain_snapshots<'b>(
+/// The chain does not have to be the whole expression.  A chain reaches
+/// the same conclusions about its operands wherever it sits, so this
+/// descends through the surrounding expression to find chains nested in
+/// an assignment's right-hand side, a call argument, an array element, a
+/// ternary condition, and so on.  Recording only for a chain that was
+/// itself the entire statement is what left
+/// `$ok = is_string($s) && strlen($s);` and
+/// `return is_array($this->d) && count($this->d) ? $this->d[$k] : null;`
+/// reading the un-narrowed type.
+///
+/// The narrowing is applied only to snapshots — it does NOT mutate the
+/// caller's scope, so subsequent statements see the original types.
+pub(crate) fn record_short_circuit_snapshots<'b>(
     expr: &'b Expression<'b>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
@@ -326,41 +292,152 @@ pub(crate) fn record_or_chain_snapshots<'b>(
     if !is_diagnostic_scope_active() {
         return;
     }
+    record_short_circuit_snapshots_inner(expr, scope, ctx);
+}
 
-    let operands = collect_or_chain_operands(expr);
+fn record_short_circuit_snapshots_inner<'b>(
+    expr: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match short_circuit_kind(expr) {
+        Some(ChainKind::And) => {
+            let operands = collect_and_chain_operands(expr);
+            record_chain_snapshots(&operands, ChainKind::And, scope, ctx);
+        }
+        Some(ChainKind::Or) => {
+            let operands = collect_or_chain_operands(expr);
+            record_chain_snapshots(&operands, ChainKind::Or, scope, ctx);
+        }
+        None => descend_for_short_circuit(expr, scope, ctx),
+    }
+}
+
+/// Walk a chain's operands left to right, accumulating what each one
+/// proves for the operands that follow it.
+fn record_chain_snapshots<'b>(
+    operands: &[&'b Expression<'b>],
+    kind: ChainKind,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     if operands.len() < 2 {
-        // Not a `||` chain — the `&&` and match/ternary snapshot
-        // recorders handle the other shapes.
+        // A single operand is not a chain: the parenthesised-unwrapping
+        // in the collectors can flatten `($a)` back to one element even
+        // though the root looked like a chain.
+        descend_for_short_circuit(operands[0], scope, ctx);
         return;
     }
 
-    // Apply the inverse narrowing cumulatively: each operand sees the
-    // negation of all previous operands.
     let mut narrowed_scope = scope.clone();
     for (i, operand) in operands.iter().enumerate() {
-        if i == 0 {
-            // First operand: apply its inverse for subsequent operands.
-            apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx);
-            continue;
+        if i > 0 {
+            // Record a snapshot at this operand's start offset so that
+            // member accesses within it see the narrowed types, and
+            // recurse into its sub-expressions so accesses at deeper
+            // offsets (e.g. `is_array($x->errorInfo)`, where the access
+            // sits inside a call argument) see them too.
+            record_scope_snapshot(operand.span().start.offset, &narrowed_scope);
+            record_scope_snapshot_recursive(operand, &narrowed_scope);
         }
 
-        // Record a snapshot at this operand's start offset, and recurse
-        // into sub-expressions so member accesses nested inside calls,
-        // negations, etc. see the narrowed types.
-        record_scope_snapshot(operand.span().start.offset, &narrowed_scope);
-        record_scope_snapshot_recursive(operand, &narrowed_scope);
+        // Refine chains nested inside this operand on top of the
+        // narrowing accumulated so far.  E.g. `$a && ($b instanceof Foo
+        // || $c) && $a->m()` — the inner `||` operands narrow
+        // independently.  These overwrite the coarser snapshots
+        // recorded above at the offsets that carry intra-chain
+        // narrowing.  The first operand gets this too: it proves
+        // nothing for itself, but `($a instanceof Foo && $a->m()) || $b`
+        // still holds a chain that narrows its own operands.
+        let operand_scope = if i > 0 { &narrowed_scope } else { scope };
+        record_short_circuit_snapshots_inner(operand, operand_scope, ctx);
 
-        // Refine nested `&&` / `||` chains inside this operand on top of
-        // the accumulated inverse narrowing.  E.g. the common idiom
-        // `$parent->child() !== $node || ($x instanceof Foo && !$x->m())`
-        // — the inner `&&` narrows `$x` to `Foo` for `$x->m()`.  These
-        // overwrite the coarser snapshots recorded above at the offsets
-        // that carry intra-chain narrowing.
-        record_and_chain_snapshots(operand, &narrowed_scope, ctx);
-        record_or_chain_snapshots(operand, &narrowed_scope, ctx);
+        match kind {
+            ChainKind::And => apply_condition_narrowing(operand, &mut narrowed_scope, ctx),
+            ChainKind::Or => apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx),
+        }
+    }
+}
 
-        // Apply this operand's inverse for the next operand.
-        apply_condition_narrowing_inverse(operand, &mut narrowed_scope, ctx);
+/// Descend through an expression that is not itself a short-circuit
+/// chain, looking for chains nested inside it.
+///
+/// Ternary branches are deliberately left out: they run under their own
+/// polarity of the condition, and [`record_match_ternary_snapshots`]
+/// already recurses into them with that branch scope.  Descending into
+/// them here with the un-narrowed scope would record a worse snapshot at
+/// the same offsets.  The ternary *condition* is fair game, since it is
+/// evaluated in the enclosing scope.
+fn descend_for_short_circuit<'b>(
+    expr: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let visit = |sub: &'b Expression<'b>| record_short_circuit_snapshots_inner(sub, scope, ctx);
+
+    match expr {
+        Expression::Assignment(assignment) => visit(assignment.rhs),
+        Expression::Parenthesized(inner) => visit(inner.expression),
+        Expression::UnaryPrefix(prefix) => visit(prefix.operand),
+        Expression::Binary(bin) => {
+            visit(bin.lhs);
+            visit(bin.rhs);
+        }
+        Expression::Conditional(conditional) => visit(conditional.condition),
+        Expression::ArrayAccess(aa) => {
+            visit(aa.array);
+            visit(aa.index);
+        }
+        Expression::Call(call) => {
+            let args = match call {
+                Call::Function(fc) => {
+                    visit(fc.function);
+                    &fc.argument_list
+                }
+                Call::Method(mc) => {
+                    visit(mc.object);
+                    &mc.argument_list
+                }
+                Call::NullSafeMethod(mc) => {
+                    visit(mc.object);
+                    &mc.argument_list
+                }
+                Call::StaticMethod(sc) => &sc.argument_list,
+            };
+            for arg in args.arguments.iter() {
+                visit(argument_value(arg));
+            }
+        }
+        Expression::Instantiation(inst) => {
+            if let Some(args) = &inst.argument_list {
+                for arg in args.arguments.iter() {
+                    visit(argument_value(arg));
+                }
+            }
+        }
+        Expression::Array(arr) => {
+            for elem in arr.elements.iter() {
+                match elem {
+                    ArrayElement::KeyValue(kv) => {
+                        visit(kv.key);
+                        visit(kv.value);
+                    }
+                    ArrayElement::Value(val) => visit(val.value),
+                    ArrayElement::Variadic(v) => visit(v.value),
+                    ArrayElement::Missing(_) => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The expression an argument carries, whether it was passed
+/// positionally or by name.
+fn argument_value<'b>(arg: &'b Argument<'b>) -> &'b Expression<'b> {
+    match arg {
+        Argument::Positional(a) => a.value,
+        Argument::Named(a) => a.value,
     }
 }
 

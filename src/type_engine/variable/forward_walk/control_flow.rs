@@ -28,8 +28,7 @@ pub(crate) fn process_if<'b>(
     // — the `$x->method()` span needs `$x` narrowed to non-null.
     // The `||` variant handles the short-circuit guard idiom
     // `!$x instanceof Foo || $x->method()`.
-    record_and_chain_snapshots(if_stmt.condition, scope, ctx);
-    record_or_chain_snapshots(if_stmt.condition, scope, ctx);
+    record_short_circuit_snapshots(if_stmt.condition, scope, ctx);
 
     // Cursor inside the condition: narrowing for member accesses there
     // was already recorded above via the chain snapshots (diagnostics),
@@ -1827,8 +1826,7 @@ pub(crate) fn process_while<'b>(
     }
 
     // Record `&&` and `||` chain snapshots for the while condition.
-    record_and_chain_snapshots(while_stmt.condition, scope, ctx);
-    record_or_chain_snapshots(while_stmt.condition, scope, ctx);
+    record_short_circuit_snapshots(while_stmt.condition, scope, ctx);
 
     let pre_loop_scope = scope.clone();
 
@@ -1982,8 +1980,7 @@ pub(crate) fn process_for<'b>(
     // condition does: `for (; $n && $n->next(); )` reaches `$n->next()`
     // only with `$n` non-null.
     for cond_expr in for_stmt.conditions.iter() {
-        record_and_chain_snapshots(cond_expr, scope, ctx);
-        record_or_chain_snapshots(cond_expr, scope, ctx);
+        record_short_circuit_snapshots(cond_expr, scope, ctx);
     }
 
     let pre_loop_scope = scope.clone();
@@ -2175,8 +2172,7 @@ pub(crate) fn process_do_while<'b>(
     // The condition runs after the body, so its own `&&`/`||` narrowing
     // is recorded against the scope the body leaves behind: that is where
     // `do { $n = next(); } while ($n && $n->ok());` reads `$n` from.
-    record_and_chain_snapshots(dw.condition, scope, ctx);
-    record_or_chain_snapshots(dw.condition, scope, ctx);
+    record_short_circuit_snapshots(dw.condition, scope, ctx);
 
     // After the do-while loop, the condition evaluated to false (that's
     // why the loop exited).  Apply the inverse of the condition to narrow

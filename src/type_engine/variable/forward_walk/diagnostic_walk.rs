@@ -233,8 +233,7 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // get.  Without this, a member access on a parameter narrowed
             // by an earlier conjunct (e.g. `fn($x) => $x instanceof Foo
             // && $x->bar()`) sees the un-narrowed parameter type.
-            record_and_chain_snapshots(arrow.expression, &arrow_scope, ctx);
-            record_or_chain_snapshots(arrow.expression, &arrow_scope, ctx);
+            record_short_circuit_snapshots(arrow.expression, &arrow_scope, ctx);
             if is_diagnostic_scope_active() {
                 record_match_ternary_snapshots(arrow.expression, &arrow_scope, ctx);
             }

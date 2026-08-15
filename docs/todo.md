@@ -34,7 +34,6 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B49  | [Short-circuit `&&`/`\|\|` narrowing does not reach the second operand](todo/bugs.md#b49-short-circuit--narrowing-does-not-reach-the-second-operand)        | High        | High        |
 | B51  | [`instanceof` does not eliminate a class from a union in the guarded branch](todo/bugs.md#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch) | High        | High        |
 | B57  | [A typed class constant loses its literal value](todo/bugs.md#b57-a-typed-class-constant-loses-its-literal-value)                                           | Medium      | Medium      |
 | B75  | [A builtin's return type is not derived from the arguments actually passed](todo/bugs.md#b75-a-builtins-return-type-is-not-derived-from-the-arguments-actually-passed) (six sub-cases, one PR) | Medium      | Medium-High |
@@ -47,7 +46,6 @@ contributor even though it's short.
 | B63  | [`assertInstanceOf`-narrowed return types leak across unrelated call sites](todo/bugs.md#b63-assertinstanceof-narrowed-return-types-leak-across-unrelated-call-sites-of-a-shared-helper) | Medium      | High        |
 | B64  | [A `@template` bound that includes `null` is dropped by the call site](todo/bugs.md#b64-a-template-bound-that-includes-null-is-dropped-by-the-call-site)   | Low-Medium  | Medium-High |
 | B72  | [`!== null` narrowing on a `@var`-annotated variable is not applied before a builtin call](todo/bugs.md#b72--null-narrowing-on-a-var-annotated-variable-is-not-applied-before-a-builtin-call) | Low-Medium  | Medium-High |
-| B50  | [Ternary-branch narrowing is not applied to property/array-element reads](todo/bugs.md#b50-ternary-branch-narrowing-is-not-applied-to-propertyarray-element-reads) | Low-Medium  | Medium-High |
 | B53  | [A repeated identical no-argument call is not recognized as consistent within a scope](todo/bugs.md#b53-a-repeated-identical-no-argument-call-is-not-recognized-as-consistent-within-the-same-truthy-guarded-scope) | Low-Medium  | Medium-High |
 | B61  | [`isset()` narrowing is not propagated through a multi-level chained array-dimension fetch](todo/bugs.md#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch) | Low-Medium  | High        |
 | B71  | [A `continue`-discarded falsy union member is not carried into a variable it's copied into](todo/bugs.md#b71-a-continue-discarded-falsy-union-member-is-not-carried-into-a-variable-the-value-is-copied-into) | Low-Medium  | High        |

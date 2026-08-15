@@ -220,69 +220,6 @@ of the key-type handling here or of
 
 ## Narrowing
 
-### B49. Short-circuit `&&`/`||` narrowing does not reach the second operand
-
-**Impact: High · Complexity: High**
-
-```php
-class Holder
-{
-    /** @var null|array<string, string> */
-    public ?array $data = null;
-
-    public function field(string $key): ?string
-    {
-        return is_array($this->data) && array_key_exists($key, $this->data)  // reported: got null|array<string,string>
-            ? $this->data[$key]
-            : null;
-    }
-}
-
-function useIt(?int $count, Service $s): bool
-{
-    return null === $count || $s->hasMet($count);   // reported: got ?int
-}
-```
-
-Guard-clause narrowing (`if ($x === null) { return; }` followed by
-later code) already works. The gap is narrower: within a single
-short-circuit expression, the left operand's truthy/falsy proof does
-not narrow the type used to evaluate the right operand, and the
-narrowing that does apply to plain local variables is not applied to a
-property access (`$this->data`) at all.
-
-**Fix:** apply the same type-specifier narrowing used for `if`
-conditions to the right operand of `&&`/`||` while evaluating it, and
-extend the narrowing target from "plain variable" to any narrowable
-subject expression (property access included).
-
-### B50. Ternary-branch narrowing is not applied to property/array-element reads
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-/** @var array<string, string>|'{}' $raw not quite — see real shape below */
-function decode(array|string $raw): void
-{
-    $value = isset($raw['x']) && is_string($raw['x']) ? $raw['x'] : '{}';
-    json_decode($value, true);   // fine: $value is string
-}
-
-function display(?string $countryName): string
-{
-    return $countryName ? strtoupper($countryName) : '';   // reported: got ?string
-}
-```
-
-`is_string($x) ? $x : default` and `$x ? f($x) : default` both narrow
-correctly when `$x` is a plain local variable, but not when `$x` is a
-property or array-element read — the same subject-expression gap as
-B49, manifesting inside a ternary condition instead of `&&`/`||`.
-
-**Fix:** once B49's narrowing-target extension lands, verify the
-ternary condition evaluator reuses it for both the `is_string`/`is_array`
-guard form and the plain truthy form.
-
 ### B51. `instanceof` does not eliminate a class from a union in the guarded branch
 
 **Impact: High · Complexity: High**
@@ -535,11 +472,17 @@ narrowed to its `array{...}` shape before the array-dimension fetch
 runs, giving `array<int, string>` for `['args']`. The fetch instead
 appears to read against the pre-narrowed `array|string` union.
 
-**Fix:** confirm `is_array()` guard narrowing is applied to the subject
-of an array-dimension access, not just to later assignments of the bare
-variable — this is the same "subject expression, not just variable"
-gap as B49/B50, applied to a constructor-promoted/union-typed
-parameter instead of a property.
+The narrowing itself is not the missing part. In the same branch,
+`takesArray($violationMessage)` is accepted, so the scope does hold the
+narrowed `array{...}`; only the dimension fetch reads past it and back
+to the declared parameter type. It reproduces the same way for the
+guard-clause spelling (`if (!is_array($v)) { return; }`), which rules
+out the branch-merge as the cause.
+
+**Fix:** make the array-dimension fetch resolve its base expression
+through the scope the fetch is written in, rather than from the
+subject's declared type. The union arm the guard removed is what leaks
+into the element type.
 
 ### B71. A `continue`-discarded falsy union member is not carried into a variable the value is copied into
 

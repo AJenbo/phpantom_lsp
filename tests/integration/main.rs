@@ -180,6 +180,7 @@ mod laravel_validated_shape;
 mod lsp_concurrency;
 mod narrowing_condition_proofs;
 mod narrowing_flow_tracking;
+mod narrowing_nested_short_circuit;
 mod parser;
 mod php_version;
 mod preg_match_shapes;
