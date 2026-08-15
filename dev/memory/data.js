@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786761588942,
+  "lastUpdate": 1786762761361,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21759,6 +21759,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d35c673f5717805a2b3a68405a4baa9ebfe893c3",
+          "message": "A member read off a class constant resolves against the value the\nconstant holds, not the class that declares it",
+          "timestamp": "2026-08-15T04:43:01+02:00",
+          "tree_id": "11a0a0c8607a1c33c4d01f0365bdc903ac82731f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d35c673f5717805a2b3a68405a4baa9ebfe893c3"
+        },
+        "date": 1786762754957,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.4,
             "unit": "MiB"
           }
         ]
