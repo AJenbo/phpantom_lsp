@@ -1443,6 +1443,39 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L49. Unguarded Eloquent mass assignment diagnostic
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l50-create-route-quick-fix-for-an-unresolved-route-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L50. "Create route" quick-fix for an unresolved route name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l51-convert-facade-call-to-dependency-injection-refactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L51. "Convert facade call to dependency injection" refactor
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2158,6 +2191,39 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L49. Unguarded Eloquent mass assignment diagnostic
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l50-create-route-quick-fix-for-an-unresolved-route-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L50. "Create route" quick-fix for an unresolved route name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l51-convert-facade-call-to-dependency-injection-refactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L51. "Convert facade call to dependency injection" refactor
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2847,6 +2913,12 @@ still partially lack:</p>
 <li><strong>Multi-locale hover.</strong> Hover already shows a translation key's value
   for the resolved locale; show the value per locale (with a link to
   each file) instead of just the one.</li>
+<li><strong>Insert missing key quick-fix.</strong> When the unknown-translation-key
+  diagnostic fires on a <code>group.item</code> key whose <code>lang/{locale}/group.php</code>
+  array file already exists, offer a quick-fix that inserts the missing
+  <code>'item' =&gt; '...'</code> entry (existing keys as siblings for placement,
+  empty string as the value). No fix when the group file itself doesn't
+  exist yet; that case still just diagnoses.</li>
 </ul>
 <h4 id="l25-storage-disk-name-strings">L25. Storage disk name strings<a class="headerlink" href="#l25-storage-disk-name-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
@@ -3075,6 +3147,49 @@ string literal) and prefer it over the convention, the way an explicit
 <code>build_factory_relationship_methods</code> in
 <code>virtual_members/laravel/factory.rs</code>, and the convention fallback in
 <code>inheritance/mod.rs</code>.</p>
+<h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>Model::create($request-&gt;all())</code> (and <code>fill()</code>/<code>update()</code> with an
+unfiltered array) silently drops every key the model hasn't declared
+<code>$fillable</code> for, or throws <code>MassAssignmentException</code> in strict mode —
+a common first-app footgun with no signal today. Flag a call whose
+attribute-array argument is not a literal (so its keys can't be
+checked individually) and whose target model has neither <code>$fillable</code>
+nor <code>$guarded = []]</code> declared, on <code>create()</code>, <code>fill()</code>, <code>update()</code>,
+<code>updateOrCreate()</code>, <code>firstOrCreate()</code>, and <code>firstOrNew()</code>. The model
+resolution and column-source machinery L30 already needs (and the
+diagnostic's model-argument matching) share the same receiver-typing
+path, so build them together.</p>
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction.rs</code> for
+existing <code>$fillable</code>/<code>$guarded</code> reads; <code>diagnostics/</code> for the
+call-site diagnostic pattern used by similarly-shaped checks.</p>
+<h4 id="l50-create-route-quick-fix-for-an-unresolved-route-name">L50. "Create route" quick-fix for an unresolved route name<a class="headerlink" href="#l50-create-route-quick-fix-for-an-unresolved-route-name" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The unknown-route-name diagnostic (fed by <code>route_names.rs</code>) has no
+accompanying fix today. Once the diagnostic fires, generate a
+<code>Route::get('{path}', [{Controller}::class, '{method}'])
+-&gt;name('{name}');</code> stub appended to <code>routes/web.php</code> (or <code>api.php</code> if
+the call site is <code>Route::apiResource</code>-shaped context), inferring path
+and controller from the route name's own conventional dashes/dots
+where possible and otherwise leaving placeholders.</p>
+<p><strong>Where to look:</strong> <code>code_actions/</code> for the code-action registration
+pattern used by other "declare the missing thing" fixes;
+<code>virtual_members/laravel/route_names.rs</code> for the existing scanner
+this reuses for the diagnostic and the insertion point.</p>
+<h4 id="l51-convert-facade-call-to-dependency-injection-refactor">L51. "Convert facade call to dependency injection" refactor<a class="headerlink" href="#l51-convert-facade-call-to-dependency-injection-refactor" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>A code action on a facade call inside a class method (<code>Cache::get(...)</code>,
+<code>Log::info(...)</code>) that adds a constructor-promoted property typed to
+the facade's underlying contract (resolved the same way <code>app('cache')</code>
+already resolves to a concrete class for member completion) and
+rewrites the call site to <code>$this-&gt;{property}-&gt;{method}(...)</code>. Purely
+mechanical once the facade-to-contract resolution already used
+elsewhere is in hand; skip call sites already inside a closure that
+captures <code>$this</code> differently, and skip static/trait contexts where
+constructor injection doesn't apply.</p>
+<p><strong>Where to look:</strong> <code>code_actions/</code> for the promote-to-constructor
+pattern already used elsewhere; <code>virtual_members/laravel/facade.rs</code>
+for the facade-to-concrete-class resolution to reuse.</p>
 
 
 

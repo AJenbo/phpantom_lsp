@@ -1318,6 +1318,54 @@ contributor even though it's short.</p>
 </thead>
 <tbody>
 <tr>
+<td>B80</td>
+<td><a href="../todo/bugs/#b80-maxmin-argument-dependent-return-type-is-a-malformed-union"><code>max()</code>/<code>min()</code> argument-dependent return type is a malformed union</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B78</td>
+<td><a href="../todo/bugs/#b78-a-standalone-var-cast-above-return-is-ignored">A standalone <code>@var</code> cast above <code>return</code> is ignored</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B82</td>
+<td><a href="../todo/bugs/#b82-a-nullsafe-chain-compared--to-a-non-nullable-value-does-not-narrow-the-receiver">A nullsafe chain compared <code>===</code> to a non-nullable value does not narrow the receiver</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B79</td>
+<td><a href="../todo/bugs/#b79-array_filter-without-a-callback-keeps-null-on-values-that-share-the-array-with-a-bool"><code>array_filter()</code> without a callback keeps <code>null</code> on values that share the array with a <code>?bool</code></a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B81</td>
+<td><a href="../todo/bugs/#b81-foreach-element-extraction-widens-false-to-bool">Foreach element extraction widens <code>false</code> to <code>bool</code></a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B76</td>
+<td><a href="../todo/bugs/#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing">Blade variables typed from a component class are immune to condition narrowing</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B77</td>
+<td><a href="../todo/bugs/#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path">A foreach over a proven non-empty array still merges the zero-iteration path</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B75</td>
+<td><a href="../todo/bugs/#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge">A dim-write to the foreach value variable leaks through the loop back-edge</a></td>
+<td>Medium</td>
+<td>High</td>
+</tr>
+<tr>
 <td></td>
 <td><strong>Release 0.10.0</strong></td>
 <td></td>
@@ -1707,6 +1755,12 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>A46</td>
+<td><a href="../todo/actions/#a46-honor-contextonly-in-code-action-responses">Honor <code>context.only</code> in code action responses</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>A25</td>
 <td><a href="../todo/actions/#a25-strpos-str_contains-php-80"><code>strpos</code> → <code>str_contains</code></a> (PHP 8.0+)</td>
 <td>Medium</td>
@@ -1899,6 +1953,12 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>F20</td>
+<td><a href="../todo/lsp-features/#f20-migrate-to-the-maintained-tower-lsp-fork">Migrate to the maintained <code>tower-lsp</code> fork</a> (unblocks A16)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>F2</td>
 <td><a href="../todo/lsp-features/#f2-partial-result-streaming-via-progress">Partial result streaming via <code>$/progress</code></a></td>
 <td>Medium</td>
@@ -2019,6 +2079,12 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>L49</td>
+<td><a href="../todo/laravel/#l49-unguarded-eloquent-mass-assignment-diagnostic">Unguarded Eloquent mass assignment diagnostic</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>L17</td>
 <td><a href="../todo/laravel/#l17-additional-string-contexts-without-booting">Additional string contexts without booting</a> (middleware, assets, validation, Inertia)</td>
 <td>Medium</td>
@@ -2057,6 +2123,12 @@ unlikely to move the needle for most users.</p>
 <tr>
 <td>L44</td>
 <td><a href="../todo/laravel/#l44-sibling-resource-registrations-and-degenerate-resource-names">Sibling resource registrations and degenerate resource names</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L50</td>
+<td><a href="../todo/laravel/#l50-create-route-quick-fix-for-an-unresolved-route-name">"Create route" quick-fix for an unresolved route name</a></td>
 <td>Low-Medium</td>
 <td>Medium</td>
 </tr>
@@ -2115,6 +2187,12 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>L51</td>
+<td><a href="../todo/laravel/#l51-convert-facade-call-to-dependency-injection-refactor">"Convert facade call to dependency injection" refactor</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td></td>
 <td><strong><a href="../todo/blade/">Blade</a></strong></td>
 <td></td>
@@ -2167,6 +2245,12 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/performance/#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code></a> (parked — re-evaluated at mago 1.46.0, still no <code>mago-hir</code> consumers upstream)</td>
 <td>Medium-High</td>
 <td>Very High</td>
+</tr>
+<tr>
+<td>P51</td>
+<td><a href="../todo/performance/#p51-ci-gated-scaling-and-memory-invariants">CI-gated scaling and memory invariants</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
 </tr>
 <tr>
 <td>P17</td>

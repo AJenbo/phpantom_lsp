@@ -1436,6 +1436,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p51-ci-gated-scaling-and-memory-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P51. CI-gated scaling and memory invariants
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2026,6 +2037,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p51-ci-gated-scaling-and-memory-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P51. CI-gated scaling and memory invariants
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2476,16 +2498,13 @@ isn't needed.</p>
   <code>Psalm\Internal\Provider\ClassLikeStorageCacheProvider</code>
 - Psalm: <code>FileStorageCacheProvider</code> for the content-hash invalidation
   pattern
-- php-lsp: persists <code>FileIndex</code> entries under <code>~/.cache/php-lsp/</code>
-  keyed by <code>blake3(uri || content)</code>. They originally keyed on
+- A peer PHP LSP project persists its per-file index cache on disk
+  keyed by <code>blake3(uri || content)</code>. It originally keyed on
   <code>mtime + size</code> and shipped a cache-staleness bug (a size-preserving
   edit within the same mtime second was missed) before switching to
   content hashing. Confirms the content-hash-as-authority choice
   above; never trust mtime for correctness, at most as a cheap
-  pre-filter to skip hashing unchanged files.
-- php-lsp: <code>docs/salsa-migration.md</code> in its own repo (Phases K1-K4)
-  documents their cache-size cap, reset-on-overflow, and
-  LRU-by-mtime eviction plans — useful pitfall list if P20 ships.</p>
+  pre-filter to skip hashing unchanged files.</p>
 <hr />
 <h2 id="p21-offset-shifting-for-cached-diagnostics-on-partial-edits">P21. Offset-shifting for cached diagnostics on partial edits<a class="headerlink" href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Very High</strong></p>
@@ -2926,6 +2945,38 @@ the same request cycle.</p>
 <code>type_engine/variable/resolution.rs</code>, the <code>walk_top_level_for_globals</code>
 call. A per-request cache (similar to the chain resolution cache in
 <code>type_engine/resolver/context.rs</code>) would eliminate the redundant walks.</p>
+<hr />
+<h2 id="p51-ci-gated-scaling-and-memory-invariants">P51. CI-gated scaling and memory invariants<a class="headerlink" href="#p51-ci-gated-scaling-and-memory-invariants" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p><code>.github/workflows/ci.yml</code>'s <code>benchmark</code>/<code>benchmark-pr</code> jobs only run
+the <code>completion</code> bench and publish it to the tracking dashboard; a
+regression is visible after the fact (someone has to look at the
+dashboard) rather than failing the PR. <code>references.rs</code> and
+<code>laravel_completion.rs</code> under <code>benches/</code> exist but aren't wired into
+CI at all, and none of our benchmarks assert an absolute ceiling —
+only relative-to-history comparison.</p>
+<p>Add CI-gated invariants that fail the build outright when crossed,
+not just recorded for later inspection:</p>
+<ul>
+<li><strong>Per-edit republish scaling.</strong> A synthetic workspace ingested at
+  several sizes (e.g. 100 → 5000 files); assert republish-after-edit
+  wall time stays flat (or sub-linear) as file count grows, catching
+  an accidental O(n) or worse regression on the republish path before
+  it ships.</li>
+<li><strong>Cold/warm start wall time.</strong> Time to <code>indexReady</code> on a pinned
+  fixture workspace (a vendored copy of a real Laravel/Symfony
+  project, or one of the public corpora already used by <code>analyze</code>
+  triage), gated on an absolute ceiling, both cold (no cache) and warm
+  (repeat run).</li>
+<li><strong>Session RSS guard.</strong> <code>benches/memory_usage.py</code> already measures
+  resident memory on two workloads; run it in CI and fail if RSS
+  exceeds a fixed ceiling instead of only exposing the script for
+  manual use.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>.github/workflows/ci.yml</code>'s <code>benchmark</code>/
+<code>benchmark-pr</code> jobs; <code>benches/memory_usage.py</code>; <code>benches/references.rs</code>
+and <code>benches/laravel_completion.rs</code> for benches that exist but aren't
+CI-gated yet.</p>
 
 
 

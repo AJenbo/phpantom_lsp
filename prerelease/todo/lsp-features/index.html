@@ -1532,6 +1532,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f20-migrate-to-the-maintained-tower-lsp-fork" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F20. Migrate to the maintained <code>tower-lsp</code> fork
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2272,6 +2283,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f20-migrate-to-the-maintained-tower-lsp-fork" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F20. Migrate to the maintained <code>tower-lsp</code> fork
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2439,12 +2461,6 @@ full background indexing is available, the lookup can become a
 simple index query instead of relying on the scan-based approach that
 Find References uses on its own.</p>
 <p><strong>References:</strong>
-- php-lsp: <code>src/navigation/call_hierarchy.rs</code> in its own repo — a
-  working Rust implementation (prepare/incoming/outgoing, cross-file)
-  built on the same "wrap Find References + walk the body" shape
-  described above. Their wire-protocol tests (<code>tests/</code>, call-hierarchy
-  cases in the Symfony suite) show the expected item/range semantics
-  editors rely on.
 - Phpactor: call hierarchy via its references index.</p>
 <h2 id="f7-evaluatable-expression-support-dap-integration">F7. Evaluatable expression support (DAP integration)<a class="headerlink" href="#f7-evaluatable-expression-support-dap-integration" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
@@ -2746,11 +2762,7 @@ machinery to produce the <code>WorkspaceEdit</code>. The companion
 <code>workspace/willCreateFiles</code> can then insert a PSR-4-derived <code>namespace</code>
 + class stub into newly created files.</p>
 <p><strong>References:</strong>
-- Phpactor: <code>MoveClass</code> refactoring in the class-mover package.
-- php-lsp: <code>handle_will_rename_files</code> in
-  <code>src/backend/handlers/workspace.rs</code> in its own repo (updates <code>use</code>
-  imports workspace-wide on file rename) and their <code>willCreateFiles</code>
-  PSR-4 stub insertion.</p>
+- Phpactor: <code>MoveClass</code> refactoring in the class-mover package.</p>
 <hr />
 <h2 id="f19-connect-to-a-remotetcp-language-server-vs-code-extension">F19. Connect to a remote/TCP language server (VS Code extension)<a class="headerlink" href="#f19-connect-to-a-remotetcp-language-server-vs-code-extension" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
@@ -2775,6 +2787,31 @@ extension makes).</p>
 paths must line up with the paths the server sees (or be remapped).
 Auto-download, version checks, and the per-folder rooting do not apply
 in remote mode.</p>
+<h2 id="f20-migrate-to-the-maintained-tower-lsp-fork">F20. Migrate to the maintained <code>tower-lsp</code> fork<a class="headerlink" href="#f20-migrate-to-the-maintained-tower-lsp-fork" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>tower-lsp</code> 0.20 (our current dependency) is the last release of the
+original crate; it's unmaintained upstream. A maintained fork exists
+under a different crate name and has since moved past LSP 3.17 to
+cover 3.18 proposed features. Because it's a rename rather than a
+version bump of the same crate, <code>cargo update</code>/routine dependency
+audits will not surface this on their own — nothing shows up as
+"outdated" since no new <code>tower-lsp</code> version is being withheld. It has
+to be picked up as a deliberate migration.</p>
+<p>This isn't just hygiene: A16 (snippet placeholder for extracted method
+name) is explicitly blocked on <code>SnippetTextEdit</code>, an LSP 3.18 feature
+that our pinned <code>lsp-types</code> 0.94 (via <code>tower-lsp</code> 0.20) doesn't cover.
+Migrating unblocks it directly.</p>
+<p><strong>What to check before starting:</strong> the fork's public API surface
+relative to <code>tower_lsp::LspService</code>/<code>tower_lsp::lsp_types</code> (import
+paths, trait signatures, the <code>"proposed"</code> feature flag) to scope the
+mechanical rename across every file that does <code>use tower_lsp::...</code>
+(a wide but shallow set: <code>src/lsp_dispatch.rs</code>, <code>src/inlay_hints.rs</code>,
+<code>src/document_symbols.rs</code>, <code>src/folding.rs</code>, <code>src/phpcs.rs</code>,
+<code>src/fix.rs</code>, <code>src/selection_range.rs</code>, <code>src/text_position.rs</code>, and
+others — grep <code>tower_lsp::</code> for the full list), plus the wire-protocol
+test harness described in <code>test-porting.md</code> Phase 6B if that gets
+ported around the same time.</p>
+<p><strong>Where to look:</strong> <code>Cargo.toml</code>'s <code>tower-lsp = { version = "0.20", features = ["proposed"] }</code>.</p>
 
 
 
