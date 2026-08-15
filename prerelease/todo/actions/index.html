@@ -2104,11 +2104,14 @@ current call list.</p>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <blockquote>
 <p><strong>Blocked:</strong> Requires <code>SnippetTextEdit</code> support in <code>lsp-types</code>.
-Upstream issue: <a href="https://github.com/gluon-lang/lsp-types/issues/310">gluon-lang/lsp-types#310</a>.
-The current <code>lsp-types</code> (0.94, pinned by <code>tower-lsp</code> 0.20) only
-covers LSP 3.17. <code>SnippetTextEdit</code> is an LSP 3.18 proposed feature.
-Revisit once the upstream issue is resolved and <code>tower-lsp</code> picks up
-the new version.</p>
+Upstream issue: <a href="https://github.com/gluon-lang/lsp-types/issues/310">gluon-lang/lsp-types#310</a>
+(open). <code>SnippetTextEdit</code> is an LSP 3.18 <code>@proposed</code> feature — it's
+in the spec but not yet implemented in any Rust LSP-types crate,
+including the actively maintained <code>tower-lsp-server</code>/<code>ls-types</code> fork
+that F20 migrates to (checked directly against its <code>main</code> branch;
+<code>ls-types</code> removed its generic 3.18 <code>"proposed"</code> feature flag in
+0.0.4). F20 alone does not resolve this. Revisit once the upstream
+issue is resolved in whichever crate we depend on at the time.</p>
 </blockquote>
 <p>After an Extract Function/Method code action is applied, let the user
 immediately rename the generated name by placing a snippet tab-stop on
