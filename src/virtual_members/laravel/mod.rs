@@ -224,7 +224,7 @@ use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
 pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
-    factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
+    factory_model_type, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
 };
 pub(crate) use factory_count::{
     carry_factory_count, fluent_factory_count, resolve_factory_count_return,

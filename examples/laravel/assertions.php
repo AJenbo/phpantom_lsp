@@ -317,6 +317,22 @@ check(
     $authorFactory->makeOne() instanceof \App\Models\BlogAuthor
 );
 
+// EditorialFactory cannot be paired by name. Laravel reads its explicit
+// protected $model property before trying that convention.
+$editorialFactory = \Database\Factories\EditorialFactory::new();
+check(
+    'EditorialFactory declares BlogAuthor through its model property',
+    $editorialFactory->modelName() === \App\Models\BlogAuthor::class
+);
+check(
+    'EditorialFactory::makeOne() builds one BlogAuthor',
+    $editorialFactory->makeOne() instanceof \App\Models\BlogAuthor
+);
+check(
+    'EditorialFactory count builds the BlogAuthor collection',
+    $editorialFactory->count(2)->make() instanceof \App\Models\AuthorCollection
+);
+
 // has{Relationship} is valid because posts() is a real relationship, and it
 // returns the factory so the chain continues into create()/make().
 check(
@@ -354,6 +370,23 @@ check(
 check(
     'BlogPost::factory()->trashed() returns a Factory',
     \App\Models\BlogPost::factory()->trashed() instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+
+// AnnotatedPostFactory carries `@extends Factory<BlogPost>`. The generic
+// binding resolves create()/make() on its own; forAuthor()/trashed() still
+// come from BlogPost's relationships and SoftDeletes trait through __call().
+$annotatedPostFactory = \Database\Factories\AnnotatedPostFactory::new();
+check(
+    'AnnotatedPostFactory::forAuthor() returns a Factory despite the @extends generic',
+    $annotatedPostFactory->forAuthor() instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+check(
+    'AnnotatedPostFactory::trashed() returns a Factory despite the @extends generic',
+    $annotatedPostFactory->trashed() instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+check(
+    'AnnotatedPostFactory::make() builds a BlogPost via the generic binding',
+    $annotatedPostFactory->make() instanceof \App\Models\BlogPost
 );
 
 // ─── Factory count-conditional return types ──────────────────────────────────

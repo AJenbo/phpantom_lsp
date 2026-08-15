@@ -840,39 +840,6 @@ resolution at all.
 `completion/laravel_string_keys.rs`; `ViewReceiverSite` in
 `symbol_map/mod.rs` for the confirm-later shape.
 
-#### L48. A factory's `$model` property is ignored
-
-**Impact: Medium · Complexity: Medium**
-
-`Factory::modelName()` reads `protected $model` before it reaches for the
-naming convention, and a factory whose name does not match its model is
-exactly what the property is there for:
-
-```php
-class ArticleFactory extends Factory
-{
-    protected $model = Draft::class;   // ignored
-}
-```
-
-We read `@extends Factory<Model>` and the class-name convention only, so
-`Draft::factory()->makeOne()` resolves to Eloquent's base `Model` and
-every member of the real model reads as unknown. The property is also
-what usually pairs with a shared, unannotated factory base: a project
-that centralises helpers in a `BaseFactory` and names the model on each
-concrete factory gets nothing from either route, and where the name
-happens to look conventional we answer with the conventional model
-rather than the one the factory declares.
-
-The fix is to read the property's initialiser (a `::class` constant or a
-string literal) and prefer it over the convention, the way an explicit
-`@extends Factory<Model>` already wins.
-
-**Where to look:** `factory_model_type` and
-`build_factory_relationship_methods` in
-`virtual_members/laravel/factory.rs`, and the convention fallback in
-`inheritance/mod.rs`.
-
 #### L49. Unguarded Eloquent mass assignment diagnostic
 
 **Impact: Medium · Complexity: Medium**

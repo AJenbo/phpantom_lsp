@@ -61,11 +61,17 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
         let SubjectExpr::CallExpr { callee, args_text } = current else {
             return FactoryCount::Unknown;
         };
-        let args = split_text_args(args_text);
-        let first_arg = args.first().map(|a| a.trim());
         match callee.as_ref() {
             SubjectExpr::MethodCall { base, method } => {
-                if let Some(state) = instance_count_state(method, first_arg) {
+                let args = if method == "count" {
+                    Some(split_text_args(args_text))
+                } else {
+                    None
+                };
+                let first_arg = args
+                    .as_ref()
+                    .and_then(|args| args.first().map(|arg| arg.trim()));
+                if let Some(state) = instance_count_state(method, first_arg, &|| None) {
                     return state;
                 }
                 current = base;
@@ -73,6 +79,14 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
             // A static call is the head of the chain: `Model::factory()`,
             // `UserFactory::new()`, `UserFactory::times(3)`.
             SubjectExpr::StaticMethodCall { method, .. } => {
+                let args = if method == "factory" {
+                    Some(split_text_args(args_text))
+                } else {
+                    None
+                };
+                let first_arg = args
+                    .as_ref()
+                    .and_then(|args| args.first().map(|arg| arg.trim()));
                 return static_count_state(method, first_arg, &|| None);
             }
             _ => return FactoryCount::Unknown,
@@ -114,10 +128,18 @@ pub(crate) fn chain_count_ast(receiver: &Expression<'_>, content: &str) -> Facto
             return FactoryCount::Unknown;
         };
         let method = bytes_to_str(ident.value);
-        let first_arg = first_argument_text(argument_list, content);
+        let reads_first_arg = match object {
+            Some(_) => method == "count",
+            None => method == "factory",
+        };
+        let first_arg = if reads_first_arg {
+            first_argument_text(argument_list, content)
+        } else {
+            None
+        };
         match object {
             Some(base) => {
-                if let Some(state) = instance_count_state(method, first_arg) {
+                if let Some(state) = instance_count_state(method, first_arg, &|| None) {
                     return state;
                 }
                 current = base;
@@ -141,24 +163,74 @@ fn first_argument_text<'c>(argument_list: &ArgumentList<'_>, content: &'c str) -
 
 /// Count state contributed by an instance call in the chain, or `None`
 /// when the call does not touch the count.
-fn instance_count_state(method: &str, first_arg: Option<&str>) -> Option<FactoryCount> {
+fn instance_count_state(
+    method: &str,
+    first_arg: Option<&str>,
+    first_arg_type: &dyn Fn() -> Option<PhpType>,
+) -> Option<FactoryCount> {
     match method {
-        // `count(?int $count)` — the only way to clear a count is to pass
-        // a literal `null`.  A non-literal argument is assumed to be the
-        // integer the parameter asks for.
-        "count" => Some(match first_arg {
-            None => FactoryCount::One,
-            Some(arg) => {
-                if arg.eq_ignore_ascii_case("null") {
-                    FactoryCount::One
-                } else {
-                    FactoryCount::Many
-                }
-            }
-        }),
+        // `count(?int $count)` clears the count for null and sets one for an
+        // integer. A non-literal can only pick a branch once its type is
+        // known; `?int` keeps both outcomes possible.
+        "count" => Some(count_argument_count(first_arg, first_arg_type)),
         // `times(int $count)` cannot be given null.
         "times" => Some(FactoryCount::Many),
         _ => None,
+    }
+}
+
+/// Count state set by `Factory::count(?int $count)`.
+///
+/// Literal integers and `null` settle the branch without type resolution.
+/// Anything else asks for the argument's resolved type, which callers supply
+/// lazily because almost every method call in a project is not `count()`.
+fn count_argument_count(
+    first_arg: Option<&str>,
+    first_arg_type: &dyn Fn() -> Option<PhpType>,
+) -> FactoryCount {
+    let Some(first) = first_arg else {
+        // The call is invalid because Laravel requires the argument, but
+        // preserving the old single-model result avoids inventing a count.
+        return FactoryCount::One;
+    };
+    let first = first.trim();
+    if first.eq_ignore_ascii_case("null") {
+        return FactoryCount::One;
+    }
+    if is_int_literal_syntax(first) {
+        return FactoryCount::Many;
+    }
+
+    first_arg_type().map_or(FactoryCount::Unknown, |ty| count_argument_type(&ty))
+}
+
+/// Whether source text is a PHP integer literal.
+///
+/// The ordinary decimal path avoids the allocation used to normalize the
+/// less-common underscored and radix-prefixed spellings.
+fn is_int_literal_syntax(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    let unsigned = trimmed
+        .strip_prefix('+')
+        .or_else(|| trimmed.strip_prefix('-'))
+        .unwrap_or(trimmed);
+    if !unsigned.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        return false;
+    }
+
+    trimmed.parse::<i64>().is_ok() || crate::php_type::parse_php_int_literal(trimmed).is_some()
+}
+
+/// Count state settled by a resolved `count()` argument type.
+fn count_argument_type(ty: &PhpType) -> FactoryCount {
+    if ty.is_null() {
+        FactoryCount::One
+    } else if ty.accepts_null() {
+        FactoryCount::Unknown
+    } else if ty.is_int_subtype() {
+        FactoryCount::Many
+    } else {
+        FactoryCount::Unknown
     }
 }
 
@@ -273,12 +345,18 @@ fn is_decidable_literal(arg: &str) -> bool {
 /// not veto the factory's own state.  Class entries that disagree do,
 /// since the value is then a factory of unknown count.
 fn carried_count(receiver: &[ResolvedType]) -> FactoryCount {
-    receiver
+    let mut carried = None;
+    for count in receiver
         .iter()
         .filter(|rt| rt.class_info.is_some())
         .map(|rt| rt.factory_count)
-        .reduce(FactoryCount::join)
-        .unwrap_or(FactoryCount::Unknown)
+    {
+        if count == FactoryCount::Unknown || carried.is_some_and(|previous| previous != count) {
+            return FactoryCount::Unknown;
+        }
+        carried = Some(count);
+    }
+    carried.unwrap_or(FactoryCount::Unknown)
 }
 
 /// The count state an instance call hands to its result, or `None` when
@@ -293,19 +371,20 @@ pub(crate) fn fluent_factory_count(
     receiver: &[ResolvedType],
     method: &str,
     first_arg: Option<&str>,
+    first_arg_type: &dyn Fn() -> Option<PhpType>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<FactoryCount> {
     let inherited = carried_count(receiver);
-    let Some(set) = instance_count_state(method, first_arg) else {
+    if !matches!(method, "count" | "times") {
         return (inherited != FactoryCount::Unknown).then_some(inherited);
-    };
-    // `count()` is a common method name, so a receiver that never
-    // carried a factory state has to prove it is a factory before its
-    // `count()` is read as one.
-    if inherited != FactoryCount::Unknown || receiver_is_factory(receiver, ctx) {
-        return Some(set);
     }
-    None
+    // `count()` is a common method name, so a receiver that never
+    // carried a factory state has to prove it is a factory before its argument
+    // is resolved or the call is read as a factory count setter.
+    if inherited == FactoryCount::Unknown && !receiver_is_factory(receiver, ctx) {
+        return None;
+    }
+    instance_count_state(method, first_arg, first_arg_type)
 }
 
 /// Whether any of the receiver's classes is an Eloquent factory.
@@ -361,16 +440,18 @@ pub(crate) fn tag_static_factory_call(
     if !matches!(method, "factory" | "times" | "new") {
         return;
     }
-    let count = static_count_state(method, first_arg, first_arg_type);
-    if count == FactoryCount::Unknown {
-        return;
-    }
+    let mut count = None;
     for result in results.iter_mut() {
         if result
             .class_info
             .as_ref()
             .is_some_and(|ci| extends_eloquent_factory(ci, ctx.class_loader))
         {
+            let count =
+                *count.get_or_insert_with(|| static_count_state(method, first_arg, first_arg_type));
+            if count == FactoryCount::Unknown {
+                return;
+            }
             result.factory_count = count;
         }
     }

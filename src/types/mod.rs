@@ -1505,13 +1505,21 @@ pub mod attribute_target {
     pub const TARGET_ALL: u8 = (1 << 6) - 1; // 63
 }
 
-/// Laravel-specific metadata extracted from Eloquent model classes.
+/// Laravel-specific metadata extracted from class declarations.
 ///
 /// Grouped into a sub-struct to keep the core `ClassInfo` focused on
 /// PHP semantics. All fields default to empty/`None`, so non-Laravel
 /// classes carry no overhead beyond a single struct value.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LaravelMetadata {
+    /// Model class explicitly configured by a Laravel factory's `$model`
+    /// property.
+    ///
+    /// Both `protected $model = Post::class` and literal class strings are
+    /// recognized. The type is resolved to an FQN during the normal
+    /// name-resolution pass and provides factory-to-model evidence when
+    /// generic PHPDoc or Laravel's naming convention is unavailable.
+    pub factory_model: Option<PhpType>,
     /// Custom collection class for Eloquent models.
     ///
     /// Detected from three Laravel mechanisms:

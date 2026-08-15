@@ -1414,18 +1414,28 @@ impl Backend {
                 })
                 .collect();
 
-            // Resolve custom collection class name to FQN
-            if let Some(coll) = class.laravel().and_then(|l| l.custom_collection.clone()) {
+            if let Some(laravel) = class.laravel.as_deref_mut() {
                 let resolver =
                     |name: &str| -> String { Self::resolve_name(name, use_map, namespace) };
-                class.laravel_mut().custom_collection = Some(coll.resolve_names(&resolver));
-            }
 
-            // Resolve custom builder class name to FQN
-            if let Some(builder) = class.laravel().and_then(|l| l.custom_builder.clone()) {
-                let resolver =
-                    |name: &str| -> String { Self::resolve_name(name, use_map, namespace) };
-                class.laravel_mut().custom_builder = Some(builder.resolve_names(&resolver));
+                // Resolve custom collection class name to FQN.
+                if let Some(collection) = laravel.custom_collection.take() {
+                    laravel.custom_collection = Some(collection.resolve_names(&resolver));
+                }
+
+                // Resolve custom builder class name to FQN.
+                if let Some(builder) = laravel.custom_builder.take() {
+                    laravel.custom_builder = Some(builder.resolve_names(&resolver));
+                }
+
+                // Resolve a Laravel factory's explicitly configured model
+                // class to an FQN. Class-constant initializers follow the
+                // file's imports and namespace; literal class strings were
+                // marked absolute while being extracted and therefore remain
+                // unchanged.
+                if let Some(model) = laravel.factory_model.take() {
+                    laravel.factory_model = Some(model.resolve_names(&resolver));
+                }
             }
 
             // Resolve a facade's `getFacadeAccessor()` class reference to an

@@ -1,10 +1,54 @@
 use super::*;
 use crate::test_fixtures::{make_class, no_loader};
+use std::cell::Cell;
+
+const FACTORY_BASE_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
 
 /// Parse a receiver expression the way the resolver hands it to
 /// [`chain_count`]: the text to the left of the final `->create()`.
 fn count_of(receiver: &str) -> FactoryCount {
     chain_count(&SubjectExpr::parse(receiver))
+}
+
+/// Parse an expression and read its receiver chain through the AST path.
+fn count_ast_of(receiver: &str) -> FactoryCount {
+    let content = format!("<?php {receiver};");
+    crate::parser::with_parsed_program(&content, "factory_count_ast_test", |program, content| {
+        let expression = program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                mago_syntax::cst::Statement::Expression(statement) => Some(statement.expression),
+                _ => None,
+            });
+        chain_count_ast(
+            expression.expect("test source should contain an expression"),
+            content,
+        )
+    })
+}
+
+fn resolution_ctx(class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> ResolutionCtx<'_> {
+    ResolutionCtx {
+        current_class: None,
+        all_classes: &[],
+        content: "",
+        cursor_offset: 0,
+        class_loader,
+        backend: None,
+        laravel_macro_this_resolver: None,
+        resolved_class_cache: None,
+        function_loader: None,
+        scope_var_resolver: None,
+        is_in_static_method: false,
+        preserve_static: false,
+    }
+}
+
+fn eloquent_factory_result(name: &str) -> ResolvedType {
+    let mut factory = make_class(name);
+    factory.parent_class = Some(atom(FACTORY_BASE_FQN));
+    ResolvedType::from_arc(Arc::new(factory))
 }
 
 // ── is_count_conditional_method ─────────────────────────────────────
@@ -96,6 +140,48 @@ fn count_without_arguments_builds_one() {
     assert_eq!(count_of("User::factory()->count()"), FactoryCount::One);
 }
 
+#[test]
+fn ast_chains_read_arguments_only_for_count_setters() {
+    assert_eq!(
+        count_ast_of("User::factory()->count(3)"),
+        FactoryCount::Many
+    );
+    assert_eq!(
+        count_ast_of("User::factory(3)->state(['first', 'second'])"),
+        FactoryCount::Many
+    );
+    assert_eq!(
+        count_ast_of("User::factory(3)->count(null)"),
+        FactoryCount::One
+    );
+    assert_eq!(
+        count_ast_of("User::factory(3)->count(count: null)"),
+        FactoryCount::One
+    );
+    assert_eq!(count_ast_of("User::factory()->count()"), FactoryCount::One);
+    assert_eq!(
+        count_ast_of("User::factory()->count($count)"),
+        FactoryCount::Unknown
+    );
+}
+
+#[test]
+fn ast_static_heads_read_arguments_only_for_factory() {
+    assert_eq!(count_ast_of("User::factory(3)"), FactoryCount::Many);
+    assert_eq!(count_ast_of("User::factory(count: 3)"), FactoryCount::Many);
+    assert_eq!(count_ast_of("User::factory([])"), FactoryCount::One);
+    assert_eq!(count_ast_of("User::factory($count)"), FactoryCount::Unknown);
+    assert_eq!(count_ast_of("UserFactory::times(3)"), FactoryCount::Many);
+    assert_eq!(
+        count_ast_of("UserFactory::new(['first', 'second'])"),
+        FactoryCount::One
+    );
+    assert_eq!(
+        count_ast_of("UserFactory::forTesting(['first', 'second'])"),
+        FactoryCount::Unknown
+    );
+}
+
 // ── chain_count: chains that settle nothing ─────────────────────────
 
 /// A receiver that is not a chain carries no visible count state.  The
@@ -155,16 +241,219 @@ fn count_call_builds_many() {
 }
 
 #[test]
-fn count_with_variable_builds_many() {
-    // `count(?int $count)` only takes an integer or null, so a variable
-    // argument that is not literally `null` sets a count.
-    assert_eq!(count_of("User::factory()->count($n)"), FactoryCount::Many);
+fn count_with_non_literal_argument_is_unknown_from_syntax() {
+    for argument in ["$n", "self::COUNT", "count($rows)"] {
+        assert_eq!(
+            count_of(&format!("User::factory()->count({argument})")),
+            FactoryCount::Unknown,
+            "{argument} could resolve to either int or null"
+        );
+    }
 }
 
 #[test]
 fn count_zero_builds_many() {
     // `count(0)` yields an empty collection, not a single model.
     assert_eq!(count_of("User::factory()->count(0)"), FactoryCount::Many);
+}
+
+#[test]
+fn literal_count_arguments_do_not_resolve_their_type() {
+    let should_not_resolve =
+        || -> Option<PhpType> { panic!("literal count arguments settle from syntax") };
+
+    for literal in ["3", "+2", "-2", "1_000", "0x10"] {
+        assert_eq!(
+            count_argument_count(Some(literal), &should_not_resolve),
+            FactoryCount::Many,
+            "{literal} is an integer literal"
+        );
+    }
+    assert_eq!(
+        count_argument_count(Some("null"), &should_not_resolve),
+        FactoryCount::One
+    );
+}
+
+#[test]
+fn unresolved_and_non_integer_count_arguments_remain_unknown() {
+    let resolutions = Cell::new(0);
+    let unresolved = || {
+        resolutions.set(resolutions.get() + 1);
+        None
+    };
+
+    assert_eq!(
+        count_argument_count(Some("$count"), &unresolved),
+        FactoryCount::Unknown
+    );
+    assert_eq!(resolutions.get(), 1);
+
+    assert_eq!(
+        count_argument_count(Some("3.5"), &|| Some(PhpType::parse("float"))),
+        FactoryCount::Unknown,
+        "a numeric expression is not enough for count(?int)"
+    );
+}
+
+#[test]
+fn resolved_count_argument_type_selects_only_certain_branches() {
+    let count_for =
+        |type_name: &str| count_argument_count(Some("$count"), &|| Some(PhpType::parse(type_name)));
+
+    assert_eq!(count_for("int"), FactoryCount::Many);
+    assert_eq!(count_for("positive-int"), FactoryCount::Many);
+    assert_eq!(count_for("null"), FactoryCount::One);
+    assert_eq!(count_for("?int"), FactoryCount::Unknown);
+    assert_eq!(count_for("int|null"), FactoryCount::Unknown);
+    assert_eq!(count_for("mixed"), FactoryCount::Unknown);
+}
+
+#[test]
+fn an_ordinary_count_call_never_resolves_its_argument_for_factory_state() {
+    let receiver = vec![ResolvedType::from_arc(Arc::new(make_class(
+        "Illuminate\\Database\\Query\\Builder",
+    )))];
+    let resolutions = Cell::new(0);
+    let first_arg_type = || {
+        resolutions.set(resolutions.get() + 1);
+        Some(PhpType::string())
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    assert_eq!(
+        fluent_factory_count(&receiver, "count", Some("$column"), &first_arg_type, &ctx),
+        None
+    );
+    assert_eq!(resolutions.get(), 0);
+}
+
+#[test]
+fn a_non_factory_static_factory_call_never_resolves_its_argument() {
+    let mut results = vec![ResolvedType::from_arc(Arc::new(make_class(
+        "App\\Support\\Builder",
+    )))];
+    let resolutions = Cell::new(0);
+    let first_arg_type = || {
+        resolutions.set(resolutions.get() + 1);
+        Some(PhpType::int())
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    tag_static_factory_call(
+        &mut results,
+        "factory",
+        Some("$value"),
+        &first_arg_type,
+        &ctx,
+    );
+
+    assert_eq!(resolutions.get(), 0);
+    assert_eq!(results[0].factory_count, FactoryCount::Unknown);
+}
+
+#[test]
+fn unrelated_static_calls_never_inspect_factory_state() {
+    let mut results = vec![eloquent_factory_result("Database\\Factories\\UserFactory")];
+    let should_not_resolve = || -> Option<PhpType> {
+        panic!("an unrelated static method must not resolve its argument")
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    tag_static_factory_call(
+        &mut results,
+        "configure",
+        Some("$value"),
+        &should_not_resolve,
+        &ctx,
+    );
+
+    assert_eq!(results[0].factory_count, FactoryCount::Unknown);
+}
+
+#[test]
+fn static_factory_state_is_resolved_once_and_only_factory_results_are_tagged() {
+    let mut results = vec![
+        ResolvedType::from_arc(Arc::new(make_class("App\\Support\\Builder"))),
+        eloquent_factory_result("Database\\Factories\\UserFactory"),
+        ResolvedType::from_type_string(PhpType::null()),
+        eloquent_factory_result("Database\\Factories\\AdminFactory"),
+    ];
+    let resolutions = Cell::new(0);
+    let first_arg_type = || {
+        resolutions.set(resolutions.get() + 1);
+        Some(PhpType::int())
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    tag_static_factory_call(
+        &mut results,
+        "factory",
+        Some("$count"),
+        &first_arg_type,
+        &ctx,
+    );
+
+    assert_eq!(resolutions.get(), 1);
+    assert_eq!(results[0].factory_count, FactoryCount::Unknown);
+    assert_eq!(results[1].factory_count, FactoryCount::Many);
+    assert_eq!(results[2].factory_count, FactoryCount::Unknown);
+    assert_eq!(results[3].factory_count, FactoryCount::Many);
+}
+
+#[test]
+fn unknown_static_factory_state_leaves_factory_results_unchanged() {
+    let mut first = eloquent_factory_result("Database\\Factories\\UserFactory");
+    first.factory_count = FactoryCount::One;
+    let mut second = eloquent_factory_result("Database\\Factories\\AdminFactory");
+    second.factory_count = FactoryCount::Many;
+    let mut results = vec![first, second];
+    let resolutions = Cell::new(0);
+    let first_arg_type = || {
+        resolutions.set(resolutions.get() + 1);
+        Some(PhpType::mixed())
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    tag_static_factory_call(
+        &mut results,
+        "factory",
+        Some("$count"),
+        &first_arg_type,
+        &ctx,
+    );
+
+    assert_eq!(resolutions.get(), 1);
+    assert_eq!(results[0].factory_count, FactoryCount::One);
+    assert_eq!(results[1].factory_count, FactoryCount::Many);
+}
+
+#[test]
+fn static_times_and_new_set_state_without_resolving_arguments() {
+    let should_not_resolve = || -> Option<PhpType> {
+        panic!("times() and new() settle count state without argument types")
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    let mut times = vec![eloquent_factory_result("Database\\Factories\\UserFactory")];
+    tag_static_factory_call(
+        &mut times,
+        "times",
+        Some("$count"),
+        &should_not_resolve,
+        &ctx,
+    );
+    assert_eq!(times[0].factory_count, FactoryCount::Many);
+
+    let mut new = vec![eloquent_factory_result("Database\\Factories\\UserFactory")];
+    tag_static_factory_call(
+        &mut new,
+        "new",
+        Some("$attributes"),
+        &should_not_resolve,
+        &ctx,
+    );
+    assert_eq!(new[0].factory_count, FactoryCount::One);
 }
 
 #[test]
@@ -300,6 +589,64 @@ fn model_type_ignores_generics_for_other_parents() {
     );
 }
 
+#[test]
+fn model_type_prefers_declared_property_over_convention() {
+    let mut factory = make_class("DraftFactory");
+    factory.file_namespace = Some(atom("Database\\Factories"));
+    factory.parent_class = Some(atom(FACTORY_BASE_FQN));
+    factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Domain\\PublishedDraft")));
+
+    let mut factory_base = make_class(FACTORY_BASE_FQN);
+    factory_base.template_params = vec![atom("TModel")];
+    let conventional_model = make_class("App\\Models\\Draft");
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            FACTORY_BASE_FQN => Some(Arc::new(factory_base.clone())),
+            "App\\Models\\Draft" => Some(Arc::new(conventional_model.clone())),
+            _ => None,
+        }
+    };
+
+    assert_eq!(
+        factory_model_type(&factory, &loader).map(|ty| ty.to_string()),
+        Some("App\\Domain\\PublishedDraft".to_string())
+    );
+}
+
+#[test]
+fn model_type_prefers_forwarded_generic_over_declared_property() {
+    let mut factory = make_class("DraftFactory");
+    factory.parent_class = Some(atom("Database\\Factories\\DocumentFactory"));
+    factory.extends_generics = vec![(
+        atom("Database\\Factories\\DocumentFactory"),
+        vec![PhpType::named(atom("App\\Domain\\PublishedDraft"))],
+    )];
+    factory.laravel_mut().factory_model = Some(PhpType::named(atom("App\\Models\\WrongDraft")));
+
+    let mut document_factory = make_class("DocumentFactory");
+    document_factory.file_namespace = Some(atom("Database\\Factories"));
+    document_factory.parent_class = Some(atom(FACTORY_BASE_FQN));
+    document_factory.template_params = vec![atom("TModel")];
+    document_factory.extends_generics =
+        vec![(atom(FACTORY_BASE_FQN), vec![PhpType::named(atom("TModel"))])];
+
+    let mut factory_base = make_class(FACTORY_BASE_FQN);
+    factory_base.template_params = vec![atom("TModel")];
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Database\\Factories\\DocumentFactory" => Some(Arc::new(document_factory.clone())),
+            FACTORY_BASE_FQN => Some(Arc::new(factory_base.clone())),
+            _ => None,
+        }
+    };
+
+    assert_eq!(
+        factory_model_type(&factory, &loader).map(|ty| ty.to_string()),
+        Some("App\\Domain\\PublishedDraft".to_string())
+    );
+}
+
 // ── Count state carried by the value ────────────────────────────────
 
 /// A resolved factory value with a count state attached.
@@ -314,6 +661,20 @@ fn a_lone_factory_value_speaks_for_itself() {
     assert_eq!(
         carried_count(&[factory_value("UserFactory", FactoryCount::Many)]),
         FactoryCount::Many
+    );
+}
+
+#[test]
+fn absent_or_unknown_factory_values_carry_nothing() {
+    assert_eq!(carried_count(&[]), FactoryCount::Unknown);
+    assert_eq!(
+        carried_count(&[
+            ResolvedType::from_type_string(PhpType::null()),
+            factory_value("UserFactory", FactoryCount::Unknown),
+            factory_value("AdminFactory", FactoryCount::Many),
+        ]),
+        FactoryCount::Unknown,
+        "an unknown class-bearing alternative absorbs later count states"
     );
 }
 
@@ -338,6 +699,72 @@ fn a_nullable_factory_keeps_its_count() {
             ResolvedType::from_type_string(PhpType::null()),
         ]),
         FactoryCount::One
+    );
+}
+
+#[test]
+fn fluent_calls_propagate_or_replace_carried_state_lazily() {
+    let receiver = vec![factory_value("UserFactory", FactoryCount::One)];
+    let should_not_resolve =
+        || -> Option<PhpType> { panic!("this fluent call settles without resolving its argument") };
+    let ctx = resolution_ctx(&no_loader);
+
+    assert_eq!(
+        fluent_factory_count(&receiver, "state", None, &should_not_resolve, &ctx),
+        Some(FactoryCount::One)
+    );
+    assert_eq!(
+        fluent_factory_count(
+            &receiver,
+            "times",
+            Some("$count"),
+            &should_not_resolve,
+            &ctx,
+        ),
+        Some(FactoryCount::Many)
+    );
+    assert_eq!(
+        fluent_factory_count(&receiver, "count", Some("null"), &should_not_resolve, &ctx,),
+        Some(FactoryCount::One)
+    );
+}
+
+#[test]
+fn an_untracked_factory_receiver_is_proved_before_resolving_count() {
+    let receiver = vec![eloquent_factory_result("Database\\Factories\\UserFactory")];
+    let resolutions = Cell::new(0);
+    let first_arg_type = || {
+        resolutions.set(resolutions.get() + 1);
+        Some(PhpType::int())
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    assert_eq!(
+        fluent_factory_count(&receiver, "count", Some("$count"), &first_arg_type, &ctx,),
+        Some(FactoryCount::Many)
+    );
+    assert_eq!(resolutions.get(), 1);
+
+    let should_not_resolve = || -> Option<PhpType> {
+        panic!("a literal count settles without argument type resolution")
+    };
+    assert_eq!(
+        fluent_factory_count(&receiver, "count", Some("3"), &should_not_resolve, &ctx,),
+        Some(FactoryCount::Many)
+    );
+}
+
+#[test]
+fn an_unknown_non_count_receiver_propagates_nothing() {
+    let receiver = vec![factory_value("UserFactory", FactoryCount::Unknown)];
+    let should_not_resolve = || -> Option<PhpType> {
+        panic!("ordinary fluent calls never inspect their arguments for count state")
+    };
+    let ctx = resolution_ctx(&no_loader);
+
+    assert_eq!(
+        fluent_factory_count(&receiver, "state", None, &should_not_resolve, &ctx),
+        None
     );
 }
 

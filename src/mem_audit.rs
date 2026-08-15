@@ -455,6 +455,7 @@ fn property_source(src: &PropertySource) -> Sz {
 fn laravel_meta(l: &LaravelMetadata) -> Sz {
     let mut z = Sz::default();
     z.add(size_of::<LaravelMetadata>());
+    z += opt_ty(&l.factory_model);
     z += opt_ty(&l.custom_collection);
     z += opt_ty(&l.custom_builder);
     z.add(l.casts_definitions.capacity() * size_of::<(String, String)>());
