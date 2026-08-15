@@ -949,17 +949,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b176-a-reopened-file-recycles-result-ids-a-client-may-still-hold" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. A reopened file recycles result ids a client may still hold
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1554,17 +1543,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b176-a-reopened-file-recycles-result-ids-a-client-may-still-hold" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B176. A reopened file recycles result ids a client may still hold
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1642,31 +1620,6 @@ that compiled no longer does.</p>
 not, so the two can never be the same symbol. The match should require
 the reference to be a global constant, not merely share the last
 segment of its name.</p>
-<h3 id="b176-a-reopened-file-recycles-result-ids-a-client-may-still-hold">B176. A reopened file recycles result ids a client may still hold<a class="headerlink" href="#b176-a-reopened-file-recycles-result-ids-a-client-may-still-hold" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
-<p><code>did_close</code> drops the file's entry from <code>result_ids</code> and <code>last_full</code>, so
-reopening it starts the counter at zero again while the client may still
-hold an id from before the close. Once the reopened file's recomputes
-walk the counter back up to that number, a pull carrying the stale
-<code>previousResultId</code> matches the current one, the handler answers
-<code>Unchanged</code>, and the editor keeps showing the diagnostics the file had
-before it was closed.</p>
-<p>The window is narrow but reachable in ordinary use. A captured Zed
-session shows a controller reaching <code>resultId</code> 3, being closed, and
-climbing back through 1, 2, 3 on reopen with a different set at each
-step; nothing about the id says which generation it belongs to. The
-editor only escaped it there because it had dropped the file's id on
-close.</p>
-<p>Result ids are compared for equality alone, so they only need to never
-repeat within a session. Drawing them from a session-global sequence
-(the way <code>WorkspaceDiagnostics</code> already does with its <code>ws{n}</code> ids)
-removes the collision entirely, and keeping the counter across a close
-would do as well.</p>
-<p><strong>Where to look:</strong> the <code>result_ids</code> removal in
-<code>clear_diagnostics_for_file</code> (<code>diagnostics/mod.rs</code>), and the equality
-checks in
-<code>document_pull_diagnostic</code> / <code>workspace_pull_diagnostic</code>
-(<code>diagnostics/pull.rs</code>).</p>
 
 
 
