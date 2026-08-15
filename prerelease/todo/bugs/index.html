@@ -869,14 +869,25 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#arithmetic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Arithmetic
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Arithmetic">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path" class="md-nav__link">
+  <a href="#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B77. A foreach over a proven non-empty array still merges the zero-iteration path
+        B85. A magic constant is not recognised as an arithmetic operand
       </span>
     </span>
   </a>
@@ -1430,14 +1441,25 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#arithmetic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Arithmetic
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Arithmetic">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path" class="md-nav__link">
+  <a href="#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B77. A foreach over a proven non-empty array still merges the zero-iteration path
+        B85. A magic constant is not recognised as an arithmetic operand
       </span>
     </span>
   </a>
@@ -1515,16 +1537,14 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Complexity</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<p>The entries below come from the 2026-08-15 evening sample-project sweep
-(11 diagnostics across ten projects, run after the B49–B74 fixes
-landed). 10 were false positives, filed here as <strong>B75–B82</strong>; the
-eleventh is the already-tracked <code>abort_unless()</code> narrowing gap (<strong>L5</strong>
-in <code>docs/todo/laravel.md</code>). No genuine findings surfaced, so nothing
-was patched in the sample sources. Every entry was isolated in a
-scratch repro and bisected to the minimal trigger shown in its code
-block; several sit at the same source sites as fixed bugs from the
-previous sweep (B50, B54, B59, B62), where the coarse defect was fixed
-and a finer one behind it became visible.</p>
+<p>The <strong>B85</strong> entry below comes from the 2026-08-15 evening sample-project
+sweep and the re-runs that followed it as the sweep's own findings
+(<strong>B75–B84</strong>) were fixed and cleared. The three diagnostics still
+standing across the ten projects at the time of writing are this one
+plus two genuine findings (<code>int / int</code> returned from an <code>int</code> function),
+which are the sample sources' own to fix. As with every entry here, it
+was isolated in a scratch repro and bisected to the minimal trigger
+shown in its code block.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
@@ -1532,35 +1552,25 @@ and a finer one behind it became visible.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path">B77. A foreach over a proven non-empty array still merges the zero-iteration path<a class="headerlink" href="#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param array&lt;int, int&gt; $qtys */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function floorStock(array $qtys): int</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">{</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    if (!$qtys) {</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        return 0;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    }</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $max = null;</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    foreach ($qtys as $qty) {</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        if ($max === null) {</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">            $max = $qty;</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">            continue;</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">        }</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">        $max = min($max, $qty);</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">    }</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    return takesInt($max);   // reported: got null|int</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">}</span>
+<p>No outstanding items.</p>
+<h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
+<h3 id="b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand">B85. A magic constant is not recognised as an arithmetic operand<a class="headerlink" href="#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function getEndLineOfThisFile(): int</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    return __LINE__ + 3;   // reported: got int|float</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>if (!$qtys) return;</code> proves the array non-empty, so the loop body runs
-at least once, and every path through the body assigns <code>$max</code> an <code>int</code>.
-After the loop <code>$max</code> cannot be <code>null</code>, but the pre-loop <code>null</code> is
-still merged in. PHPStan eliminates the zero-iteration state when the
-iterated subject is a non-empty array.</p>
-<p>Sample site: <code>luxplus-shared src/core/PCN/PCNService.php:845</code> (bundle
-stock floor tracked across <code>$bundleItemQty</code>, guarded non-empty).</p>
-<p><strong>Fix:</strong> when the iterated expression's type is proven non-empty at
-the loop head, exclude the "body never ran" branch from the post-loop
-merge.</p>
+<p><code>__LINE__</code> on its own resolves to <code>int</code> and returns cleanly, but as an
+operand of <code>+</code> it is not classified, so the addition falls back to the
+conservative <code>int|float</code> that a mixed-operand sum produces. Every
+<code>int</code>-typed magic constant (<code>__LINE__</code>) and <code>string</code>-typed one
+(<code>__FILE__</code>, <code>__DIR__</code>, <code>__FUNCTION__</code>, <code>__CLASS__</code>, <code>__METHOD__</code>,
+<code>__NAMESPACE__</code>) should be classified the same way its own type is.</p>
+<p>Sample site: <code>pdepend tests/php/PDepend/Source/AST/ASTCompilationUnitTest.php:293</code>.</p>
+<p><strong>Fix:</strong> classify a magic constant by its own resolved type in the
+binary-operator operand classifier, the way <code>int</code> refinements already
+are.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
