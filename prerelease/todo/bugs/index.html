@@ -1135,34 +1135,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B65. <code>ReflectionClass&lt;T&gt;</code>'s generic argument is not carried through <code>newInstanceArgs()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B66. A closure parameter passed to <code>spl_autoload_register()</code> is not inferred from the callback's declared type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1990,34 +1962,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B65. <code>ReflectionClass&lt;T&gt;</code>'s generic argument is not carried through <code>newInstanceArgs()</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B66. A closure parameter passed to <code>spl_autoload_register()</code> is not inferred from the callback's declared type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2535,56 +2479,25 @@ for <code>PHPStan\Analyser\Scope::isInClass()</code> narrowing a subsequent
 <code>getClassReflection()</code> call on the same <code>$scope</code>. Low priority: this is
 PHPStan-extension-authoring-specific, not general PHP or Laravel code.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs">B65. <code>ReflectionClass&lt;T&gt;</code>'s generic argument is not carried through <code>newInstanceArgs()</code><a class="headerlink" href="#b65-reflectionclassts-generic-argument-is-not-carried-through-newinstanceargs" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @var class-string&lt;Node&gt; $class */</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">$class = substr(static::class, 0, -4);</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">$reflection = new ReflectionClass($class);</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">return $reflection-&gt;newInstanceArgs([__METHOD__]);   // reported: got Node|null</span>
-</code></pre></div>
-<p><code>new ReflectionClass($class)</code> on a <code>class-string&lt;Node&gt;</code> should produce
-<code>ReflectionClass&lt;Node&gt;</code>, and its generic <code>newInstanceArgs(): T</code> stub
-should then resolve to plain <code>Node</code> here — matching the declared return
-type exactly. An extra <code>|null</code> is added instead.</p>
-<p><strong>Fix:</strong> confirm the generic type argument captured from the
-<code>class-string&lt;T&gt;</code> constructor argument is threaded through to
-<code>newInstanceArgs()</code>'s templated return, the same way it already must be
-for <code>newInstance()</code> (worth checking both stay in sync).</p>
-<h3 id="b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type">B66. A closure parameter passed to <code>spl_autoload_register()</code> is not inferred from the callback's declared type<a class="headerlink" href="#b66-a-closure-parameter-passed-to-spl_autoload_register-is-not-inferred-from-the-callbacks-declared-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">spl_autoload_register(function ($class): void {</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">    $file = __DIR__ . strtr(str_replace(&#39;App\\&#39;, &#39;&#39;, $class), &#39;\\&#39;, &#39;/&#39;) . &#39;.php&#39;;   // reported: got array&lt;array-key,string&gt;|string</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">    // ...</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">});</span>
-</code></pre></div>
-<p><code>spl_autoload_register()</code>'s stub types its callback parameter as
-<code>callable(string): void</code>. The closure's own <code>$class</code> parameter has no
-type declaration, so its type should be inferred from that
-context — <code>string</code> — the same way an inferred parameter type already
-works for other typed-callable consumers (e.g. <code>array_map</code>). Left
-untyped, <code>$class</code> falls back to a wider inferred type and <code>str_replace()</code>
-returns its full union.</p>
-<p><strong>Fix:</strong> confirm the callable-parameter-type inference used for
-<code>usort</code>/<code>array_map</code>/similar higher-order builtins also covers
-<code>spl_autoload_register</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type">B58. The array union operator (<code>+</code>) does not preserve a previously narrowed key type<a class="headerlink" href="#b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @return array&lt;string&gt; shorthand for array&lt;int|string, string&gt; */</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">function convert(string $raw): array { /* ... */ }</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">/** @param array&lt;string, string&gt; $vars */</span>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">function build(array $vars): void {}</span>
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>
-<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="x">function run(string $raw): void</span>
-<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="x">{</span>
-<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="x">    $data = convert($raw);</span>
-<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="x">    $data = array_filter($data, fn(string|int $key): bool =&gt; is_string($key), ARRAY_FILTER_USE_KEY);</span>
-<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="x">    build($data);                      // fine on its own</span>
-<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>
-<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="x">    $data = getShared() + $data + getShared();   // reported: got array&lt;int|string, string&gt;</span>
-<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="x">    build($data);</span>
-<a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @return array&lt;string&gt; shorthand for array&lt;int|string, string&gt; */</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">function convert(string $raw): array { /* ... */ }</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">/** @param array&lt;string, string&gt; $vars */</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">function build(array $vars): void {}</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="x">function run(string $raw): void</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="x">{</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="x">    $data = convert($raw);</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="x">    $data = array_filter($data, fn(string|int $key): bool =&gt; is_string($key), ARRAY_FILTER_USE_KEY);</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="x">    build($data);                      // fine on its own</span>
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="x">    $data = getShared() + $data + getShared();   // reported: got array&lt;int|string, string&gt;</span>
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a><span class="x">    build($data);</span>
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>array_filter(..., ARRAY_FILTER_USE_KEY)</code> with an <code>is_string($key)</code>
 guard already narrows the key type correctly on its own (a prior fix
@@ -2597,23 +2510,23 @@ operand's <em>actual</em> (possibly narrowed) key type, not re-derive a wider
 key type from the operands' declared/generic shapes.</p>
 <h3 id="b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring">B60. Array keys built from loop-index arithmetic or <code>array_keys()</code> still widen to <code>int|string</code><a class="headerlink" href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">/** @return list&lt;string&gt; */</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">function paths(): array</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">{</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="x">    /** @return array&lt;string, string&gt; absoluteFilePath =&gt; viewName */</span>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="x">    $templates = discover();</span>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="x">    return array_keys($templates);   // reported: got list&lt;array-key&gt;, not list&lt;string&gt;</span>
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="x">}</span>
-<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>
-<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="x">/** @return array&lt;int, array&lt;string,int&gt;&gt; */</span>
-<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="x">function lineMapping(string $contents): array</span>
-<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="x">{</span>
-<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="x">    $mapping = [];</span>
-<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="x">    foreach (explode(&quot;\n&quot;, $contents) as $lineIndex =&gt; $line) {</span>
-<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="x">        $mapping[$lineIndex + 1] = [&#39;x&#39; =&gt; 1];   // reported: got array&lt;int|string,...&gt;</span>
-<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="x">    }</span>
-<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="x">    return $mapping;</span>
-<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @return list&lt;string&gt; */</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">function paths(): array</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">{</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">    /** @return array&lt;string, string&gt; absoluteFilePath =&gt; viewName */</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">    $templates = discover();</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">    return array_keys($templates);   // reported: got list&lt;array-key&gt;, not list&lt;string&gt;</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="x">}</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="x">/** @return array&lt;int, array&lt;string,int&gt;&gt; */</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="x">function lineMapping(string $contents): array</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="x">{</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="x">    $mapping = [];</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a><span class="x">    foreach (explode(&quot;\n&quot;, $contents) as $lineIndex =&gt; $line) {</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a><span class="x">        $mapping[$lineIndex + 1] = [&#39;x&#39; =&gt; 1];   // reported: got array&lt;int|string,...&gt;</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="x">    }</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a><span class="x">    return $mapping;</span>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a><span class="x">}</span>
 </code></pre></div>
 <p>Both examples only ever produce <code>int</code> (arithmetic on a sequential
 <code>foreach</code> index) or <code>string</code> (<code>array_keys()</code> on an <code>array&lt;string, ...&gt;</code>)
@@ -2631,16 +2544,16 @@ site still reports the widened key type, isolate the exact expression
 <code>int</code>-only or <code>string</code>-only key type gets joined with its opposite.</p>
 <h3 id="b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch">B61. <code>isset()</code> narrowing is not propagated through a multi-level chained array-dimension fetch<a class="headerlink" href="#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">/**</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x"> * @param array{files?: array&lt;string, array{violations?: list&lt;array{rule: string}&gt;}&gt;} $state</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x"> */</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">function violations(array $state, string $path): array</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x">{</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x">    if (!isset($state[&#39;files&#39;][$path][&#39;violations&#39;])) {</span>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="x">        return [];</span>
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="x">    }</span>
-<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="x">    return $state[&#39;files&#39;][$path][&#39;violations&#39;];   // reported: got list&lt;array{rule:string}&gt;|null</span>
-<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/**</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x"> * @param array{files?: array&lt;string, array{violations?: list&lt;array{rule: string}&gt;}&gt;} $state</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x"> */</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">function violations(array $state, string $path): array</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">{</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="x">    if (!isset($state[&#39;files&#39;][$path][&#39;violations&#39;])) {</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="x">        return [];</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="x">    }</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="x">    return $state[&#39;files&#39;][$path][&#39;violations&#39;];   // reported: got list&lt;array{rule:string}&gt;|null</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>violations</code> is an <em>optional</em> shape key (<code>violations?: ...</code>), not a
 nullable one, so <code>isset()</code> on the full three-level chain is the
