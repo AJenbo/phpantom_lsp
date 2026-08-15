@@ -380,7 +380,50 @@ PHPStan-extension-authoring-specific, not general PHP or Laravel code.
 
 ## Symbol resolution
 
-No outstanding items.
+### B76. A member read off a class constant is looked for on the class that declares the constant
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+enum Kind: string
+{
+    case A = 'a';
+}
+
+class Matrix
+{
+    public const Kind TYPED = Kind::A;
+    public const UNTYPED = Kind::A;
+
+    public function all(): void
+    {
+        echo self::TYPED->value;     // reported: Property 'value' not found on class 'Matrix'
+        echo self::UNTYPED->value;   // reported: Property 'value' not found on class 'Matrix'
+        echo Matrix::TYPED->value;   // same, written through the class name
+    }
+}
+```
+
+`Class::CONST->member` resolves the subject to the class the constant is
+declared on rather than to the type the constant holds, so every member
+read off it is reported as missing. It fires on the declared type and on
+the initialiser alike, so writing PHP 8.3's `const Kind TYPED` does not
+help, and `self::`, `static::`, and an explicit class name all reach it.
+The everyday shape is an enum case held in a constant, where `->value` is
+the whole reason to hold it.
+
+There are two paths for `Class::CONST` and only one of them knows this.
+`resolve_static_access_type` (`type_engine/call_resolution/return_types.rs`)
+reads the constant's declared type and initialiser and gets `Kind` right;
+the `SubjectExpr::StaticAccess` arm of `resolve_target_classes_expr`
+(`type_engine/resolver/mod.rs`) special-cases a static property (`self::$p`)
+and otherwise returns the owning class. That arm is what the unknown-member
+check resolves its subject through.
+
+**Fix:** have the `StaticAccess` arm resolve a non-property member through
+the same constant-type path the call resolver uses, so both answer alike,
+rather than teaching it a second way to read a constant. An enum case is
+its own enum, so `Kind::A` must keep resolving to `Kind`.
 
 ## Array types
 

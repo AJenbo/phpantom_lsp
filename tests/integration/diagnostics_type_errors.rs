@@ -9956,6 +9956,34 @@ class Encoder {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// The shape the typed-constant report was filed against: a declared `string`
+/// says the constant may hold any string, while the initialiser says which one
+/// it does hold. A parameter that accepts only some of them tells the two
+/// apart, and the one that is not among them is what gets reported.
+#[test]
+fn a_typed_string_constant_keeps_the_literal_it_holds() {
+    let php = r#"<?php
+/** @param 'ZeroSSL'|'LetsEncrypt' $provider */
+function useProvider(string $provider): void {}
+
+class SiteCertificate {
+    final public const string ZERO_SSL = 'ZeroSSL';
+    final public const string SELF_SIGNED = 'SelfSigned';
+}
+
+function test(): void {
+    useProvider(SiteCertificate::ZERO_SSL);
+    useProvider(SiteCertificate::SELF_SIGNED);
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("'SelfSigned'"),
+        "the value the constant holds is what the message names, got {messages:?}"
+    );
+}
+
 /// A constant defined in terms of itself has no value to fold, and folding it
 /// must terminate rather than chase the cycle.
 #[test]

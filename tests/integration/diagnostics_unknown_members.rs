@@ -313,6 +313,39 @@ $x = Foo::BAR;
     );
 }
 
+/// PHP 8.3 lets a constant declare a type, and `final` may be written on
+/// either side of the visibility. Every spelling declares a constant that is
+/// there to be read, from inside the class and from outside it.
+#[test]
+fn no_diagnostic_for_a_typed_class_constant() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class SiteCertificate {
+    final public const string ZERO_SSL = 'ZeroSSL';
+    public final const string LETS_ENCRYPT = 'LetsEncrypt';
+    final const string ACME = 'Acme';
+    public const int RETRIES = 3;
+    public const array PROVIDERS = ['ZeroSSL'];
+
+    public function issuer(): string
+    {
+        return self::ZERO_SSL . static::LETS_ENCRYPT . self::ACME;
+    }
+}
+
+$x = SiteCertificate::ZERO_SSL;
+$y = SiteCertificate::RETRIES;
+$z = SiteCertificate::PROVIDERS;
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for typed class constants, got: {:?}",
+        diags
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Static properties
 // ═══════════════════════════════════════════════════════════════════════════
