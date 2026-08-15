@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786763263008,
+  "lastUpdate": 1786764430587,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21827,6 +21827,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ad4ea8be00fa16fbed20c89b052f7d01aa7b33a1",
+          "message": "A one-line function no longer inherits the previous function's `@param`",
+          "timestamp": "2026-08-15T05:09:52+02:00",
+          "tree_id": "1e5ae06b38fed2daa86370a452b762f842a11f74",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ad4ea8be00fa16fbed20c89b052f7d01aa7b33a1"
+        },
+        "date": 1786764425029,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80,
             "unit": "MiB"
           }
         ]
