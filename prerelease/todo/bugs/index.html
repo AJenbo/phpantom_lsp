@@ -873,28 +873,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B75. A dim-write to the foreach value variable leaks through the loop back-edge
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B76. Blade variables typed from a component class are immune to condition narrowing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1478,28 +1456,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B75. A dim-write to the foreach value variable leaks through the loop back-edge
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B76. Blade variables typed from a component class are immune to condition narrowing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1622,84 +1578,24 @@ tightening surfaced one previously-swallowed site.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge">B75. A dim-write to the foreach value variable leaks through the loop back-edge<a class="headerlink" href="#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function normalize(mixed $steps): void</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    if (is_array($steps)) {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        foreach ($steps as $step) {</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">            if (!is_array($step)) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">                throw new RuntimeException(&#39;not array&#39;);</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">            }</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">            $raw = isset($step[&#39;fo&#39;]) &amp;&amp; is_string($step[&#39;fo&#39;]) ? $step[&#39;fo&#39;] : &#39;{}&#39;;</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">            json_decode($raw, true);   // reported: got array|&#39;{}&#39;</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">            $decoded = json_decode($raw, true);</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">            if (!is_array($decoded)) {</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">                throw new RuntimeException(&#39;bad json&#39;);</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">            }</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">            $step[&#39;fo&#39;] = $decoded;    // &lt;-- remove this line and the FP disappears</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">        }</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">    }</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">}</span>
-</code></pre></div>
-<p>The foreach rebinds <code>$step</code> to a fresh element at the top of every
-iteration, so the <code>$step['fo'] = $decoded</code> write at the bottom of the
-body must not influence the next iteration's <code>$step</code>. It does: the
-loop back-edge merges the written element type (<code>array</code>) into the
-rebound variable, and the <code>isset(...) &amp;&amp; is_string(...)</code> ternary guard
-then fails to filter it — the true arm keeps the leaked <code>array</code> type
-instead of narrowing to <code>string</code> (an <code>is_string</code> proof should eliminate
-a pure-<code>array</code> arm entirely). Without the write-back (or without the
-loop) the same guard narrows correctly.</p>
-<p>Sample sites: <code>luxplus-backoffice .../ProductRoutineTemplatesController.php:120</code>
-and <code>:204</code> (identical normalize-steps loops).</p>
-<p><strong>Fix:</strong> foreach rebinding must reset the value variable to the
-iterated element type on every back-edge merge; dim-writes to it are
-dead state once the variable is rebound.</p>
-<h3 id="b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing">B76. Blade variables typed from a component class are immune to condition narrowing<a class="headerlink" href="#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>{{-- component view, backed by a component class that declares
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>     public ?string $countryName / public readonly ?array $rules --}}
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>&lt;small&gt;NEW {{ $countryName ? strtoupper($countryName) . &#39; &#39; : &#39;&#39; }}ORDERS&lt;/small&gt;
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>{{-- reported: strtoupper() got string|null --}}
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>@foreach ($rules as $rule)
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    {{ is_string($rule) ? $rule : $rule-&gt;getDescription() }}
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    {{-- reported: e() got IFileValidationRule|string --}}
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>@endforeach
-</code></pre></div>
-<p>Both expressions narrow correctly when the template's variable types
-come only from its own <code>@bladestan-signature</code> <code>@var</code> block: copying
-either file byte-for-byte to a path no component renders produces zero
-diagnostics. In place — where the variables' types are supplied by the
-component class (<code>Dashboard\NewOrdersOverview::$countryName</code>,
-<code>File\Upload::$rules</code>) — the ternary condition's proof is discarded
-and the un-narrowed union flows into the arm. The render-site/
-component-supplied type appears to be re-pinned at every read instead
-of participating in narrowing like a normal scope entry.</p>
-<p>Sample sites: <code>luxplus-backoffice resources/backoffice/views/components/dashboard/new-orders-overview.blade.php:23</code>,
-<code>.../components/file/upload.blade.php:35</code>.</p>
-<p><strong>Fix:</strong> inject component-class/render-site variable types as ordinary
-initial scope state (the way the signature block's types are), so the
-forward walker narrows them like any other variable.</p>
 <h3 id="b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path">B77. A foreach over a proven non-empty array still merges the zero-iteration path<a class="headerlink" href="#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param array&lt;int, int&gt; $qtys */</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function floorStock(array $qtys): int</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">{</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    if (!$qtys) {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        return 0;</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    $max = null;</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    foreach ($qtys as $qty) {</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">        if ($max === null) {</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">            $max = $qty;</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">            continue;</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">        }</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">        $max = min($max, $qty);</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">    }</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">    return takesInt($max);   // reported: got null|int</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param array&lt;int, int&gt; $qtys */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function floorStock(array $qtys): int</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    if (!$qtys) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        return 0;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    }</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $max = null;</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    foreach ($qtys as $qty) {</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        if ($max === null) {</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">            $max = $qty;</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">            continue;</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">        }</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">        $max = min($max, $qty);</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">    }</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    return takesInt($max);   // reported: got null|int</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>if (!$qtys) return;</code> proves the array non-empty, so the loop body runs
 at least once, and every path through the body assigns <code>$max</code> an <code>int</code>.
@@ -1713,21 +1609,21 @@ the loop head, exclude the "body never ran" branch from the post-loop
 merge.</p>
 <h3 id="b82-a-nullsafe-chain-compared-to-a-non-nullable-value-does-not-narrow-the-receiver">B82. A nullsafe chain compared <code>===</code> to a non-nullable value does not narrow the receiver<a class="headerlink" href="#b82-a-nullsafe-chain-compared-to-a-non-nullable-value-does-not-narrow-the-receiver" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">final class NodeX</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">{</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    public function getParent(): ?NodeX { /* ... */ }</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public function getChild(): NodeX { /* ... */ }</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    public function getInner(): object { /* ... */ }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">function strip(NodeX $n): NodeX</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">{</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">    $parent = $n-&gt;getParent();</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">    if ($parent?-&gt;getChild()-&gt;getInner() === $n-&gt;getInner()) {</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">        return $parent;   // reported: ?NodeX incompatible with NodeX</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">    }</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">    return $n;</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">final class NodeX</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function getParent(): ?NodeX { /* ... */ }</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function getChild(): NodeX { /* ... */ }</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    public function getInner(): object { /* ... */ }</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">function strip(NodeX $n): NodeX</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">{</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">    $parent = $n-&gt;getParent();</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">    if ($parent?-&gt;getChild()-&gt;getInner() === $n-&gt;getInner()) {</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">        return $parent;   // reported: ?NodeX incompatible with NodeX</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">    }</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">    return $n;</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">}</span>
 </code></pre></div>
 <p>If <code>$parent</code> is <code>null</code>, the nullsafe chain short-circuits to <code>null</code>,
 and <code>null === $n-&gt;getInner()</code> is <code>false</code> because the right-hand side's
@@ -1741,16 +1637,16 @@ type excludes <code>null</code>, narrow <code>$x</code> to non-null (and mirror 
 the false branch).</p>
 <h3 id="b83-a-match-true-arms-condition-does-not-narrow-inside-the-arms-result">B83. A <code>match (true)</code> arm's condition does not narrow inside the arm's result<a class="headerlink" href="#b83-a-match-true-arms-condition-does-not-narrow-inside-the-arms-result" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param list&lt;int|string&gt; $args */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function takesList(array $args): void {}</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">function label(?int $buy, ?int $pay, string $kind): void {</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    $textArgs = match (true) {</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        $kind === &#39;xy&#39; &amp;&amp; $buy !== null &amp;&amp; $pay !== null =&gt; [$buy, $pay],</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">        default =&gt; [],</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">    };</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">    takesList($textArgs);   // reported: array{?int, ?int} does not satisfy list&lt;int|string&gt;</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param list&lt;int|string&gt; $args */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function takesList(array $args): void {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">function label(?int $buy, ?int $pay, string $kind): void {</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $textArgs = match (true) {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        $kind === &#39;xy&#39; &amp;&amp; $buy !== null &amp;&amp; $pay !== null =&gt; [$buy, $pay],</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">        default =&gt; [],</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    };</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    takesList($textArgs);   // reported: array{?int, ?int} does not satisfy list&lt;int|string&gt;</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
 </code></pre></div>
 <p>The <code>!== null</code> conjuncts of a <code>match (true)</code> arm's condition prove the
 values non-null within that arm's result expression, exactly as the
