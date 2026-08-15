@@ -1293,12 +1293,16 @@ pub(crate) fn process_foreach<'b>(
             if point != LoopSeedPoint::Entry {
                 return;
             }
-            // Re-bind the foreach variables for the next iteration.
+            // Re-bind the foreach variables for the next iteration,
+            // discarding what the previous one wrote to them.
             match &foreach.target {
                 ForeachTarget::Value(val) => {
+                    reset_foreach_target(val.value, next_scope, &pre_loop_scope);
                     bind_foreach_value(val.value, &iter_type, next_scope, ctx);
                 }
                 ForeachTarget::KeyValue(kv) => {
+                    reset_foreach_target(kv.key, next_scope, &pre_loop_scope);
+                    reset_foreach_target(kv.value, next_scope, &pre_loop_scope);
                     bind_foreach_key(kv.key, &iter_type, next_scope, ctx);
                     bind_foreach_value(kv.value, &iter_type, next_scope, ctx);
                 }
@@ -1747,6 +1751,77 @@ pub(crate) fn extract_foreach_var_name(expr: &Expression<'_>) -> Option<String> 
         Some(bytes_to_str(dv.name).to_string())
     } else {
         None
+    }
+}
+
+/// Undo what the previous iteration wrote to a `foreach` target
+/// variable, ahead of re-binding it for the next one.
+///
+/// The loop hands the target a fresh element at the top of every
+/// iteration, so a write in the body — `$step = …`, and just as much
+/// `$step['fo'] = …` — describes the element that iteration was given,
+/// not the next one.  Merging it back over the loop's back edge leaves
+/// the rebound variable carrying a type it cannot have, which then
+/// defeats the guards in the body that would have narrowed it.
+///
+/// What the variable held *before* the loop is put back rather than
+/// dropped: a `foreach` whose element type nothing can settle leaves the
+/// name where it found it, and a loop that shadows an outer variable of
+/// the same name is then no worse off than it was before the loop.
+/// Clearing the entry first also drops the synthetic `$step['fo']` keys
+/// and the proofs recorded against them, which the rebinding invalidates
+/// whether or not a type replaces them.
+fn reset_foreach_target(
+    expr: &Expression<'_>,
+    scope: &mut ScopeState,
+    pre_loop_scope: &ScopeState,
+) {
+    let inner = if let Expression::UnaryPrefix(up) = expr
+        && matches!(up.operator, UnaryPrefixOperator::Reference(_))
+    {
+        up.operand
+    } else {
+        expr
+    };
+    match inner {
+        Expression::Variable(Variable::Direct(dv)) => {
+            let var_name = bytes_to_str(dv.name);
+            scope.remove(var_name);
+            scope.invalidate_dependent_keys(var_name);
+            if pre_loop_scope.contains(var_name) {
+                let before = pre_loop_scope.get(var_name);
+                if before.is_empty() {
+                    scope.set_empty(var_name);
+                } else {
+                    scope.set(var_name, before.to_vec());
+                }
+            }
+        }
+        // Destructuring targets: `foreach ($rows as [$a, $b])` binds
+        // every variable in the pattern, each one just as fresh.
+        Expression::Array(arr) => {
+            for elem in arr.elements.iter() {
+                reset_foreach_destructured_element(elem, scope, pre_loop_scope);
+            }
+        }
+        Expression::List(list) => {
+            for elem in list.elements.iter() {
+                reset_foreach_destructured_element(elem, scope, pre_loop_scope);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn reset_foreach_destructured_element(
+    elem: &ArrayElement<'_>,
+    scope: &mut ScopeState,
+    pre_loop_scope: &ScopeState,
+) {
+    match elem {
+        ArrayElement::KeyValue(kv) => reset_foreach_target(kv.value, scope, pre_loop_scope),
+        ArrayElement::Value(val) => reset_foreach_target(val.value, scope, pre_loop_scope),
+        _ => {}
     }
 }
 

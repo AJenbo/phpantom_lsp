@@ -34,9 +34,7 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B76  | [Blade variables typed from a component class are immune to condition narrowing](todo/bugs.md#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing) | Medium      | Medium-High |
 | B77  | [A foreach over a proven non-empty array still merges the zero-iteration path](todo/bugs.md#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path) | Medium      | Medium-High |
-| B75  | [A dim-write to the foreach value variable leaks through the loop back-edge](todo/bugs.md#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge) | Medium      | High        |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions

@@ -120,7 +120,36 @@ pub(crate) fn process_statement<'b>(
                 }
             }
         }
+        // An echoed expression narrows exactly the way a returned one
+        // does: `echo $s ? strtoupper($s) : '';` proves `$s` a string
+        // inside the arm that runs it.  Blade compiles every `{{ … }}`
+        // to an `echo`, so a template's guards live here.
+        Statement::Echo(echo) => {
+            for value in echo.values.iter() {
+                process_echoed_expression(value, scope, ctx);
+            }
+        }
+        Statement::EchoTag(echo) => {
+            for value in echo.values.iter() {
+                process_echoed_expression(value, scope, ctx);
+            }
+        }
         _ => {}
+    }
+}
+
+/// Apply one echoed expression's effects to the scope: the assignments it
+/// makes, and the narrowing its short-circuit chains, ternaries and
+/// `match (true)` arms prove for the code inside them.
+fn process_echoed_expression<'b>(
+    value: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    process_assignment_expr(value, scope, ctx);
+    record_short_circuit_snapshots(value, scope, ctx);
+    if is_diagnostic_scope_active() {
+        record_match_ternary_snapshots(value, scope, ctx);
     }
 }
 

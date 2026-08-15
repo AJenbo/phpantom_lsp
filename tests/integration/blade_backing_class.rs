@@ -683,4 +683,67 @@ mod tests {
             undefined_variables(&backend, &uri)
         );
     }
+
+    /// Every `{{ … }}` compiles to an `echo`, so a guard written inside
+    /// one has to narrow the variable it proves — here the component's
+    /// own nullable `$countryName`.
+    #[tokio::test]
+    async fn a_guard_inside_an_interpolation_narrows_the_variable_it_proves() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                (
+                    "app/helpers.php",
+                    "<?php\nfunction shout(string $value): string { return $value; }\n",
+                ),
+                (
+                    "app/View/Components/Banner.php",
+                    "<?php\nnamespace App\\View\\Components;\n\
+                     use Illuminate\\View\\Component;\n\
+                     class Banner extends Component {\n\
+                         public function __construct(public ?string $countryName = null) {}\n\
+                         public function render() {}\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/components/banner.blade.php",
+                    "@php\n\
+                     /**\n\
+                      * @bladestan-signature\n\
+                      * @var string|null $countryName\n\
+                      */\n\
+                     @endphp\n\
+                     {{ $countryName ? shout($countryName) : '' }}\n",
+                ),
+            ],
+        );
+        backend.initialized(InitializedParams {}).await;
+        let root = backend.workspace_root().read().clone().unwrap();
+        let uri = open_template(
+            &backend,
+            &root,
+            "resources/views/components/banner.blade.php",
+        )
+        .await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let type_errors: Vec<String> = diags
+            .into_iter()
+            .filter(|d| {
+                d.code.as_ref().is_some_and(
+                    |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+                )
+            })
+            .map(|d| d.message)
+            .collect();
+        assert!(
+            type_errors.is_empty(),
+            "the truthy arm proves $countryName is a string: {type_errors:?}"
+        );
+    }
 }

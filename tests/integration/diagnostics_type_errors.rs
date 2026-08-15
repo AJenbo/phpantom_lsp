@@ -4076,6 +4076,37 @@ function x(array $array): void {
 // ─── Foreach variable reassignment should not leak into RHS ─────────────────
 
 #[test]
+fn no_diagnostic_for_dim_write_to_foreach_value_variable() {
+    // The foreach rebinds $step to a fresh element every iteration, so
+    // the `$step['fo'] = ...` write at the bottom of the body is dead
+    // state by the time the next iteration starts.  When it leaked
+    // through the back-edge the `is_string()` guard could no longer
+    // narrow the ternary's true arm to string.
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function normalize(mixed $steps): void {
+    if (is_array($steps)) {
+        foreach ($steps as $step) {
+            if (!is_array($step)) {
+                throw new \RuntimeException('not array');
+            }
+            $raw = isset($step['fo']) && is_string($step['fo']) ? $step['fo'] : '{}';
+            takes_string($raw);
+            $step['fo'] = [1, 2];
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A dim-write to the foreach value variable must not leak into the \
+         next iteration's binding, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_foreach_var_reassigned_in_body() {
     // When $type is the foreach key (string), and then reassigned to
     // BackedEnum::from($type), the $type argument inside from() should
@@ -10698,4 +10729,57 @@ function run(): void {
 }
 "#;
     assert_eq!(type_error_messages(&collect(php)), Vec::<String>::new());
+}
+
+// ─── Narrowing inside an echoed expression ──────────────────────────────────
+
+#[test]
+fn an_echoed_ternary_narrows_its_arms() {
+    // Blade compiles every `{{ … }}` to an `echo`, so a template's guards
+    // are only honoured if an echoed expression narrows the way an
+    // assigned or returned one does.
+    let php = r#"<?php
+class Text { public static function shout(string $v): string { return $v; } }
+
+function render(?string $c): void {
+    echo $c ? Text::shout($c) : '';
+}
+"#;
+    assert_eq!(
+        type_error_messages(&collect_slow(php)),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn an_echoed_short_circuit_chain_narrows_its_right_hand_side() {
+    let php = r#"<?php
+class Text { public static function shout(string $v): string { return $v; } }
+
+function render(?string $c): void {
+    echo $c && Text::shout($c) ? 'yes' : 'no';
+}
+"#;
+    assert_eq!(
+        type_error_messages(&collect_slow(php)),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn an_echoed_type_guard_narrows_the_else_arm() {
+    let php = r#"<?php
+interface Rule { public function getDescription(): string; }
+function out(string $v): string { return $v; }
+
+function render(Rule|string $rule): void {
+    echo out(is_string($rule) ? $rule : $rule->getDescription());
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///echoed_type_guard.php";
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut diags);
+    assert_eq!(type_error_messages(&diags), Vec::<String>::new());
 }
