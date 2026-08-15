@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786838343798,
+  "lastUpdate": 1786838379649,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22813,6 +22813,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "17831c987a3b8e936cb3ac1d61da549353449386",
+          "message": "A project-wide external tool re-run no longer invalidates every file it\nreported",
+          "timestamp": "2026-08-16T01:42:31+02:00",
+          "tree_id": "4ea00b24855dff795133724820f1658e6fca9e60",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/17831c987a3b8e936cb3ac1d61da549353449386"
+        },
+        "date": 1786838372912,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.1,
             "unit": "MiB"
           }
         ]
