@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786826588876,
+  "lastUpdate": 1786827640090,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22541,6 +22541,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "russiameb@gmail.com",
+            "name": "real420og",
+            "username": "real420og"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f2d61ba6a51eeb7bd68be63196bc1988d0b0208d",
+          "message": "Find implementations declared in Composer packages\n\nGo-to-implementation on a method declared by a vendor interface, such as\nSymfony's HttpKernelInterface::handle(), returned nothing. Three filters\neach removed a valid answer:\n\n- once the workspace index was ready, results were restricted to project\n  classes and the scans that could reach vendor code were skipped, so a\n  vendor-owned target lost the implementations shipping beside it;\n- implementors were collected with abstract classes excluded, dropping an\n  abstract base whose method has a body;\n- an implementor had to declare the member itself, so a concrete subclass\n  that inherits the method unchanged was skipped.\n\nA target that itself lives under /vendor/ now drops the project-only\nrestriction and keeps the class-index scans, which are the only way to\nreach classes the workspace index never parses. Embedded stubs stay on\nthe fast path, since PHP's own interfaces are implemented across the\nwhole dependency tree.\n\nBoth member-level paths share locate_member_implementation, which returns\nthe declaration that supplies the body — the implementor's own or the\nnearest ancestor's — and skips a method only ever re-declared abstract.",
+          "timestamp": "2026-08-15T22:43:24+02:00",
+          "tree_id": "5f1a462a4a21ff2173b8d025aa511b99824c3939",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f2d61ba6a51eeb7bd68be63196bc1988d0b0208d"
+        },
+        "date": 1786827633252,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.4,
             "unit": "MiB"
           }
         ]
