@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786816310391,
+  "lastUpdate": 1786820410210,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22473,6 +22473,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1c31857576c7229dd3ba8d4f0df3d4d3bd678628",
+          "message": "A factory's `$model` property is ignored",
+          "timestamp": "2026-08-15T20:43:41+02:00",
+          "tree_id": "cb30c64e7c176c7d887840b336cc35c5bce33abb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1c31857576c7229dd3ba8d4f0df3d4d3bd678628"
+        },
+        "date": 1786820404091,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.3,
             "unit": "MiB"
           }
         ]
