@@ -202,7 +202,7 @@ impl Backend {
                 let fqn = self.function_fqn_at(uri, span.start, name);
                 Some((crate::util::short_name(&fqn).to_string(), true))
             }
-            SymbolKind::ConstantReference { name } => {
+            SymbolKind::ConstantReference { name, .. } => {
                 let fqn = self.constant_fqn_at(uri, span.start, name);
                 Some((crate::util::short_name(&fqn).to_string(), false))
             }
@@ -346,7 +346,7 @@ impl Backend {
             SymbolKind::MemberAccess { member_name, .. } => Some((member_name.to_string(), range)),
             SymbolKind::MemberDeclaration { name, .. } => Some((name.to_string(), range)),
             SymbolKind::FunctionCall { name, .. } => Some((name.to_string(), range)),
-            SymbolKind::ConstantReference { name } => Some((name.to_string(), range)),
+            SymbolKind::ConstantReference { name, .. } => Some((name.to_string(), range)),
             SymbolKind::NamespaceDeclaration { name } => Some((name.to_string(), range)),
             SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,

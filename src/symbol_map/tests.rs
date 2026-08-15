@@ -2917,8 +2917,13 @@ fn constant_access_produces_constant_reference() {
     let eol_offset = php.find("PHP_EOL").unwrap() as u32;
     let hit = map.lookup(eol_offset);
     assert!(hit.is_some(), "Should find PHP_EOL as ConstantReference");
-    if let SymbolKind::ConstantReference { ref name } = hit.unwrap().kind {
+    if let SymbolKind::ConstantReference {
+        ref name,
+        is_definition,
+    } = hit.unwrap().kind
+    {
         assert_eq!(name, "PHP_EOL");
+        assert!(!is_definition);
     } else {
         panic!(
             "Expected ConstantReference for PHP_EOL, got {:?}",
@@ -2964,8 +2969,13 @@ fn namespaced_standalone_constant_produces_constant_reference() {
         hit.is_some(),
         "Should find \\PHPStan\\PHP_VERSION_ID as ConstantReference"
     );
-    if let SymbolKind::ConstantReference { ref name } = hit.unwrap().kind {
+    if let SymbolKind::ConstantReference {
+        ref name,
+        is_definition,
+    } = hit.unwrap().kind
+    {
         assert_eq!(name, "PHPStan\\PHP_VERSION_ID");
+        assert!(!is_definition);
     } else {
         panic!(
             "Expected ConstantReference for PHPStan\\PHP_VERSION_ID, got {:?}",
@@ -3001,8 +3011,13 @@ fn constant_array_key_outside_interpolation_stays_a_constant_reference() {
     let key_offset = php.find("MY_KEY").unwrap() as u32;
     let hit = map.lookup(key_offset);
     assert!(hit.is_some(), "Should find MY_KEY as ConstantReference");
-    if let SymbolKind::ConstantReference { ref name } = hit.unwrap().kind {
+    if let SymbolKind::ConstantReference {
+        ref name,
+        is_definition,
+    } = hit.unwrap().kind
+    {
         assert_eq!(name, "MY_KEY");
+        assert!(!is_definition);
     } else {
         panic!(
             "Expected ConstantReference for MY_KEY, got {:?}",

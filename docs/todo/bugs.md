@@ -45,27 +45,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B176. Find References on a global constant always includes its declaration
-
-**Impact: Low · Effort: Medium**
-
-`find_constant_references` ignores its `include_declaration` parameter:
-every match is a `SymbolKind::ConstantReference` span, and unlike
-`SymbolKind::FunctionCall` (which carries `is_definition`),
-`ConstantReference` does not distinguish a constant's declaration site
-(`const BAR = 1;`) from a use of it (`echo BAR;`) -- both are extracted
-with the same span kind (`symbol_map/extraction/statements.rs`). So a
-"Find References" request with `includeDeclaration: false` still
-returns the declaration line for a global constant, unlike functions,
-methods, and properties.
-
-Fixing this properly means giving `ConstantReference` an `is_definition`
-flag the way `FunctionCall` has one, set at the declaration site in
-`extract_from_statement`'s `Statement::Constant` arm and cleared
-everywhere else `ConstantReference` is emitted (`Expression::ConstantAccess`,
-the `use const` import case in `class_like.rs`), then having
-`find_constant_references` skip definition spans when
-`include_declaration` is `false`. That touches the span extraction,
-the reference index (`reference_index.rs` pattern-matches
-`ConstantReference` by name only) and every other match on the enum
-variant, so it is not a one-line change.
+No outstanding items.

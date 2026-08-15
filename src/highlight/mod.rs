@@ -81,7 +81,7 @@ impl Backend {
             SymbolKind::FunctionCall { name, .. } => {
                 self.highlight_function(symbol_map, content, name)
             }
-            SymbolKind::ConstantReference { name } => {
+            SymbolKind::ConstantReference { name, .. } => {
                 self.highlight_constant(symbol_map, content, name)
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
@@ -337,7 +337,7 @@ impl Backend {
         let mut highlights = Vec::new();
 
         for span in &symbol_map.spans {
-            if let SymbolKind::ConstantReference { name } = &span.kind
+            if let SymbolKind::ConstantReference { name, .. } = &span.kind
                 && name == target_name
             {
                 highlights.push(DocumentHighlight {

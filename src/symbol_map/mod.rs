@@ -329,7 +329,11 @@ pub(crate) enum SymbolKind {
 
     /// A constant name in a navigable context (`define()` name,
     /// class constant access, standalone constant reference).
-    ConstantReference { name: Atom },
+    ///
+    /// `is_definition` follows the same convention as `FunctionCall`: `true`
+    /// at the declaration site (`const FOO = 1;`), `false` everywhere else,
+    /// so find-references can exclude the declaration when asked to.
+    ConstantReference { name: Atom, is_definition: bool },
 
     /// A method, property, or constant name at its *declaration* site.
     ///

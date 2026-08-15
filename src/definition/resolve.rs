@@ -427,7 +427,7 @@ impl Backend {
                     .map(|loc| vec![loc])
             }
 
-            SymbolKind::ConstantReference { name } => {
+            SymbolKind::ConstantReference { name, .. } => {
                 let ctx = self.file_context(uri);
                 let fqn = ctx.resolve_name_at(name, cursor_offset);
                 let mut candidates = vec![fqn];

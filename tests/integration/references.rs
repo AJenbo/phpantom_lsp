@@ -202,6 +202,72 @@ class Baz {
     );
 }
 
+// ─── Global constant reference tests ───────────────────────────────────────
+
+#[test]
+fn global_constant_references_include_declaration() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_global_const.php";
+    let content = r#"<?php
+
+const FOO = 1;
+
+function test(): int {
+    return FOO + FOO;
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `FOO` in the declaration (line 2, col 6)
+    let results = backend
+        .find_references(uri, content, Position::new(2, 6), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "global_constant_references");
+
+    // 1 declaration + 2 usages
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 references (1 declaration + 2 usages), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[test]
+fn global_constant_references_without_declaration_no_duplicates() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_global_const_nodecl.php";
+    let content = r#"<?php
+
+const FOO = 1;
+
+function test(): int {
+    return FOO + FOO;
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `FOO` in the declaration (line 2, col 6), include_declaration = false
+    let results = backend
+        .find_references(uri, content, Position::new(2, 6), false)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "global_constant_references_nodecl");
+
+    // 2 usages only, no declaration
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 references (usages only), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
 // ─── Member access tests ────────────────────────────────────────────────────
 
 #[test]

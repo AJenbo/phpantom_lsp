@@ -110,7 +110,7 @@ impl Backend {
                     }
                 }
 
-                SymbolKind::ConstantReference { name } => {
+                SymbolKind::ConstantReference { name, .. } => {
                     let first_segment = extract_first_segment(name);
                     if file_use_map.contains_key(first_segment) {
                         referenced_aliases.insert(first_segment.to_string());

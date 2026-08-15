@@ -483,7 +483,7 @@ impl Backend {
                 }
             }
 
-            SymbolKind::ConstantReference { name } => {
+            SymbolKind::ConstantReference { name, .. } => {
                 // The name is resolved against the file the same way the
                 // type engine resolves it, so a namespaced constant is
                 // found through whichever spelling the reference used.

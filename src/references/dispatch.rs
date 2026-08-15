@@ -276,7 +276,7 @@ impl Backend {
                 let fqn = ctx.resolve_name_at(name, span_start);
                 self.find_function_references(&fqn, name, include_declaration)
             }
-            SymbolKind::ConstantReference { name } => {
+            SymbolKind::ConstantReference { name, .. } => {
                 let fqn = self.constant_fqn_at(uri, span_start, name);
                 self.find_constant_references(
                     &fqn,

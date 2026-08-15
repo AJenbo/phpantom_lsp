@@ -1039,7 +1039,10 @@ pub(super) fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<Sym
                 is_definition: false,
                 is_docblock_reference: false,
             },
-            UseItemKind::Constant => SymbolKind::ConstantReference { name },
+            UseItemKind::Constant => SymbolKind::ConstantReference {
+                name,
+                is_definition: false,
+            },
         };
         spans.push(SymbolSpan {
             start: item.name.span().start.offset,

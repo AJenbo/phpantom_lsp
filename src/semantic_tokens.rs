@@ -424,7 +424,7 @@ impl Backend {
                     (TT_NAMESPACE, TM_DECLARATION)
                 }
 
-                SymbolKind::ConstantReference { name: _ } => {
+                SymbolKind::ConstantReference { .. } => {
                     if mode == SemanticTokensMode::Contextual {
                         continue;
                     }

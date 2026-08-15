@@ -394,7 +394,10 @@ pub(super) fn extract_from_expression<'a>(
             ctx.spans.push(SymbolSpan {
                 start: ca.name.span().start.offset,
                 end: ca.name.span().end.offset,
-                kind: SymbolKind::ConstantReference { name: name_clean },
+                kind: SymbolKind::ConstantReference {
+                    name: name_clean,
+                    is_definition: false,
+                },
             });
         }
 

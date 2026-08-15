@@ -332,6 +332,7 @@ pub(super) fn extract_from_statement<'a>(
                     end: item.name.span.end.offset,
                     kind: SymbolKind::ConstantReference {
                         name: crate::atom::atom_bytes(item.name.value),
+                        is_definition: true,
                     },
                 });
                 extract_from_expression(item.value, ctx, scope_start);

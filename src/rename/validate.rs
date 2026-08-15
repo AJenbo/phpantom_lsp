@@ -128,7 +128,7 @@ fn span_name(kind: &SymbolKind) -> Option<&str> {
         | SymbolKind::Variable { name }
         | SymbolKind::CompactVariable { name }
         | SymbolKind::FunctionCall { name, .. }
-        | SymbolKind::ConstantReference { name }
+        | SymbolKind::ConstantReference { name, .. }
         | SymbolKind::MemberDeclaration { name, .. }
         | SymbolKind::NamespaceDeclaration { name } => Some(name.as_str()),
         SymbolKind::MemberAccess { member_name, .. } => Some(member_name.as_str()),

@@ -389,7 +389,7 @@ impl Backend {
                 };
                 function_keys(&resolved, name)
             }
-            SymbolKind::ConstantReference { name } => {
+            SymbolKind::ConstantReference { name, .. } => {
                 let resolved = self.constant_fqn_at(uri, span.start, name);
                 constant_keys(&resolved, name)
             }
