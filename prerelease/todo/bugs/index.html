@@ -915,6 +915,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#miscellaneous" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Miscellaneous
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b174-reference-counts-stay-at-zero-until-the-next-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B174. Reference counts stay at zero until the next edit
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B175. Renaming a global constant renames a class constant of the same name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1470,6 +1509,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#miscellaneous" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Miscellaneous
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b174-reference-counts-stay-at-zero-until-the-next-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B174. Reference counts stay at zero until the next edit
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B175. Renaming a global constant renames a class constant of the same name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1519,6 +1597,29 @@ each bug's row lives in the current sprint/backlog.</p>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
+<h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
+<h3 id="b174-reference-counts-stay-at-zero-until-the-next-edit">B174. Reference counts stay at zero until the next edit<a class="headerlink" href="#b174-reference-counts-stay-at-zero-until-the-next-edit" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p>A file opened before the initial project index finishes shows <code>0
+references</code> above every declaration, because the counts are computed
+from an index that is still filling. <code>inlay_hint_refresh</code> is sent when
+a <code>didChange</code> parse commits a new symbol map (<code>server.rs</code>) and when
+pending member reference counts finish (<code>reference_counts.rs</code>), but not
+when the initial index completes, so the stale zeros sit there until
+something else happens to trigger a refresh. Send the same refresh once
+indexing finishes.</p>
+<h3 id="b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name">B175. Renaming a global constant renames a class constant of the same name<a class="headerlink" href="#b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p><code>find_constant_references</code> matches <code>MemberDeclaration</code> spans by short
+name, so a global <code>const BAR = 1;</code> and an unrelated <code>class Holder {
+public const BAR = 2; }</code> are treated as one symbol. Renaming the global
+constant to <code>QUX</code> rewrites <code>Holder</code>'s declaration too, and only the
+declaration: <code>Holder::BAR</code> at every use site is left alone, so a file
+that compiled no longer does.</p>
+<p>A class constant is reached through <code>Holder::BAR</code> and a global one is
+not, so the two can never be the same symbol. The match should require
+the reference to be a global constant, not merely share the last
+segment of its name.</p>
 
 
 
