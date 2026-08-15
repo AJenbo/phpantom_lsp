@@ -939,10 +939,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name" class="md-nav__link">
+  <a href="#b176-find-references-on-a-global-constant-always-includes-its-declaration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B175. Renaming a global constant renames a class constant of the same name
+        B176. Find References on a global constant always includes its declaration
       </span>
     </span>
   </a>
@@ -1533,10 +1533,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name" class="md-nav__link">
+  <a href="#b176-find-references-on-a-global-constant-always-includes-its-declaration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B175. Renaming a global constant renames a class constant of the same name
+        B176. Find References on a global constant always includes its declaration
       </span>
     </span>
   </a>
@@ -1608,18 +1608,27 @@ pending member reference counts finish (<code>reference_counts.rs</code>), but n
 when the initial index completes, so the stale zeros sit there until
 something else happens to trigger a refresh. Send the same refresh once
 indexing finishes.</p>
-<h3 id="b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name">B175. Renaming a global constant renames a class constant of the same name<a class="headerlink" href="#b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p><code>find_constant_references</code> matches <code>MemberDeclaration</code> spans by short
-name, so a global <code>const BAR = 1;</code> and an unrelated <code>class Holder {
-public const BAR = 2; }</code> are treated as one symbol. Renaming the global
-constant to <code>QUX</code> rewrites <code>Holder</code>'s declaration too, and only the
-declaration: <code>Holder::BAR</code> at every use site is left alone, so a file
-that compiled no longer does.</p>
-<p>A class constant is reached through <code>Holder::BAR</code> and a global one is
-not, so the two can never be the same symbol. The match should require
-the reference to be a global constant, not merely share the last
-segment of its name.</p>
+<h3 id="b176-find-references-on-a-global-constant-always-includes-its-declaration">B176. Find References on a global constant always includes its declaration<a class="headerlink" href="#b176-find-references-on-a-global-constant-always-includes-its-declaration" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Effort: Medium</strong></p>
+<p><code>find_constant_references</code> ignores its <code>include_declaration</code> parameter:
+every match is a <code>SymbolKind::ConstantReference</code> span, and unlike
+<code>SymbolKind::FunctionCall</code> (which carries <code>is_definition</code>),
+<code>ConstantReference</code> does not distinguish a constant's declaration site
+(<code>const BAR = 1;</code>) from a use of it (<code>echo BAR;</code>) -- both are extracted
+with the same span kind (<code>symbol_map/extraction/statements.rs</code>). So a
+"Find References" request with <code>includeDeclaration: false</code> still
+returns the declaration line for a global constant, unlike functions,
+methods, and properties.</p>
+<p>Fixing this properly means giving <code>ConstantReference</code> an <code>is_definition</code>
+flag the way <code>FunctionCall</code> has one, set at the declaration site in
+<code>extract_from_statement</code>'s <code>Statement::Constant</code> arm and cleared
+everywhere else <code>ConstantReference</code> is emitted (<code>Expression::ConstantAccess</code>,
+the <code>use const</code> import case in <code>class_like.rs</code>), then having
+<code>find_constant_references</code> skip definition spans when
+<code>include_declaration</code> is <code>false</code>. That touches the span extraction,
+the reference index (<code>reference_index.rs</code> pattern-matches
+<code>ConstantReference</code> by name only) and every other match on the enum
+variant, so it is not a one-line change.</p>
 
 
 
