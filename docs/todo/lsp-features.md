@@ -474,34 +474,57 @@ in remote mode.
 
 ## F20. Migrate to the maintained `tower-lsp` fork
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low-Medium · Complexity: Very High**
 
 `tower-lsp` 0.20 (our current dependency) is the last release of the
 original crate; it's unmaintained upstream. A maintained fork exists
-under a different crate name and has since moved past LSP 3.17 to
-cover 3.18 proposed features. Because it's a rename rather than a
-version bump of the same crate, `cargo update`/routine dependency
-audits will not surface this on their own — nothing shows up as
-"outdated" since no new `tower-lsp` version is being withheld. It has
-to be picked up as a deliberate migration.
+as `tower-lsp-server` (types crate `ls-types`), actively developed as
+of 2026. Because it's a rename rather than a version bump of the same
+crate, `cargo update`/routine dependency audits will not surface this
+on their own — nothing shows up as "outdated" since no new `tower-lsp`
+version is being withheld. It has to be picked up as a deliberate
+migration.
 
-This isn't just hygiene: A16 (snippet placeholder for extracted method
-name) is explicitly blocked on `SnippetTextEdit`, an LSP 3.18 feature
-that our pinned `lsp-types` 0.94 (via `tower-lsp` 0.20) doesn't cover.
-Migrating unblocks it directly. It also unblocks F21 (static
-`typeHierarchyProvider` advertisement), which needs a `lsp-types`
-version newer than 0.94.1.
+**Does not unblock A16 or F21.** Checked directly against `ls-types`
+`main` and upstream `lsp-types` 0.97.0 source (not just docs): neither
+crate implements `SnippetTextEdit`/`StringValue` (tracked upstream at
+[gluon-lang/lsp-types#310](https://github.com/gluon-lang/lsp-types/issues/310),
+still open) or a static `type_hierarchy_provider` field on
+`ServerCapabilities` (tracked at
+[gluon-lang/lsp-types#298](https://github.com/gluon-lang/lsp-types/issues/298)
+and [tower-lsp-community/ls-types#38](https://github.com/tower-lsp-community/ls-types/issues/38),
+both open). `ls-types` also removed its generic `"proposed"` 3.18
+feature flag in 0.0.4 ("only applied to a handful of v3.18 items"), so
+there is no version bump or feature flag on our side that grants either
+type today. Both are real 3.18-spec (`@proposed`) features, just not
+yet implemented in any Rust LSP-types crate. The remaining motivation
+for this migration is staying on an actively maintained crate — bug
+and security fixes, and a path to 3.18 support once upstream catches
+up — not unblocking a specific feature now. Re-check A16 and F21 for
+upstream progress before assuming this migration alone resolves them.
 
-**What to check before starting:** the fork's public API surface
-relative to `tower_lsp::LspService`/`tower_lsp::lsp_types` (import
-paths, trait signatures, the `"proposed"` feature flag) to scope the
-mechanical rename across every file that does `use tower_lsp::...`
-(a wide but shallow set: `src/lsp_dispatch.rs`, `src/inlay_hints.rs`,
-`src/document_symbols.rs`, `src/folding.rs`, `src/phpcs.rs`,
-`src/fix.rs`, `src/selection_range.rs`, `src/text_position.rs`, and
-others — grep `tower_lsp::` for the full list), plus the wire-protocol
-test harness described in `test-porting.md` Phase 6B if that gets
-ported around the same time.
+**The real complexity driver:** `ls-types`'s `Uri` is a newtype over
+`fluent_uri::Uri<String>`, not `url::Url`. Our code uses `Url`
+(re-exported from `lsp_types`) directly in roughly 90 files across
+nearly every module — path manipulation, `to_file_path`/
+`from_file_path`, `.path()`, `.join()`, and more — and `fluent_uri`'s
+API does not mirror `url::Url`'s. This is a project-wide port of the
+document-URI type, not a mechanical import rename. Scope it file by
+file before committing to a single PR; it may need a preparatory
+abstraction (e.g. isolate URI construction/parsing behind a narrow
+internal helper) to keep the blast radius reviewable, and likely
+warrants breaking into more than one PR despite the "one task per PR"
+convention — raise that with the maintainer before starting.
+
+**What to also check:** the fork's public API surface relative to
+`tower_lsp::LspService`/`tower_lsp::lsp_types` (import paths, trait
+signatures) to scope the mechanical rename across every file that does
+`use tower_lsp::...` (grep `tower_lsp::` for the full list:
+`src/lsp_dispatch.rs`, `src/inlay_hints.rs`, `src/document_symbols.rs`,
+`src/folding.rs`, `src/phpcs.rs`, `src/fix.rs`,
+`src/selection_range.rs`, `src/text_position.rs`, and others), plus the
+wire-protocol test harness described in `test-porting.md` Phase 6B if
+that gets ported around the same time.
 
 **Where to look:** `Cargo.toml`'s `tower-lsp = { version = "0.20", features = ["proposed"] }`.
 
@@ -524,12 +547,20 @@ capabilities, such as a feature-conformance probe — sees no type
 hierarchy support at all, even though the feature works end-to-end for
 a real editor that does the dynamic-registration round trip.
 
-Once F20 lands and a `type_hierarchy_provider` field is available, add
-static advertisement (`Boolean(true)` or `TypeHierarchyOptions`) in
-`initialize`'s `ServerCapabilities`, conditional on the client *not*
-declaring `dynamicRegistration: true` for type hierarchy (avoid
-double-registering: send either the static capability or the dynamic
-registration, not both, per the client's declared support). Also
+The field is still missing after F20, not just before it: neither
+upstream `lsp-types` nor the maintained `tower-lsp-server`/`ls-types`
+fork that F20 migrates to has added `type_hierarchy_provider` yet
+(tracked at
+[gluon-lang/lsp-types#298](https://github.com/gluon-lang/lsp-types/issues/298)
+and [tower-lsp-community/ls-types#38](https://github.com/tower-lsp-community/ls-types/issues/38),
+both open) — so F20 landing is necessary but not sufficient here; this
+also needs the upstream crate to add the field. Once both have
+happened, add static advertisement (`Boolean(true)` or
+`TypeHierarchyOptions`) in `initialize`'s `ServerCapabilities`,
+conditional on the client *not* declaring `dynamicRegistration: true`
+for type hierarchy (avoid double-registering: send either the static
+capability or the dynamic registration, not both, per the client's
+declared support). Also
 verify whether the same version bump exposes `diagnostic` client
 capabilities more precisely — pull diagnostics (`diagnostic_provider`
 in `server.rs`) is unaffected by this gap (it's already advertised
