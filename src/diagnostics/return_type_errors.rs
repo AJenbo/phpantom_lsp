@@ -295,6 +295,7 @@ fn resolve_return_and_push(
     maybe_expr: Option<&Expression<'_>>,
     start: usize,
     end: usize,
+    stmt_start: usize,
     declared_return: &PhpType,
     current_class: &ClassInfo,
     content: &str,
@@ -320,6 +321,39 @@ fn resolve_return_and_push(
             if declared_return.is_void() {
                 out.push(ResolvedReturn {
                     ty: Some(PhpType::untyped()), // placeholder; message ignores it
+                    start,
+                    end,
+                    declared_type: declared_return.clone(),
+                });
+                return;
+            }
+
+            let resolve_class_names = |ty: PhpType| {
+                ty.resolve_names(&|name: &str| {
+                    if name.contains("__anonymous@") {
+                        return name.to_string();
+                    }
+                    if let Some(cls) = class_loader(name) {
+                        cls.fqn().to_string()
+                    } else {
+                        name.to_string()
+                    }
+                })
+            };
+
+            // A standalone `/** @var Type */` docblock (no variable name)
+            // immediately above the `return` keyword casts the returned
+            // expression's type outright (PHPStan semantics), so it wins
+            // over whatever the expression itself resolves to.
+            if let Some(cast) =
+                crate::type_engine::variable::forward_walk::find_preceding_nameless_var_cast(
+                    content, stmt_start,
+                )
+                && !cast.is_untyped()
+                && !cast.is_empty()
+            {
+                out.push(ResolvedReturn {
+                    ty: Some(resolve_class_names(cast)),
                     start,
                     end,
                     declared_type: declared_return.clone(),
@@ -355,16 +389,7 @@ fn resolve_return_and_push(
             }
 
             // Resolve short class names to FQN.
-            let ty = ty.resolve_names(&|name: &str| {
-                if name.contains("__anonymous@") {
-                    return name.to_string();
-                }
-                if let Some(cls) = class_loader(name) {
-                    cls.fqn().to_string()
-                } else {
-                    name.to_string()
-                }
-            });
+            let ty = resolve_class_names(ty);
 
             out.push(ResolvedReturn {
                 ty: Some(ty),
@@ -526,7 +551,7 @@ fn process_top_level_statement(
             }
 
             // Collect return statements (both bare and with values).
-            let mut returns: Vec<(Option<&Expression<'_>>, usize, usize)> = Vec::new();
+            let mut returns: Vec<(Option<&Expression<'_>>, usize, usize, usize)> = Vec::new();
             collect_returns(func.body.statements.iter(), &mut returns);
 
             if returns.is_empty() {
@@ -563,11 +588,12 @@ fn process_top_level_statement(
                 trans_resolver: Some(&trans_resolver),
             };
 
-            for (maybe_expr, start, end) in returns {
+            for (maybe_expr, start, end, stmt_start) in returns {
                 resolve_return_and_push(
                     maybe_expr,
                     start,
                     end,
+                    stmt_start,
                     &declared_return,
                     current_class,
                     content,
@@ -667,7 +693,7 @@ fn process_class_member(
     }
 
     // Collect return statements (both bare and with values).
-    let mut returns: Vec<(Option<&Expression<'_>>, usize, usize)> = Vec::new();
+    let mut returns: Vec<(Option<&Expression<'_>>, usize, usize, usize)> = Vec::new();
     collect_returns(body.iter(), &mut returns);
 
     if returns.is_empty() {
@@ -712,11 +738,12 @@ fn process_class_member(
         trans_resolver: Some(&trans_resolver),
     };
 
-    for (maybe_expr, start, end) in returns {
+    for (maybe_expr, start, end, stmt_start) in returns {
         resolve_return_and_push(
             maybe_expr,
             start,
             end,
+            stmt_start,
             &declared_return,
             current_class,
             content,

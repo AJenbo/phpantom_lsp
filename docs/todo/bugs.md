@@ -342,35 +342,4 @@ already does.
 
 ## Docblock handling
 
-### B78. A standalone `@var` cast above `return` is ignored
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-function giveString(): string { return 'x'; }
-
-function cast(): int
-{
-    /** @var int */
-    return giveString();   // reported: string incompatible with int — the cast was ignored
-}
-```
-
-A nameless `/** @var T */` docblock directly above a `return` statement
-casts the returned expression to `T` (PHPStan semantics). PHPantom
-never applies it: the diagnostic judges the raw inferred type of the
-expression as if the cast were absent, whether the expression is a
-call, a variable, or an array literal. The named form above an
-assignment (`/** @var int $x */` then `$x = ...`) works; only the
-nameless return-position cast is missing. Beware vacuously-clean
-repros when testing a fix: an inferred optional-keys array shape
-currently satisfies almost any declared array type, so the cast's
-absence only shows against scalar or definite types.
-
-Sample site: `vytrvalec-server src/Dto/Season/Request/SeasonQueryFilterRequestDto.php:26`
-(same site as B79; either fix alone clears the diagnostic, both are
-real defects).
-
-**Fix:** when resolving a `return` statement's expression, look up a
-preceding standalone `@var` docblock and use its type as the expression
-type, the same way the named assignment form already does.
+No outstanding items.

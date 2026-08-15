@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B80  | [`max()`/`min()` argument-dependent return type is a malformed union](todo/bugs.md#b80-maxmin-argument-dependent-return-type-is-a-malformed-union)          | Medium      | Medium      |
-| B78  | [A standalone `@var` cast above `return` is ignored](todo/bugs.md#b78-a-standalone-var-cast-above-return-is-ignored)                                        | Medium      | Medium      |
 | B82  | [A nullsafe chain compared `===` to a non-nullable value does not narrow the receiver](todo/bugs.md#b82-a-nullsafe-chain-compared--to-a-non-nullable-value-does-not-narrow-the-receiver) | Medium      | Medium      |
 | B83  | [A `match (true)` arm's condition does not narrow inside the arm's result](todo/bugs.md#b83-a-match-true-arms-condition-does-not-narrow-inside-the-arms-result) | Medium      | Medium      |
 | B79  | [`array_filter()` without a callback keeps `null` on values that share the array with a `?bool`](todo/bugs.md#b79-array_filter-without-a-callback-keeps-null-on-values-that-share-the-array-with-a-bool) | Low-Medium  | Medium      |

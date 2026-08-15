@@ -15,13 +15,17 @@ use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 
-/// Collect `(expression, start_offset, end_offset)` for every `return`
-/// reachable from `stmts` without crossing into a nested function/closure
-/// scope.  Bare `return;` yields `expression: None` with the span of the
-/// `return` keyword itself.
+/// Collect `(expression, start_offset, end_offset, stmt_start_offset)` for
+/// every `return` reachable from `stmts` without crossing into a nested
+/// function/closure scope.  Bare `return;` yields `expression: None` with
+/// the span of the `return` keyword itself.  `stmt_start_offset` is the
+/// start of the `return` keyword, which callers use to look up a
+/// standalone docblock preceding the statement — the expression's own
+/// start offset sits after the keyword, so it cannot be used for that
+/// lookup.
 pub(crate) fn collect_returns<'a>(
     stmts: impl Iterator<Item = &'a Statement<'a>>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
+    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize, usize)>,
 ) {
     for stmt in stmts {
         collect_returns_from_stmt(stmt, returns);
@@ -30,16 +34,18 @@ pub(crate) fn collect_returns<'a>(
 
 fn collect_returns_from_stmt<'a>(
     stmt: &Statement<'a>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
+    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize, usize)>,
 ) {
     match stmt {
         Statement::Return(ret) => {
+            let stmt_start = ret.r#return.span.start.offset as usize;
             if let Some(val) = ret.value {
                 let span = val.span();
                 returns.push((
                     Some(val),
                     span.start.offset as usize,
                     span.end.offset as usize,
+                    stmt_start,
                 ));
             } else {
                 // Bare `return;` — use the `return` keyword span.
@@ -48,6 +54,7 @@ fn collect_returns_from_stmt<'a>(
                     None,
                     kw_span.start.offset as usize,
                     kw_span.end.offset as usize,
+                    stmt_start,
                 ));
             }
         }
@@ -126,7 +133,7 @@ fn collect_returns_from_stmt<'a>(
 
 fn collect_returns_from_if_body<'a>(
     body: &mago_syntax::cst::control_flow::r#if::IfBody<'a>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
+    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize, usize)>,
 ) {
     use mago_syntax::cst::control_flow::r#if::IfBody;
     match body {
@@ -159,7 +166,7 @@ fn collect_returns_from_if_body<'a>(
 
 fn collect_returns_from_switch_body<'a>(
     body: &mago_syntax::cst::control_flow::switch::SwitchBody<'a>,
-    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize)>,
+    returns: &mut Vec<(Option<&'a Expression<'a>>, usize, usize, usize)>,
 ) {
     use mago_syntax::cst::control_flow::switch::SwitchBody;
     match body {

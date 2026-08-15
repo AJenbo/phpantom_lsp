@@ -4011,3 +4011,72 @@ function dup(): array {
         return_error_messages(&diags)
     );
 }
+
+// ─── B78: standalone `@var` cast above `return` ────────────────────────────
+
+#[test]
+fn a_nameless_var_docblock_above_return_casts_the_returned_expression() {
+    let php = r#"<?php
+function giveString(): string {
+    return 'x';
+}
+
+function cast(): int
+{
+    /** @var int */
+    return giveString();
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "The standalone `@var int` cast above `return` should make the return \
+         type check as `int`, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn a_nameless_var_docblock_above_return_still_flags_a_real_mismatch() {
+    let php = r#"<?php
+function giveString(): string {
+    return 'x';
+}
+
+function cast(): array
+{
+    /** @var int */
+    return giveString();
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_return_error(&diags),
+        "The `@var int` cast is incompatible with the declared `array` return \
+         type, so this must still be flagged, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn a_named_var_docblock_above_return_is_unaffected_by_the_nameless_cast_fix() {
+    let php = r#"<?php
+function cast(): int
+{
+    /** @var int $x */
+    $x = giveString();
+    return $x;
+}
+
+function giveString(): string {
+    return 'x';
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "The named `@var int $x` form already worked before this fix and must \
+         keep working, got: {:?}",
+        return_error_messages(&diags)
+    );
+}

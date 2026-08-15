@@ -153,14 +153,14 @@ pub(crate) fn infer_return_type(
                 body_probe_offset,
             );
 
-            let mut returns: Vec<(Option<&Expression<'_>>, usize, usize)> = Vec::new();
+            let mut returns: Vec<(Option<&Expression<'_>>, usize, usize, usize)> = Vec::new();
             collect_returns(body_stmts.into_iter(), &mut returns);
 
             let mut return_types: Vec<PhpType> = Vec::new();
             let mut has_bare_return = false;
             let mut has_return_with_value = false;
 
-            for (maybe_expr, start, _end) in returns {
+            for (maybe_expr, start, _end, _stmt_start) in returns {
                 let Some(expr) = maybe_expr else {
                     has_bare_return = true;
                     continue;

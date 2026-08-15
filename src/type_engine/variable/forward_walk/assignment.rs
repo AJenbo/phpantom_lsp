@@ -1030,7 +1030,7 @@ pub(crate) fn try_process_inline_var_override<'b>(
     // Also check for `/** @var Type */` without variable name — this
     // applies to the immediately following expression if it's a simple
     // variable or assignment.
-    if let Some(php_type) = parse_inline_var_docblock_no_var(doc_text, ctx) {
+    if let Some(php_type) = parse_inline_var_docblock_no_var(doc_text) {
         let resolved = resolve_type_to_resolved_types(&php_type, ctx);
         if let Expression::Assignment(assignment) = expr {
             if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
@@ -1228,6 +1228,29 @@ pub(crate) fn apply_standalone_var_docblocks(
     apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx)
 }
 
+/// Look up a standalone `/** @var Type */` docblock (no variable name)
+/// immediately preceding the statement starting at `stmt_start`.
+///
+/// This casts the type of that statement's expression outright — used for
+/// a `return` statement, where PHPStan treats the annotation as
+/// authoritative rather than as a refinement.  That is stricter than the
+/// same annotation above an assignment ([`try_process_inline_var_override`]'s
+/// `NoVar` case), which only overrides when the override is a genuine
+/// refinement of the RHS's native type.
+pub(crate) fn find_preceding_nameless_var_cast(
+    content: &str,
+    stmt_start: usize,
+) -> Option<PhpType> {
+    let offset = stmt_start.min(content.len());
+    if offset == 0 {
+        return None;
+    }
+    let before = &content[..offset];
+    let trimmed = trim_trailing_line_comments(before);
+    let doc_text = trailing_docblock(trimmed)?;
+    parse_inline_var_docblock_no_var(doc_text)
+}
+
 /// Resolve a [`PhpType`] to a complete `Vec<ResolvedType>` with
 /// `class_info` populated when possible.  Falls back to a
 /// type-string-only entry for scalars and unresolvable types.
@@ -1338,10 +1361,7 @@ pub(crate) fn parse_all_var_docblock_annotations(doc_text: &str) -> Vec<(String,
 }
 
 /// Parse `/** @var Type */` (without variable name) and return the PhpType.
-pub(crate) fn parse_inline_var_docblock_no_var(
-    doc_text: &str,
-    _ctx: &ForwardWalkCtx<'_>,
-) -> Option<PhpType> {
+pub(crate) fn parse_inline_var_docblock_no_var(doc_text: &str) -> Option<PhpType> {
     // Flatten line-continuation markers so a `array{...}` shape spread
     // across several lines is parsed as one type string.
     let inner = flatten_docblock_inner(doc_text)?;
