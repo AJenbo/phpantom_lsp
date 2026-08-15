@@ -1044,39 +1044,3 @@ already have one, deref coercion covers the read sites, and the
 **Where to look:** `collect_deprecated_diagnostics` and
 `resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
 `var_type_cache` declaration at the top of the collector.
-
-## P55. An external tool run invalidates every file it reported
-
-**Impact: Medium-High · Complexity: Low**
-
-`WorkspaceDiagnostics::set_external` replaces a tool's whole result set
-and bumps the result id of every URI in the union of the old and new
-maps:
-
-```rust
-let mut updated: HashSet<String> = entry.keys().cloned().collect();
-updated.extend(results.keys().cloned());
-*entry = results;
-let updated: Vec<String> = updated.into_iter().collect();
-for uri in &updated {
-    self.bump(uri);
-}
-```
-
-Nothing compares the old diagnostics against the new ones, so a
-project-wide PHPStan re-run that changes one file still invalidates the
-client's cached result for every file the tool reports. The next
-workspace pull then answers `Full` for all of them and re-serializes
-the entire set. On a large project that is the most expensive single
-response the server produces, and it is triggered by every run whether
-or not anything moved.
-
-Bump only where the merged set actually differs, and return only those
-URIs so the caller's refresh and the push-mode publish loop follow the
-same rule. This is the same defect as the unconditional per-file
-`resultId` bump in `assemble_and_push`, on the source with the widest
-blast radius.
-
-**Where to look:** `set_external` and `set_external_for_uri` in
-`diagnostics/workspace.rs`; `flush_workspace_diag_updates` consumes the
-returned URI list.

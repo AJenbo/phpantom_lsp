@@ -115,19 +115,26 @@ impl WorkspaceDiagnostics {
         true
     }
 
-    /// Replace one external tool's entire result set.  Returns the
-    /// URIs whose diagnostics changed (old entries cleared by the new
-    /// run are included so the editor drops them).
+    /// Replace one external tool's entire result set.  Returns the URIs
+    /// whose diagnostics actually changed (old entries cleared by the new
+    /// run are included so the editor drops them); URIs whose diagnostics
+    /// are byte-for-byte identical between runs are left untouched so a
+    /// re-run that changes nothing doesn't invalidate the client's cache
+    /// for the whole project.
     pub(crate) fn set_external(
         &mut self,
         source: &'static str,
         results: HashMap<String, Vec<Diagnostic>>,
     ) -> Vec<String> {
         let entry = self.external.entry(source).or_default();
-        let mut updated: HashSet<String> = entry.keys().cloned().collect();
-        updated.extend(results.keys().cloned());
+        let mut all: HashSet<&String> = entry.keys().collect();
+        all.extend(results.keys());
+        let updated: Vec<String> = all
+            .into_iter()
+            .filter(|uri| entry.get(*uri) != results.get(*uri))
+            .cloned()
+            .collect();
         *entry = results;
-        let updated: Vec<String> = updated.into_iter().collect();
         for uri in &updated {
             self.bump(uri);
         }
@@ -832,8 +839,29 @@ mod tests {
         second.insert("file:///b.php".to_string(), vec![diag("phpstan", 2)]);
         let updated = ws.set_external("phpstan", second);
         assert!(updated.contains(&"file:///a.php".to_string()));
+        assert!(
+            !updated.contains(&"file:///b.php".to_string()),
+            "b.php's diagnostics did not change, so it must not be re-bumped"
+        );
         assert!(ws.merged("file:///a.php").is_empty());
         assert_eq!(ws.merged("file:///b.php").len(), 1);
+    }
+
+    #[test]
+    fn set_external_leaves_unchanged_uris_alone() {
+        let mut ws = WorkspaceDiagnostics::default();
+
+        let mut first = HashMap::new();
+        first.insert("file:///a.php".to_string(), vec![diag("phpstan", 1)]);
+        ws.set_external("phpstan", first.clone());
+        let id_before = ws.result_id("file:///a.php").expect("tracked");
+
+        // Re-running the tool with byte-for-byte identical results must
+        // not bump the result id: nothing changed, so the client's cached
+        // result for this (and every other untouched) file stays valid.
+        let updated = ws.set_external("phpstan", first);
+        assert!(updated.is_empty());
+        assert_eq!(ws.result_id("file:///a.php"), Some(id_before));
     }
 
     #[test]
