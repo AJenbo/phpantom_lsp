@@ -36,7 +36,6 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork) (unblocks A16)                                              | Medium      | Medium      |
 | F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement-depends-on-f20) (depends on F20)                        | Low-Medium  | Low         |
-| B174 | [Reference counts stay at zero until the next edit](todo/bugs.md#b174-reference-counts-stay-at-zero-until-the-next-edit)                                   | Low-Medium  | Low         |
 | B176 | [Find References on a global constant always includes its declaration](todo/bugs.md#b176-find-references-on-a-global-constant-always-includes-its-declaration) | Low         | Medium      |
 | P55  | [An external tool run invalidates every file it reported](todo/performance.md#p55-an-external-tool-run-invalidates-every-file-it-reported)                  | Medium-High | Low         |
 | P54  | [A workspace pull re-serializes files the client already has](todo/performance.md#p54-a-workspace-pull-re-serializes-files-the-client-already-has)          | Medium-High | Low-Medium  |
