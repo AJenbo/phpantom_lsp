@@ -1127,6 +1127,27 @@ function run(Icon|string $v): void {{
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// A `throw` is an expression like any other, so a ternary inside the
+/// value it throws narrows exactly as it would inside a `return`.
+#[test]
+fn a_ternary_inside_a_throw_narrows_its_arms() {
+    let backend = create_test_backend();
+    let uri = "file:///ternary_throw.php";
+    let text = format!(
+        "{TERNARY_SCAFFOLD}
+function bare(?string $s): void {{
+    throw new \\RuntimeException($s ? passThrough($s) : 'x');
+}}
+
+function concatenated(?string $s): void {{
+    throw new \\RuntimeException('got: ' . ($s ? passThrough($s) : 'x'));
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// Scaffolding for short-circuit narrowing: a wide union source and
 /// consumers that accept only part of it.
 const SHORT_CIRCUIT_SCAFFOLD: &str = r#"<?php

@@ -172,6 +172,13 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
             record_match_ternary_snapshots(bin.lhs, scope, ctx);
             record_match_ternary_snapshots(bin.rhs, scope, ctx);
         }
+        // A `throw` is an expression since PHP 8, and the value it throws
+        // is built the same way any other is: `throw new Exception($x ? …
+        // : …)` narrows its branches exactly as the identical `return`
+        // would.
+        Expression::Throw(throw_expr) => {
+            record_match_ternary_snapshots(throw_expr.exception, scope, ctx);
+        }
         Expression::Array(arr) => {
             for elem in arr.elements.iter() {
                 let elem_expr = match elem {

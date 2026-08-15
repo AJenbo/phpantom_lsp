@@ -270,3 +270,132 @@ fn subtype_of_typed_rejects_disjoint_generic_arguments() {
         &loader
     ));
 }
+
+// ── is_subtype_of_typed: object and iterable supertypes ─────
+
+#[test]
+fn subtype_of_typed_accepts_any_class_like_as_object() {
+    use crate::php_type::PhpType;
+
+    let collection = make_class("Collection", Some("App"), None, &[]);
+    let cat = make_class("Cat", None, None, &[]);
+    let classes = [collection, cat];
+    let loader = loader_from(&classes);
+    let parse = |src: &str| PhpType::parse(src);
+
+    // A plain name and a generic both name an instance; the type
+    // arguments have no say in it.
+    assert!(is_subtype_of_typed(
+        &parse("Cat"),
+        &parse("object"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("App\\Collection<int, Cat>"),
+        &parse("object"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("Cat"),
+        &parse("?object"),
+        &loader
+    ));
+    // A class the project cannot load is still an object.
+    assert!(is_subtype_of_typed(
+        &parse("Unindexed<Cat>"),
+        &parse("object"),
+        &loader
+    ));
+    // Scalars and arrays are not.
+    assert!(!is_subtype_of_typed(
+        &parse("string"),
+        &parse("object"),
+        &loader
+    ));
+    assert!(!is_subtype_of_typed(
+        &parse("array<int, Cat>"),
+        &parse("object"),
+        &loader
+    ));
+}
+
+#[test]
+fn subtype_of_typed_accepts_traversable_class_as_iterable() {
+    use crate::php_type::PhpType;
+
+    let traversable = make_class("Traversable", None, None, &[]);
+    let iterator = make_class("Iterator", None, None, &["Traversable"]);
+    let collection = make_class("Collection", Some("App"), None, &["Iterator"]);
+    let plain = make_class("Plain", Some("App"), None, &[]);
+    let classes = [traversable, iterator, collection, plain];
+    let loader = loader_from(&classes);
+    let parse = |src: &str| PhpType::parse(src);
+
+    assert!(is_subtype_of_typed(
+        &parse("App\\Collection"),
+        &parse("iterable"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("App\\Collection<Cat>"),
+        &parse("iterable"),
+        &loader
+    ));
+    // A class with no Traversable in its hierarchy cannot be iterated.
+    assert!(!is_subtype_of_typed(
+        &parse("App\\Plain"),
+        &parse("iterable"),
+        &loader
+    ));
+}
+
+// ── is_subtype_of_typed: array-like cross-form rules ────────
+
+#[test]
+fn subtype_of_typed_array_forms_resolve_nominal_value_types() {
+    use crate::php_type::PhpType;
+
+    let animal = make_class("Animal", None, None, &[]);
+    let cat = make_class("Cat", None, Some("Animal"), &[]);
+    let classes = [animal, cat];
+    let loader = loader_from(&classes);
+    let parse = |src: &str| PhpType::parse(src);
+
+    // The value type is only a subtype nominally, and the two sides are
+    // written at different arities, so neither the structural check nor
+    // the equal-arity branch can answer.
+    assert!(is_subtype_of_typed(
+        &parse("array<int, Cat>"),
+        &parse("array<Animal>"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("list<Cat>"),
+        &parse("array<int, Animal>"),
+        &loader
+    ));
+    // `X[]` constrains the values and says nothing about the keys.
+    assert!(is_subtype_of_typed(
+        &parse("array<string, Cat>"),
+        &parse("Animal[]"),
+        &loader
+    ));
+    assert!(is_subtype_of_typed(
+        &parse("list<Cat>"),
+        &parse("Animal[]"),
+        &loader
+    ));
+
+    // A wider value type does not fit a narrower slice.
+    assert!(!is_subtype_of_typed(
+        &parse("array<int, Animal>"),
+        &parse("Cat[]"),
+        &loader
+    ));
+    // Only a list promises the sequential keys a `list` supertype wants.
+    assert!(!is_subtype_of_typed(
+        &parse("array<int, Cat>"),
+        &parse("list<Animal>"),
+        &loader
+    ));
+}

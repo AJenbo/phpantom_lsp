@@ -450,6 +450,46 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_generic_class_to_object() {
+    let php = r#"<?php
+/** @template T */
+class Collection {}
+
+class Foo {}
+
+function takes_object(object $x): void {}
+
+/** @param Collection<Foo> $c */
+function test(Collection $c): void {
+    takes_object($c);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Type arguments have no say in whether a value is an object, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_nullable_class_to_object() {
+    let php = r#"<?php
+class Foo {}
+
+function takes_object(object $x): void {}
+
+function test(?Foo $f): void {
+    takes_object($f);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "`null` is not an object, so a nullable argument does not satisfy `object`"
+    );
+}
+
 // ─── Flags: wrong class type ────────────────────────────────────────────────
 
 #[test]
@@ -1065,6 +1105,47 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "Should not flag array passed to iterable, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_traversable_class_to_iterable() {
+    let php = r#"<?php
+interface Traversable {}
+interface Iterator extends Traversable {}
+
+class Bag implements Iterator {}
+
+function takes_iterable(iterable $items): void {}
+
+function test(Bag $bag): void {
+    takes_iterable($bag);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "`iterable` is `array|Traversable`, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_non_traversable_class_to_iterable() {
+    let php = r#"<?php
+interface Traversable {}
+
+class Bag {}
+
+function takes_iterable(iterable $items): void {}
+
+function test(Bag $bag): void {
+    takes_iterable($bag);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A class with no Traversable in its hierarchy cannot be iterated"
     );
 }
 

@@ -414,7 +414,7 @@ impl PhpType {
 }
 
 // ---------------------------------------------------------------------------
-// Array-like arity normalisation (private)
+// Array-like arity normalisation
 // ---------------------------------------------------------------------------
 
 /// The `(key, value)` pair an array-like generic implies, whichever arity
@@ -424,7 +424,7 @@ impl PhpType {
 /// `array-key`, and a one-argument `iterable<V>` on `mixed` (a
 /// `Traversable` may yield any key type). Returns `None` for arities that
 /// carry no key/value meaning.
-fn array_like_key_value(generic: &GenericType) -> Option<(PhpType, &PhpType)> {
+pub(crate) fn array_like_key_value(generic: &GenericType) -> Option<(PhpType, &PhpType)> {
     match generic.args.as_slice() {
         [value] => {
             let name = generic.name.to_ascii_lowercase();

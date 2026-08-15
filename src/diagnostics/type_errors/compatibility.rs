@@ -186,9 +186,14 @@ pub(crate) fn is_type_compatible(
     //    be loaded, rather than producing a false positive.
     //
     // Strict subtype relationships (Cat <: Animal, never <: T,
-    // Closure(int): void <: callable, array<int, string> <: array)
-    // are handled by the `is_subtype_of_typed` fallback at the end
-    // of this function and should NOT be duplicated here.
+    // Closure(int): void <: callable, array<int, string> <: array,
+    // Collection<Cat> <: object, ArrayIterator <: iterable,
+    // array<int, Cat> <: Animal[]) are handled by the
+    // `is_subtype_of_typed` fallback at the end of this function and
+    // should NOT be duplicated here.  A rule that recurses into
+    // `is_type_compatible` for a nested position is not a duplicate:
+    // it carries the MAYBE rules into that position, which the core
+    // engine deliberately does not.
     //
     // A future pass may tighten specific MAYBE relationships (reporting
     // them as mismatches rather than letting them pass) once we are
@@ -342,29 +347,12 @@ pub(crate) fn is_type_compatible(
     {
         return true;
     }
-    // Skip when param type is `object` and arg type is any class-like.
-    // Any class instance IS an object — this is always YES.
-    if param_type.is_object() && arg_type.base_name().is_some() {
-        return true;
-    }
     // Skip when arg type is `object` and param expects a specific class.
     // The developer's code may have narrowed the object (instanceof,
     // assert, etc.) before this call site.  We flag `$obj->method()`
     // as unknown-member instead — that's where the developer learns
     // they need better types.  MAYBE → stay silent.
     if arg_type.is_object() && param_type.base_name().is_some() {
-        return true;
-    }
-    // Skip when param type is `iterable` and arg type is array-like or Traversable.
-    if param_type.is_iterable()
-        && (arg_type.is_array_like()
-            || arg_type
-                .base_name()
-                .and_then(class_loader)
-                .is_some_and(|cls| {
-                    crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
-                }))
-    {
         return true;
     }
     // ── Callable specification ↔ callable specification ─────────
@@ -797,10 +785,14 @@ pub(crate) fn is_type_compatible(
             return true;
         }
 
-        // ── array<K, V> → array<V> (2-param to 1-param): YES ───
-        // `array<V>` means `array<mixed, V>`.  A 2-param array is
+        // ── array<K, V> → array<V> (2-param to 1-param) ────────
+        // `array<V>` means `array<array-key, V>`.  A 2-param array is
         // more specific — its value type always fits in the 1-param
-        // form as long as the value types are compatible.
+        // form as long as the value types are compatible.  The strict
+        // form of that is `is_subtype_of_typed`'s; what this adds is
+        // the MAYBE rules in the value position, so an
+        // `array<string, string>` still reaches a
+        // `array<non-empty-string>` parameter.
         if arg_is_array
             && param_is_array
             && args_arg.len() == 2
@@ -834,9 +826,13 @@ pub(crate) fn is_type_compatible(
     //   list<X> → X[]      is YES  (list is more specific than array)
     //   X[] → list<X>      is MAYBE (X[] might have gaps / non-int keys)
 
-    // ── Generic array → X[] : YES ───────────────────────────────
+    // ── Generic array → X[] ─────────────────────────────────────
     // `array<int, string>` → `string[]` — the value type of the
     // generic form is more specific than (or equal to) the slice.
+    // `list<X>` is one of these too: it is array-like, and its single
+    // argument is its value type.  As with the arity rules above, the
+    // strict form lives in `is_subtype_of_typed`; this one carries the
+    // MAYBE rules into the value position.
     if let TypeKind::Generic(g) = arg_type.kind()
         && is_array_like_name(&g.name)
         && let TypeKind::Array(inner) = param_type.kind()
@@ -860,18 +856,6 @@ pub(crate) fn is_type_compatible(
         if is_type_compatible(inner, val, class_loader, strict_types) {
             return true;
         }
-    }
-
-    // ── list<X> → X[] : YES ────────────────────────────────────
-    // A list is a stricter form of array (sequential int keys).
-    // It always satisfies the weaker `X[]` constraint.
-    if let TypeKind::Generic(g) = arg_type.kind()
-        && g.name.eq_ignore_ascii_case("list")
-        && g.args.len() == 1
-        && let TypeKind::Array(inner) = param_type.kind()
-        && is_type_compatible(&g.args[0], inner, class_loader, strict_types)
-    {
-        return true;
     }
 
     // ── X[] → list<X> : MAYBE ──────────────────────────────────

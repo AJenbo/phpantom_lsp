@@ -495,6 +495,44 @@ pub(crate) fn is_subtype_of_typed(
                 return false;
             }
         }
+
+        // ── Array-like generics written at different arities ────
+        // The same array spells out at one, two, or no type arguments:
+        // `list<V>` is `array<int, V>` and `array<V>` is
+        // `array<array-key, V>`.  `is_subtype_of` normalises the pair
+        // already, but compares the implied key and value structurally,
+        // so a nominal inner type (`array<int, Cat>` <: `array<Animal>`)
+        // never lines up.  Redo the comparison through the class loader.
+        //
+        // A `list` supertype is the one form that demands more than its
+        // values: an `array` cannot promise the sequential integer keys,
+        // so it is left to the checks below.
+        if args_sub.len() != args_sup.len()
+            && crate::php_type::is_array_like_name(name_sub)
+            && crate::php_type::is_array_like_name(name_sup)
+            && !(crate::php_type::is_list_name(name_sup)
+                && !crate::php_type::is_list_name(name_sub))
+            && let Some((sub_key, sub_val)) = crate::php_type::array_like_key_value(sub)
+            && let Some((sup_key, sup_val)) = crate::php_type::array_like_key_value(sup)
+            && is_subtype_of_typed(&sub_key, &sup_key, class_loader)
+            && is_subtype_of_typed(sub_val, sup_val, class_loader)
+        {
+            return true;
+        }
+    }
+
+    // ── Array-like generic <: `X[]` ─────────────────────────────
+    // `X[]` is `array<mixed, X>`: it constrains the values and says
+    // nothing about the keys, so any array-like generic whose value type
+    // fits satisfies it — `array<int, Cat>` and `list<Cat>` are both
+    // `Animal[]`.  `is_subtype_of` has no rule for this direction at all.
+    if let TypeKind::Generic(sub) = subtype.kind()
+        && crate::php_type::is_array_like_name(&sub.name)
+        && let TypeKind::Array(inner_sup) = supertype.kind()
+        && let Some(sub_val) = sub.args.last()
+        && is_subtype_of_typed(sub_val, inner_sup, class_loader)
+    {
+        return true;
     }
 
     // ── Array slice covariance ──────────────────────────────────
@@ -641,6 +679,28 @@ pub(crate) fn is_subtype_of_typed(
             }
             _ => true,
         };
+    }
+
+    // ── Class-like <: `object` / `iterable` ─────────────────────
+    // Neither `object` nor `iterable` is a class name, so the nominal
+    // walk below cannot speak for them: it needs a loadable name on both
+    // sides.  `is_named_subtype` answers for a plain `Foo`, but not for a
+    // `Foo<T>` — a generic carries the same instance, and its type
+    // arguments have no say in whether it is an object.
+    //
+    // `iterable` is `array|Traversable`, so a class whose hierarchy
+    // reaches `Traversable` satisfies it however it was spelled.
+    if let Some(sub) = subtype.base_name()
+        && let TypeKind::Named(sup) = supertype.kind()
+    {
+        if sup.eq_ignore_ascii_case("object") && crate::php_type::is_class_like_name(sub) {
+            return true;
+        }
+        if sup.eq_ignore_ascii_case("iterable")
+            && class_loader(sub).is_some_and(|cls| is_subtype_of(&cls, "Traversable", class_loader))
+        {
+            return true;
+        }
     }
 
     // ── Nominal class hierarchy check ───────────────────────────

@@ -2494,11 +2494,16 @@ class ScaffoldingEntityLocator implements ScaffoldingEntityFinder
 class ScaffoldingAssert
 {
     /**
+     * `$actual` is `mixed` rather than `object`, matching PHPUnit's own
+     * signature: the whole point of the assertion is that the caller does
+     * not yet know what it holds, so a nullable subject has to be able to
+     * reach it.
+     *
      * @template ExpectedType of object
      * @param class-string<ExpectedType> $expected
      * @phpstan-assert ExpectedType $actual
      */
-    public static function assertInstanceOf(string $expected, object $actual): void
+    public static function assertInstanceOf(string $expected, mixed $actual): void
     {
         if (!$actual instanceof $expected) {
             throw new \InvalidArgumentException('Type mismatch');
