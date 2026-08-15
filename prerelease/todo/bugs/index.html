@@ -1018,23 +1018,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b76-a-member-read-off-a-class-constant-is-looked-for-on-the-class-that-declares-the-constant" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B76. A member read off a class constant is looked for on the class that declares the constant
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1706,23 +1689,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b76-a-member-read-off-a-class-constant-is-looked-for-on-the-class-that-declares-the-constant" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B76. A member read off a class constant is looked for on the class that declares the constant
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2055,44 +2021,7 @@ for <code>PHPStan\Analyser\Scope::isInClass()</code> narrowing a subsequent
 <code>getClassReflection()</code> call on the same <code>$scope</code>. Low priority: this is
 PHPStan-extension-authoring-specific, not general PHP or Laravel code.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b76-a-member-read-off-a-class-constant-is-looked-for-on-the-class-that-declares-the-constant">B76. A member read off a class constant is looked for on the class that declares the constant<a class="headerlink" href="#b76-a-member-read-off-a-class-constant-is-looked-for-on-the-class-that-declares-the-constant" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">enum Kind: string</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">{</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">    case A = &#39;a&#39;;</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">}</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">class Matrix</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">{</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">    public const Kind TYPED = Kind::A;</span>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="x">    public const UNTYPED = Kind::A;</span>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="x">    public function all(): void</span>
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="x">    {</span>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="x">        echo self::TYPED-&gt;value;     // reported: Property &#39;value&#39; not found on class &#39;Matrix&#39;</span>
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="x">        echo self::UNTYPED-&gt;value;   // reported: Property &#39;value&#39; not found on class &#39;Matrix&#39;</span>
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="x">        echo Matrix::TYPED-&gt;value;   // same, written through the class name</span>
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="x">    }</span>
-<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>Class::CONST-&gt;member</code> resolves the subject to the class the constant is
-declared on rather than to the type the constant holds, so every member
-read off it is reported as missing. It fires on the declared type and on
-the initialiser alike, so writing PHP 8.3's <code>const Kind TYPED</code> does not
-help, and <code>self::</code>, <code>static::</code>, and an explicit class name all reach it.
-The everyday shape is an enum case held in a constant, where <code>-&gt;value</code> is
-the whole reason to hold it.</p>
-<p>There are two paths for <code>Class::CONST</code> and only one of them knows this.
-<code>resolve_static_access_type</code> (<code>type_engine/call_resolution/return_types.rs</code>)
-reads the constant's declared type and initialiser and gets <code>Kind</code> right;
-the <code>SubjectExpr::StaticAccess</code> arm of <code>resolve_target_classes_expr</code>
-(<code>type_engine/resolver/mod.rs</code>) special-cases a static property (<code>self::$p</code>)
-and otherwise returns the owning class. That arm is what the unknown-member
-check resolves its subject through.</p>
-<p><strong>Fix:</strong> have the <code>StaticAccess</code> arm resolve a non-property member through
-the same constant-type path the call resolver uses, so both answer alike,
-rather than teaching it a second way to read a constant. An enum case is
-its own enum, so <code>Kind::A</code> must keep resolving to <code>Kind</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
