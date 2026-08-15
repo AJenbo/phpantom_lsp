@@ -1235,6 +1235,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#workspace-index-fast-path-and-vendor-owned-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Workspace-Index Fast Path and Vendor-Owned Targets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#phase-5-scope-user-code-only-by-design" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2830,6 +2841,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#workspace-index-fast-path-and-vendor-owned-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Workspace-Index Fast Path and Vendor-Owned Targets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#phase-5-scope-user-code-only-by-design" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4027,6 +4049,9 @@ rather than from the classes the current parse produced.</p>
 <a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a>│
 <a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>└── Vec&lt;ClassInfo&gt; (concrete implementors only)
 </code></pre></div>
+<h3 id="workspace-index-fast-path-and-vendor-owned-targets">Workspace-Index Fast Path and Vendor-Owned Targets<a class="headerlink" href="#workspace-index-fast-path-and-vendor-owned-targets" title="Permanent link">&para;</a></h3>
+<p>Once the workspace index is ready, Phase 1 alone answers the request and its results are restricted to project classes. The reverse-inheritance index is populated by every parse, so a vendor or stub class that happened to be loaded earlier in the session would otherwise appear while an identical class that was never loaded would not, making results depend on session history. The full workspace index parses only project files, so user-only is the deterministic set to return.</p>
+<p>The exception is a target that itself lives under <code>/vendor/</code>. An interface shipped by a Composer package is normally implemented inside that same package, so the project-only restriction would answer a request about <code>HttpKernelInterface</code> with everything Symfony ships filtered out. Such a target keeps the class-index scans (Phases 2–5), which is the only way to reach classes the workspace index never parses. Embedded stubs stay on the fast path: PHP's own interfaces (<code>Countable</code>, <code>Iterator</code>) are implemented across the whole dependency tree, so scanning it for them costs far more than the answer is worth.</p>
 <h3 id="phase-5-scope-user-code-only-by-design">Phase 5 Scope: User Code Only (by design)<a class="headerlink" href="#phase-5-scope-user-code-only-by-design" title="Permanent link">&para;</a></h3>
 <p>Phase 5 walks PSR-4 roots from <code>composer.json</code> (<code>autoload</code> and <code>autoload-dev</code>). Since PSR-4 mappings are sourced exclusively from the project's own <code>composer.json</code> (vendor PSR-4 is not loaded), Phase 5 inherently only discovers classes in the user's own source directories (e.g. <code>src/</code>, <code>app/</code>, <code>tests/</code>). Vendor dependencies are fully covered by fqn_uri_index (Phase 3).</p>
 <p>Phase 5 exists to catch newly-created or not-yet-indexed user classes that are missing from fqn_uri_index.</p>
@@ -4036,7 +4061,7 @@ rather than from the classes the current parse produced.</p>
 <h3 id="caching_1">Caching<a class="headerlink" href="#caching_1" title="Permanent link">&para;</a></h3>
 <p><code>parse_and_cache_file</code> follows the same pattern as <code>find_or_load_class</code>: it parses the PHP file, resolves parent/interface names via <code>resolve_parent_class_names</code>, and stores the results in <code>uri_classes_index</code>, <code>fqn_class_index</code>, and <code>fqn_uri_index</code>. This means files discovered during a go-to-implementation scan are immediately available for subsequent completion, definition, and implementation lookups without re-parsing.</p>
 <h3 id="member-level-implementation">Member-Level Implementation<a class="headerlink" href="#member-level-implementation" title="Permanent link">&para;</a></h3>
-<p>When the cursor is on a method call (e.g. <code>$repo-&gt;find()</code>), <code>resolve_member_implementations</code> first resolves the subject to candidate classes. If any candidate is an interface or abstract class, <code>find_implementors</code> is called and each implementor is checked for the specific method. Only classes that directly define (override) the method are returned — inherited-but-not-overridden methods are excluded.</p>
+<p>When the cursor is on a method call (e.g. <code>$repo-&gt;find()</code>), <code>resolve_member_implementations</code> first resolves the subject to candidate classes. If any candidate is an interface or abstract class, <code>find_implementors</code> is called and each implementor is checked for the specific method. The location returned for an implementor is the declaration that supplies the body: its own when it declares the method, otherwise the nearest ancestor that declares it, since a class that inherits a method unchanged still implements it. A method that is only re-declared <code>abstract</code> is another declaration rather than an implementation and is skipped, which is also why implementors are collected with abstract classes included — whether the <em>class</em> is abstract says nothing about the method that was asked for.</p>
 <h3 id="reverse-jump-concrete-method-prototype-declaration">Reverse Jump: Concrete Method → Prototype Declaration<a class="headerlink" href="#reverse-jump-concrete-method-prototype-declaration" title="Permanent link">&para;</a></h3>
 <p>When go-to-implementation is invoked on a <code>MemberDeclaration</code> symbol (a method name at its definition site), <code>resolve_reverse_implementation</code> checks whether the enclosing class implements any interface or extends an abstract class that declares a method with the same name. If found, it returns the location of the prototype method in the interface or abstract class. This covers:</p>
 <ul>
