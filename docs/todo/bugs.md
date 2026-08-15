@@ -22,9 +22,7 @@ block; several sit at the same source sites as fixed bugs from the
 previous sweep (B50, B54, B59, B62), where the coarse defect was fixed
 and a finer one behind it became visible. **B83** was filed the same
 day from the follow-up re-run at `c618c8aa`, whose compatibility
-tightening surfaced one previously-swallowed site, and **B84** from a
-probe at `66a524bc` showing the return-position side of that
-tightening is still missing.
+tightening surfaced one previously-swallowed site.
 
 ## Crashes
 
@@ -72,45 +70,6 @@ the neighbouring juggling rules already are. Verify against the
 sample projects first: a file that declares `strict_types=1` and
 leans on `__toString()` would start reporting, and those reports are
 correct.
-
-### B84. Return-position compatibility ignores an array shape's value types
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @return array<string, int> */
-function bad(): array {
-    return ['a' => 'x'];   // not reported
-}
-
-/** @param array<string, int> $m */
-function takesIntMap(array $m): void {}
-
-function alsoBad(): void {
-    takesIntMap(['a' => 'x']);   // reported, as expected
-}
-```
-
-Needs investigation: `type_mismatch_argument` correctly reports an
-array shape whose values do not satisfy the declared map or list value
-type (`array{a: 'x'}` vs `array<string, int>`, `array{'x', 'y'}` vs
-`list<int>`), but `type_mismatch_return` accepts the identical
-mismatch silently. The return side is not skipping shapes entirely —
-a nullability mismatch in a shape value (`array{a: ?bool}` vs
-`array<string, int>`) is reported in return position — so the two
-diagnostics are reaching different verdicts for the same shape-vs-map
-comparison somewhere below the nullability check. `array<string,
-never>` as the declared type is the extreme case: any all-optional-keys
-shape (e.g. an `array_filter()` result) passes against it, which is
-what kept masking scratch probes during the 2026-08-15 sweeps.
-
-Found by probe at `66a524bc`, after the argument-side tightening
-landed; no sample-project site currently hits it.
-
-**Fix:** find where the return-position compatibility path diverges
-from the argument-position path for shape-to-map value checks and
-unify them; the recently tightened argument behaviour is the correct
-one.
 
 ## Standard-library return types
 
@@ -372,8 +331,7 @@ both keep their `null` arms.
 Filed 2026-08-15, after the evening sweep: the argument-compatibility
 tightening in `c618c8aa` surfaced it — the resulting shape mismatch
 was previously swallowed by the diagnostic layer's array leniency
-(the argument side has since been tightened further; the return-side
-remainder is B84).
+(the argument side has since been tightened further).
 
 Sample site: `luxplus-website app/Contexts/Api/Resources/ProductResource.php:210`
 (discount label `$textArgs` built from `?int` properties the arm

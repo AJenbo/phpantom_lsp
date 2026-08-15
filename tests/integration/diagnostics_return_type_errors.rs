@@ -3920,3 +3920,94 @@ function gate(?string $grade): string {
         return_error_messages(&collect(php)).join("; ")
     );
 }
+
+// ── A function's `@return` docblock refines its native `array` hint ──────────
+
+#[test]
+fn flags_shape_value_mismatch_against_docblock_map_on_plain_function() {
+    let php = r#"<?php
+/** @return array<string, int> */
+function bad(): array {
+    return ['a' => 'x'];
+}
+"#;
+    let diags = collect(php);
+    let msgs = return_error_messages(&diags);
+    assert!(
+        msgs.iter().any(|m| m.contains("array<string, int>")),
+        "Expected the docblock map type to be checked, not the bare `array` hint, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_shape_value_mismatch_against_docblock_list_on_plain_function() {
+    let php = r#"<?php
+/** @return list<int> */
+function bad(): array {
+    return ['x', 'y'];
+}
+"#;
+    let diags = collect(php);
+    let msgs = return_error_messages(&diags);
+    assert!(
+        msgs.iter().any(|m| m.contains("list<int>")),
+        "Expected the docblock list type to be checked, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_when_shape_satisfies_docblock_map_on_plain_function() {
+    let php = r#"<?php
+/** @return array<string, int> */
+function good(): array {
+    return ['a' => 1];
+}
+
+/** @return list<int> */
+function goodList(): array {
+    return [1, 2];
+}
+
+/** @return array<string, int> */
+function goodEmpty(): array {
+    return [];
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "Expected no return type error, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn docblock_return_type_of_another_files_function_is_not_borrowed() {
+    let backend = create_test_backend();
+    let other = "file:///other.php";
+    backend.update_ast(
+        other,
+        r#"<?php
+/** @return array<string, int> */
+function dup(): array {
+    return [];
+}
+"#,
+    );
+
+    let uri = "file:///test.php";
+    let php = r#"<?php
+function dup(): array {
+    return ['a' => 'x'];
+}
+"#;
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    assert!(
+        !has_return_error(&diags),
+        "This file declares `dup(): array` with no docblock, so the other file's \
+         `@return array<string, int>` must not be checked against this body, got: {:?}",
+        return_error_messages(&diags)
+    );
+}

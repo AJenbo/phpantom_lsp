@@ -182,6 +182,7 @@ impl Backend {
                 for stmt in program.statements.iter() {
                     process_top_level_statement(
                         stmt,
+                        uri,
                         content,
                         &file_ctx,
                         &class_loader,
@@ -375,10 +376,48 @@ fn resolve_return_and_push(
     }
 }
 
+/// The return type the index holds for the function `uri` declares at
+/// `func_offset`, with the `@return` docblock already merged over the native
+/// hint.
+///
+/// Only this file's own declaration will do.  A same-named function in another
+/// file has a docblock that says nothing about the body being checked, so the
+/// index entry is accepted only when it was contributed by `uri`, and a name
+/// another file won the race for is looked up among the runners-up instead.
+fn indexed_return_type(
+    backend: &Backend,
+    file_ctx: &crate::types::FileContext,
+    uri: &str,
+    func_name: &str,
+    func_offset: u32,
+) -> Option<PhpType> {
+    let fqn = file_ctx.resolve_name_at(func_name, func_offset);
+
+    {
+        let fmap = backend.global_functions().read();
+        for name in [fqn.as_str(), func_name] {
+            if let Some((decl_uri, fi)) = fmap.get(name)
+                && decl_uri == uri
+            {
+                return fi.return_type.clone();
+            }
+        }
+    }
+
+    let dups = backend.symbols.duplicate_functions.read();
+    for name in [fqn.as_str(), func_name] {
+        if let Some(fi) = dups.get(name).and_then(|by_uri| by_uri.get(uri)) {
+            return fi.return_type.clone();
+        }
+    }
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Walk a top-level statement looking for function/class declarations.
 fn process_top_level_statement(
     stmt: &Statement<'_>,
+    uri: &str,
     content: &str,
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -392,6 +431,7 @@ fn process_top_level_statement(
             for inner in ns.statements().iter() {
                 process_top_level_statement(
                     inner,
+                    uri,
                     content,
                     file_ctx,
                     class_loader,
@@ -462,28 +502,17 @@ fn process_top_level_statement(
             let func_name = bytes_to_str(func.name.value);
             let func_offset = func.name.span.start.offset;
 
-            // Extract the declared return type.  Prefer the AST's native
-            // return type hint (always available for the current file),
-            // then fall back to the global function index (which may
-            // carry a richer docblock-enriched type).
-            let declared_return = func
-                .return_type_hint
-                .as_ref()
-                .map(|rth| crate::parser::extract_hint_type(&rth.hint))
-                .or_else(|| {
-                    let fqn = file_ctx.resolve_name_at(func_name, func_offset);
-                    backend
-                        .global_functions()
-                        .read()
-                        .get(&fqn)
-                        .and_then(|(_, fi)| fi.return_type.clone())
-                        .or_else(|| {
-                            backend
-                                .global_functions()
-                                .read()
-                                .get(func_name)
-                                .and_then(|(_, fi)| fi.return_type.clone())
-                        })
+            // Extract the declared return type.  Prefer the indexed
+            // `FunctionInfo`, where the parser has already merged the
+            // `@return` docblock over the native hint, so a body is checked
+            // against `array<string, int>` rather than bare `array`.  Falling
+            // back to the AST hint covers a function the index has not caught
+            // up with yet.
+            let declared_return =
+                indexed_return_type(backend, file_ctx, uri, func_name, func_offset).or_else(|| {
+                    func.return_type_hint
+                        .as_ref()
+                        .map(|rth| crate::parser::extract_hint_type(&rth.hint))
                 });
 
             let declared_return = match declared_return {
@@ -556,6 +585,7 @@ fn process_top_level_statement(
                 DeclareBody::Statement(inner) => {
                     process_top_level_statement(
                         inner,
+                        uri,
                         content,
                         file_ctx,
                         class_loader,
@@ -569,6 +599,7 @@ fn process_top_level_statement(
                     for s in body.statements.iter() {
                         process_top_level_statement(
                             s,
+                            uri,
                             content,
                             file_ctx,
                             class_loader,
