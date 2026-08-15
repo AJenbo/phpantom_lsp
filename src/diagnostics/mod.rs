@@ -1206,9 +1206,8 @@ impl Backend {
                 cache.insert(uri_str.to_string(), full);
             }
             {
-                let mut ids = self.diag.result_ids.lock();
-                let id = ids.entry(uri_str.to_string()).or_insert(0);
-                *id += 1;
+                let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
+                self.diag.result_ids.lock().insert(uri_str.to_string(), id);
             }
             true
         } else {
@@ -1934,5 +1933,64 @@ mod tests {
         assert_eq!(result_id(), Some(4));
         assert!(!backend.assemble_and_push(uri).await);
         assert_eq!(result_id(), Some(4));
+    }
+
+    /// A reopened file must never be assigned a `resultId` the client
+    /// could still be holding from before the close. Before the
+    /// fix, `result_ids` was a per-file counter that `did_close` reset
+    /// to nothing, so a reopened file's ids restarted at 1 and could
+    /// climb back through a value the client had cached — a pull with
+    /// that stale `previousResultId` would then wrongly answer
+    /// `Unchanged` with pre-close diagnostics.
+    #[tokio::test]
+    async fn reopened_file_never_recycles_a_result_id() {
+        let backend = Backend::new_test();
+        backend
+            .supports_pull_diagnostics
+            .store(true, Ordering::Release);
+        let uri = "file:///reopen.php";
+        let result_id = || backend.diag.result_ids.lock().get(uri).copied();
+
+        // The client observes a sequence of ids before closing the file.
+        assert!(backend.assemble_and_push(uri).await);
+        let seen_before_close = result_id();
+        assert!(seen_before_close.is_some());
+
+        backend.diag.last_fast.lock().insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: "boom".to_string(),
+                ..Default::default()
+            }],
+        );
+        assert!(backend.assemble_and_push(uri).await);
+        let last_seen_before_close = result_id();
+        assert_ne!(seen_before_close, last_seen_before_close);
+
+        // Close drops the file's cached id and full set entirely.
+        backend.clear_diagnostics_for_file(uri).await;
+        assert_eq!(result_id(), None);
+
+        // Reopen and recompute enough times that a per-file counter
+        // reset to 0 would climb back through every id the client saw
+        // before the close.
+        backend.diag.last_fast.lock().remove(uri);
+        for _ in 0..3 {
+            backend.assemble_and_push(uri).await;
+            backend.diag.last_fast.lock().insert(
+                uri.to_string(),
+                vec![Diagnostic {
+                    range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    message: "boom again".to_string(),
+                    ..Default::default()
+                }],
+            );
+            backend.assemble_and_push(uri).await;
+            assert_ne!(result_id(), seen_before_close);
+            assert_ne!(result_id(), last_seen_before_close);
+        }
     }
 }

@@ -28,8 +28,14 @@ pub(crate) struct DiagnosticState {
     pub(crate) last_slow: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
     /// Last-computed fast diagnostics per file URI.
     pub(crate) last_fast: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
-    /// Per-file `resultId` for pull diagnostics.
+    /// Per-file `resultId` for pull diagnostics, drawn from
+    /// `result_id_seq` so a value is never reused within the session
+    /// even after `did_close` drops a file's entry (a reopened file
+    /// starting back at 0 could otherwise land on an id the client
+    /// still holds from before the close).
     pub(crate) result_ids: Arc<Mutex<HashMap<String, u64>>>,
+    /// Session-global sequence feeding `result_ids`.
+    pub(crate) result_id_seq: Arc<AtomicU64>,
     /// Combined diagnostic cache (fast + slow + external tools) per file URI.
     pub(crate) last_full: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
     /// Diagnostics to suppress from the next publish cycle.
@@ -61,6 +67,7 @@ impl DiagnosticState {
             last_slow: Arc::new(Mutex::new(HashMap::new())),
             last_fast: Arc::new(Mutex::new(HashMap::new())),
             result_ids: Arc::new(Mutex::new(HashMap::new())),
+            result_id_seq: Arc::new(AtomicU64::new(0)),
             last_full: Arc::new(Mutex::new(HashMap::new())),
             suppressed: Arc::new(Mutex::new(Vec::new())),
             workspace_diags: Arc::new(Mutex::new(WorkspaceDiagnostics::default())),
