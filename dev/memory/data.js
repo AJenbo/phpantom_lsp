@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786767393145,
+  "lastUpdate": 1786771396619,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21895,6 +21895,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c618c8aad6f59020b83c93275b98723f648f8d55",
+          "message": "Fix generic call return type, and update roadmap",
+          "timestamp": "2026-08-15T07:06:13+02:00",
+          "tree_id": "51b3aea7d4e0121e1e66fc01a3491b0cb6c3fd36",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c618c8aad6f59020b83c93275b98723f648f8d55"
+        },
+        "date": 1786771390758,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.4,
             "unit": "MiB"
           }
         ]
