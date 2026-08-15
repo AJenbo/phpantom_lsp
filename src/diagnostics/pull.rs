@@ -191,21 +191,20 @@ impl Backend {
         // are skipped — the live per-file pipeline above owns them.
         let open_uris: HashSet<&str> = open_uris.iter().map(|u| u.as_str()).collect();
         let workspace_items: Vec<(String, String, Option<Vec<Diagnostic>>)> = {
-            let ws = self.diag.workspace_diags.lock();
+            let mut ws = self.diag.workspace_diags.lock();
             ws.tracked_uris()
                 .into_iter()
                 .filter(|uri| !open_uris.contains(uri.as_str()))
-                .filter_map(|uri| {
-                    let result_id = ws.result_id(&uri)?;
-                    // Only clone the merged set when the client's
-                    // previous result id is stale; unchanged files
-                    // are answered without touching the diagnostics.
-                    let diags = if previous.get(uri.as_str()) == Some(&result_id.as_str()) {
-                        None
-                    } else {
-                        Some(ws.merged(&uri))
-                    };
-                    Some((uri, result_id, diags))
+                .map(|uri| {
+                    // `diff_for_pull` trusts the client's echoed id, and
+                    // otherwise falls back to what the server itself
+                    // last delivered — this is what keeps a file the
+                    // client can't display (and so never echoes an id
+                    // for) from being re-serialized in full on every
+                    // pull for the rest of the session.
+                    let client_previous = previous.get(uri.as_str()).copied();
+                    let (result_id, diags) = ws.diff_for_pull(&uri, client_previous);
+                    (uri, result_id, diags)
                 })
                 .collect()
         };

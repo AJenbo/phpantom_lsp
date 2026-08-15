@@ -37,7 +37,6 @@ contributor even though it's short.
 | F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork) (unblocks A16)                                              | Medium      | Medium      |
 | F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement-depends-on-f20) (depends on F20)                        | Low-Medium  | Low         |
 | P55  | [An external tool run invalidates every file it reported](todo/performance.md#p55-an-external-tool-run-invalidates-every-file-it-reported)                  | Medium-High | Low         |
-| P54  | [A workspace pull re-serializes files the client already has](todo/performance.md#p54-a-workspace-pull-re-serializes-files-the-client-already-has)          | Medium-High | Low-Medium  |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions

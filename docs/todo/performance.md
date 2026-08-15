@@ -1045,68 +1045,6 @@ already have one, deref coercion covers the read sites, and the
 `resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
 `var_type_cache` declaration at the top of the collector.
 
-## P54. A workspace pull re-serializes files the client already has
-
-**Impact: Medium-High · Complexity: Low-Medium**
-
-`workspace_pull_diagnostic` decides between a `Full` report and an
-`Unchanged` one purely from the `previousResultIds` the client sent:
-
-```rust
-let diags = if previous.get(uri.as_str()) == Some(&result_id.as_str()) {
-    None
-} else {
-    Some(ws.merged(&uri))
-};
-```
-
-The server keeps no record of what it already delivered, so a file the
-client does not echo an id for is re-serialized in full on every pull,
-for the whole session. A client will not necessarily ever echo one.
-Editors track diagnostics per worktree, and the workspace pass reports
-every parsed user file, which in a monorepo includes first-party
-sibling packages pulled in through a Composer path repository. Those
-sit outside the opened project, so the editor has nowhere to put them,
-never stores an id, and never sends one back.
-
-A captured Zed session over a 3,688-file project shows the split
-exactly. Of the 188 files the pass reported, the 155 under the opened
-project were acknowledged from the first pull onward; the 33 under a
-sibling package were acknowledged zero times across all 22 pulls, and
-were therefore sent in full 20 times each. That is 507 KB of the
-1.28 MB of workspace report the session produced, 40% of it, spent
-re-sending diagnostics for files the editor discards on arrival. The
-cost does not decay: it is paid on every refresh for as long as the
-session lasts.
-
-The streaming phase compounds it. The background pass sends a refresh
-every `DELIVERY_INTERVAL` (3s), so the number of rounds is the pass
-duration divided by three, and each round re-serializes everything
-diagnosed so far that the client has not acknowledged. Every round also
-re-runs `WorkspaceDiagnostics::merged` (a clone of each source's
-diagnostics plus an overlap-suppression pass) per file, on the request
-path, while holding the lock the pass writes its batches through.
-
-Record the result id last sent for each URI in a workspace response and
-answer a repeat with `Unchanged` instead of re-serializing. That makes
-each round genuinely incremental (O(files) across the pass rather than
-O(rounds × files)) and puts a ceiling on the out-of-project files
-rather than paying for them forever, without depending on client
-behaviour.
-
-Prefer `Unchanged` over omitting the file. Both leave a client that
-genuinely lost a result set stuck until the file's id next changes, but
-`Unchanged` is what the spec provides for and costs about 150 bytes.
-
-Worth deciding alongside this: whether the workspace pass should report
-files outside the workspace root to an editor at all. Diagnosing them
-is right for the `analyze` CLI, and they are first-party code, but an
-editor that cannot display them gains nothing from receiving them.
-
-**Where to look:** `workspace_pull_diagnostic` in
-`diagnostics/pull.rs`, and `WorkspaceDiagnostics` in
-`diagnostics/workspace.rs` for the id bookkeeping.
-
 ## P55. An external tool run invalidates every file it reported
 
 **Impact: Medium-High · Complexity: Low**

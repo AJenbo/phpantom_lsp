@@ -85,6 +85,11 @@ pub(crate) struct WorkspaceDiagnostics {
     result_ids: HashMap<String, u64>,
     /// Session-global sequence feeding `result_ids`.
     seq: u64,
+    /// The result id last delivered to the client for a URI, via either
+    /// a `Full` or an `Unchanged` report. Lets [`Self::diff_for_pull`]
+    /// answer `Unchanged` on its own record when the client never
+    /// echoes an id back (see its docs).
+    delivered: HashMap<String, String>,
 }
 
 impl WorkspaceDiagnostics {
@@ -173,6 +178,39 @@ impl WorkspaceDiagnostics {
     /// sets keep being reported as empty).
     pub(crate) fn tracked_uris(&self) -> Vec<String> {
         self.result_ids.keys().cloned().collect()
+    }
+
+    /// Decide whether to answer `Unchanged` or resend full diagnostics
+    /// for a tracked `uri`, given the id (if any) the client echoed back
+    /// as its previous result for this URI. Returns the current result
+    /// id plus `Some(diagnostics)` when a full report is needed, or
+    /// `None` when `Unchanged` suffices.
+    ///
+    /// The client's echoed id is trusted first. Otherwise this falls
+    /// back to the id it last delivered itself: some clients (editors
+    /// with monorepo path dependencies outside the opened project) have
+    /// nowhere to store diagnostics for a file outside their workspace
+    /// root and so never echo an id for it, which would otherwise force
+    /// a full re-serialization of that file on every single pull for
+    /// the rest of the session. Reusing the server's own delivery record
+    /// bounds that cost to one full report per change instead.
+    pub(crate) fn diff_for_pull(
+        &mut self,
+        uri: &str,
+        client_previous: Option<&str>,
+    ) -> (String, Option<Vec<Diagnostic>>) {
+        let result_id = self
+            .result_id(uri)
+            .expect("diff_for_pull called with an untracked uri");
+        let unchanged = client_previous == Some(result_id.as_str())
+            || self.delivered.get(uri) == Some(&result_id);
+        self.delivered.insert(uri.to_string(), result_id.clone());
+        let diags = if unchanged {
+            None
+        } else {
+            Some(self.merged(uri))
+        };
+        (result_id, diags)
     }
 }
 
@@ -808,6 +846,35 @@ mod tests {
 
         let merged = ws.merged("file:///a.php");
         assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn diff_for_pull_falls_back_to_its_own_delivery_record() {
+        let mut ws = WorkspaceDiagnostics::default();
+        ws.set_native("file:///a.php", vec![diag("unknown_class", 1)]);
+
+        // First pull: no previous id from the client, so a full report
+        // is sent and the server records what it delivered.
+        let (first_id, diags) = ws.diff_for_pull("file:///a.php", None);
+        assert!(diags.is_some(), "first pull must send a full report");
+
+        // A client that has nowhere to store this file's diagnostics
+        // (e.g. it sits outside the opened workspace root) never echoes
+        // an id back. Without server-side tracking this would resend
+        // the full report forever; it must now answer Unchanged.
+        let (second_id, diags) = ws.diff_for_pull("file:///a.php", None);
+        assert_eq!(second_id, first_id);
+        assert!(
+            diags.is_none(),
+            "a repeat pull with no client echo but no server-side change must be Unchanged"
+        );
+
+        // Once the diagnostics actually change, a full report is due
+        // again even though the client still never echoes an id.
+        ws.set_native("file:///a.php", vec![diag("unknown_class", 2)]);
+        let (third_id, diags) = ws.diff_for_pull("file:///a.php", None);
+        assert_ne!(third_id, second_id);
+        assert!(diags.is_some(), "changed diagnostics must be re-sent");
     }
 
     /// End-to-end: the native pass diagnoses unopened workspace files,
