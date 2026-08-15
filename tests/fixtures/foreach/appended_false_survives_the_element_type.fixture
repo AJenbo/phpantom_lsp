@@ -1,0 +1,38 @@
+// test: an appended string|false keeps its false half through the foreach element type
+// feature: hover
+// A `[]` append drops the literal precision of what it stores, but a
+// boolean half names one of only two values rather than one of an open
+// domain. Widening it to `bool` used to leave the `!false` assertion
+// below looking at a phantom `true`.
+// expect: string
+// expect_absent: bool
+// expect_absent: true
+// expect_hover: $before => string|false
+---
+<?php
+
+function realPathish(string $path): string|false
+{
+    return $path;
+}
+
+class Assert
+{
+    /** @phpstan-assert !false $actual */
+    public static function assertNotFalse(mixed $actual): void {}
+}
+
+class Collector extends Assert
+{
+    public function collect(string $path): void
+    {
+        $files = [];
+        $files[] = realPathish($path);
+
+        foreach ($files as $file) {
+            $before = $file;
+            static::assertNotFalse($file);
+            echo $before, $fi<>le;
+        }
+    }
+}

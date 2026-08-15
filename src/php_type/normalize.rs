@@ -127,6 +127,13 @@ impl PhpType {
     /// such as generic arguments, callable signatures, and existing shapes
     /// are deliberately left untouched: storing `Box<'draft'>` in an array
     /// must not rewrite the type carried by `Box`.
+    ///
+    /// `true` and `false` are not widened. Unlike `'draft'`, which stands
+    /// for one value out of an open domain, a boolean half names one of the
+    /// only two values there are, and it is how PHP's failure-signal unions
+    /// (`realpath(): string|false`) are spelled. Widening it to `bool` adds
+    /// an alternative the expression can never produce, which a later
+    /// `!false` assertion then leaves behind as a phantom `true`.
     #[must_use]
     pub(crate) fn widen_scalar_literals(&self) -> PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
@@ -138,14 +145,6 @@ impl PhpType {
                 LiteralValue::Float(_) => PhpType::float(),
                 LiteralValue::String(_) => PhpType::string(),
             },
-            // `true` and `false` are spelled as keyword names rather than
-            // `TypeKind::Literal`, but they are exact values all the same
-            // and widen at the boundary like every other literal.
-            TypeKind::Named(name)
-                if name.eq_ignore_ascii_case("true") || name.eq_ignore_ascii_case("false") =>
-            {
-                PhpType::bool()
-            }
             TypeKind::Union(members) => {
                 let mut widened: Vec<PhpType> = Vec::with_capacity(members.len());
                 let mut seen = HashSet::with_capacity(members.len());

@@ -4062,11 +4062,13 @@ async fn test_array_shape_incremental_key_assignments() {
                     .and_then(|i| i.detail.clone())
                     .unwrap_or_default()
             };
-            // Written in the literal, so the exact value survives; the two
-            // keys assigned afterwards widen at the mutation boundary.
+            // Written in the literal, so the exact value survives; a string
+            // or int assigned afterwards widens at the mutation boundary.
+            // A boolean half does not: it names one of only two values, and
+            // widening it to `bool` would invent the other one.
             assert_eq!(find("key1"), "key1: 1");
             assert_eq!(find("key2"), "key2: string");
-            assert_eq!(find("key3"), "key3: bool");
+            assert_eq!(find("key3"), "key3: true");
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }

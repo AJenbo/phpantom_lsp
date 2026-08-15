@@ -308,37 +308,7 @@ No outstanding items.
 
 ## Array types
 
-### B81. Foreach element extraction widens `false` to `bool`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-function collect(string $p): void
-{
-    $files = [];
-    $files[] = realpath($p);   // string|false — stored correctly ($files[0] reads back string|false)
-    foreach ($files as $file) {
-        assertNotFalse($file);       // @phpstan-assert !false
-        takesString($file);          // reported: got string|true
-    }
-}
-```
-
-The element union produced for a `foreach` over the array degrades the
-stored `false` literal to `bool`: a `@phpstan-assert !false` (PHPUnit's
-`assertNotFalse()`) then strips only the `false` half and leaves a
-phantom `string|true`. A dim read (`$files[0]`) of the same array
-preserves `string|false`, and the identical assert on a plain variable
-holding `realpath()`'s result narrows cleanly to `string` — the
-widening is specific to the foreach element-type computation.
-
-Sample site: `pdepend tests/php/PDepend/AbstractTestCase.php:765` — the
-same site as the previous sweep's B62; the assertion is now recognized
-(B62 fixed) and this widening is what it uncovered.
-
-**Fix:** flatten array-shape values into the foreach element union
-without literal-to-general widening, matching what the dim-read path
-already does.
+No outstanding items.
 
 ## Docblock handling
 
