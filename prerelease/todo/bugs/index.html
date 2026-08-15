@@ -963,23 +963,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b77-a-one-line-function-body-lets-the-preceding-docblocks-param-reach-the-next-function" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B77. A one-line function body lets the preceding docblock's <code>@param</code> reach the next function
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1596,23 +1579,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b77-a-one-line-function-body-lets-the-preceding-docblocks-param-reach-the-next-function" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B77. A one-line function body lets the preceding docblock's <code>@param</code> reach the next function
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1828,28 +1794,6 @@ for <code>PHPStan\Analyser\Scope::isInClass()</code> narrowing a subsequent
 PHPStan-extension-authoring-specific, not general PHP or Laravel code.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
-<h3 id="b77-a-one-line-function-body-lets-the-preceding-docblocks-param-reach-the-next-function">B77. A one-line function body lets the preceding docblock's <code>@param</code> reach the next function<a class="headerlink" href="#b77-a-one-line-function-body-lets-the-preceding-docblocks-param-reach-the-next-function" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @param array&lt;Status&gt; $s */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">function g3(array $s): void { foreach ($s as $x) { doThing($x); } }</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">function g4(Status $s): void { doThing($s); }   // reported: got array&lt;Status&gt;</span>
-</code></pre></div>
-<p><code>g4</code> declares no docblock of its own, so the backward <code>@param</code> scan in
-<code>find_iterable_raw_type_in_source</code> keeps going and finds <code>g3</code>'s, matching
-on the shared parameter name <code>$s</code>. The scan does have a sibling-function
-boundary check, but it only fires once it has seen the brace depth rise
-above zero and come back down. A body written entirely on the signature
-line opens and closes on the same line, so the net depth never leaves
-zero and the boundary is never detected.</p>
-<p>Reformatting <code>g3</code> across multiple lines makes it go away, which is why
-this stays out of sight in PSR-12 code and shows up in fixtures and
-tests, where one-line bodies are the norm.</p>
-<p><strong>Fix:</strong> detect the sibling boundary from the <code>function</code> keyword at the
-scan's own depth rather than from a depth excursion, so a body that
-opens and closes on one line still ends the search. The same scan is
-what <code>resolve_param_type</code> and the array-literal element inference both
-call, so both inherit the leak.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
