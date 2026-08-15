@@ -1135,17 +1135,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l5-abort_ifabort_unless-type-narrowing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L5. <code>abort_if</code>/<code>abort_unless</code> type narrowing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1883,17 +1872,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l5-abort_ifabort_unless-type-narrowing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L5. <code>abort_if</code>/<code>abort_unless</code> type narrowing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2570,41 +2548,6 @@ today and what is still missing.</p>
 </table>
 <h3 id="gaps-ranked-by-impact-effort">Gaps (ranked by impact ÷ effort)<a class="headerlink" href="#gaps-ranked-by-impact-effort" title="Permanent link">&para;</a></h3>
 <hr />
-<h4 id="l5-abort_ifabort_unless-type-narrowing">L5. <code>abort_if</code>/<code>abort_unless</code> type narrowing<a class="headerlink" href="#l5-abort_ifabort_unless-type-narrowing" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Complexity: Medium-High</strong></p>
-<p>These are the standard guard patterns in Laravel controllers and
-middleware. Without narrowing, variables keep their wider type,
-causing false "unknown member" warnings and missing completions.</p>
-<p>After <code>abort_if($user === null, 404)</code>, the type of <code>$user</code> should
-be narrowed to exclude <code>null</code> in subsequent code.  Similarly,
-<code>abort_unless($user instanceof Admin, 403)</code> should narrow <code>$user</code>
-to <code>Admin</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">abort_if($user === null, 404);</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$user-&gt;email;  // $user should be non-null here</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">abort_unless($user instanceof Admin, 403);</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$user-&gt;grantPermission(&#39;edit&#39;);  // $user should be Admin here</span>
-</code></pre></div>
-<p>Larastan handles this via <code>AbortIfFunctionTypeSpecifyingExtension</code>,
-a PHPStan-specific <code>TypeSpecifyingExtension</code> mechanism.  The
-framework does <strong>not</strong> annotate these functions with
-<code>@phpstan-assert</code> — there are no stubs for this either.</p>
-<p>Our guard clause narrowing already handles the pattern
-<code>if ($x === null) { return; }</code> + subsequent code, and we support
-<code>@phpstan-assert-if-true/false</code>.  However, <code>abort_if</code> / <code>abort_unless</code>
-/ <code>throw_if</code> / <code>throw_unless</code> don't follow either pattern: they are
-standalone function calls (not if-conditions) that conditionally
-throw.</p>
-<p><strong>Where to change:</strong> In <code>type_narrowing.rs</code>, add special-case
-handling for standalone <code>abort_if()</code>, <code>abort_unless()</code>, <code>throw_if()</code>,
-and <code>throw_unless()</code> calls.  When the first argument is a type check
-expression (instanceof, <code>=== null</code>, etc.), apply the inverse narrowing
-to subsequent code:
-- <code>abort_if($x === null, ...)</code> → narrow <code>$x</code> to non-null after
-- <code>abort_unless($x instanceof Foo, ...)</code> → narrow <code>$x</code> to <code>Foo</code> after
-- <code>throw_if(...)</code> / <code>throw_unless(...)</code> → same logic</p>
-<p>This is similar to the existing guard clause narrowing but triggered
-by specific function names rather than <code>if</code> + early return.</p>
 <h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>For each relationship method we synthesize a <code>{snake_name}_count</code>
@@ -2646,8 +2589,8 @@ aggregate function (<code>withSum</code>/<code>withAvg</code> → <code>float</c
 support dynamic <code>with*()</code> calls via <code>__call()</code>.  For example,
 <code>view('home')-&gt;withUser($user)</code> is equivalent to
 <code>-&gt;with('user', $user)</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">view(&#39;home&#39;)-&gt;withUser($user);         // dynamic, no @method annotation</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">redirect(&#39;/&#39;)-&gt;withErrors($errors);    // has explicit withErrors(), but withFoo() is dynamic</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">view(&#39;home&#39;)-&gt;withUser($user);         // dynamic, no @method annotation</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">redirect(&#39;/&#39;)-&gt;withErrors($errors);    // has explicit withErrors(), but withFoo() is dynamic</span>
 </code></pre></div>
 <p>The framework provides no <code>@method</code> annotations for arbitrary
 <code>with*</code> calls — only specific ones like <code>withErrors()</code>,
@@ -2690,8 +2633,8 @@ name: the <code>morphMap()</code> keys themselves, <code>Relation::getMorphedMod
 <code>Model::getActualClassNameForMorph()</code>, and the <code>$types</code> argument of the
 <code>whereHasMorph()</code> family. It does <strong>not</strong> recognize an alias compared
 against a morph type <em>column</em>, which is how much real code reads it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$query-&gt;where(&#39;commentable_type&#39;, &#39;post&#39;);</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">if ($comment-&gt;commentable_type === &#39;post&#39;) { … }</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$query-&gt;where(&#39;commentable_type&#39;, &#39;post&#39;);</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">if ($comment-&gt;commentable_type === &#39;post&#39;) { … }</span>
 </code></pre></div>
 <p>Both are alias literals, but recognizing them means knowing that the
 column named on the other side is a polymorphic type column. The
@@ -2708,8 +2651,8 @@ dispatch on the <code>LaravelStringKind::MorphAlias</code> span kind.</p>
 <p>Morph aliases complete inside <code>Relation::getMorphedModel('|')</code> and
 <code>Model::getActualClassNameForMorph('|')</code>, but not in the two array
 positions where they are most often written:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Relation::morphMap([&#39;|&#39; =&gt; Post::class]);</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$query-&gt;whereHasMorph(&#39;commentable&#39;, [&#39;|&#39;]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">Relation::morphMap([&#39;|&#39; =&gt; Post::class]);</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$query-&gt;whereHasMorph(&#39;commentable&#39;, [&#39;|&#39;]);</span>
 </code></pre></div>
 <p>The blocker is not the alias index but
 <code>detect_laravel_string_key_context</code> in
@@ -3054,8 +2997,8 @@ reference found," never as an error.</p>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>url()</code> returns the generator or a string depending on whether it got a
 path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
 </code></pre></div>
 <p>We resolve the call to the contract regardless of the argument, so a
 string result is typed as <code>UrlGenerator</code>. Real-world fallout is
@@ -3074,10 +3017,10 @@ Application : mixed)</code>).</p>
 <p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
 registrations that generate route names the same way are not, so every
 <code>route()</code> call naming one is reported as an unknown route:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
 </code></pre></div>
 <p><code>resources()</code> / <code>apiResources()</code> expand to the same seven (or five)
 conventional names per entry. <code>singleton()</code> generates <code>show</code>, <code>edit</code>, and
@@ -3127,10 +3070,10 @@ resolution at all.</p>
 <p><code>Factory::modelName()</code> reads <code>protected $model</code> before it reaches for the
 naming convention, and a factory whose name does not match its model is
 exactly what the property is there for:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">class ArticleFactory extends Factory</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">{</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    protected $model = Draft::class;   // ignored</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">class ArticleFactory extends Factory</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">{</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    protected $model = Draft::class;   // ignored</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>We read <code>@extends Factory&lt;Model&gt;</code> and the class-name convention only, so
 <code>Draft::factory()-&gt;makeOne()</code> resolves to Eloquent's base <code>Model</code> and
