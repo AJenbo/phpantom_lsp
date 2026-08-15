@@ -297,8 +297,15 @@ pub(crate) fn is_type_compatible(
     {
         return true;
     }
-    // `void` should never appear as an argument but skip it conservatively.
-    if arg_type.is_void() || param_type.is_void() {
+    // A `void` *parameter* is not a constraint any value can be judged
+    // against — nothing produces a value of that type, so the annotation
+    // that spelled it is what is wrong, not the argument.
+    //
+    // A `void` *argument* is a different matter and is reported: the call
+    // it came from hands back no value at all, so whatever the parameter
+    // asks for, it is not getting it.  PHP 8 quietly passes `null` there,
+    // which makes it a bug that survives until the parameter is used.
+    if param_type.is_void() {
         return true;
     }
     // Skip Raw types (unparseable / unresolved type strings).

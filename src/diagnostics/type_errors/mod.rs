@@ -797,6 +797,12 @@ impl Backend {
                         " (return type {arg_return} does not satisfy {param_return})"
                     ));
                 }
+                // "got void" reads as a type the value happens to have
+                // rather than as the absence of one, so say what the call
+                // site actually did.
+                if arg_type.is_void() {
+                    message.push_str(" (the expression returns no value)");
+                }
                 // Two shapes that differ by a key the developer forgot
                 // read as two long type expressions to diff by eye. Name
                 // the keys that are missing instead.

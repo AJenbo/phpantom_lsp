@@ -1862,6 +1862,96 @@ function test(?Color $color): void {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// A `void` call hands back no value, so passing it on is reported
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn a_void_call_passed_as_an_argument_is_reported() {
+    let php = r#"<?php
+function log_it(string $message): void {}
+function takes_string(string $s): void {}
+
+function test(): void {
+    takes_string(log_it("hi"));
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("void") && messages[0].contains("returns no value"),
+        "the message should say the expression yields nothing, got {messages:?}"
+    );
+}
+
+#[test]
+fn a_void_method_call_passed_as_an_argument_is_reported() {
+    let php = r#"<?php
+class Logger {
+    /** @return void */
+    public function write(string $message) {}
+}
+
+function takes_string(string $s): void {}
+
+function test(Logger $logger): void {
+    takes_string($logger->write("hi"));
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+/// A `void` argument is wrong whatever the parameter accepts: PHP 8 passes
+/// the `null` it substitutes, so a nullable parameter hides the mistake
+/// rather than excusing it.
+#[test]
+fn a_void_call_is_reported_against_a_nullable_parameter() {
+    let php = r#"<?php
+function log_it(): void {}
+function takes_nullable(?string $s): void {}
+
+function test(): void {
+    takes_nullable(log_it());
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+/// `never` is not `void`: a call that never returns hands the parameter no
+/// value because the program does not get that far, which is sound for any
+/// parameter type.
+#[test]
+fn a_never_returning_call_passed_as_an_argument_is_not_reported() {
+    let php = r#"<?php
+function fail(string $message): never { throw new RuntimeException($message); }
+function takes_string(string $s): void {}
+
+function test(): void {
+    takes_string(fail("boom"));
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Nothing produces a value of type `void`, so a parameter annotated with
+/// it is the annotation being wrong, not the argument.
+#[test]
+fn a_void_parameter_annotation_does_not_report_its_arguments() {
+    let php = r#"<?php
+/** @param void $x */
+function takes_void($x): void {}
+
+function test(): void {
+    takes_void("hi");
+}
+"#;
+    let messages = type_error_messages(&collect(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 #[test]
 fn no_diagnostic_for_non_nullable_to_nullable_param() {
     let php = r#"<?php

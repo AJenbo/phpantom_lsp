@@ -1194,12 +1194,6 @@ pub(super) fn resolve_rhs_function_call<'b>(
             // `list<Widget>`, `int`, `array{name: string}`).  Return a
             // type-string-only entry so that consumers reading
             // `.type_string` still get the information.
-            //
-            // When the return type is `void`, PHP yields `null` at
-            // runtime — mirror that so the variable type is correct.
-            if *ret == PhpType::void() {
-                return vec![ResolvedType::from_type_string(PhpType::null())];
-            }
             return vec![resolved_type_with_lookup(
                 ret.clone(),
                 current_class_name,
@@ -1827,7 +1821,7 @@ pub(super) fn resolve_conditional_return_for_call(
 /// the full type string as the hint (so generics like `Collection<int, User>`
 /// survive).  When the type names no class (a bare `array<…>`, `list<…>`,
 /// scalar, or shape) a type-string-only entry is returned so consumers that
-/// read `.type_string` still see it.  `void` collapses to `null`.
+/// read `.type_string` still see it.
 pub(super) fn resolve_from_authoritative_type(
     ty: PhpType,
     current_class_name: &str,
@@ -1842,9 +1836,6 @@ pub(super) fn resolve_from_authoritative_type(
     );
     if !classes.is_empty() {
         return ResolvedType::from_classes_with_hint(classes, ty);
-    }
-    if ty == PhpType::void() {
-        return vec![ResolvedType::from_type_string(PhpType::null())];
     }
     vec![resolved_type_with_lookup(
         ty,
@@ -2103,10 +2094,9 @@ pub(super) fn resolve_owner_method_call(
     //
     // Return the type string even for non-informative types like `array` or
     // `mixed` — a correct-but-vague type is better than keeping the
-    // previous (wrong) type after reassignment.  Skip only `void` (void
-    // methods don't produce a value).  Also expand type aliases before
-    // returning so that `@phpstan-type UserList array<int, User>` with
-    // `@return UserList` is expanded to its concrete type.
+    // previous (wrong) type after reassignment.  Also expand type aliases
+    // before returning so that `@phpstan-type UserList array<int, User>`
+    // with `@return UserList` is expanded to its concrete type.
     if let Some(hint) = ret_type_string {
         let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
             &hint,
@@ -2115,9 +2105,6 @@ pub(super) fn resolve_owner_method_call(
             ctx.class_loader,
         );
         let parsed_effective = expanded.unwrap_or(hint);
-        if parsed_effective == PhpType::void() {
-            return vec![ResolvedType::from_type_string(PhpType::null())];
-        }
         return vec![resolved_type_with_lookup(
             parsed_effective,
             current_class_name,

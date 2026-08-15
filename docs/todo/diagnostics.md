@@ -117,33 +117,6 @@ with `command`, `timeout`, and tool-specific options mirroring the
 
 ---
 
-## D14. Tighten argument type mismatch diagnostic (Phase 2)
-
-**Impact: Medium · Complexity: High**
-
-`is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
-still silences two cases that are genuine bugs at runtime. Two other
-gaps this item used to track — the any-member union threshold and the
-reverse-hierarchy (supertype-to-subtype) acceptance — have since been
-tightened (see "A partially-compatible union argument is now reported"
-and the class-hierarchy comment noting the downcast direction "is now
-reported" in the changelog).
-
-### 1. Nullable arg → non-nullable param
-
-Currently silenced with a MAYBE comment ("developer may have guarded
-against null"). This is the #1 source of runtime `TypeError` in
-PHP 8+. Both PHPStan and Psalm flag it. Should be reported at least
-as **Warning** severity, since the null path may be unguarded.
-
-### 2. `void` as argument
-
-Currently silenced conservatively. Passing the return value of a
-`void` function is always a bug — PHP 8 returns `null` but the call
-site clearly misunderstands the API. Should be **Error** severity.
-
----
-
 ## D15. Unused parameter diagnostic
 
 **Impact: Low · Complexity: Medium**

@@ -261,6 +261,11 @@ class TypeErrorDemo
         // No diagnostic — int widens to float:
         $this->requiresFloat(42);
 
+        // Type error — a `void` method hands back no value.  PHP 8 passes
+        // the `null` it substitutes, so the call site's misreading of the
+        // API surfaces inside the callee rather than here:
+        $this->requiresString($this->logAction('saved'));
+
         // Type error — a `callable(...)` parameter states what the callee
         // will do with the result, so a closure that returns something
         // else breaks the contract on the first call:
@@ -316,6 +321,7 @@ class TypeErrorDemo
     private function requiresInterfaceName(string $name): void {}
     private function acceptsNullable(?string $text): void {}
     private function requiresFloat(float $value): void {}
+    private function logAction(string $message): void {}
     /** @param callable(Scaffolding\User): bool $matcher */
     private function requiresUserMatcher(callable $matcher): void {}
     /** @param array{host: string, port: int, timeout?: int} $config */
