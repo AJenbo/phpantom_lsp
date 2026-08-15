@@ -1543,6 +1543,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2294,6 +2305,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2800,7 +2822,9 @@ to be picked up as a deliberate migration.</p>
 <p>This isn't just hygiene: A16 (snippet placeholder for extracted method
 name) is explicitly blocked on <code>SnippetTextEdit</code>, an LSP 3.18 feature
 that our pinned <code>lsp-types</code> 0.94 (via <code>tower-lsp</code> 0.20) doesn't cover.
-Migrating unblocks it directly.</p>
+Migrating unblocks it directly. It also unblocks F21 (static
+<code>typeHierarchyProvider</code> advertisement), which needs a <code>lsp-types</code>
+version newer than 0.94.1.</p>
 <p><strong>What to check before starting:</strong> the fork's public API surface
 relative to <code>tower_lsp::LspService</code>/<code>tower_lsp::lsp_types</code> (import
 paths, trait signatures, the <code>"proposed"</code> feature flag) to scope the
@@ -2812,6 +2836,37 @@ others — grep <code>tower_lsp::</code> for the full list), plus the wire-proto
 test harness described in <code>test-porting.md</code> Phase 6B if that gets
 ported around the same time.</p>
 <p><strong>Where to look:</strong> <code>Cargo.toml</code>'s <code>tower-lsp = { version = "0.20", features = ["proposed"] }</code>.</p>
+<h2 id="f21-static-typehierarchyprovider-advertisement-depends-on-f20">F21. Static <code>typeHierarchyProvider</code> advertisement (depends on F20)<a class="headerlink" href="#f21-static-typehierarchyprovider-advertisement-depends-on-f20" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Type hierarchy (<code>textDocument/prepareTypeHierarchy</code>,
+<code>typeHierarchy/supertypes</code>, <code>typeHierarchy/subtypes</code>) is fully
+implemented (<code>src/type_hierarchy.rs</code>) and registered dynamically via
+<code>client/registerCapability</code> in <code>initialized</code> (<code>server.rs</code>,
+<code>type_hierarchy_registration()</code>), gated on the client declaring
+<code>textDocument.typeHierarchy.dynamicRegistration: true</code>. This works for
+every client that supports dynamic registration, but there is no
+static fallback: <code>lsp-types</code> 0.94.1 (pinned by <code>tower-lsp</code> 0.20, see
+F20) has no <code>type_hierarchy_provider</code> field on <code>ServerCapabilities</code>, so
+a client that supports type hierarchy without dynamic registration —
+or any tool that inspects only the <code>initialize</code> response's static
+capabilities, such as a feature-conformance probe — sees no type
+hierarchy support at all, even though the feature works end-to-end for
+a real editor that does the dynamic-registration round trip.</p>
+<p>Once F20 lands and a <code>type_hierarchy_provider</code> field is available, add
+static advertisement (<code>Boolean(true)</code> or <code>TypeHierarchyOptions</code>) in
+<code>initialize</code>'s <code>ServerCapabilities</code>, conditional on the client <em>not</em>
+declaring <code>dynamicRegistration: true</code> for type hierarchy (avoid
+double-registering: send either the static capability or the dynamic
+registration, not both, per the client's declared support). Also
+verify whether the same version bump exposes <code>diagnostic</code> client
+capabilities more precisely — pull diagnostics (<code>diagnostic_provider</code>
+in <code>server.rs</code>) is unaffected by this gap (it's already advertised
+correctly whenever the client declares <code>textDocument.diagnostic</code>,
+verified by probing <code>initialize</code> directly with that capability set),
+but is worth a quick re-check after the migration in case the newer
+<code>lsp-types</code> changes the shape of that capability struct.</p>
+<p><strong>Where to look:</strong> <code>src/server.rs</code> (<code>initialize</code>, <code>type_hierarchy_registration</code>),
+<code>src/type_hierarchy.rs</code>.</p>
 
 
 

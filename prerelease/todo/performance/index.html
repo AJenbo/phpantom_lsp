@@ -1469,6 +1469,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p54-a-workspace-pull-re-serializes-files-the-client-already-has" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P54. A workspace pull re-serializes files the client already has
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p55-an-external-tool-run-invalidates-every-file-it-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P55. An external tool run invalidates every file it reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2086,6 +2108,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P53. The deprecated collector deep-copies a class per member access
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p54-a-workspace-pull-re-serializes-files-the-client-already-has" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P54. A workspace pull re-serializes files the client already has
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p55-an-external-tool-run-invalidates-every-file-it-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P55. An external tool run invalidates every file it reported
       </span>
     </span>
   </a>
@@ -3079,6 +3123,84 @@ already have one, deref coercion covers the read sites, and the
 <p><strong>Where to look:</strong> <code>collect_deprecated_diagnostics</code> and
 <code>resolve_variable_subject</code> in <code>diagnostics/deprecated.rs</code>, plus the
 <code>var_type_cache</code> declaration at the top of the collector.</p>
+<h2 id="p54-a-workspace-pull-re-serializes-files-the-client-already-has">P54. A workspace pull re-serializes files the client already has<a class="headerlink" href="#p54-a-workspace-pull-re-serializes-files-the-client-already-has" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
+<p><code>workspace_pull_diagnostic</code> decides between a <code>Full</code> report and an
+<code>Unchanged</code> one purely from the <code>previousResultIds</code> the client sent:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kd">let</span><span class="w"> </span><span class="n">diags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">previous</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">uri</span><span class="p">.</span><span class="n">as_str</span><span class="p">())</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="o">&amp;</span><span class="n">result_id</span><span class="p">.</span><span class="n">as_str</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="nb">None</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nb">Some</span><span class="p">(</span><span class="n">ws</span><span class="p">.</span><span class="n">merged</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uri</span><span class="p">))</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="p">};</span>
+</code></pre></div>
+<p>The server keeps no record of what it already delivered, so a file the
+client does not echo an id for is re-serialized in full on every pull,
+for the whole session. A client will not necessarily ever echo one.
+Editors track diagnostics per worktree, and the workspace pass reports
+every parsed user file, which in a monorepo includes first-party
+sibling packages pulled in through a Composer path repository. Those
+sit outside the opened project, so the editor has nowhere to put them,
+never stores an id, and never sends one back.</p>
+<p>A captured Zed session over a 3,688-file project shows the split
+exactly. Of the 188 files the pass reported, the 155 under the opened
+project were acknowledged from the first pull onward; the 33 under a
+sibling package were acknowledged zero times across all 22 pulls, and
+were therefore sent in full 20 times each. That is 507 KB of the
+1.28 MB of workspace report the session produced, 40% of it, spent
+re-sending diagnostics for files the editor discards on arrival. The
+cost does not decay: it is paid on every refresh for as long as the
+session lasts.</p>
+<p>The streaming phase compounds it. The background pass sends a refresh
+every <code>DELIVERY_INTERVAL</code> (3s), so the number of rounds is the pass
+duration divided by three, and each round re-serializes everything
+diagnosed so far that the client has not acknowledged. Every round also
+re-runs <code>WorkspaceDiagnostics::merged</code> (a clone of each source's
+diagnostics plus an overlap-suppression pass) per file, on the request
+path, while holding the lock the pass writes its batches through.</p>
+<p>Record the result id last sent for each URI in a workspace response and
+answer a repeat with <code>Unchanged</code> instead of re-serializing. That makes
+each round genuinely incremental (O(files) across the pass rather than
+O(rounds × files)) and puts a ceiling on the out-of-project files
+rather than paying for them forever, without depending on client
+behaviour.</p>
+<p>Prefer <code>Unchanged</code> over omitting the file. Both leave a client that
+genuinely lost a result set stuck until the file's id next changes, but
+<code>Unchanged</code> is what the spec provides for and costs about 150 bytes.</p>
+<p>Worth deciding alongside this: whether the workspace pass should report
+files outside the workspace root to an editor at all. Diagnosing them
+is right for the <code>analyze</code> CLI, and they are first-party code, but an
+editor that cannot display them gains nothing from receiving them.</p>
+<p><strong>Where to look:</strong> <code>workspace_pull_diagnostic</code> in
+<code>diagnostics/pull.rs</code>, and <code>WorkspaceDiagnostics</code> in
+<code>diagnostics/workspace.rs</code> for the id bookkeeping.</p>
+<h2 id="p55-an-external-tool-run-invalidates-every-file-it-reported">P55. An external tool run invalidates every file it reported<a class="headerlink" href="#p55-an-external-tool-run-invalidates-every-file-it-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Low</strong></p>
+<p><code>WorkspaceDiagnostics::set_external</code> replaces a tool's whole result set
+and bumps the result id of every URI in the union of the old and new
+maps:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">updated</span><span class="p">:</span><span class="w"> </span><span class="nc">HashSet</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">entry</span><span class="p">.</span><span class="n">keys</span><span class="p">().</span><span class="n">cloned</span><span class="p">().</span><span class="n">collect</span><span class="p">();</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">updated</span><span class="p">.</span><span class="n">extend</span><span class="p">(</span><span class="n">results</span><span class="p">.</span><span class="n">keys</span><span class="p">().</span><span class="n">cloned</span><span class="p">());</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="o">*</span><span class="n">entry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">results</span><span class="p">;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">updated</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">updated</span><span class="p">.</span><span class="n">into_iter</span><span class="p">().</span><span class="n">collect</span><span class="p">();</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="k">for</span><span class="w"> </span><span class="n">uri</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="o">&amp;</span><span class="n">updated</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">bump</span><span class="p">(</span><span class="n">uri</span><span class="p">);</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">}</span>
+</code></pre></div>
+<p>Nothing compares the old diagnostics against the new ones, so a
+project-wide PHPStan re-run that changes one file still invalidates the
+client's cached result for every file the tool reports. The next
+workspace pull then answers <code>Full</code> for all of them and re-serializes
+the entire set. On a large project that is the most expensive single
+response the server produces, and it is triggered by every run whether
+or not anything moved.</p>
+<p>Bump only where the merged set actually differs, and return only those
+URIs so the caller's refresh and the push-mode publish loop follow the
+same rule. This is the same defect as the unconditional per-file
+<code>resultId</code> bump in <code>assemble_and_push</code>, on the source with the widest
+blast radius.</p>
+<p><strong>Where to look:</strong> <code>set_external</code> and <code>set_external_for_uri</code> in
+<code>diagnostics/workspace.rs</code>; <code>flush_workspace_diag_updates</code> consumes the
+returned URI list.</p>
 
 
 
