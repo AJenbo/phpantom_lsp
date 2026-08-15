@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786813220014,
+  "lastUpdate": 1786813792751,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22371,6 +22371,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dda69f209f7f0344aa7cbe58f89b296b618838a0",
+          "message": "Faster diagnostics on long method chains",
+          "timestamp": "2026-08-15T18:52:58+02:00",
+          "tree_id": "4bddc4e4c266ff7ad19e993ba4e094ade4a5595d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/dda69f209f7f0344aa7cbe58f89b296b618838a0"
+        },
+        "date": 1786813785924,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.5,
             "unit": "MiB"
           }
         ]
