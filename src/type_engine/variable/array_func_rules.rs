@@ -241,7 +241,15 @@ fn filter_element_type(raw: &PhpType) -> Option<PhpType> {
 /// can narrow.
 fn filter_key_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     let param_index = filter_key_param_index(args)?;
-    let key = raw.iterable_key_type()?;
+    // `array<string>` and `string[]` name a value type and say nothing about
+    // their keys, so the callback narrows every key PHP permits. Reading the
+    // `int` that iteration assumes for them would leave `is_string($k)` with
+    // nothing to keep and drop the narrowing entirely.
+    let key = if raw.has_open_key_domain() {
+        PhpType::union(vec![PhpType::int(), PhpType::string()])
+    } else {
+        raw.iterable_key_type()?
+    };
     let narrowed = args.callback_param_narrowing(1, param_index, &key)?;
     // A callback that admits every key it could receive (`is_int($k) ||
     // is_string($k)`) leaves nothing to say, and answering with the

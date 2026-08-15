@@ -448,10 +448,20 @@ pub(crate) fn resolve_arg_variable_raw_type(
         } else {
             format!("${}", var_name)
         };
+        // An entry the walker holds but has no type for says "tracked,
+        // unknown", not "mixed" — the walker seeds a subject key before it
+        // can answer it. Joining nothing produces `mixed`, which is an
+        // answer, so the caller stops looking and a call argument
+        // (`array_keys($this->templates())`) never reaches the call
+        // resolver that does know its type. Step 3 below already declines
+        // an empty entry for the same reason.
         if let Some(types) = crate::type_engine::variable::forward_walk::lookup_diagnostic_scope(
             &prefixed,
             rctx.cursor_offset,
         ) {
+            if types.is_empty() {
+                return None;
+            }
             return Some(ResolvedType::types_joined(&types));
         }
     }

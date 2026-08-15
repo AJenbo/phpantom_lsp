@@ -3386,7 +3386,7 @@ fn resolve_synthetic_key_type(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
-    if key.ends_with("\"]") {
+    if key.ends_with(']') {
         resolve_array_key_type(key, scope, ctx)
     } else if key.contains("->") {
         resolve_member_key_type(key, scope, ctx)
@@ -3457,7 +3457,7 @@ fn resolve_static_property_key_type(
 }
 
 /// Resolve the element type an array-access key promises (`$a["k"]`,
-/// `$a->items["0"]`, `$a["x"]["y"]`).
+/// `$a->items["0"]`, `$a["x"]["y"]`, `$a["x"][$i]`).
 fn resolve_array_key_type(
     key: &str,
     scope: &ScopeState,
@@ -3465,13 +3465,12 @@ fn resolve_array_key_type(
 ) -> Vec<ResolvedType> {
     // Split off the *last* bracket segment so a nested access resolves its
     // base (`$a["x"]` of `$a["x"]["y"]`) through the same dispatcher.
-    let Some(bracket_pos) = key.rfind("[\"") else {
+    let Some((base_var, segment)) = narrowing::split_trailing_bracket(key) else {
         return Vec::new();
     };
-    let base_var = &key[..bracket_pos];
-    let key_name = key[bracket_pos + 2..]
-        .strip_suffix("\"]")
-        .unwrap_or(&key[bracket_pos + 2..]);
+    // A variable index names no shape entry, so only the container's
+    // element type describes it.
+    let key_name = narrowing::bracket_segment_literal(segment);
 
     // Only the leading variable of a path is ever assigned in the scope, so
     // a compound base has to be resolved the same way this key is.  Each
@@ -3479,7 +3478,7 @@ fn resolve_array_key_type(
     // segments in the key.
     let resolved_base;
     let base_types: &[ResolvedType] = match scope.get(base_var) {
-        [] if base_var.contains("->") || base_var.ends_with("\"]") => {
+        [] if base_var.contains("->") || base_var.ends_with(']') => {
             resolved_base = resolve_synthetic_key_type(base_var, scope, ctx);
             &resolved_base
         }
@@ -3497,9 +3496,8 @@ fn resolve_array_key_type(
     // (e.g. `assertInstanceOf(X::class, $arr['k'])`).
     let mut key_results: Vec<ResolvedType> = Vec::new();
     for rt in base_types {
-        let element_type = rt
-            .type_string
-            .extract_shape_key_type(key_name)
+        let element_type = key_name
+            .and_then(|name| rt.type_string.extract_shape_key_type(name))
             .or_else(|| rt.type_string.extract_value_type(false).cloned())
             .or_else(|| rt.type_string.is_array_like().then(PhpType::mixed));
         let Some(element_type) = element_type else {

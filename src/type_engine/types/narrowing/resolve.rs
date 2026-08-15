@@ -97,11 +97,7 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
             };
             Some(format!("{}::{}", class, bytes_to_str(dv.name)))
         }
-        Expression::ArrayAccess(aa) => {
-            let base = expr_to_subject_key(aa.array)?;
-            let key = array_access_key_as_string(aa)?;
-            Some(format!("{}[\"{}\"]", base, key))
-        }
+        Expression::ArrayAccess(aa) => array_access_subject_key(aa),
         // A call keyed under its own written form: checking one call and
         // using another is the idiom the check is written for
         // (`if ($h->get() instanceof Foo) { $h->get()->m(); }`,
@@ -180,7 +176,61 @@ pub(in crate::type_engine) fn is_call_key_with_arguments(key: &str) -> bool {
 /// than tracking as locals, so every gate that asks "is this a compound
 /// subject?" has to agree on the answer.
 pub(in crate::type_engine) fn is_member_path_key(key: &str) -> bool {
-    key.contains("->") || key.contains("[\"") || key.contains("::$")
+    key.contains("->") || key.contains('[') || key.contains("::$")
+}
+
+/// Split a subject key's trailing bracket segment off its base:
+/// `$a["x"][$i]` → `("$a[\"x\"]", "$i")`.
+///
+/// Returns `None` unless the key *ends* in a bracket segment, so a key
+/// that only reads through one (`$a["x"]->b`, `f($a["x"])`) is left to
+/// the dispatcher arm that owns its trailing access. Brackets nest
+/// (`$a[$b["k"]]`) and a literal key may itself contain one, so the scan
+/// tracks depth and quoting rather than searching for `["`.
+pub(in crate::type_engine) fn split_trailing_bracket(key: &str) -> Option<(&str, &str)> {
+    if !key.ends_with(']') {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut last_open = None;
+    for (index, byte) in key.bytes().enumerate() {
+        if quoted {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => quoted = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            b'[' => {
+                if depth == 0 {
+                    last_open = Some(index);
+                }
+                depth += 1;
+            }
+            b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    if depth != 0 || quoted {
+        return None;
+    }
+    let open = last_open?;
+    Some((&key[..open], &key[open + 1..key.len() - 1]))
+}
+
+/// The literal key a bracket segment names, or `None` when the segment is
+/// a variable index (`[$path]`) that addresses an element the shape
+/// cannot name.
+pub(in crate::type_engine) fn bracket_segment_literal(segment: &str) -> Option<&str> {
+    segment
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
 }
 
 /// Whether `key` reads `var_name`, so that writing to the variable makes
@@ -190,6 +240,11 @@ pub(in crate::type_engine) fn is_member_path_key(key: &str) -> bool {
 /// caught by a prefix test; a call key mentions its inputs anywhere inside
 /// the argument list (`findPos($slug, $marker)`), so those are matched on
 /// a token boundary — `$slug` must not match `$slugger`.
+///
+/// A variable index is read the same way (`$state["files"][$path]` stops
+/// describing anything once `$path` moves), but only inside the brackets:
+/// scanning the whole key would make writing `$repo` invalidate
+/// `self::$repo`, which is different storage.
 pub(in crate::type_engine) fn key_reads_variable(key: &str, var_name: &str) -> bool {
     if var_name.is_empty() {
         return false;
@@ -199,23 +254,70 @@ pub(in crate::type_engine) fn key_reads_variable(key: &str, var_name: &str) -> b
     {
         return true;
     }
-    if !is_call_key(key) {
+    let bracketed_only = !is_call_key(key);
+    if bracketed_only && !key.contains('[') {
         return false;
     }
+    let mut depth = 0usize;
+    let mut offset = 0;
     let mut rest = key;
     while let Some(pos) = rest.find(var_name) {
+        if bracketed_only {
+            depth = bracket_depth_at(key, offset, offset + pos, depth);
+            offset += pos;
+        }
         rest = &rest[pos + var_name.len()..];
-        if !rest.starts_with(is_name_char) {
+        if (!bracketed_only || depth > 0) && !rest.starts_with(is_name_char) {
             return true;
+        }
+        if bracketed_only {
+            offset += var_name.len();
         }
     }
     false
+}
+
+/// Advance a running bracket-nesting depth across `key[from..to]`.
+fn bracket_depth_at(key: &str, from: usize, to: usize, mut depth: usize) -> usize {
+    for byte in key.as_bytes()[from..to].iter() {
+        match byte {
+            b'[' => depth += 1,
+            b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth
 }
 
 /// Whether `c` can continue a PHP identifier, so `$slug` is not found
 /// inside `$slugger`.
 fn is_name_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii()
+}
+
+/// Build the subject key for an array access: `$a["k"]` for a literal
+/// index, `$a[$i]` for a variable one.
+///
+/// A variable index addresses one element just as a literal one does, for
+/// as long as the index holds the value it held at the check. Writing to
+/// it drops the key — [`key_reads_variable`] sees the index inside the
+/// brackets — which is the rule a call key's arguments already follow.
+/// The index is left unquoted so it cannot collide with a literal key that
+/// happens to spell a variable name.
+///
+/// Kept out of [`expr_to_subject_key`] so its frame stays small: a long
+/// method chain recurses once per link and pays for every local the match
+/// arms declare.
+#[inline(never)]
+fn array_access_subject_key(aa: &mago_syntax::cst::ArrayAccess<'_>) -> Option<String> {
+    let base = expr_to_subject_key(aa.array)?;
+    if let Some(key) = array_access_key_as_string(aa) {
+        return Some(format!("{}[\"{}\"]", base, key));
+    }
+    let index = expr_to_subject_key(aa.index)?;
+    index
+        .starts_with('$')
+        .then(|| format!("{}[{}]", base, index))
 }
 
 /// Build the subject key for a method call, matching the
@@ -491,6 +593,42 @@ mod tests {
         assert!(!is_call_key_with_arguments("$h->get()"));
         assert!(is_call_key_with_arguments("mb_strpos($s,$m)"));
         assert!(!is_call_key_with_arguments("$this->handle"));
+    }
+
+    #[test]
+    fn a_variable_index_is_read_by_the_key_that_brackets_it() {
+        assert!(key_reads_variable("$state[\"files\"][$path]", "$path"));
+        assert!(key_reads_variable("$state[$path][\"violations\"]", "$path"));
+        assert!(key_reads_variable("$a[$b[\"k\"]]", "$b"));
+        assert!(!key_reads_variable("$state[\"files\"][$pathname]", "$path"));
+        assert!(!key_reads_variable("$state[\"files\"][$other]", "$path"));
+        // Different storage that merely spells the same name outside any
+        // bracket: writing the local must not drop the static property.
+        assert!(!key_reads_variable("self::$repo", "$repo"));
+        assert!(!key_reads_variable("$this->path", "$path"));
+    }
+
+    #[test]
+    fn the_trailing_bracket_segment_splits_off_its_base() {
+        assert_eq!(
+            split_trailing_bracket("$a[\"x\"][\"y\"]"),
+            Some(("$a[\"x\"]", "\"y\""))
+        );
+        assert_eq!(
+            split_trailing_bracket("$a[\"x\"][$i]"),
+            Some(("$a[\"x\"]", "$i"))
+        );
+        assert_eq!(
+            split_trailing_bracket("$a[$b[\"k\"]]"),
+            Some(("$a", "$b[\"k\"]"))
+        );
+        // Not a trailing bracket: the key's last access is something else.
+        assert_eq!(split_trailing_bracket("$a[\"x\"]->b"), None);
+        assert_eq!(split_trailing_bracket("f($a[\"x\"])"), None);
+        assert_eq!(split_trailing_bracket("$a"), None);
+
+        assert_eq!(bracket_segment_literal("\"y\""), Some("y"));
+        assert_eq!(bracket_segment_literal("$i"), None);
     }
 
     #[test]

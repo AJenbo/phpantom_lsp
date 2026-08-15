@@ -620,3 +620,89 @@ function f(): void {
         "`'0'` and `0` are falsy in PHP, got: {text}"
     );
 }
+
+/// An `isset()` on a chain whose middle segment is a variable index proves
+/// the optional shape key at the end of it is there, the same way a chain
+/// of literal keys does. The subject key records the index variable, so the
+/// proof survives to the read that follows.
+#[test]
+fn isset_narrows_a_chain_through_a_variable_index() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_variable_index.php";
+    let content = r#"<?php
+/**
+ * @param array{files?: array<string, array{violations?: list<string>}>} $state
+ */
+function f(array $state, string $path): void {
+    if (!isset($state['files'][$path]['violations'])) {
+        return;
+    }
+    $found = $state['files'][$path]['violations']; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("list<string>"),
+        "expected the shape's list, got: {text}"
+    );
+    assert!(
+        !text.contains("null"),
+        "an optional key proved present is not null, got: {text}"
+    );
+}
+
+/// The same proof read from inside the `isset()` branch rather than after
+/// a guard clause.
+#[test]
+fn isset_narrows_a_chain_through_a_variable_index_inside_the_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_variable_index_branch.php";
+    let content = r#"<?php
+/**
+ * @param array{files?: array<string, array{violations?: list<string>}>} $state
+ */
+function f(array $state, string $path): void {
+    if (isset($state['files'][$path]['violations'])) {
+        $found = $state['files'][$path]['violations']; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("list<string>"),
+        "expected the shape's list, got: {text}"
+    );
+    assert!(
+        !text.contains("null"),
+        "an optional key proved present is not null, got: {text}"
+    );
+}
+
+/// The index variable is part of what the proof was made about, so writing
+/// to it makes the recorded narrowing stale: the chain now addresses a
+/// different element and the optional key is unproven again.
+#[test]
+fn writing_the_index_variable_drops_the_isset_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_variable_index_reassigned.php";
+    let content = r#"<?php
+/**
+ * @param array{files?: array<string, array{violations?: list<string>}>} $state
+ */
+function f(array $state, string $path, string $other): void {
+    if (!isset($state['files'][$path]['violations'])) {
+        return;
+    }
+    $path = $other;
+    $found = $state['files'][$path]['violations']; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("null"),
+        "a proof about a different element does not carry over, got: {text}"
+    );
+}

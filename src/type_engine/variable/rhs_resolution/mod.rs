@@ -854,7 +854,7 @@ fn resolve_rhs_expression_inner<'b>(
             // a `scope_var_resolver`; the diagnostic path instead reads
             // the forward walker's snapshot cache, so both are consulted.
             if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
-                && key.contains("[\"")
+                && key.contains('[')
                 && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {
                 return from_scope;

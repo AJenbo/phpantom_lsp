@@ -1946,6 +1946,38 @@ impl PhpType {
         }
     }
 
+    /// Whether this type only names a value type, leaving the key domain
+    /// open: `array<T>`, `non-empty-array<T>`, `T[]` and bare `array`.
+    ///
+    /// [`iterable_key_type`](Self::iterable_key_type) answers `int` for these
+    /// because sequential keys are the common case and iterating them as
+    /// `int` is the useful default. That default is a guess, though, and a
+    /// caller that is about to *refine* the key domain (rather than read one
+    /// element out of it) has to start from every key PHP allows, or the
+    /// refinement contradicts the guess and is thrown away. `list<T>` is not
+    /// open: it promises `int` keys.
+    pub fn has_open_key_domain(&self) -> bool {
+        match self.kind() {
+            TypeKind::Array(_) => true,
+            TypeKind::Generic(g) => {
+                g.args.len() == 1
+                    && matches!(
+                        g.name.to_ascii_lowercase().as_str(),
+                        "array" | "non-empty-array"
+                    )
+            }
+            TypeKind::Named(name) => {
+                matches!(
+                    name.to_ascii_lowercase().as_str(),
+                    "array" | "non-empty-array"
+                )
+            }
+            TypeKind::Nullable(inner) => inner.has_open_key_domain(),
+            TypeKind::Union(members) => members.iter().any(PhpType::has_open_key_domain),
+            _ => false,
+        }
+    }
+
     /// The generic array type a constant shape describes, dropping the
     /// per-key detail: `array{a: int, b: string}` → `array<string,
     /// int|string>`, `array{User, Order}` → `list<User|Order>`.

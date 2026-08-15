@@ -347,3 +347,132 @@ function probe(array $data): void {
         ],
     );
 }
+
+/// `array<T>` and `T[]` name a value type and leave the key domain open, so
+/// the callback narrows every key PHP permits — the same result the spelled
+/// out `array<string|int, T>` gets. A `list<T>` does promise `int` keys, so
+/// a callback asking for string keys has nothing to keep and the declared
+/// type stands.
+#[test]
+fn array_filter_narrows_the_open_key_domain_of_a_shorthand_array() {
+    let content = r#"<?php
+/**
+ * @param array<string> $shorthand
+ * @param string[] $slice
+ * @param list<string> $sequential
+ */
+function probe(array $shorthand, array $slice, array $sequential): void {
+    $from_shorthand = array_filter($shorthand, fn ($k) => is_string($k), ARRAY_FILTER_USE_KEY);
+    $from_slice = array_filter($slice, fn ($k) => is_string($k), ARRAY_FILTER_USE_KEY);
+    $from_list = array_filter($sequential, fn ($k) => is_string($k), ARRAY_FILTER_USE_KEY);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$from_shorthand", "array<string, string>"),
+            ("$from_slice", "array<string, string>"),
+            ("$from_list", "list<string>"),
+        ],
+    );
+}
+
+/// A narrowed key type survives PHP's array union: `+` combines what each
+/// operand actually carries, so merging two string-keyed arrays stays
+/// string-keyed however the operands were spelled.
+#[test]
+fn the_array_union_operator_keeps_a_narrowed_key_type() {
+    let content = r#"<?php
+/**
+ * @param array<string> $raw
+ * @return array<string, string>
+ */
+function shared(array $raw): array { return []; }
+
+/**
+ * @param array<string> $raw
+ */
+function probe(array $raw): void {
+    $narrowed = array_filter($raw, fn ($k) => is_string($k), ARRAY_FILTER_USE_KEY);
+    $left = shared($raw) + $narrowed;
+    $right = $narrowed + shared($raw);
+    $chained = shared($raw) + $narrowed + shared($raw);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$narrowed", "array<string, string>"),
+            ("$left", "array<string, string>"),
+            ("$right", "array<string, string>"),
+            ("$chained", "array<string, string>"),
+        ],
+    );
+}
+
+/// A method call handed straight to a key-reading builtin binds the same
+/// key type a local holding its result would. The forward walker seeds a
+/// subject key for the call before it can answer it, and that empty entry
+/// used to be read as `mixed` — an answer wide enough to stop the argument
+/// ever reaching the call resolver that knows its return type.
+#[test]
+fn a_key_reader_binds_from_a_method_call_argument() {
+    let content = r#"<?php
+class Registry {
+    /** @return array<string, string> */
+    public function templates(): array { return []; }
+
+    /** @return array<int, string> */
+    public function rows(): array { return []; }
+}
+
+function probe(Registry $registry): void {
+    $names = array_keys($registry->templates());
+    $indices = array_keys($registry->rows());
+    $values = array_values($registry->templates());
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$names", "list<string>"),
+            ("$indices", "list<int>"),
+            ("$values", "list<string>"),
+        ],
+    );
+}
+
+/// An index PHP only produces by computing it (`$m[$line + 1]`) types the
+/// written element just as a plain variable index does. Resolving it
+/// through the narrower expression resolver left arithmetic unanswered and
+/// widened the whole key domain to `array-key`.
+#[test]
+fn a_computed_index_keeps_the_key_type_it_computes() {
+    let content = r#"<?php
+function probe(string $contents, int $start): void {
+    $lines = [];
+    foreach (explode("\n", $contents) as $index => $line) {
+        $lines[$index + 1] = $line;
+    }
+    $offsets = $lines;
+
+    $pairs = [];
+    $pairs[$start] = 'a';
+    $pairs[$start + 1] = 'b';
+    $doubled = $pairs;
+
+    $cursor = $start;
+    $seen = [];
+    $seen[++$cursor] = 'c';
+    $counted = $seen;
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$offsets", "array<int, string>"),
+            ("$doubled", "array<int, string>"),
+            ("$counted", "array<int, string>"),
+        ],
+    );
+}

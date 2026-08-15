@@ -2430,23 +2430,17 @@ fn apply_array_write<'b>(
         return;
     }
 
-    let rhs_offset = assignment.span().start.offset;
-    let scope_locals = &scope.locals;
-    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-        scope_locals
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
-    let rhs_ctx = ctx.var_ctx_for_with_scope("$__idx", rhs_offset, &scope_resolver);
     let mut write_keys: Vec<super::super::resolution::ArrayWriteKey> = key_chain
         .iter()
         .map(
             |idx| match super::super::resolution::extract_array_key_for_shape(idx) {
                 Some(key) => super::super::resolution::ArrayWriteKey::Shape(key),
-                None => super::super::resolution::ArrayWriteKey::Keyed(
-                    super::super::resolution::infer_array_key_type(idx, &rhs_ctx),
-                ),
+                None => {
+                    let index_types = resolve_rhs_with_scope(idx, scope, ctx);
+                    super::super::resolution::ArrayWriteKey::Keyed(
+                        super::super::resolution::infer_array_key_type(idx, &index_types),
+                    )
+                }
             },
         )
         .collect();

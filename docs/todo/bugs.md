@@ -184,11 +184,7 @@ mechanisms need to be reconciled here rather than patched independently.
 #### Verification
 
 Each sub-case has a self-contained repro above; add a fixture or
-integration test per sub-case. Once this lands, re-check
-[B60](#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring),
-whose two examples do not reproduce in isolation and may be downstream
-of the key-type handling here or of
-[B58](#b58-the-array-union-operator--does-not-preserve-a-previously-narrowed-key-type).
+integration test per sub-case.
 
 ## Narrowing
 
@@ -542,103 +538,4 @@ No outstanding items.
 
 ## Array types
 
-### B58. The array union operator (`+`) does not preserve a previously narrowed key type
-
-**Impact: Medium · Complexity: High**
-
-```php
-/** @return array<string> shorthand for array<int|string, string> */
-function convert(string $raw): array { /* ... */ }
-
-/** @param array<string, string> $vars */
-function build(array $vars): void {}
-
-function run(string $raw): void
-{
-    $data = convert($raw);
-    $data = array_filter($data, fn(string|int $key): bool => is_string($key), ARRAY_FILTER_USE_KEY);
-    build($data);                      // fine on its own
-
-    $data = getShared() + $data + getShared();   // reported: got array<int|string, string>
-    build($data);
-}
-```
-
-`array_filter(..., ARRAY_FILTER_USE_KEY)` with an `is_string($key)`
-guard already narrows the key type correctly on its own (a prior fix
-landed this). The narrowing is lost specifically when the result then
-feeds into a `+` (array union) expression with other
-`array<string, string>`-typed arrays: the merge widens the key type back
-to `int|string` instead of keeping `string`.
-
-**Fix:** the `+` operator's result-type computation should combine each
-operand's *actual* (possibly narrowed) key type, not re-derive a wider
-key type from the operands' declared/generic shapes.
-
-### B60. Array keys built from loop-index arithmetic or `array_keys()` still widen to `int|string`
-
-**Impact: Medium · Complexity: High**
-
-```php
-/** @return list<string> */
-function paths(): array
-{
-    /** @return array<string, string> absoluteFilePath => viewName */
-    $templates = discover();
-    return array_keys($templates);   // reported: got list<array-key>, not list<string>
-}
-
-/** @return array<int, array<string,int>> */
-function lineMapping(string $contents): array
-{
-    $mapping = [];
-    foreach (explode("\n", $contents) as $lineIndex => $line) {
-        $mapping[$lineIndex + 1] = ['x' => 1];   // reported: got array<int|string,...>
-    }
-    return $mapping;
-}
-```
-
-Both examples only ever produce `int` (arithmetic on a sequential
-`foreach` index) or `string` (`array_keys()` on an `array<string, ...>`)
-keys, yet the resolved type includes the other half of `array-key`.
-Neither example reproduces on its own against a release build, so this
-may be a residual symptom of a cause elsewhere rather than a defect of
-its own — the two candidates being the `+` merge below and the
-key-type handling in
-[B75](#b75-a-builtins-return-type-is-not-derived-from-the-arguments-actually-passed),
-either of which could contribute via code paths not shown in this
-trimmed repro.
-
-**Fix:** re-run this project's diagnostics once B58/B75 land; if either
-site still reports the widened key type, isolate the exact expression
-`array_keys()`/the loop-index write goes through and trace where the
-`int`-only or `string`-only key type gets joined with its opposite.
-
-### B61. `isset()` narrowing is not propagated through a multi-level chained array-dimension fetch
-
-**Impact: Low-Medium · Complexity: High**
-
-```php
-/**
- * @param array{files?: array<string, array{violations?: list<array{rule: string}>}>} $state
- */
-function violations(array $state, string $path): array
-{
-    if (!isset($state['files'][$path]['violations'])) {
-        return [];
-    }
-    return $state['files'][$path]['violations'];   // reported: got list<array{rule:string}>|null
-}
-```
-
-`violations` is an *optional* shape key (`violations?: ...`), not a
-nullable one, so `isset()` on the full three-level chain is the
-idiomatic presence check. After it passes, re-reading the same chain
-should resolve to the non-optional `list<...>` shape. A stray `|null`
-survives instead.
-
-**Fix:** confirm `isset()`'s narrowing walks the full depth of a chained
-array-dimension expression (not just a single level) when proving an
-optional shape key present, matching the depth the array-shape resolver
-itself supports for reads.
+No outstanding items.

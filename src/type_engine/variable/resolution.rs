@@ -2020,21 +2020,26 @@ pub(super) fn merge_array_plus(lhs: &PhpType, rhs: &PhpType) -> PhpType {
     merge_keyed_type(lhs, &rhs_key, &rhs_value)
 }
 
-/// Infer the source type of an array-access index expression.
+/// Infer the source type of an array-access index expression from what the
+/// shared RHS resolver made of it.
 ///
 /// [`merge_keyed_type`] performs collection-boundary normalization exactly
 /// once. Returning the exact source type here preserves distinctions such as a
 /// known non-numeric string versus a broad `string`.
-pub(super) fn infer_array_key_type(index: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
+///
+/// The caller resolves the index rather than this function, so that an index
+/// PHP only builds by computing it (`$m[$line + 1]`) goes through the same
+/// path an assignment's RHS does. Falling back to `int|string` for anything
+/// the narrower expression resolver cannot answer is what widened an
+/// all-integer key domain to the full `array-key`.
+pub(super) fn infer_array_key_type(index: &Expression<'_>, resolved: &[ResolvedType]) -> PhpType {
     // Fast path: literal values.
     if let Expression::Literal(Literal::Integer(_)) = index {
         return PhpType::int();
     }
 
-    // Resolve the expression type through the standard pipeline.
-    let resolved = super::rhs_resolution::resolve_rhs_expression(index, ctx);
     if !resolved.is_empty() {
-        let joined = ResolvedType::types_joined(&resolved);
+        let joined = ResolvedType::types_joined(resolved);
         if !joined.is_mixed() {
             return joined;
         }
