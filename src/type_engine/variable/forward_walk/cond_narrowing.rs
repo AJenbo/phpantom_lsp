@@ -3027,19 +3027,7 @@ fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
         }
         EmptyValue::Array => match ty.kind() {
             TypeKind::ArrayShape(entries) if entries.is_empty() => None,
-            TypeKind::Named(name) if name == "array" => {
-                Some(PhpType::named(atom("non-empty-array")))
-            }
-            TypeKind::Named(name) if name == "list" => Some(PhpType::named(atom("non-empty-list"))),
-            TypeKind::Generic(generic) if generic.name == "array" => Some(PhpType::generic_atom(
-                atom("non-empty-array"),
-                generic.args.clone(),
-            )),
-            TypeKind::Generic(generic) if generic.name == "list" => Some(PhpType::generic_atom(
-                atom("non-empty-list"),
-                generic.args.clone(),
-            )),
-            _ => Some(ty.clone()),
+            _ => Some(ty.non_empty_array_form()),
         },
     }
 }

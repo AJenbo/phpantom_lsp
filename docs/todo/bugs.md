@@ -11,16 +11,14 @@ Each entry below carries an **Impact · Complexity** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-The entries below come from the 2026-08-15 evening sample-project sweep
-(11 diagnostics across ten projects, run after the B49–B74 fixes
-landed). 10 were false positives, filed here as **B75–B82**; the
-eleventh is the already-tracked `abort_unless()` narrowing gap (**L5**
-in `docs/todo/laravel.md`). No genuine findings surfaced, so nothing
-was patched in the sample sources. Every entry was isolated in a
-scratch repro and bisected to the minimal trigger shown in its code
-block; several sit at the same source sites as fixed bugs from the
-previous sweep (B50, B54, B59, B62), where the coarse defect was fixed
-and a finer one behind it became visible.
+The **B85** entry below comes from the 2026-08-15 evening sample-project
+sweep and the re-runs that followed it as the sweep's own findings
+(**B75–B84**) were fixed and cleared. The three diagnostics still
+standing across the ten projects at the time of writing are this one
+plus two genuine findings (`int / int` returned from an `int` function),
+which are the sample sources' own to fix. As with every entry here, it
+was isolated in a scratch repro and bisected to the minimal trigger
+shown in its code block.
 
 ## Crashes
 
@@ -36,41 +34,33 @@ No outstanding items.
 
 ## Narrowing
 
-### B77. A foreach over a proven non-empty array still merges the zero-iteration path
+No outstanding items.
 
-**Impact: Medium · Complexity: Medium-High**
+## Arithmetic
+
+### B85. A magic constant is not recognised as an arithmetic operand
+
+**Impact: Low-Medium · Complexity: Low**
 
 ```php
-/** @param array<int, int> $qtys */
-function floorStock(array $qtys): int
+function getEndLineOfThisFile(): int
 {
-    if (!$qtys) {
-        return 0;
-    }
-    $max = null;
-    foreach ($qtys as $qty) {
-        if ($max === null) {
-            $max = $qty;
-            continue;
-        }
-        $max = min($max, $qty);
-    }
-    return takesInt($max);   // reported: got null|int
+    return __LINE__ + 3;   // reported: got int|float
 }
 ```
 
-`if (!$qtys) return;` proves the array non-empty, so the loop body runs
-at least once, and every path through the body assigns `$max` an `int`.
-After the loop `$max` cannot be `null`, but the pre-loop `null` is
-still merged in. PHPStan eliminates the zero-iteration state when the
-iterated subject is a non-empty array.
+`__LINE__` on its own resolves to `int` and returns cleanly, but as an
+operand of `+` it is not classified, so the addition falls back to the
+conservative `int|float` that a mixed-operand sum produces. Every
+`int`-typed magic constant (`__LINE__`) and `string`-typed one
+(`__FILE__`, `__DIR__`, `__FUNCTION__`, `__CLASS__`, `__METHOD__`,
+`__NAMESPACE__`) should be classified the same way its own type is.
 
-Sample site: `luxplus-shared src/core/PCN/PCNService.php:845` (bundle
-stock floor tracked across `$bundleItemQty`, guarded non-empty).
+Sample site: `pdepend tests/php/PDepend/Source/AST/ASTCompilationUnitTest.php:293`.
 
-**Fix:** when the iterated expression's type is proven non-empty at
-the loop head, exclude the "body never ran" branch from the post-loop
-merge.
+**Fix:** classify a magic constant by its own resolved type in the
+binary-operator operand classifier, the way `int` refinements already
+are.
 
 ## Symbol resolution
 

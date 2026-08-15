@@ -864,6 +864,67 @@ pub(crate) fn simplify_bool_union(types: &mut Vec<PhpType>) {
     }
 }
 
+/// Drop every `non-empty-` refinement whose unrefined base shares the
+/// union, reporting whether anything was removed.
+///
+/// A truthy narrowing contributes `non-empty-list<Item>` where the
+/// alternative beside it is the plain `list<Item>` it was refined from
+/// (`$items = $this->getItems() ?: $this->getDefaultItems()`), and a
+/// union spelling both reads as if they were different types. Unlike
+/// [`absorb_scalar_refinements`], which compares plain names, this also
+/// pairs the parameterised spellings, whose arguments must match for the
+/// wider member to cover the narrower one.
+pub(crate) fn absorb_non_empty_refinements(types: &mut Vec<PhpType>) -> bool {
+    if types.len() < 2 || !types.iter().any(is_non_empty_refinement) {
+        return false;
+    }
+
+    let keep: Vec<bool> = types
+        .iter()
+        .map(|ty| match unrefined_base(ty) {
+            // The refinement itself never matches its own base, so no
+            // index bookkeeping is needed to skip it.
+            Some(base) => !types.iter().any(|other| equivalent_for_dedup(other, &base)),
+            None => true,
+        })
+        .collect();
+
+    let mut index = 0;
+    let before = types.len();
+    types.retain(|_| {
+        let retain = keep[index];
+        index += 1;
+        retain
+    });
+    types.len() != before
+}
+
+/// The name a `non-empty-` type refines, or `None` for anything else.
+fn non_empty_base_name(name: &str) -> Option<&str> {
+    const PREFIX: &str = "non-empty-";
+    let (prefix, base) = name.split_at_checked(PREFIX.len())?;
+    (!base.is_empty() && prefix.eq_ignore_ascii_case(PREFIX)).then_some(base)
+}
+
+fn is_non_empty_refinement(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(name) => non_empty_base_name(name).is_some(),
+        TypeKind::Generic(generic) => non_empty_base_name(&generic.name).is_some(),
+        _ => false,
+    }
+}
+
+/// The unrefined form of a `non-empty-` type: `non-empty-array<K, V>`
+/// widens to `array<K, V>`, `non-empty-string` to `string`.
+fn unrefined_base(ty: &PhpType) -> Option<PhpType> {
+    match ty.kind() {
+        TypeKind::Named(name) => non_empty_base_name(name).map(|base| PhpType::named(atom(base))),
+        TypeKind::Generic(generic) => non_empty_base_name(&generic.name)
+            .map(|base| PhpType::generic_atom(atom(base), generic.args.clone())),
+        _ => None,
+    }
+}
+
 /// Absorb scalar refinements into their parent types.
 ///
 /// When a union contains both a refinement and its parent (e.g.

@@ -232,7 +232,10 @@ namespace PsalmTest_loop_foreach_14 {
       break;
     }
 
-    assertType('bool', $a);
+    // PHPantom is more precise than Psalm here: `["a", "b", "c"]` is
+    // non-empty, so the body runs at least once and the pre-loop `false`
+    // cannot survive into the post-loop scope.
+    assertType('true', $a);
 }
 
 // Test: falseToBoolExplicitContinue
@@ -244,7 +247,10 @@ namespace PsalmTest_loop_foreach_15 {
       continue;
     }
 
-    assertType('bool', $a);
+    // PHPantom is more precise than Psalm here: `["a", "b", "c"]` is
+    // non-empty, so the body runs at least once and the pre-loop `false`
+    // cannot survive into the post-loop scope.
+    assertType('true', $a);
 }
 
 // Test: falseToBoolInBreak
@@ -315,7 +321,10 @@ namespace PsalmTest_loop_foreach_19 {
         }
     }
 
-    assertType('bool', $a);
+    // PHPantom is more precise than Psalm here: the inner array is
+    // non-empty, so the inner body runs and `!$a` holds on its first
+    // iteration, leaving `break` as the only way out and `$a` as `true`.
+    assertType('true', $a);
 }
 
 // Test: falseToBoolAfterContinueAndBreak

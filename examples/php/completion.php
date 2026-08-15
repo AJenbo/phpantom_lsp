@@ -2023,6 +2023,79 @@ class LoopCarriedAssignmentDemo
 }
 
 
+// ── Loops Over an Array That Cannot Be Empty ────────────────────────────────
+// A `foreach` over an array proven to hold entries runs its body at least
+// once, so the sentinel the loop was seeded with is gone by the time the
+// loop ends and a variable first written inside it is defined after it.
+
+class NonEmptyLoopDemo
+{
+    /**
+     * Try: put the cursor after `$smallest->` and trigger completion.
+     *
+     * The `!$pens` guard proves the list non-empty, so `$smallest` is a
+     * `Scaffolding\Pen` here rather than `Scaffolding\Pen|null`.
+     *
+     * @param list<Scaffolding\Pen> $pens
+     */
+    public function smallest(array $pens): Scaffolding\Pen
+    {
+        if (!$pens) {
+            return new Scaffolding\Pen();
+        }
+        $smallest = null;
+        foreach ($pens as $pen) {
+            if ($smallest === null) {
+                $smallest = $pen;
+                continue;
+            }
+            $smallest = strlen($pen->color()) < strlen($smallest->color()) ? $pen : $smallest;
+        }
+        $smallest->write();                       // Scaffolding\Pen (the pre-loop null is gone)
+
+        return $smallest;
+    }
+
+    /**
+     * The same proof written into the annotation instead of a guard. A
+     * `non-empty-array`, a shape with a required key, and a literal
+     * written with entries all say the loop body runs.
+     *
+     * @param non-empty-list<Scaffolding\Pen> $pens
+     */
+    public function labels(array $pens): string
+    {
+        $last = null;
+        foreach ($pens as $pen) {
+            $last = $pen;
+        }
+        $summary = $last->color();                // string (never null here)
+
+        foreach (['red', 'blue'] as $name) {
+            $seen = $name;
+        }
+
+        return $summary . ' ' . $seen;            // string, defined by the loop
+    }
+
+    /**
+     * Nothing proves this array holds entries, so the loop may not run
+     * and the pre-loop `null` survives it.
+     *
+     * @param list<Scaffolding\Pen> $pens
+     */
+    public function maybeLast(array $pens): ?Scaffolding\Pen
+    {
+        $last = null;
+        foreach ($pens as $pen) {
+            $last = $pen;
+        }
+
+        return $last;                             // Scaffolding\Pen|null
+    }
+}
+
+
 // ── Assignment Inside a Condition ───────────────────────────────────────────
 // A variable assigned in an `if`/`while` condition is a definition site,
 // including the bare negated guard and the call-wrapped form.

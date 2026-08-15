@@ -42,9 +42,15 @@ fn is_unloadable_short_name(
 /// can contradict a typed array. `array<array-key, mixed>` in particular is
 /// what a resolver produces when it knows a value is an array but nothing
 /// more, which is precisely the case a mismatch must not be claimed for.
+///
+/// A bare `list`, `non-empty-array`, or `non-empty-list` counts the same
+/// way: each refines the *shape* of an array whose values are still
+/// unknown, so a truthy narrowing that turns a bare `array` into a bare
+/// `non-empty-array` must not start contradicting typed parameters the
+/// unrefined type reached fine.
 fn is_bare_array(ty: &PhpType) -> bool {
     match ty.kind() {
-        TypeKind::Named(name) => name.eq_ignore_ascii_case("array"),
+        TypeKind::Named(name) => !name.eq_ignore_ascii_case("iterable") && is_array_like_name(name),
         TypeKind::Array(inner) => inner.is_mixed(),
         TypeKind::Generic(generic) => {
             is_array_like_name(&generic.name)

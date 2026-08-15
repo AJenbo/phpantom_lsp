@@ -752,6 +752,9 @@ impl PhpType {
     /// subtype absorption, and nested-union flattening see
     /// [`simplified`](PhpType::simplified).
     pub fn union(mut members: Vec<PhpType>) -> PhpType {
+        if normalize::absorb_non_empty_refinements(&mut members) && members.len() == 1 {
+            return members.into_iter().next().unwrap();
+        }
         if normalize::has_duplicate_members(&members) {
             normalize::dedup_types(&mut members);
             if members.len() == 1 {
@@ -2550,7 +2553,48 @@ impl PhpType {
             // one branch would go on carrying its falsy half for the rest
             // of the scope.
             _ if self.is_bool() => Some(PhpType::true_()),
+            // `[]` is the only falsy array, so an array that survives a
+            // truthy test has at least one entry.  Carrying that in the
+            // type is what lets a later `foreach` know its body runs.
+            _ if self.is_array_like() => Some(self.non_empty_array_form()),
             _ => Some(self.clone()),
+        }
+    }
+
+    /// The non-empty counterpart of an array type: `array<K, V>` becomes
+    /// `non-empty-array<K, V>` and `list<T>` becomes `non-empty-list<T>`.
+    ///
+    /// Everything else comes back unchanged, including a shape (its own
+    /// entries already say whether it can be empty) and a type that is
+    /// non-empty by name already.
+    pub fn non_empty_array_form(&self) -> PhpType {
+        match self.kind() {
+            TypeKind::Named(name) if name == "array" => PhpType::named(atom("non-empty-array")),
+            TypeKind::Named(name) if name == "list" => PhpType::named(atom("non-empty-list")),
+            TypeKind::Generic(generic) if generic.name == "array" => {
+                PhpType::generic_atom(atom("non-empty-array"), generic.args.clone())
+            }
+            TypeKind::Generic(generic) if generic.name == "list" => {
+                PhpType::generic_atom(atom("non-empty-list"), generic.args.clone())
+            }
+            _ => self.clone(),
+        }
+    }
+
+    /// Whether this type promises at least one entry.
+    ///
+    /// An optional entry (`array{a?: int}`) can be the only one there is,
+    /// so a shape only counts once one of its entries is required, and a
+    /// union only counts once every member does.
+    pub fn is_provably_non_empty(&self) -> bool {
+        match self.kind() {
+            TypeKind::Named(name) => is_non_empty_array_name(name.as_str()),
+            TypeKind::Generic(generic) => is_non_empty_array_name(generic.name.as_str()),
+            TypeKind::ArrayShape(_) | TypeKind::ListShape(_) => self
+                .shape_entries()
+                .is_some_and(|entries| entries.iter().any(|entry| !entry.optional)),
+            TypeKind::Union(members) => members.iter().all(PhpType::is_provably_non_empty),
+            _ => false,
         }
     }
 

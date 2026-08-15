@@ -34,7 +34,7 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B77  | [A foreach over a proven non-empty array still merges the zero-iteration path](todo/bugs.md#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path) | Medium      | Medium-High |
+| B85  | [A magic constant is not recognised as an arithmetic operand](todo/bugs.md#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand) | Low-Medium  | Low         |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions

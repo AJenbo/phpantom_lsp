@@ -977,3 +977,113 @@ function render(Article $article): void
 "#
     ));
 }
+
+// ─── Loops over an iterable that proves it has entries ──────────────────────
+
+const FLOOR_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+function takesInt(int $v): int { return $v; }
+"#;
+
+/// `if (!$qtys) { return; }` proves the array non-empty, so the body runs
+/// at least once and the sentinel the loop was seeded with is gone by the
+/// time the loop ends.
+#[test]
+fn a_guard_proving_the_iterable_non_empty_drops_the_pre_loop_sentinel() {
+    assert_no_type_errors(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array<int, int> $qtys */
+function floorStock(array $qtys): int
+{{
+    if (!$qtys) {{
+        return 0;
+    }}
+    $max = null;
+    foreach ($qtys as $qty) {{
+        if ($max === null) {{
+            $max = $qty;
+            continue;
+        }}
+        $max = min($max, $qty);
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// The same proof written into the parameter's own type rather than
+/// carried in by a guard.
+#[test]
+fn a_non_empty_array_parameter_drops_the_pre_loop_sentinel() {
+    assert_no_type_errors(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param non-empty-array<int, int> $qtys */
+function floorStock(array $qtys): int
+{{
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// A shape with a required entry has at least that entry to iterate.
+#[test]
+fn an_array_shape_with_a_required_entry_drops_the_pre_loop_sentinel() {
+    assert_no_type_errors(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array{{first: int, second?: int}} $qtys */
+function floorStock(array $qtys): int
+{{
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// Negative control: nothing proves this array has entries, so the loop
+/// may not run and the sentinel survives it.
+#[test]
+fn an_unproven_iterable_keeps_the_pre_loop_sentinel() {
+    assert_type_error(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array<int, int> $qtys */
+function floorStock(array $qtys): int
+{{
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// Negative control: an all-optional shape can be the empty array, so it
+/// proves nothing about whether the body runs.
+#[test]
+fn an_all_optional_array_shape_keeps_the_pre_loop_sentinel() {
+    assert_type_error(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array{{first?: int}} $qtys */
+function floorStock(array $qtys): int
+{{
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}

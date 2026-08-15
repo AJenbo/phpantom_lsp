@@ -1323,29 +1323,26 @@ pub(crate) fn process_foreach<'b>(
 
     let exits = pop_exit_frame();
 
-    // The iterable might be empty, so the loop body might not execute
-    // at all.  Merge with the pre-loop scope.
-    let post_loop = scope.clone();
-    *scope = pre_loop_scope;
-    scope.merge_branch(&post_loop);
+    // An iterable that proves it has entries — a non-empty array literal,
+    // or a type refined to `non-empty-array`/`non-empty-list`/a required
+    // shape entry — runs the body at least once, so what was known before
+    // the loop is not an alternative to what the body left behind.  The
+    // pre-loop sentinel (`$max = null` ahead of a loop that always
+    // assigns) would otherwise survive the whole loop.  A body that never
+    // falls out of its own bottom has no fall-through state to keep, so
+    // it still takes the merge.
+    let body_always_runs = !scope.unreachable
+        && (is_non_empty_array_literal(foreach.expression)
+            || iter_type
+                .as_ref()
+                .is_some_and(PhpType::is_provably_non_empty));
 
-    // When the iterable is a non-empty literal array (e.g. `["a", "b",
-    // "c"]`), the loop body is guaranteed to execute at least once.
-    // The pre-loop sentinel value (e.g. `null` from `$tag = null`) must
-    // not survive as a possible post-loop type for the foreach target
-    // variable — override it with the post-loop value from the body walk.
-    // A body that never falls out of its own bottom has no such value.
-    if is_non_empty_array_literal(foreach.expression) && !post_loop.unreachable {
-        let target_var = match &foreach.target {
-            ForeachTarget::Value(val) => extract_foreach_var_name(val.value),
-            ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.value),
-        };
-        if let Some(ref vn) = target_var
-            && let Some(post_val) = post_loop.locals.get(&ustr::ustr(vn.as_str()))
-            && !post_val.is_empty()
-        {
-            scope.set(vn, post_val.clone());
-        }
+    if !body_always_runs {
+        // The iterable might be empty, so the loop body might not execute
+        // at all.  Merge with the pre-loop scope.
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
     }
 
     // A path that broke out never reached the end of the body, so the

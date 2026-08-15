@@ -17,9 +17,7 @@
 /// the handful of questions the rules ask about an argument, and the
 /// rules stay in one place so a fix to `array_map`'s element type
 /// reaches every consumer.
-use crate::php_type::{
-    LiteralValue, PhpType, TypeKind, is_array_like_name, is_non_empty_array_name,
-};
+use crate::php_type::{LiteralValue, PhpType, TypeKind, is_array_like_name};
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -224,7 +222,8 @@ pub(in crate::type_engine) fn array_func_element_type(
         || func_name.eq_ignore_ascii_case("key")
     {
         let raw = args.arg_raw_type(0)?;
-        return is_provably_non_empty(&raw)
+        return raw
+            .is_provably_non_empty()
             .then(|| array_key_domain(&raw))
             .flatten();
     }
@@ -352,19 +351,6 @@ fn array_key_domain(ty: &PhpType) -> Option<PhpType> {
     (!ty.has_open_key_domain())
         .then(|| ty.iterable_key_type())
         .flatten()
-}
-
-/// Whether `ty` promises at least one entry.
-fn is_provably_non_empty(ty: &PhpType) -> bool {
-    match ty.kind() {
-        TypeKind::Named(name) => is_non_empty_array_name(name.as_str()),
-        TypeKind::Generic(g) => is_non_empty_array_name(g.name.as_str()),
-        // An optional entry (`array{a?: int}`) can be the only one there is,
-        // so a shape is only non-empty once one entry is required.
-        TypeKind::ArrayShape(entries) => entries.iter().any(|entry| !entry.optional),
-        TypeKind::Union(members) => members.iter().all(is_provably_non_empty),
-        _ => false,
-    }
 }
 
 /// The container `array_map` returns around `element`.

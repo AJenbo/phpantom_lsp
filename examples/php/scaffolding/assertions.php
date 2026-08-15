@@ -1656,6 +1656,22 @@ function runDemoAssertions(): void
         'a sentinel check beside an assignment leaves the success type behind'
     );
 
+    // ── Loops over an array that cannot be empty ─────────────────────────
+    $nonEmptyLoop = new NonEmptyLoopDemo();
+    $shortest = new Scaffolding\Pen();
+    assert(
+        $nonEmptyLoop->smallest([new Scaffolding\Pen(), $shortest]) instanceof Scaffolding\Pen,
+        'a guarded non-empty list leaves a pen behind, never the pre-loop null'
+    );
+    assert(
+        is_string($nonEmptyLoop->labels([new Scaffolding\Pen()])),
+        'a non-empty-list annotation runs the body, so both loop-written names are set'
+    );
+    assert(
+        $nonEmptyLoop->maybeLast([]) === null,
+        'a list that may be empty really does leave the pre-loop null behind'
+    );
+
     // ── Untyped property inference from constructor ─────────────────────
     $untypedDemo = new UntypedPropertyInferenceDemo();
     // The scaffolding repo's findById() returns Scaffolding\Pen, so we can verify
