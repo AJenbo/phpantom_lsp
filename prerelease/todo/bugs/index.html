@@ -1129,45 +1129,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B58. The array union operator (<code>+</code>) does not preserve a previously narrowed key type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B60. Array keys built from loop-index arithmetic or <code>array_keys()</code> still widen to <code>int|string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B61. <code>isset()</code> narrowing is not propagated through a multi-level chained array-dimension fetch
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1939,45 +1900,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B58. The array union operator (<code>+</code>) does not preserve a previously narrowed key type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B60. Array keys built from loop-index arithmetic or <code>array_keys()</code> still widen to <code>int|string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B61. <code>isset()</code> narrowing is not propagated through a multi-level chained array-dimension fetch
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -2144,11 +2066,7 @@ is any callable" rather than on an inline closure. Note that
 mechanisms need to be reconciled here rather than patched independently.</p>
 <h4 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">&para;</a></h4>
 <p>Each sub-case has a self-contained repro above; add a fixture or
-integration test per sub-case. Once this lands, re-check
-<a href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring">B60</a>,
-whose two examples do not reproduce in isolation and may be downstream
-of the key-type handling here or of
-<a href="#b58-the-array-union-operator--does-not-preserve-a-previously-narrowed-key-type">B58</a>.</p>
+integration test per sub-case.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch">B51. <code>instanceof</code> does not eliminate a class from a union in the guarded branch<a class="headerlink" href="#b51-instanceof-does-not-eliminate-a-class-from-a-union-in-the-guarded-branch" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: High</strong></p>
@@ -2424,89 +2342,7 @@ PHPStan-extension-authoring-specific, not general PHP or Laravel code.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type">B58. The array union operator (<code>+</code>) does not preserve a previously narrowed key type<a class="headerlink" href="#b58-the-array-union-operator-does-not-preserve-a-previously-narrowed-key-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">/** @return array&lt;string&gt; shorthand for array&lt;int|string, string&gt; */</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">function convert(string $raw): array { /* ... */ }</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">/** @param array&lt;string, string&gt; $vars */</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="x">function build(array $vars): void {}</span>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="x">function run(string $raw): void</span>
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="x">{</span>
-<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="x">    $data = convert($raw);</span>
-<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="x">    $data = array_filter($data, fn(string|int $key): bool =&gt; is_string($key), ARRAY_FILTER_USE_KEY);</span>
-<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="x">    build($data);                      // fine on its own</span>
-<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>
-<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="x">    $data = getShared() + $data + getShared();   // reported: got array&lt;int|string, string&gt;</span>
-<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="x">    build($data);</span>
-<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>array_filter(..., ARRAY_FILTER_USE_KEY)</code> with an <code>is_string($key)</code>
-guard already narrows the key type correctly on its own (a prior fix
-landed this). The narrowing is lost specifically when the result then
-feeds into a <code>+</code> (array union) expression with other
-<code>array&lt;string, string&gt;</code>-typed arrays: the merge widens the key type back
-to <code>int|string</code> instead of keeping <code>string</code>.</p>
-<p><strong>Fix:</strong> the <code>+</code> operator's result-type computation should combine each
-operand's <em>actual</em> (possibly narrowed) key type, not re-derive a wider
-key type from the operands' declared/generic shapes.</p>
-<h3 id="b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring">B60. Array keys built from loop-index arithmetic or <code>array_keys()</code> still widen to <code>int|string</code><a class="headerlink" href="#b60-array-keys-built-from-loop-index-arithmetic-or-array_keys-still-widen-to-intstring" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @return list&lt;string&gt; */</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">function paths(): array</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">{</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">    /** @return array&lt;string, string&gt; absoluteFilePath =&gt; viewName */</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">    $templates = discover();</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">    return array_keys($templates);   // reported: got list&lt;array-key&gt;, not list&lt;string&gt;</span>
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="x">}</span>
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="x">/** @return array&lt;int, array&lt;string,int&gt;&gt; */</span>
-<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="x">function lineMapping(string $contents): array</span>
-<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="x">{</span>
-<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a><span class="x">    $mapping = [];</span>
-<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="x">    foreach (explode(&quot;\n&quot;, $contents) as $lineIndex =&gt; $line) {</span>
-<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a><span class="x">        $mapping[$lineIndex + 1] = [&#39;x&#39; =&gt; 1];   // reported: got array&lt;int|string,...&gt;</span>
-<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="x">    }</span>
-<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a><span class="x">    return $mapping;</span>
-<a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a><span class="x">}</span>
-</code></pre></div>
-<p>Both examples only ever produce <code>int</code> (arithmetic on a sequential
-<code>foreach</code> index) or <code>string</code> (<code>array_keys()</code> on an <code>array&lt;string, ...&gt;</code>)
-keys, yet the resolved type includes the other half of <code>array-key</code>.
-Neither example reproduces on its own against a release build, so this
-may be a residual symptom of a cause elsewhere rather than a defect of
-its own — the two candidates being the <code>+</code> merge below and the
-key-type handling in
-<a href="#b75-a-builtins-return-type-is-not-derived-from-the-arguments-actually-passed">B75</a>,
-either of which could contribute via code paths not shown in this
-trimmed repro.</p>
-<p><strong>Fix:</strong> re-run this project's diagnostics once B58/B75 land; if either
-site still reports the widened key type, isolate the exact expression
-<code>array_keys()</code>/the loop-index write goes through and trace where the
-<code>int</code>-only or <code>string</code>-only key type gets joined with its opposite.</p>
-<h3 id="b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch">B61. <code>isset()</code> narrowing is not propagated through a multi-level chained array-dimension fetch<a class="headerlink" href="#b61-isset-narrowing-is-not-propagated-through-a-multi-level-chained-array-dimension-fetch" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/**</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x"> * @param array{files?: array&lt;string, array{violations?: list&lt;array{rule: string}&gt;}&gt;} $state</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x"> */</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">function violations(array $state, string $path): array</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">{</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">    if (!isset($state[&#39;files&#39;][$path][&#39;violations&#39;])) {</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="x">        return [];</span>
-<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="x">    }</span>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="x">    return $state[&#39;files&#39;][$path][&#39;violations&#39;];   // reported: got list&lt;array{rule:string}&gt;|null</span>
-<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>violations</code> is an <em>optional</em> shape key (<code>violations?: ...</code>), not a
-nullable one, so <code>isset()</code> on the full three-level chain is the
-idiomatic presence check. After it passes, re-reading the same chain
-should resolve to the non-optional <code>list&lt;...&gt;</code> shape. A stray <code>|null</code>
-survives instead.</p>
-<p><strong>Fix:</strong> confirm <code>isset()</code>'s narrowing walks the full depth of a chained
-array-dimension expression (not just a single level) when proving an
-optional shape key present, matching the depth the array-shape resolver
-itself supports for reads.</p>
+<p>No outstanding items.</p>
 
 
 
