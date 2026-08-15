@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786820410210,
+  "lastUpdate": 1786826588876,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22507,6 +22507,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "85673933+petrovo-as@users.noreply.github.com",
+            "name": "Petr Aš",
+            "username": "petrovo-as"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5a2ad796689884d22c589f4119eee064410fcb79",
+          "message": "Resolve, index, and rename functions and constants declared outside a class (#357)\n\nCo-authored-by: Claude Opus 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-15T22:27:00+02:00",
+          "tree_id": "28148d11baeee22e69cdc894918867ae7ba058ea",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5a2ad796689884d22c589f4119eee064410fcb79"
+        },
+        "date": 1786826584432,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.1,
             "unit": "MiB"
           }
         ]
