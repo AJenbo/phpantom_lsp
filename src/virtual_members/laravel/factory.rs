@@ -2,17 +2,20 @@
 //!
 //! Synthesizes `create()` and `make()` methods for factory classes that
 //! extend `Illuminate\Database\Eloquent\Factories\Factory` but do not
-//! already have `@extends Factory<Model>` generics. The model type comes from
-//! an explicit generic binding, the factory's `$model` property, or Laravel's
-//! naming convention (e.g. `Database\Factories\UserFactory` →
-//! `App\Models\User`), in that order.
+//! already have `@extends Factory<Model>` generics (which resolve those two
+//! methods on their own). The model type comes from an explicit generic
+//! binding, the factory's `$model` property, or Laravel's naming convention
+//! (e.g. `Database\Factories\UserFactory` → `App\Models\User`), in that
+//! order.
 //!
 //! In addition, it synthesizes the dynamic relationship methods that
 //! Laravel's `Factory::__call()` resolves at runtime — `has{Relationship}()`
 //! and `for{Relationship}()` for each relationship method on the associated
 //! model, plus `trashed()` when the model uses `SoftDeletes`.  These return
 //! `static` so the fluent chain stays on the factory (e.g.
-//! `UserFactory::new()->hasPosts(3)->create()`).
+//! `UserFactory::new()->hasPosts(3)->create()`), and are synthesized
+//! regardless of whether `@extends Factory<Model>` generics are present,
+//! since the generics system does not cover them.
 
 use crate::atom::atom;
 use crate::inheritance::{ClassRef, build_substitution_map};
@@ -434,22 +437,24 @@ pub struct LaravelFactoryProvider;
 
 impl VirtualMemberProvider for LaravelFactoryProvider {
     /// Returns `true` if the class extends
-    /// `Illuminate\Database\Eloquent\Factories\Factory` and does not
-    /// already have `@extends Factory<Model>` generics.
+    /// `Illuminate\Database\Eloquent\Factories\Factory`.
+    ///
+    /// Applies even when the class already has `@extends Factory<Model>`
+    /// generics: the generics system resolves `create()`/`make()` in that
+    /// case, but not the dynamic relationship methods `provide()` still
+    /// needs to synthesize.
     fn applies_to(
         &self,
         class: &ClassInfo,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
-        !is_eloquent_factory(&class.name)
-            && !has_factory_extends_generic(class)
-            && extends_eloquent_factory(class, class_loader)
+        !is_eloquent_factory(&class.name) && extends_eloquent_factory(class, class_loader)
     }
 
-    /// Synthesize `create()` and `make()` methods that return the associated
-    /// model type, plus the dynamic
-    /// `has{Relationship}()` / `for{Relationship}()` / `trashed()` methods
-    /// resolved by Laravel's `Factory::__call()`.
+    /// Synthesize the dynamic `has{Relationship}()` / `for{Relationship}()`
+    /// / `trashed()` methods resolved by Laravel's `Factory::__call()`, plus
+    /// `create()` and `make()` when the class has no `@extends Factory<Model>`
+    /// generics for the generics system to resolve them from instead.
     fn provide(
         &self,
         class: &ClassInfo,
@@ -457,7 +462,11 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
         cache: Option<&crate::virtual_members::ResolvedClassCache>,
     ) -> VirtualMembers {
         let model_type = factory_model_type(class, class_loader);
-        let mut methods = build_factory_model_methods(model_type.as_ref());
+        let mut methods = if has_factory_extends_generic(class) {
+            Vec::new()
+        } else {
+            build_factory_model_methods(model_type.as_ref())
+        };
         methods.extend(build_factory_relationship_methods(
             model_type.as_ref(),
             class_loader,

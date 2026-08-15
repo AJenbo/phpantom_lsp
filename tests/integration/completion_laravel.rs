@@ -9711,6 +9711,94 @@ class UserFactory extends Factory {
     );
 }
 
+/// An annotated factory (`@extends Factory<Model>`, the shape
+/// `make:factory` emits) still gets `has{Relationship}()` /
+/// `for{Relationship}()`, even though the generics system already covers
+/// `create()`/`make()` for it.
+#[tokio::test]
+async fn test_factory_has_for_relationship_methods_appear_when_extends_generic_present() {
+    let post_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class Post extends Model {}
+";
+
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Factories\\HasFactory;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class User extends Model {
+    use HasFactory;
+    public function greet(): string { return ''; }
+    /** @return HasMany<Post, $this> */
+    public function posts(): HasMany { return $this->hasMany(Post::class); }
+}
+";
+
+    let factory_php = "\
+<?php
+namespace Database\\Factories;
+use Illuminate\\Database\\Eloquent\\Factories\\Factory;
+use App\\Models\\User;
+/**
+ * @extends Factory<User>
+ */
+class UserFactory extends Factory {
+    public function definition(): array { return []; }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Post.php", post_php),
+        ("src/Models/User.php", user_php),
+        ("database/factories/UserFactory.php", factory_php),
+    ]);
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse App\\Models\\User;\nUser::factory()->\n",
+        2,
+        18,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"hasPosts"),
+        "hasPosts() should appear on an annotated factory, got methods: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"forPosts"),
+        "forPosts() should appear on an annotated factory, got methods: {:?}",
+        methods
+    );
+
+    // hasPosts() returns the factory (static), so the chain into create()
+    // still resolves back to the User model via the generics system.
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/test.php",
+        "<?php\nuse App\\Models\\User;\nUser::factory()->hasPosts(3)->create()->\n",
+        2,
+        41,
+    )
+    .await;
+
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"greet"),
+        "hasPosts()->create() chain should resolve back to User, got methods: {:?}",
+        methods
+    );
+}
+
 #[tokio::test]
 async fn test_factory_subdirectory_convention() {
     let user_php = "\

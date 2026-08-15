@@ -515,13 +515,13 @@ fn factory_provider_does_not_apply_to_factory_base_class() {
 }
 
 #[test]
-fn factory_provider_does_not_apply_when_extends_generic_present() {
+fn factory_provider_applies_when_extends_generic_present() {
     let provider = LaravelFactoryProvider;
     let mut factory = make_class("Database\\Factories\\UserFactory");
     factory.parent_class = Some(atom(FACTORY_FQN));
     factory.extends_generics = vec![(atom("Factory"), vec![PhpType::parse("User")])];
 
-    assert!(!provider.applies_to(&factory, &no_loader));
+    assert!(provider.applies_to(&factory, &no_loader));
 }
 
 #[test]
@@ -696,6 +696,37 @@ fn factory_provider_synthesizes_has_and_for_relationship_methods() {
     // create()/make() are still present alongside the relationship methods.
     assert!(result.methods.iter().any(|m| m.name == "create"));
     assert!(result.methods.iter().any(|m| m.name == "make"));
+}
+
+#[test]
+fn factory_provider_synthesizes_relationship_methods_but_not_create_and_make_when_annotated() {
+    let provider = LaravelFactoryProvider;
+    let mut factory = make_class("Database\\Factories\\UserFactory");
+    factory.parent_class = Some(atom(FACTORY_FQN));
+    factory.extends_generics = vec![(atom("Factory"), vec![PhpType::parse("App\\Models\\User")])];
+
+    let mut model = make_class("App\\Models\\User");
+    model
+        .methods
+        .push(Arc::new(make_method("posts", Some("HasMany<Post, $this>"))));
+
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Models\\User" {
+            Some(Arc::new(model.clone()))
+        } else {
+            None
+        }
+    };
+
+    let result = provider.provide(&factory, &loader, None);
+
+    assert!(result.methods.iter().any(|m| m.name == "hasPosts"));
+    assert!(result.methods.iter().any(|m| m.name == "forPosts"));
+
+    // create()/make() are left to the generics system that already resolves
+    // them from `@extends Factory<Model>`.
+    assert!(!result.methods.iter().any(|m| m.name == "create"));
+    assert!(!result.methods.iter().any(|m| m.name == "make"));
 }
 
 #[test]

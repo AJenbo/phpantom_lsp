@@ -319,20 +319,7 @@ fn an_ordinary_count_call_never_resolves_its_argument_for_factory_state() {
         resolutions.set(resolutions.get() + 1);
         Some(PhpType::string())
     };
-    let ctx = ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader: &no_loader,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    };
+    let ctx = resolution_ctx(&no_loader);
 
     assert_eq!(
         fluent_factory_count(&receiver, "count", Some("$column"), &first_arg_type, &ctx),
@@ -351,20 +338,7 @@ fn a_non_factory_static_factory_call_never_resolves_its_argument() {
         resolutions.set(resolutions.get() + 1);
         Some(PhpType::int())
     };
-    let ctx = ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader: &no_loader,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    };
+    let ctx = resolution_ctx(&no_loader);
 
     tag_static_factory_call(
         &mut results,

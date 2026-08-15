@@ -372,6 +372,23 @@ check(
     \App\Models\BlogPost::factory()->trashed() instanceof \Illuminate\Database\Eloquent\Factories\Factory
 );
 
+// AnnotatedPostFactory carries `@extends Factory<BlogPost>`. The generic
+// binding resolves create()/make() on its own; forAuthor()/trashed() still
+// come from BlogPost's relationships and SoftDeletes trait through __call().
+$annotatedPostFactory = \Database\Factories\AnnotatedPostFactory::new();
+check(
+    'AnnotatedPostFactory::forAuthor() returns a Factory despite the @extends generic',
+    $annotatedPostFactory->forAuthor() instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+check(
+    'AnnotatedPostFactory::trashed() returns a Factory despite the @extends generic',
+    $annotatedPostFactory->trashed() instanceof \Illuminate\Database\Eloquent\Factories\Factory
+);
+check(
+    'AnnotatedPostFactory::make() builds a BlogPost via the generic binding',
+    $annotatedPostFactory->make() instanceof \App\Models\BlogPost
+);
+
 // ─── Factory count-conditional return types ──────────────────────────────────
 
 // create()/make() hand back a single model until the chain sets a count, at

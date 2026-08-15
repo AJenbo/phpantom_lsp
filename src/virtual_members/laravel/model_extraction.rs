@@ -325,6 +325,12 @@ fn extract_factory_model<'a>(
             continue;
         };
 
+        // `Factory::modelName()` reads `$this->model`, which a static
+        // property of the same name never answers.
+        if plain.modifiers.iter().any(|modifier| modifier.is_static()) {
+            continue;
+        }
+
         for item in plain.items.iter() {
             let var_name = bytes_to_str(item.variable().name);
             if var_name.strip_prefix('$').unwrap_or(var_name) != "model" {
@@ -1330,6 +1336,10 @@ class UnrelatedPropertyFactory {
     protected $notModel = \App\Models\Draft::class;
 }
 
+class StaticPropertyFactory {
+    protected static $model = \App\Models\Draft::class;
+}
+
 class NonUtf8StringFactory {
     protected $model = "\xff";
 }
@@ -1356,6 +1366,7 @@ class InvalidEscapeFactory {
             "ParentFactory",
             "OtherConstantFactory",
             "UnrelatedPropertyFactory",
+            "StaticPropertyFactory",
             "NonUtf8StringFactory",
             "InvalidEscapeFactory",
         ] {

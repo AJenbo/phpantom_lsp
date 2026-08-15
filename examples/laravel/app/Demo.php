@@ -21,6 +21,7 @@ use App\Models\Customer;
 use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
+use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -201,6 +202,14 @@ class Demo
         // trashed() is synthesized only because BlogPost uses SoftDeletes.
         BlogPost::factory()->trashed();                        // → factory
         BlogPost::factory()->forAuthor()->trashed()->create(); // → BlogPost
+
+        // AnnotatedPostFactory carries `@extends Factory<BlogPost>`, the
+        // shape `make:factory` generates. The generic binding resolves
+        // create()/make() on its own; forAuthor()/trashed() still appear
+        // because they come from BlogPost's relationships and SoftDeletes
+        // trait, not from the generics system.
+        AnnotatedPostFactory::new()->forAuthor()->create();     // → BlogPost
+        AnnotatedPostFactory::new()->trashed()->make();         // → BlogPost
     }
 
     // The declared return type is the check: makeOne() is inherited through
