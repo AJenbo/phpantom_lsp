@@ -49,15 +49,19 @@ use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::type_resolution;
 use crate::util::strip_fqn_prefix;
 
+mod arithmetic;
 mod array_access;
 mod calls;
 mod instantiation;
 mod property_access;
 
+use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
 use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
 use instantiation::resolve_rhs_instantiation;
 use property_access::resolve_rhs_property_access;
+
+pub(crate) use arithmetic::{infer_addition_result_type, infer_arithmetic_result_type};
 
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
 pub(crate) use calls::{
@@ -1096,10 +1100,12 @@ fn resolve_rhs_expression_inner<'b>(
             }
             vec![]
         }
-        // ── Arithmetic: `$a + $b`, `$a * $b` etc. → numeric ────────
-        // We can't distinguish int vs float without deeper analysis,
-        // so we don't emit a type here and let callers fall back.
-        //
+        // ── Arithmetic and other binary operators ───────────────────
+        // `??` and method-chain binaries are peeled off in
+        // `resolve_rhs_expression` before this function is reached, and
+        // concatenation is handled above; everything else (arithmetic,
+        // comparison, bitwise, spaceship) is answered by operator kind.
+        Expression::Binary(binary) => resolve_binary_result_type(binary, ctx).unwrap_or_default(),
         // ── Catch-all: unrecognised expression types ────────────────
         // Return an empty vec — callers that need a type string for
         // expressions not handled above should use the raw-type

@@ -2523,34 +2523,34 @@ impl PhpType {
     /// but that PHP has no plain spelling for are left alone: `int` stays
     /// `int` rather than becoming a range excluding `0`.
     pub fn truthy_type(&self) -> Option<PhpType> {
-        let is_falsy = |t: &PhpType| t.truthiness() == Some(false);
-        // A `bool` that survives a truthy test can only have been `true`,
-        // and keeping it as `bool` makes the check unfalsifiable: a
-        // variable seeded `false` and reassigned in one branch would go on
-        // carrying its falsy half for the rest of the scope.
-        let truthy_half = |t: &PhpType| {
-            if t.is_bool() {
-                PhpType::true_()
-            } else {
-                t.clone()
-            }
-        };
         match self.kind() {
             TypeKind::Nullable(inner) => inner.truthy_type(),
+            // Each member is stripped by recursing rather than by checking
+            // only whether the member as a whole is certainly falsy: a
+            // `?int` member sitting inside a wider union (`?int|?bool`,
+            // built by merging several properties into one array's value
+            // type) is not certainly falsy on its own, so a shallow check
+            // would leave its `null` in place while a bare `?int` handed to
+            // this function directly loses it via the `Nullable` arm above.
+            // Recursing makes every member go through the exact same rule
+            // regardless of what else shares the union with it.
             TypeKind::Union(members) => {
-                let truthy: Vec<PhpType> = members
-                    .iter()
-                    .filter(|m| !is_falsy(m))
-                    .map(truthy_half)
-                    .collect();
+                let truthy: Vec<PhpType> =
+                    members.iter().filter_map(PhpType::truthy_type).collect();
                 match truthy.len() {
                     0 => None,
                     1 => truthy.into_iter().next(),
                     _ => Some(PhpType::union(truthy)),
                 }
             }
-            _ if is_falsy(self) => None,
-            _ => Some(truthy_half(self)),
+            _ if self.truthiness() == Some(false) => None,
+            // A `bool` that survives a truthy test can only have been
+            // `true`, and keeping it as `bool` makes the check
+            // unfalsifiable: a variable seeded `false` and reassigned in
+            // one branch would go on carrying its falsy half for the rest
+            // of the scope.
+            _ if self.is_bool() => Some(PhpType::true_()),
+            _ => Some(self.clone()),
         }
     }
 

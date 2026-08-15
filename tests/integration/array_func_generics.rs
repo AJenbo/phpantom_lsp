@@ -215,6 +215,24 @@ function probe(array $maybe, array $users, array $plain, callable $cb): void {
     );
 }
 
+/// A `?bool` entry sitting alongside other nullable entries in the same
+/// array shape must not stop `array_filter()` from stripping `null` off
+/// its siblings: each entry's truthy half is worked out on its own, not
+/// only when the whole merged value type happens to be a single nullable.
+#[test]
+fn array_filter_without_a_callback_strips_null_from_every_entry_sharing_a_bool() {
+    let content = r#"<?php
+function probe(?int $w, ?bool $a, ?string $s, ?DateTime $d): void {
+    $arr = ['w' => $w, 'a' => $a, 's' => $s, 'd' => $d];
+    $filtered = array_filter($arr);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[("$filtered", "array<string, int|true|string|DateTime>")],
+    );
+}
+
 /// `array_sum`/`array_product` are declared `int|float` for PHP's numeric
 /// promotion, but an all-`int` array can only sum to an `int`. A union that
 /// really can go either way keeps both.

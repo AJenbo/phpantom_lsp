@@ -17,7 +17,9 @@
 /// the handful of questions the rules ask about an argument, and the
 /// rules stay in one place so a fix to `array_map`'s element type
 /// reaches every consumer.
-use crate::php_type::{PhpType, TypeKind, is_array_like_name, is_non_empty_array_name};
+use crate::php_type::{
+    LiteralValue, PhpType, TypeKind, is_array_like_name, is_non_empty_array_name,
+};
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -298,13 +300,43 @@ fn min_max_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     let mut members = Vec::new();
     let mut index = 0;
     while args.has_arg(index) {
-        members.push(args.arg_raw_type(index)?.widen_scalar_literals());
+        let widened = widen_non_bool_scalar_literals(&args.arg_raw_type(index)?);
+        for member in widened.union_members() {
+            if !members.contains(member) {
+                members.push(member.clone());
+            }
+        }
         index += 1;
     }
     match members.len() {
         0 => None,
         1 => members.pop(),
         _ => Some(PhpType::union(members)),
+    }
+}
+
+/// Widen literal `int`/`float`/`string` members the way
+/// [`PhpType::widen_scalar_literals`] does, but leave `true`/`false` alone.
+///
+/// `widen_scalar_literals` folds both halves of a boolean literal into
+/// `bool` because it targets a mutable-collection boundary (an array
+/// element, a stored property) where tracking which exact literal arrived
+/// stops being useful. `max()`/`min()` hand back one of their arguments
+/// verbatim instead of storing it, so a lone `false` argument (`int|false`
+/// from `filemtime()`) must stay `false` rather than degrade to `bool`: a
+/// later `!== false` check or `?:` fallback depends on the narrower type.
+fn widen_non_bool_scalar_literals(ty: &PhpType) -> PhpType {
+    match ty.kind() {
+        TypeKind::Literal(value) => match &**value {
+            LiteralValue::Int(_) => PhpType::int(),
+            LiteralValue::Float(_) => PhpType::float(),
+            LiteralValue::String(_) => PhpType::string(),
+        },
+        TypeKind::Union(members) => {
+            PhpType::union(members.iter().map(widen_non_bool_scalar_literals).collect())
+        }
+        TypeKind::Nullable(inner) => PhpType::nullable(widen_non_bool_scalar_literals(inner)),
+        _ => ty.clone(),
     }
 }
 

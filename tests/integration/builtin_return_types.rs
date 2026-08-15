@@ -297,3 +297,64 @@ function probe(array $names, array $weights, int $count, mixed $anything): void 
         ],
     );
 }
+
+/// Two more `max()`/`min()` pitfalls beyond picking the right branch:
+///
+/// 1. `max($t, filemtime('a'))` must not double the `int` argument into the
+///    result nor degrade `filemtime()`'s `false` arm to `bool` — a
+///    `?:`/`!==` check downstream depends on the exact `false`.
+/// 2. A `max()` call whose argument is an arithmetic expression must still
+///    resolve to `int` so a write key built from it (`$result[$line]`)
+///    keeps `int` rather than widening to `int|string`, in both a
+///    top-level function and a class method.
+#[test]
+fn min_and_max_preserve_false_and_do_not_poison_array_keys() {
+    let content = r#"<?php
+function track(int $t): void {
+    $m = max($t, filemtime('a'));
+    $safe = max($t, filemtime('a')) ?: 0;
+}
+
+function linesFn(int $a, int $b = 0): array {
+    $line = max($a - 1 - $b, 0);
+    $result = [];
+    $result[$line] = 'x';
+    return $result;
+}
+
+final class Excerpt {
+    public function lines(int $a, int $b = 0): array {
+        $line = max($a - 1 - $b, 0);
+        $result = [];
+        $result[$line] = 'x';
+        return $result;
+    }
+}
+"#;
+    assert_assigned_types(content, &[("$m", "int|false"), ("$safe", "int")]);
+
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///max_min_array_key.php";
+    let mut checked = 0;
+    for (line, text) in content.lines().enumerate() {
+        let Some(col) = text.find("$result;") else {
+            continue;
+        };
+        let hover = hover_at(&backend, uri, content, line as u32, col as u32 + 1)
+            .unwrap_or_else(|| panic!("no hover on line {line}"));
+        let HoverContents::Markup(markup) = &hover.contents else {
+            panic!("Expected MarkupContent");
+        };
+        let got = markup
+            .value
+            .lines()
+            .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
+            .unwrap_or_else(|| panic!("no assignment in hover on line {line}: {}", markup.value));
+        assert_eq!(&got, "array<int, string>", "$result on line {line}");
+        checked += 1;
+    }
+    assert_eq!(
+        checked, 2,
+        "expected to check both the function and the method"
+    );
+}

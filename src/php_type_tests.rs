@@ -4788,3 +4788,27 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
         "int|float"
     );
 }
+
+#[test]
+fn truthy_type_strips_null_from_every_nullable_union_member() {
+    // A lone nullable member loses its `null` the same way a bare `?T`
+    // passed directly to `truthy_type` does.
+    assert_eq!(
+        PhpType::parse("?int|?bool|?string|?DateTime")
+            .truthy_type()
+            .unwrap()
+            .to_string(),
+        "int|true|string|DateTime"
+    );
+    // A member that is certainly falsy on its own (`null`, `false`) is
+    // dropped outright rather than surviving as an empty type.
+    assert_eq!(
+        PhpType::parse("null|false|?int")
+            .truthy_type()
+            .unwrap()
+            .to_string(),
+        "int"
+    );
+    // A union that is entirely falsy has no truthy half at all.
+    assert_eq!(PhpType::parse("null|false").truthy_type(), None);
+}
