@@ -980,23 +980,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b81-foreach-element-extraction-widens-false-to-bool" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B81. Foreach element extraction widens <code>false</code> to <code>bool</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1630,23 +1613,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b81-foreach-element-extraction-widens-false-to-bool" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B81. Foreach element extraction widens <code>false</code> to <code>bool</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1932,31 +1898,7 @@ from that arm's condition.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b81-foreach-element-extraction-widens-false-to-bool">B81. Foreach element extraction widens <code>false</code> to <code>bool</code><a class="headerlink" href="#b81-foreach-element-extraction-widens-false-to-bool" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">function collect(string $p): void</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">{</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    $files = [];</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    $files[] = realpath($p);   // string|false — stored correctly ($files[0] reads back string|false)</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    foreach ($files as $file) {</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">        assertNotFalse($file);       // @phpstan-assert !false</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">        takesString($file);          // reported: got string|true</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">    }</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="x">}</span>
-</code></pre></div>
-<p>The element union produced for a <code>foreach</code> over the array degrades the
-stored <code>false</code> literal to <code>bool</code>: a <code>@phpstan-assert !false</code> (PHPUnit's
-<code>assertNotFalse()</code>) then strips only the <code>false</code> half and leaves a
-phantom <code>string|true</code>. A dim read (<code>$files[0]</code>) of the same array
-preserves <code>string|false</code>, and the identical assert on a plain variable
-holding <code>realpath()</code>'s result narrows cleanly to <code>string</code> — the
-widening is specific to the foreach element-type computation.</p>
-<p>Sample site: <code>pdepend tests/php/PDepend/AbstractTestCase.php:765</code> — the
-same site as the previous sweep's B62; the assertion is now recognized
-(B62 fixed) and this widening is what it uncovered.</p>
-<p><strong>Fix:</strong> flatten array-shape values into the foreach element union
-without literal-to-general widening, matching what the dim-read path
-already does.</p>
+<p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
