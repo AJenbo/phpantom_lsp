@@ -1469,17 +1469,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#p55-an-external-tool-run-invalidates-every-file-it-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P55. An external tool run invalidates every file it reported
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -2097,17 +2086,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P53. The deprecated collector deep-copies a class per member access
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p55-an-external-tool-run-invalidates-every-file-it-reported" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P55. An external tool run invalidates every file it reported
       </span>
     </span>
   </a>
@@ -3101,34 +3079,6 @@ already have one, deref coercion covers the read sites, and the
 <p><strong>Where to look:</strong> <code>collect_deprecated_diagnostics</code> and
 <code>resolve_variable_subject</code> in <code>diagnostics/deprecated.rs</code>, plus the
 <code>var_type_cache</code> declaration at the top of the collector.</p>
-<h2 id="p55-an-external-tool-run-invalidates-every-file-it-reported">P55. An external tool run invalidates every file it reported<a class="headerlink" href="#p55-an-external-tool-run-invalidates-every-file-it-reported" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Low</strong></p>
-<p><code>WorkspaceDiagnostics::set_external</code> replaces a tool's whole result set
-and bumps the result id of every URI in the union of the old and new
-maps:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">updated</span><span class="p">:</span><span class="w"> </span><span class="nc">HashSet</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">entry</span><span class="p">.</span><span class="n">keys</span><span class="p">().</span><span class="n">cloned</span><span class="p">().</span><span class="n">collect</span><span class="p">();</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">updated</span><span class="p">.</span><span class="n">extend</span><span class="p">(</span><span class="n">results</span><span class="p">.</span><span class="n">keys</span><span class="p">().</span><span class="n">cloned</span><span class="p">());</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="o">*</span><span class="n">entry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">results</span><span class="p">;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">updated</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">updated</span><span class="p">.</span><span class="n">into_iter</span><span class="p">().</span><span class="n">collect</span><span class="p">();</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">for</span><span class="w"> </span><span class="n">uri</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="o">&amp;</span><span class="n">updated</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="bp">self</span><span class="p">.</span><span class="n">bump</span><span class="p">(</span><span class="n">uri</span><span class="p">);</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">}</span>
-</code></pre></div>
-<p>Nothing compares the old diagnostics against the new ones, so a
-project-wide PHPStan re-run that changes one file still invalidates the
-client's cached result for every file the tool reports. The next
-workspace pull then answers <code>Full</code> for all of them and re-serializes
-the entire set. On a large project that is the most expensive single
-response the server produces, and it is triggered by every run whether
-or not anything moved.</p>
-<p>Bump only where the merged set actually differs, and return only those
-URIs so the caller's refresh and the push-mode publish loop follow the
-same rule. This is the same defect as the unconditional per-file
-<code>resultId</code> bump in <code>assemble_and_push</code>, on the source with the widest
-blast radius.</p>
-<p><strong>Where to look:</strong> <code>set_external</code> and <code>set_external_for_uri</code> in
-<code>diagnostics/workspace.rs</code>; <code>flush_workspace_diag_updates</code> consumes the
-returned URI list.</p>
 
 
 
