@@ -30,46 +30,7 @@ No outstanding items.
 
 ## Type comparison
 
-### B85. A `Stringable` object is accepted for a `string` parameter under `strict_types=1`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-<?php
-declare(strict_types=1);
-
-class Name
-{
-    public function __toString(): string { return 'x'; }
-}
-
-function takesString(string $value): void {}
-
-function run(Name $name): void {
-    takesString($name);   // not reported; PHP throws a TypeError here
-}
-```
-
-PHP converts a `Stringable` object to a string only in weak mode. The
-calling file's `declare(strict_types=1)` turns the same call into a
-`TypeError`, and `is_type_compatible` accepts it either way: the
-Stringable rule is the one type-juggling rule in
-`src/diagnostics/type_errors/compatibility.rs` that does not consult
-the `strict_types` flag its neighbours (int/float → string,
-numeric-string → int/float, `numeric` → int/float) all check.
-
-This is also why the rule cannot move down into
-`class_lookup::is_subtype_of_typed` with the other sound facts: it is
-not a subtype relationship, it is a coercion that depends on a
-per-file setting the core engine has no parameter for. Found while
-auditing those escape hatches; no sample-project site currently hits
-it.
-
-**Fix:** gate the Stringable acceptance on `!strict_types`, the way
-the neighbouring juggling rules already are. Verify against the
-sample projects first: a file that declares `strict_types=1` and
-leans on `__toString()` would start reporting, and those reports are
-correct.
+No outstanding items.
 
 ## Standard-library return types
 

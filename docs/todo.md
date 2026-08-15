@@ -42,7 +42,6 @@ contributor even though it's short.
 | B81  | [Foreach element extraction widens `false` to `bool`](todo/bugs.md#b81-foreach-element-extraction-widens-false-to-bool)                                     | Low-Medium  | Medium      |
 | B76  | [Blade variables typed from a component class are immune to condition narrowing](todo/bugs.md#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing) | Medium      | Medium-High |
 | B77  | [A foreach over a proven non-empty array still merges the zero-iteration path](todo/bugs.md#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path) | Medium      | Medium-High |
-| B85  | [A `Stringable` object is accepted for a `string` parameter under `strict_types=1`](todo/bugs.md#b85-a-stringable-object-is-accepted-for-a-string-parameter-under-strict_types1) | Low-Medium  | Medium      |
 | B75  | [A dim-write to the foreach value variable leaks through the loop back-edge](todo/bugs.md#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge) | Medium      | High        |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 

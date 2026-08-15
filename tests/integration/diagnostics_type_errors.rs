@@ -2117,6 +2117,28 @@ function test(): void {
     );
 }
 
+#[test]
+fn type_error_for_stringable_to_string_under_strict_types() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Name {
+    public function __toString(): string { return 'x'; }
+}
+
+function takes_string(string $value): void {}
+
+function test(Name $name): void {
+    takes_string($name);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Expected type error for Stringable object passed to string under strict_types=1, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: PHP type juggling
 // ═══════════════════════════════════════════════════════════════════════════

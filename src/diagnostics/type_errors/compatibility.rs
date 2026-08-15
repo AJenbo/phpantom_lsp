@@ -520,10 +520,13 @@ pub(crate) fn is_type_compatible(
 
     // ── Stringable objects accepted as string ────────────────────
     // PHP calls __toString() on Stringable objects when a string is
-    // expected.  We only accept objects whose class implements
-    // \Stringable or declares __toString().  For bare `object` types
-    // (no class name) we stay permissive since we can't check.
-    if param_type.is_string_type() && arg_type.is_object_like() {
+    // expected, but only outside strict_types: under
+    // declare(strict_types=1) passing a Stringable object where a
+    // `string` parameter is expected is a TypeError. We only accept
+    // objects whose class implements \Stringable or declares
+    // __toString(). For bare `object` types (no class name) we stay
+    // permissive since we can't check.
+    if !strict_types && param_type.is_string_type() && arg_type.is_object_like() {
         if let Some(class_name) = arg_type.base_name() {
             if let Some(cls) = class_loader(class_name) {
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
