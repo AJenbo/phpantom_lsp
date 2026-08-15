@@ -1008,23 +1008,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Docblock handling">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b78-a-standalone-var-cast-above-return-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B78. A standalone <code>@var</code> cast above <code>return</code> is ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1675,23 +1658,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Docblock handling">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b78-a-standalone-var-cast-above-return-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B78. A standalone <code>@var</code> cast above <code>return</code> is ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1992,32 +1958,7 @@ same site as the previous sweep's B62; the assertion is now recognized
 without literal-to-general widening, matching what the dim-read path
 already does.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
-<h3 id="b78-a-standalone-var-cast-above-return-is-ignored">B78. A standalone <code>@var</code> cast above <code>return</code> is ignored<a class="headerlink" href="#b78-a-standalone-var-cast-above-return-is-ignored" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">function giveString(): string { return &#39;x&#39;; }</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">function cast(): int</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">{</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">    /** @var int */</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">    return giveString();   // reported: string incompatible with int — the cast was ignored</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>A nameless <code>/** @var T */</code> docblock directly above a <code>return</code> statement
-casts the returned expression to <code>T</code> (PHPStan semantics). PHPantom
-never applies it: the diagnostic judges the raw inferred type of the
-expression as if the cast were absent, whether the expression is a
-call, a variable, or an array literal. The named form above an
-assignment (<code>/** @var int $x */</code> then <code>$x = ...</code>) works; only the
-nameless return-position cast is missing. Beware vacuously-clean
-repros when testing a fix: an inferred optional-keys array shape
-currently satisfies almost any declared array type, so the cast's
-absence only shows against scalar or definite types.</p>
-<p>Sample site: <code>vytrvalec-server src/Dto/Season/Request/SeasonQueryFilterRequestDto.php:26</code>
-(same site as B79; either fix alone clears the diagnostic, both are
-real defects).</p>
-<p><strong>Fix:</strong> when resolving a <code>return</code> statement's expression, look up a
-preceding standalone <code>@var</code> docblock and use its type as the expression
-type, the same way the named assignment form already does.</p>
+<p>No outstanding items.</p>
 
 
 
